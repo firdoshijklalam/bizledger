@@ -19,18 +19,28 @@ import { LoadingState, EmptyState } from '@/components/shared/states'
 import { useMemo, useState } from 'react'
 
 type ChartType = 'revenue' | 'profit' | 'cashflow'
+type TimeFilter = 'last7d' | 'thisWeek' | 'thisMonth' | 'last3m' | 'last6m'
 
-const CHART_OPTIONS: Array<{ id: ChartType; label: string }> = [
-  { id: 'revenue', label: 'আয় বনাম ব্যয়' },
-  { id: 'profit', label: 'লাভ বনাম লোকসান' },
-  { id: 'cashflow', label: 'ক্যাশ ইন/আউট' },
+const TIME_FILTERS: Array<{ id: TimeFilter; labelKey: string }> = [
+  { id: 'last7d', labelKey: 'dash.filter.last7d' },
+  { id: 'thisWeek', labelKey: 'dash.filter.thisWeek' },
+  { id: 'thisMonth', labelKey: 'dash.filter.thisMonth' },
+  { id: 'last3m', labelKey: 'dash.filter.last3m' },
+  { id: 'last6m', labelKey: 'dash.filter.last6m' },
 ]
 
 export function DashboardView() {
-  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, triggerQuickAction } = useAppStore()
+  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction } = useAppStore()
   const { t } = useI18n()
   const { data, loading } = useFetch<DashboardStats>('/api/dashboard')
   const [chartType, setChartType] = useState<ChartType>('revenue')
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('last7d')
+
+  const chartOptions: Array<{ id: ChartType; label: string }> = [
+    { id: 'revenue', label: t('dash.chart.revenue') },
+    { id: 'profit', label: t('dash.chart.profit') },
+    { id: 'cashflow', label: t('dash.chart.cashflow') },
+  ]
 
   const currency = business?.currency || 'INR'
 
@@ -152,17 +162,28 @@ export function DashboardView() {
         <div className="flex items-center justify-between mb-3">
           <div>
             <h3 className="text-sm font-semibold">{t('dash.salesTrend')}</h3>
-            <p className="text-[11px] text-muted-foreground">Last 7 days</p>
+            <p className="text-[11px] text-muted-foreground">{TIME_FILTERS.find((f) => f.id === timeFilter)?.labelKey ? t(TIME_FILTERS.find((f) => f.id === timeFilter)!.labelKey) : ''}</p>
           </div>
-          <select
-            value={chartType}
-            onChange={(e) => setChartType(e.target.value as ChartType)}
-            className="text-xs bg-muted rounded-lg px-2 py-1.5 border-0 outline-none h-8 font-medium"
-          >
-            {CHART_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>{o.label}</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-1.5">
+            <select
+              value={timeFilter}
+              onChange={(e) => setTimeFilter(e.target.value as TimeFilter)}
+              className="text-[11px] bg-muted rounded-lg px-2 py-1.5 border-0 outline-none h-8 font-medium"
+            >
+              {TIME_FILTERS.map((f) => (
+                <option key={f.id} value={f.id}>{t(f.labelKey)}</option>
+              ))}
+            </select>
+            <select
+              value={chartType}
+              onChange={(e) => setChartType(e.target.value as ChartType)}
+              className="text-xs bg-muted rounded-lg px-2 py-1.5 border-0 outline-none h-8 font-medium"
+            >
+              {chartOptions.map((o) => (
+                <option key={o.id} value={o.id}>{o.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
         <motion.div
           key={chartType}
@@ -218,26 +239,32 @@ export function DashboardView() {
         </motion.div>
       </Card>
 
-      {/* Grade distribution */}
+      {/* Grade distribution — interactive bar chart (PRD Part 2 §4.2) */}
       <Card className="p-4">
         <h3 className="text-sm font-semibold mb-3">Customer Quality Distribution</h3>
+        <p className="text-[10px] text-muted-foreground mb-2">Tap a grade bar to filter customers</p>
         <div className="flex items-end justify-between gap-2 h-28">
           {data.gradeDistribution.map((g) => {
             const max = Math.max(...data.gradeDistribution.map((x) => x.count), 1)
             const h = (g.count / max) * 100
             const meta = GRADE_META[g.grade]
             return (
-              <div key={g.grade} className="flex-1 flex flex-col items-center gap-1">
-                <span className="text-xs font-bold tabular">{g.count}</span>
+              <button
+                key={g.grade}
+                onClick={() => { setKhataFilter('all'); setActiveView('khata') }}
+                className="flex-1 flex flex-col items-center gap-1 group"
+                aria-label={`Grade ${g.grade}: ${g.count} customers`}
+              >
+                <span className="text-xs font-bold tabular group-hover:text-primary">{g.count}</span>
                 <motion.div
                   initial={{ height: 0 }}
                   animate={{ height: `${h}%` }}
                   transition={{ duration: 0.5 }}
-                  className={`w-full rounded-t-md ${meta.bg} min-h-[4px]`}
+                  className={`w-full rounded-t-md ${meta.bg} min-h-[4px] group-hover:opacity-80 transition-opacity`}
                   style={{ maxHeight: '80px' }}
                 />
                 <span className={`text-[10px] font-bold ${meta.color}`}>{g.grade}</span>
-              </div>
+              </button>
             )
           })}
         </div>
@@ -296,8 +323,20 @@ export function DashboardView() {
             {data.recentTransactions.slice(0, 5).map((tx) => {
               const isCredit = tx.type === 'credit'
               return (
-                <div key={tx.id} className="flex items-center gap-3 p-2 rounded-lg">
-                  <span className={`w-8 h-8 rounded-full flex items-center justify-center ${isCredit ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
+                <button
+                  key={tx.id}
+                  onClick={() => {
+                    if (tx.invoiceId) {
+                      setSelectedInvoiceId(tx.invoiceId)
+                      setActiveView('billing')
+                    } else if (tx.partyId) {
+                      setSelectedPartyId(tx.partyId)
+                      setActiveView('khata')
+                    }
+                  }}
+                  className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left"
+                >
+                  <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isCredit ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
                     {isCredit ? <ArrowDownRight className="w-4 h-4 text-emerald-600" /> : <ArrowUpRight className="w-4 h-4 text-red-600" />}
                   </span>
                   <div className="flex-1 min-w-0">
@@ -307,7 +346,7 @@ export function DashboardView() {
                   <span className={`text-sm font-semibold tabular ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>
                     {isCredit ? '+' : '-'}{formatCurrency(tx.amount, currency)}
                   </span>
-                </div>
+                </button>
               )
             })}
           </div>

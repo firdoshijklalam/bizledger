@@ -51,10 +51,35 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
 
   useEffect(() => {
     if (open) {
-      setCustomer(null); setItems([]); setDiscountValue('0'); setDiscountMode('flat')
-      setIsGst(true); setPaymentMode('cash')
+      // Load draft from active billing tab if available (PRD Part 3 §2.1)
+      const activeTab = tabs.find((t) => t.id === activeTabId)
+      if (activeTab?.hasDraft && activeTab.items?.length > 0) {
+        setItems(activeTab.items.map((it: any) => ({
+          productId: it.productId,
+          name: it.name,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          gstRate: it.gstRate,
+          discount: it.discount,
+          total: it.total,
+        })))
+        setDiscountMode(activeTab.discountMode || 'flat')
+        setDiscountValue(String(activeTab.discountValue || 0))
+        setIsGst(activeTab.isGst ?? true)
+        setPaymentMode(activeTab.paymentMode || 'cash')
+        // Try to find the customer from parties list
+        if (activeTab.customerId && parties) {
+          const found = parties.find((p) => p.id === activeTab.customerId)
+          if (found) setCustomer(found)
+        } else {
+          setCustomer(null)
+        }
+      } else {
+        setCustomer(null); setItems([]); setDiscountValue('0'); setDiscountMode('flat')
+        setIsGst(true); setPaymentMode('cash')
+      }
     }
-  }, [open])
+  }, [open, tabs, activeTabId, parties])
 
   const currency = business?.currency || 'INR'
 
@@ -233,12 +258,26 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setShowCustSearch(true)}
-                className="w-full h-11 rounded-xl border border-dashed border-border flex items-center justify-center gap-2 text-sm text-muted-foreground hover:bg-muted"
-              >
-                <Search className="w-4 h-4" /> {t('bill.selectCustomer')}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowCustSearch(true)}
+                  className="flex-1 h-11 rounded-xl border border-dashed border-border flex items-center justify-center gap-2 text-sm text-muted-foreground hover:bg-muted"
+                >
+                  <Search className="w-4 h-4" /> {t('bill.selectCustomer')}
+                </button>
+                <button
+                  onClick={() => {
+                    // Close invoice form and open party form (PRD Part 3 §2.2)
+                    onOpenChange(false)
+                    useAppStore.getState().setActiveView('khata')
+                    useAppStore.getState().setShowPartyForm(true)
+                  }}
+                  className="w-11 h-11 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0"
+                  aria-label="Add new customer"
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+              </div>
             )}
           </div>
 
@@ -246,18 +285,15 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
           <div>
             <div className="flex items-center justify-between mb-2">
               <Label className="text-xs">Items ({items.length})</Label>
-              <button
-                onClick={() => setShowProdSearch(true)}
-                className="text-xs text-primary font-medium flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" /> {t('bill.addItem')}
-              </button>
             </div>
             {items.length === 0 ? (
-              <div className="p-6 rounded-xl border border-dashed border-border text-center">
+              <button
+                onClick={() => setShowProdSearch(true)}
+                className="w-full p-6 rounded-xl border border-dashed border-border text-center hover:bg-muted transition-colors"
+              >
                 <ShoppingCart className="w-6 h-6 text-muted-foreground mx-auto mb-2" />
-                <p className="text-xs text-muted-foreground">No items added</p>
-              </div>
+                <p className="text-xs text-muted-foreground">No items added — tap to add</p>
+              </button>
             ) : (
               <div className="space-y-2">
                 {items.map((it, idx) => (
@@ -296,6 +332,13 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
                 ))}
               </div>
             )}
+            {/* Bigger Add Item button (PRD Part 3 §2.3) */}
+            <button
+              onClick={() => setShowProdSearch(true)}
+              className="w-full mt-2 h-12 rounded-xl border-2 border-dashed border-primary/30 text-primary font-medium text-sm flex items-center justify-center gap-2 hover:bg-primary/5 transition-colors"
+            >
+              <Plus className="w-5 h-5" /> {t('bill.addItem')}
+            </button>
           </div>
 
           {/* Discount */}

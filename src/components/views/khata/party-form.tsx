@@ -224,7 +224,7 @@ export function PartyForm({ open, onOpenChange, partyId }: Props) {
             <Label htmlFor="address" className="text-xs">{t('set.address')}</Label>
             <div className="relative">
               <MapPin className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
-              <Textarea id="address" value={address} onChange={(e) => setAddress(e.target.value)} className="pl-9 min-h-[60px]" placeholder="Shop address" />
+              <Textarea id="address" value={address} onChange={(e) => setAddress(e.target.value)} className="pl-9 min-h-[60px]" placeholder="Address" />
             </div>
           </div>
 

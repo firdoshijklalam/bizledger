@@ -17,6 +17,7 @@ import { NotificationsView } from '@/components/views/notifications-view'
 import { AiToolsView } from '@/components/views/ai-tools-view'
 import { PaymentLandingPage } from '@/components/views/payment-landing-page'
 import { SalePadView } from '@/components/views/sale-pad-view'
+import { useBackButton } from '@/hooks/use-back-button'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 
@@ -30,6 +31,9 @@ export function AppShell() {
   } = useAppStore()
   const { setLanguage } = useI18n()
   const [paymentToken, setPaymentToken] = useState<string | null>(null)
+
+  // Android back button navigation with history back-stack (PRD Part 3 §4)
+  useBackButton()
 
   // Check for payment landing page token in URL (?payment=TOKEN)
   useEffect(() => {

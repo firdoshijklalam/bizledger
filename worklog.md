@@ -181,3 +181,32 @@ Stage Summary:
 - 8 new files: forecast-view, insights-view, reminders-view, ocr-scanner-view, global-voice-input, use-voice-input hook, 4 API routes
 - Zero console errors, zero lint errors
 - Server running with watchdog
+
+---
+Task ID: PRD-PART2-3
+Agent: main
+Task: Implement PRD Part 2 & Part 3 — Inventory redesign, dashboard analytics, billing upgrades, back button
+
+Work Log:
+- P2-1: Removed edit/delete buttons from inventory main cards. Created Product Profile View with image gallery placeholder, highlights grid (stock/category/SKU/GST), Restock dialog (with quick-add buttons +10/+25/+50/+100), Edit Product button, Delete Product button. Created /api/products/[id]/restock endpoint.
+- P2-3: Moved Add Party button to top of Khata view. Moved Add Product button to top of Inventory view. Fixed address placeholder from "Shop address" to "Address". Grade section already hidden for supplier type (isCustomer check).
+- P2-4: Dashboard chart i18n — added chart label keys (dash.chart.revenue/profit/cashflow) and time filter keys to i18n store (EN+BN). Chart dropdown now uses t() for labels. Added time filter dropdown (Last 7 Days, This Week, This Month, Past 3 Months, Past 6 Months). Made grade distribution bars clickable (navigate to Khata). Made recent transaction rows clickable (open invoice preview or party detail).
+- P3-2.1: Fixed hold bills/draft tab onClick — clicking a draft tab now opens the invoice form with saved items. Added handleTabClick in BillingTabs that calls setShowInvoiceForm(true) when tab has draft. InvoiceForm useEffect loads draft data (items, customer, discount, GST, payment mode) from active billing tab on open.
+- P3-2.2: Added "+" new customer button in invoice form next to Select Customer. Clicking it closes invoice form, navigates to Khata, and opens party form.
+- P3-2.3: Empty cart zone is now clickable (opens product search). Made Add Item button bigger (h-12, border-2 dashed, primary color, w-full).
+- P3-2 (Quick Sale): Renamed "পাইকারি" to "পূর্ণ জিনিস" (Full Product) per PRD.
+- P3-3.1: Made recent invoices in Reports clickable — clicking opens invoice preview.
+- P3-4: Created useBackButton hook for Android back button navigation. Maintains history stack — closes dialogs/forms first, then sub-views, then shows exit confirmation on dashboard.
+- Fixed bug: setSelectedProductId was not destructured in inventory view, preventing product profile from opening.
+
+Stage Summary:
+- ALL PRD Part 2 & Part 3 features implemented:
+  ✅ Inventory: clean cards (no buttons), Product Profile with Restock/Edit/Delete
+  ✅ Dashboard: i18n chart labels, time filter, clickable grade bars, clickable recent transactions
+  ✅ Khata: Add Party at top, Address label fixed
+  ✅ Billing: draft tab click opens form with saved items, + new customer button, bigger Add Item, empty cart clickable
+  ✅ Quick Sale: "পূর্ণ জিনিস" label (not পাইকারি)
+  ✅ Reports: clickable invoice rows
+  ✅ Back button: history back-stack with exit confirmation
+- Zero console errors, zero lint errors
+- Server running with watchdog

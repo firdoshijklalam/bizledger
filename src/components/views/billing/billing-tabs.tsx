@@ -1,6 +1,7 @@
 'use client'
 
 import { useBillingStore } from '@/store/billing-store'
+import { useAppStore } from '@/store/app-store'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Plus } from 'lucide-react'
 import { useState } from 'react'
@@ -11,9 +12,19 @@ import {
 
 export function BillingTabs() {
   const { tabs, activeTabId, setActiveTab, addTab, closeTab } = useBillingStore()
+  const { setShowInvoiceForm } = useAppStore()
   const [closeConfirmId, setCloseConfirmId] = useState<string | null>(null)
 
   const tabToClose = tabs.find((t) => t.id === closeConfirmId)
+
+  const handleTabClick = (tabId: string) => {
+    const tab = tabs.find((t) => t.id === tabId)
+    setActiveTab(tabId)
+    // If this tab has a draft, open the invoice form with the saved items (PRD Part 3 §2.1)
+    if (tab?.hasDraft) {
+      setShowInvoiceForm(true)
+    }
+  }
 
   return (
     <>
@@ -26,7 +37,7 @@ export function BillingTabs() {
           return (
             <div
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => handleTabClick(tab.id)}
               className={`group relative shrink-0 flex items-center gap-1.5 px-3 h-9 rounded-t-lg cursor-pointer transition-colors min-w-[88px] ${
                 isActive
                   ? 'bg-primary text-primary-foreground'

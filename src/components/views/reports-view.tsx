@@ -294,19 +294,26 @@ export function ReportsView() {
         )}
       </motion.div>
 
-      {/* Recent invoices summary */}
+      {/* Recent invoices summary — clickable (PRD Part 3 §3.1) */}
       <Card className="p-5 no-print">
         <h3 className="text-sm font-semibold mb-3">Recent Invoices</h3>
         <div className="space-y-2">
           {data.recentInvoices.slice(0, 5).map((inv) => (
-            <div key={inv.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50">
-              <Receipt className="w-4 h-4 text-muted-foreground" />
+            <button
+              key={inv.id}
+              onClick={() => {
+                useAppStore.getState().setSelectedInvoiceId(inv.id)
+                useAppStore.getState().setActiveView('billing')
+              }}
+              className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 text-left transition-colors"
+            >
+              <Receipt className="w-4 h-4 text-muted-foreground shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{inv.number}</p>
                 <p className="text-[11px] text-muted-foreground">{inv.party} · {formatDate(inv.date)}</p>
               </div>
-              <span className="text-sm font-semibold tabular">{formatCurrency(inv.total, currency)}</span>
-            </div>
+              <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(inv.total, currency)}</span>
+            </button>
           ))}
         </div>
       </Card>

@@ -70,6 +70,11 @@ export function KhataView() {
 
   return (
     <div className="space-y-4">
+      {/* Add Party button — at top (PRD Part 2 §3) */}
+      <Button onClick={() => setShowPartyForm(true)} className="w-full h-11">
+        <Plus className="w-4 h-4 mr-1.5" /> {t('khata.addParty')}
+      </Button>
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3">
         <button
@@ -183,17 +188,6 @@ export function KhataView() {
             })}
           </AnimatePresence>
         </div>
-      )}
-
-      {/* Add party button */}
-      {filtered.length > 0 && (
-        <Button
-          onClick={() => setShowPartyForm(true)}
-          className="w-full h-11"
-          variant="outline"
-        >
-          <Plus className="w-4 h-4 mr-1.5" /> {t('khata.addParty')}
-        </Button>
       )}
 
       <PartyForm

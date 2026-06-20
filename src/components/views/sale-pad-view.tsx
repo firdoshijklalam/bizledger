@@ -192,8 +192,8 @@ export function SalePadView() {
           }`}
         >
           <Boxes className={`w-6 h-6 ${mode === 'wholesale' ? 'text-primary' : 'text-muted-foreground'}`} />
-          <span className={`text-sm font-bold ${mode === 'wholesale' ? 'text-primary' : 'text-muted-foreground'}`}>📦 পাইকারি</span>
-          <span className="text-[10px] text-muted-foreground">Wholesale (per bag)</span>
+          <span className={`text-sm font-bold ${mode === 'wholesale' ? 'text-primary' : 'text-muted-foreground'}`}>📦 পূর্ণ জিনিস</span>
+          <span className="text-[10px] text-muted-foreground">Full Product (per bag/box)</span>
         </button>
       </div>
 
