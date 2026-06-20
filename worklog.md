@@ -143,3 +143,41 @@ Stage Summary:
 - ALL buttons and features now verified working
 - Zero console errors, zero lint errors
 - Server running with watchdog persistence
+
+---
+Task ID: AI-INTEGRATE
+Agent: main
+Task: Integrate all AI features — remove "Phase 2"/"Coming Soon" badges, make everything functional
+
+Work Log:
+- Found issue: AI Tools view showed all 6 tools with "Phase 2" badge and "coming in Phase 2" toast on click — misleading since backends existed
+- Created 4 new API endpoints with real data:
+  - /api/forecast — 3-month demand prediction per product (avg monthly sales + trend analysis + days-until-out-of-stock + restock alerts)
+  - /api/insights — top products, top debtors, stock alerts, revenue growth, collection rate, overdue count, slow-moving items
+  - /api/reminders — overdue parties with daysOverdue + oldest invoice info
+  - /api/ocr — VLM-powered bill scanner using z-ai-web-dev-sdk (createVision API), accepts base64 image, returns structured JSON (vendor, date, items, totals)
+- Created 4 new AI sub-views with real data display:
+  - ForecastView — product cards with avg/predicted/trend + restock alerts + confidence badges
+  - InsightsView — revenue growth card, collection rate, top products, top debtors, stock alerts, slow-moving
+  - RemindersView — overdue party list with Call + WhatsApp reminder buttons (sends Bengali message)
+  - OcrScannerView — camera/gallery upload → VLM scan → structured bill results display
+- Created GlobalVoiceInput component — mic button in top app bar using Web Speech API (SpeechRecognition):
+  - Bengali (bn-BD) / English (en-IN) based on app language
+  - Shows live transcript + parsed entities (customer, amount, type, item, qty) via parseVoiceEntities
+  - Animated listening indicator (pulsing red mic)
+- Created useVoiceInput hook — Web Speech API wrapper with transcript + parsed entities state
+- Wired phonetic search into SearchOverlay — when no exact matches found locally, automatically fetches /api/parties?q=...&phonetic=true and /api/products?q=...&phonetic=true, shows results in "phonetic match 🔊" sections
+- Rewrote AI Tools view — removed all "Phase 2" badges, replaced with "Active" (green) for functional tools and "Ready" (blue) for info tools. Back button navigation between sub-views.
+- Fixed back button bug — sub-views now rendered within AiToolsView wrapper with "← Back to AI Tools" button
+
+Stage Summary:
+- ALL AI features now functional (no more "Coming Soon"):
+  ✅ Business Insights — real data from /api/insights (collection rate 15%, 5 top products, 5 debtors, 3 stock alerts)
+  ✅ Demand Forecast — real predictions (Cement Bag: predict 35, restock=True)
+  ✅ Auto Reminders — 5 overdue parties with WhatsApp/Call actions
+  ✅ OCR Bill Scanner — VLM-powered (z-ai-web-dev-sdk), camera + upload
+  ✅ Global Voice Input — Web Speech API mic in top bar, Bengali/English, entity parsing
+  ✅ Phonetic Search — wired into search overlay, "miniket" finds "Miniket Rice"
+- 8 new files: forecast-view, insights-view, reminders-view, ocr-scanner-view, global-voice-input, use-voice-input hook, 4 API routes
+- Zero console errors, zero lint errors
+- Server running with watchdog

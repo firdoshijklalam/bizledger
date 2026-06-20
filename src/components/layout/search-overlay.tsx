@@ -16,6 +16,8 @@ export function SearchOverlay() {
   const [products, setProducts] = useState<Product[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [txns, setTxns] = useState<Transaction[]>([])
+  const [phoneticParties, setPhoneticParties] = useState<Party[]>([])
+  const [phoneticProducts, setPhoneticProducts] = useState<Product[]>([])
 
   useEffect(() => {
     if (!showSearch) return
@@ -32,16 +34,42 @@ export function SearchOverlay() {
     })
   }, [showSearch])
 
+  // Phonetic search: when query has no exact matches, try phonetic API (PRD v2 §12.2)
+  useEffect(() => {
+    if (!q.trim() || q.trim().length < 2) return
+    const timer = setTimeout(() => {
+      // Only fetch phonetic if no exact matches found locally
+      const localPartyMatch = parties.filter((p) =>
+        p.name.toLowerCase().includes(q.toLowerCase()) || (p.phone || '').includes(q)
+      )
+      const localProdMatch = products.filter((p) =>
+        p.name.toLowerCase().includes(q.toLowerCase()) || (p.sku || '').toLowerCase().includes(q.toLowerCase())
+      )
+      if (localPartyMatch.length === 0) {
+        fetch(`/api/parties?q=${encodeURIComponent(q)}&phonetic=true`).then((r) => r.json()).then((res) => setPhoneticParties(res || [])).catch(() => {})
+      }
+      if (localProdMatch.length === 0) {
+        fetch(`/api/products?q=${encodeURIComponent(q)}&phonetic=true`).then((r) => r.json()).then((res) => setPhoneticProducts(res || [])).catch(() => {})
+      }
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [q, parties, products])
+
   const results = useMemo(() => {
-    if (!q.trim()) return { parties: [], products: [], invoices: [], txns: [] }
+    if (!q.trim()) return { parties: [], products: [], invoices: [], txns: [], phoneticParties: [], phoneticProducts: [] }
     const query = q.toLowerCase()
+    const localParties = parties.filter((p) => p.name.toLowerCase().includes(query) || (p.phone || '').includes(query)).slice(0, 4)
+    const localProducts = products.filter((p) => p.name.toLowerCase().includes(query) || (p.sku || '').toLowerCase().includes(query)).slice(0, 4)
     return {
-      parties: parties.filter((p) => p.name.toLowerCase().includes(query) || (p.phone || '').includes(query)).slice(0, 4),
-      products: products.filter((p) => p.name.toLowerCase().includes(query) || (p.sku || '').toLowerCase().includes(query)).slice(0, 4),
+      parties: localParties,
+      products: localProducts,
       invoices: invoices.filter((i) => i.invoiceNumber.toLowerCase().includes(query)).slice(0, 4),
       txns: txns.filter((t) => (t.description || '').toLowerCase().includes(query)).slice(0, 4),
+      // Phonetic matches — only show ones NOT already in local results
+      phoneticParties: localParties.length === 0 ? phoneticParties.filter((p) => !localParties.find((lp) => lp.id === p.id)).slice(0, 3) : [],
+      phoneticProducts: localProducts.length === 0 ? phoneticProducts.filter((p) => !localProducts.find((lp) => lp.id === p.id)).slice(0, 3) : [],
     }
-  }, [q, parties, products, invoices, txns])
+  }, [q, parties, products, invoices, txns, phoneticParties, phoneticProducts])
 
   const close = () => {
     setQ('')
@@ -95,8 +123,46 @@ export function SearchOverlay() {
                 {t('header.search')}
               </p>
             )}
-            {q.trim() && results.parties.length === 0 && results.products.length === 0 && results.invoices.length === 0 && results.txns.length === 0 && (
+            {q.trim() && results.parties.length === 0 && results.products.length === 0 && results.invoices.length === 0 && results.txns.length === 0 && results.phoneticParties.length === 0 && results.phoneticProducts.length === 0 && (
               <p className="text-sm text-muted-foreground text-center py-12">No results for “{q}”.</p>
+            )}
+
+            {/* Phonetic search results — Bengali ↔ English sound matching (PRD v2 §12.2) */}
+            {results.phoneticParties.length > 0 && (
+              <Section title="Parties (phonetic match 🔊)">
+                {results.phoneticParties.map((p) => {
+                  const meta = GRADE_META[p.qualityGrade]
+                  return (
+                    <button key={p.id} onClick={() => openParty(p.id)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
+                      <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                        <User className="w-4 h-4 text-emerald-600" />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{p.name}</p>
+                        <p className="text-xs text-muted-foreground">{p.phone || 'No phone'}</p>
+                      </div>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{p.qualityGrade}</span>
+                    </button>
+                  )
+                })}
+              </Section>
+            )}
+
+            {results.phoneticProducts.length > 0 && (
+              <Section title="Products (phonetic match 🔊)">
+                {results.phoneticProducts.map((p) => (
+                  <button key={p.id} onClick={() => openProduct(p.id)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
+                    <span className="w-9 h-9 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                      <Package className="w-4 h-4 text-amber-600" />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{p.name}</p>
+                      <p className="text-xs text-muted-foreground">Stock: {p.stock} {p.unit}</p>
+                    </div>
+                    <span className="text-sm font-semibold tabular">{formatCurrency(p.salePrice)}</span>
+                  </button>
+                ))}
+              </Section>
             )}
 
             {results.parties.length > 0 && (

@@ -7,6 +7,7 @@ import { Search, Bell, Moon, Sun, Languages, BookOpen } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { useMounted } from '@/hooks/use-mounted'
+import { GlobalVoiceInput } from './global-voice-input'
 
 const VIEW_TITLES: Record<string, string> = {
   dashboard: 'dash.title',
@@ -52,6 +53,7 @@ export function TopAppBar() {
         </div>
 
         <div className="flex items-center gap-0.5">
+          <GlobalVoiceInput />
           <Button
             variant="ghost"
             size="icon"
