@@ -29,6 +29,8 @@ export async function PUT(req: NextRequest) {
         dateFormat: body.dateFormat,
         invoicePrefix: body.invoicePrefix,
         pinEnabled: body.pinEnabled,
+        userRole: body.userRole,
+        biometricEnabled: body.biometricEnabled,
       },
       create: {
         businessId: business.id,
@@ -38,6 +40,8 @@ export async function PUT(req: NextRequest) {
         dateFormat: body.dateFormat ?? 'DD/MM/YYYY',
         invoicePrefix: body.invoicePrefix ?? 'INV',
         pinEnabled: body.pinEnabled ?? false,
+        userRole: body.userRole ?? 'owner',
+        biometricEnabled: body.biometricEnabled ?? false,
       },
     })
     return NextResponse.json(updated)

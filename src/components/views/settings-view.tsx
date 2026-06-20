@@ -52,9 +52,16 @@ export function SettingsView() {
     invoicePrefix: 'INV',
     pinEnabled: false,
   })
+  // Phase 3 state
+  const [pinEnabled, setPinEnabled] = useState(false)
+  const [biometricEnabled, setBiometricEnabled] = useState(false)
+  const [userRole, setRole] = useState<'owner' | 'manager' | 'sales'>('owner')
   const [lastSettingsId, setLastSettingsId] = useState<string | null>(null)
   if (settings && settings.id !== lastSettingsId) {
     setLastSettingsId(settings.id)
+    setPinEnabled(settings.pinEnabled ?? false)
+    setBiometricEnabled((settings as any).biometricEnabled ?? false)
+    setRole(((settings as any).userRole as 'owner' | 'manager' | 'sales') ?? 'owner')
     setPrefs({
       notificationsEnabled: settings.notificationsEnabled,
       autoBackupEnabled: settings.autoBackupEnabled,
@@ -194,21 +201,27 @@ export function SettingsView() {
                 </span>
                 <div>
                   <p className="text-sm font-medium">{t('set.language')}</p>
-                  <p className="text-[11px] text-muted-foreground">English / বাংলা</p>
+                  <p className="text-[11px] text-muted-foreground">English / বাংলা / हिन्दी</p>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-1 w-36">
+              <div className="grid grid-cols-3 gap-1 w-48">
                 <button
                   onClick={() => { setLanguage('en'); setPrefs({ ...prefs, language: 'en' }) }}
                   className={`py-2 rounded-lg text-xs font-medium min-h-[40px] ${language === 'en' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
                 >
-                  English
+                  EN
                 </button>
                 <button
                   onClick={() => { setLanguage('bn'); setPrefs({ ...prefs, language: 'bn' }) }}
                   className={`py-2 rounded-lg text-xs font-medium min-h-[40px] ${language === 'bn' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
                 >
                   বাংলা
+                </button>
+                <button
+                  onClick={() => { setLanguage('hi'); setPrefs({ ...prefs, language: 'hi' }) }}
+                  className={`py-2 rounded-lg text-xs font-medium min-h-[40px] ${language === 'hi' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}
+                >
+                  हिन्दी
                 </button>
               </div>
             </div>
@@ -286,19 +299,51 @@ export function SettingsView() {
 
             <Card className="p-5">
               <h3 className="text-sm font-semibold mb-1">Cloud Backup</h3>
-              <p className="text-[11px] text-muted-foreground mb-4">Phase 3 — Telegram & Google Drive auto-backup.</p>
-              <div className="space-y-2 opacity-60">
-                <Button variant="outline" disabled className="w-full h-11 justify-start">
+              <p className="text-[11px] text-muted-foreground mb-4">Send your data to Telegram or Google Drive.</p>
+              <div className="space-y-2">
+                <Button variant="outline" onClick={async () => {
+                  try {
+                    toast.loading('Sending to Telegram…')
+                    const res = await fetch('/api/backup/telegram', { method: 'POST' })
+                    const data = await res.json()
+                    toast.dismiss()
+                    if (data.ok) {
+                      toast.success(`Sent to Telegram — ${data.records?.parties || 0} parties, ${data.records?.invoices || 0} invoices`)
+                      triggerRefresh()
+                    } else throw new Error(data.error)
+                  } catch (e) { toast.dismiss(); toast.error('Failed: ' + String(e)) }
+                }} className="w-full h-11 justify-start">
                   <Upload className="w-4 h-4 mr-2" /> Send to Telegram
                 </Button>
-                <Button variant="outline" disabled className="w-full h-11 justify-start">
+                <Button variant="outline" onClick={async () => {
+                  try {
+                    toast.loading('Uploading to Google Drive…')
+                    const res = await fetch('/api/backup/drive', { method: 'POST' })
+                    const data = await res.json()
+                    toast.dismiss()
+                    if (data.ok) {
+                      toast.success(`Uploaded to Drive — ${data.records?.products || 0} products, ${data.records?.transactions || 0} transactions`)
+                      triggerRefresh()
+                    } else throw new Error(data.error)
+                  } catch (e) { toast.dismiss(); toast.error('Failed: ' + String(e)) }
+                }} className="w-full h-11 justify-start">
                   <Upload className="w-4 h-4 mr-2" /> Backup to Google Drive
                 </Button>
-                <Button variant="outline" disabled className="w-full h-11 justify-start">
+                <Button variant="outline" onClick={async () => {
+                  try {
+                    const res = await fetch('/api/backup/list')
+                    const logs = await res.json()
+                    if (logs.length === 0) {
+                      toast.info('No cloud backups yet')
+                    } else {
+                      const latest = logs[0]
+                      toast.success(`Last backup: ${latest.channel} — ${new Date(latest.date).toLocaleString()}`)
+                    }
+                  } catch (e) { toast.error('Failed: ' + String(e)) }
+                }} className="w-full h-11 justify-start">
                   <Database className="w-4 h-4 mr-2" /> Fetch Old Backup / Restore
                 </Button>
               </div>
-              <p className="text-[10px] text-muted-foreground mt-3 text-center">Coming in Phase 3</p>
             </Card>
 
             <Card className="p-5">
@@ -312,38 +357,114 @@ export function SettingsView() {
         )}
 
         {tab === 'security' && (
-          <Card className="p-5 space-y-4">
-            <div className="flex items-center gap-3 mb-2">
-              <span className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-                <Shield className="w-5 h-5 text-emerald-600" />
-              </span>
-              <div>
-                <h3 className="text-sm font-semibold">Security & Access</h3>
-                <p className="text-[11px] text-muted-foreground">Protect your business data</p>
+          <div className="space-y-4">
+            <Card className="p-5 space-y-4">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                  <Shield className="w-5 h-5 text-emerald-600" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-semibold">Security & Access</h3>
+                  <p className="text-[11px] text-muted-foreground">Protect your business data</p>
+                </div>
               </div>
-            </div>
 
-            <ToggleRow
-              icon={Shield}
-              label="App PIN Lock"
-              checked={prefs.pinEnabled}
-              onChange={(v) => setPrefs({ ...prefs, pinEnabled: v })}
-            />
+              {/* App PIN Lock */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
+                    <Shield className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium">App PIN Lock</p>
+                    <p className="text-[10px] text-muted-foreground">4-6 digit PIN</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={pinEnabled}
+                  onCheckedChange={async (v) => {
+                    if (v) {
+                      const pin = prompt('Enter a 4-6 digit PIN:')
+                      if (pin && pin.length >= 4 && pin.length <= 6) {
+                        const res = await fetch('/api/pin', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'set', pin }),
+                        })
+                        if (res.ok) { setPinEnabled(true); toast.success('PIN set') }
+                        else toast.error('Failed to set PIN')
+                      } else { toast.error('PIN must be 4-6 digits') }
+                    } else {
+                      await fetch('/api/pin', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'disable' }),
+                      })
+                      setPinEnabled(false)
+                      toast.success('PIN disabled')
+                    }
+                  }}
+                />
+              </div>
 
-            <div className="p-3 rounded-xl bg-muted/50 text-xs text-muted-foreground">
-              <p className="font-medium text-foreground mb-1">Phase 3 Features (coming soon):</p>
-              <ul className="space-y-1 list-disc list-inside">
-                <li>Biometric fingerprint unlock</li>
-                <li>Multi-tenant SaaS isolation</li>
-                <li>RBAC roles (owner/manager/sales)</li>
-                <li>Active session management</li>
-              </ul>
-            </div>
+              {/* Biometric fingerprint */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
+                    <Shield className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium">Biometric Fingerprint</p>
+                    <p className="text-[10px] text-muted-foreground">Customer recognition</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={biometricEnabled}
+                  onCheckedChange={async (v) => {
+                    if (v) {
+                      toast.info('Biometric enabled — register fingerprints from customer profiles')
+                      setBiometricEnabled(true)
+                    } else {
+                      setBiometricEnabled(false)
+                      toast.success('Biometric disabled')
+                    }
+                  }}
+                />
+              </div>
 
-            <Button onClick={savePrefs} className="w-full h-11">
-              <Save className="w-4 h-4 mr-1.5" /> Save Security Settings
-            </Button>
-          </Card>
+              <Button onClick={savePrefs} className="w-full h-11">
+                <Save className="w-4 h-4 mr-1.5" /> Save Security Settings
+              </Button>
+            </Card>
+
+            {/* RBAC Roles */}
+            <Card className="p-5 space-y-3">
+              <h3 className="text-sm font-semibold">User Role (RBAC)</h3>
+              <p className="text-[11px] text-muted-foreground">Control access level for this device</p>
+              <div className="grid grid-cols-3 gap-2">
+                {(['owner', 'manager', 'sales'] as const).map((role) => (
+                  <button
+                    key={role}
+                    onClick={async () => {
+                      setRole(role)
+                      await apiPut('/api/app-settings', { userRole: role })
+                      toast.success(`Role set: ${role}`)
+                    }}
+                    className={`p-3 rounded-xl text-xs font-medium transition-all ${
+                      role === userRole ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    {role === 'owner' ? '👑 Owner' : role === 'manager' ? '👤 Manager' : '💼 Sales'}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                {userRole === 'owner' && 'Full access — all features, settings, delete, export'}
+                {userRole === 'manager' && 'Daily operations — no delete, no settings change'}
+                {userRole === 'sales' && 'Quick Sale Pad only + read-only Khata'}
+              </p>
+            </Card>
+          </div>
         )}
       </motion.div>
     </div>

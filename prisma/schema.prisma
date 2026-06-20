@@ -193,8 +193,40 @@ model AppSettings {
   pinEnabled           Boolean  @default(false)
   pinHash              String?
   lastBackupAt         DateTime?
+  // Phase 3 additions
+  userRole             String   @default("owner") // owner | manager | sales
+  telegramEnabled      Boolean  @default(false)
+  driveEnabled         Boolean  @default(false)
+  biometricEnabled     Boolean  @default(false)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// Phase 3: Fingerprint records for customer recognition (hash only, no raw biometric)
+model FingerprintRecord {
+  id              String   @id @default(cuid())
+  fingerprintHash String   @unique
+  partyId         String?
+  businessId      String
+  hand            String   @default("right") // right | left
+  finger          String   @default("thumb") // thumb | index | middle | ring | pinky
+  createdAt       DateTime @default(now())
+
+  @@index([partyId])
+  @@index([businessId])
+}
+
+// Phase 3: Backup log for Telegram / Google Drive
+model BackupLog {
+  id         String   @id @default(cuid())
+  businessId String
+  channel    String   // telegram | drive
+  status     String   @default("success") // success | failed
+  fileUrl    String?
+  fileSize   Int?
+  createdAt  DateTime @default(now())
+
+  @@index([businessId])
 }

@@ -79,11 +79,11 @@ export function TopAppBar() {
             variant="ghost"
             size="icon"
             className="h-10 w-10 rounded-full"
-            onClick={() => setLanguage(language === 'en' ? 'bn' : 'en')}
+            onClick={() => setLanguage(language === 'en' ? 'bn' : language === 'bn' ? 'hi' : 'en')}
             aria-label="Toggle language"
           >
             <span className="text-xs font-bold">
-              {language === 'en' ? 'বাং' : 'EN'}
+              {language === 'en' ? 'বাং' : language === 'bn' ? 'हि' : 'EN'}
             </span>
           </Button>
 

@@ -25,6 +25,10 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "BizLedger",
   },
+  icons: {
+    icon: "/icon-192.png",
+    apple: "/icon-192.png",
+  },
 };
 
 export const viewport: Viewport = {
@@ -49,6 +53,11 @@ export default function RootLayout({
           {children}
           <Toaster position="top-center" closeButton richColors />
         </ThemeProvider>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{})})}`,
+          }}
+        />
       </body>
     </html>
   );
