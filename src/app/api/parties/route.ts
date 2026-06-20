@@ -1,20 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { phoneticSearch } from '@/lib/phonetic'
 
-// GET /api/parties — list parties, optional ?type=customer|supplier|both
+// GET /api/parties — list parties, optional ?type=customer|supplier|both&q=search&phonetic=true
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const type = searchParams.get('type')
+  const q = searchParams.get('q') || ''
+  const usePhonetic = searchParams.get('phonetic') === 'true'
   const business = await db.business.findFirst()
   if (!business) return NextResponse.json([])
 
-  const parties = await db.party.findMany({
+  let parties = await db.party.findMany({
     where: {
       businessId: business.id,
       ...(type ? { type } : {}),
     },
     orderBy: { updatedAt: 'desc' },
   })
+
+  // Phonetic search (PRD v2 §12.2) — Bengali ↔ English sound matching
+  if (q && usePhonetic) {
+    const ranked = phoneticSearch(parties, q)
+    return NextResponse.json(ranked.map((r) => r.item))
+  }
+
+  // Regular text search
+  if (q) {
+    const query = q.toLowerCase()
+    parties = parties.filter(
+      (p) => p.name.toLowerCase().includes(query) || (p.phone || '').includes(q)
+    )
+  }
+
   return NextResponse.json(parties)
 }
 

@@ -74,3 +74,38 @@ Stage Summary:
 - Created /api/reset endpoint, FullScreenPicker reusable component
 - 4 bugs fixed: party edit, invoice pickers (Radix focus trap), reset data, dark mode
 - Server running with watchdog for persistence
+
+---
+Task ID: PHASE-2
+Agent: main
+Task: Implement all Phase 2 features per Master PRD v4.0
+
+Work Log:
+- Grade auto-calculation (B14): Created lib/grade-calculator.ts with weighted scoring (Payment Speed 35%, Outstanding Ratio 30%, Avg Discount 20%, Tx Count 15%). Added /api/grade-recalculate endpoint. Wired triggers in transactions POST + invoices POST (fire-and-forget recalc).
+- Multi-tab billing hold (B15): Created billing-store.ts (Zustand + localStorage persist) with up to 5 tabs, hasDraft flags, rename/close logic. Built BillingTabs component with yellow dot indicators + close confirm dialog. Added "Hold" button in invoice form that saves draft to active tab.
+- WhatsApp share (B16): Added handleWhatsAppShare + handleSMSShare to invoice-preview. WhatsApp opens wa.me with clean text (no QR), payment landing link, Bengali message. Added WhatsApp icon button in action bar + 3-button footer (WhatsApp/SMS/PDF).
+- Payment Landing Page (§10.5): Created /api/payment endpoint (token-based, public). Built PaymentLandingPage component with UPI QR (qrcode lib), "এই ফোনে পেমেন্ট করুন" UPI deep link button, invoice summary, bill details, "Secured by BizLedger" footer. AppShell checks ?payment=TOKEN query param and renders payment page without app chrome.
+- Notification deep-link (B17): Created notification-store.ts with typed notifications + action targets. Rewrote notifications-view to resolve demo party IDs to real IDs and navigate to correct view (khata/inventory/reports/settings) with party selection + filter.
+- Quick Sale Pad (§14): Built SalePadView with Retail/Wholesale dual mode, category slider, product grid (tap to add), cart with qty +/- inputs, customer picker (FullScreenPicker portal), Cash Sale (transaction) + Generate Invoice actions. Added 'sale-pad' to ViewId, AppShell renderView, TopAppBar titles. FAB "Quick Sale" now opens sale-pad.
+- Dashboard multi-chart (§7.2): Added chart type dropdown switcher — আয় বনাম ব্যয় (AreaChart), লাভ বনাম লোকসান (BarChart with colored cells), ক্যাশ ইন/আউট (ComposedChart with bars + line). AnimatePresence fade transition on switch.
+- Category autocomplete (§9.4): Created /api/products/categories endpoint (distinct categories). Added native datalist autocomplete to product form category field.
+- Supplier linking (§9.3): Added supplier select dropdown to product form (fetches parties?type=supplier). supplierId persisted via existing product API.
+- Phonetic search (§12.2): Created lib/phonetic.ts with Bengali→Latin transliteration + Soundex-like phonetic code. Added phoneticSearch() function with exact→contains→phonetic fallback. Wired into /api/products and /api/parties with ?q=&phonetic=true params. Verified "miniket" finds "Miniket Rice".
+- Voice entity parsing (§12.3): Created lib/voice-parser.ts with regex-based extraction of amount, type (credit/debit), customer name, item name, quantity from Bengali/English transcripts. Bengali digit normalization included.
+
+Stage Summary:
+- ALL Phase 2 features implemented and browser-verified:
+  ✅ Grade auto-calc with API triggers + manual recalc endpoint
+  ✅ Multi-tab billing hold (localStorage persist, yellow dots, close confirm)
+  ✅ WhatsApp + SMS share in invoice preview
+  ✅ Payment Landing Page (?payment=TOKEN, UPI QR, deep link, public)
+  ✅ Notification deep-link navigation (view/party/filter)
+  ✅ Quick Sale Pad (Retail/Wholesale, cart, customer, invoice/cash sale)
+  ✅ Dashboard multi-chart dropdown (3 chart types)
+  ✅ Category autocomplete (datalist) + supplier linking (select)
+  ✅ Cross-language phonetic search (Bengali↔English)
+  ✅ Voice entity parser utility
+- 6 new files: grade-calculator.ts, billing-store.ts, notification-store.ts, payment-landing-page.tsx, sale-pad-view.tsx, phonetic.ts, voice-parser.ts, billing-tabs.tsx, full-screen-picker.tsx
+- 4 new API routes: /api/grade-recalculate, /api/payment, /api/products/categories, /api/reset
+- Zero console errors, zero lint errors
+- Server running with watchdog persistence

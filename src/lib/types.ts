@@ -9,6 +9,7 @@ export type ViewId =
   | 'ai-tools'
   | 'settings'
   | 'notifications'
+  | 'sale-pad'
 
 export type PartyType = 'customer' | 'supplier' | 'both'
 export type QualityGrade = 'A' | 'B' | 'C' | 'D' | 'E'

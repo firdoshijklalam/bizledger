@@ -12,15 +12,25 @@ import {
 import { motion } from 'framer-motion'
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid,
+  Bar, BarChart, Cell, Legend, Line, ComposedChart,
 } from 'recharts'
 import { Card } from '@/components/ui/card'
 import { LoadingState, EmptyState } from '@/components/shared/states'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+
+type ChartType = 'revenue' | 'profit' | 'cashflow'
+
+const CHART_OPTIONS: Array<{ id: ChartType; label: string }> = [
+  { id: 'revenue', label: 'আয় বনাম ব্যয়' },
+  { id: 'profit', label: 'লাভ বনাম লোকসান' },
+  { id: 'cashflow', label: 'ক্যাশ ইন/আউট' },
+]
 
 export function DashboardView() {
   const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId } = useAppStore()
   const { t } = useI18n()
   const { data, loading } = useFetch<DashboardStats>('/api/dashboard')
+  const [chartType, setChartType] = useState<ChartType>('revenue')
 
   const currency = business?.currency || 'INR'
 
@@ -137,43 +147,75 @@ export function DashboardView() {
         })}
       </div>
 
-      {/* Sales trend chart */}
+      {/* Sales trend chart — multi-chart switcher (PRD v2 §7.2) */}
       <Card className="p-4">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h3 className="text-sm font-semibold">{t('dash.salesTrend')}</h3>
             <p className="text-[11px] text-muted-foreground">Last 7 days</p>
           </div>
-          <div className="flex items-center gap-3 text-[11px]">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />{t('dash.revenue')}</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />{t('dash.expense')}</span>
-          </div>
+          <select
+            value={chartType}
+            onChange={(e) => setChartType(e.target.value as ChartType)}
+            className="text-xs bg-muted rounded-lg px-2 py-1.5 border-0 outline-none h-8 font-medium"
+          >
+            {CHART_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>{o.label}</option>
+            ))}
+          </select>
         </div>
-        <div className="h-44 -ml-2">
+        <motion.div
+          key={chartType}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+          className="h-44 -ml-2"
+        >
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-              <defs>
-                <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
-                  <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="exp" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#f87171" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#f87171" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-              <XAxis dataKey="date" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-              <Tooltip
-                contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }}
-                formatter={(v: number) => formatCurrency(v, currency)}
-              />
-              <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" />
-              <Area type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} fill="url(#exp)" />
-            </AreaChart>
+            {chartType === 'revenue' ? (
+              <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <defs>
+                  <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="exp" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#f87171" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#f87171" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => formatCurrency(v, currency)} />
+                <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" />
+                <Area type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} fill="url(#exp)" />
+              </AreaChart>
+            ) : chartType === 'profit' ? (
+              <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => formatCurrency(v, currency)} />
+                <Bar dataKey="profit" radius={[4, 4, 0, 0]}>
+                  {data.salesTrend.map((entry, i) => (
+                    <Cell key={i} fill={entry.profit >= 0 ? '#10b981' : '#f87171'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            ) : (
+              <ComposedChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => formatCurrency(v, currency)} />
+                <Bar dataKey="revenue" fill="#10b981" radius={[4, 4, 0, 0]} name="Cash In" />
+                <Bar dataKey="expense" fill="#f87171" radius={[4, 4, 0, 0]} name="Cash Out" />
+                <Line type="monotone" dataKey="profit" stroke="#6366f1" strokeWidth={2} dot={false} name="Net" />
+              </ComposedChart>
+            )}
           </ResponsiveContainer>
-        </div>
+        </motion.div>
       </Card>
 
       {/* Grade distribution */}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { TopAppBar } from './top-app-bar'
@@ -15,6 +15,8 @@ import { ReportsView } from '@/components/views/reports-view'
 import { SettingsView } from '@/components/views/settings-view'
 import { NotificationsView } from '@/components/views/notifications-view'
 import { AiToolsView } from '@/components/views/ai-tools-view'
+import { PaymentLandingPage } from '@/components/views/payment-landing-page'
+import { SalePadView } from '@/components/views/sale-pad-view'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 
@@ -27,6 +29,15 @@ export function AppShell() {
     setBusinessLoaded,
   } = useAppStore()
   const { setLanguage } = useI18n()
+  const [paymentToken, setPaymentToken] = useState<string | null>(null)
+
+  // Check for payment landing page token in URL (?payment=TOKEN)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('payment')
+    if (token) setPaymentToken(token)
+  }, [])
 
   // Bootstrap: ensure seeded + load business + load language setting
   useEffect(() => {
@@ -64,6 +75,11 @@ export function AppShell() {
         <p className="text-sm text-muted-foreground">Loading BizLedger…</p>
       </div>
     )
+  }
+
+  // Payment Landing Page — public, no app chrome (PRD v2 §10.5)
+  if (paymentToken) {
+    return <PaymentLandingPage token={paymentToken} />
   }
 
   return (
@@ -107,6 +123,8 @@ function renderView(view: string) {
       return <SettingsView />
     case 'notifications':
       return <NotificationsView />
+    case 'sale-pad':
+      return <SalePadView />
     default:
       return <DashboardView />
   }

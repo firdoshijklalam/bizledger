@@ -17,6 +17,7 @@ const VIEW_TITLES: Record<string, string> = {
   'ai-tools': 'ai.tools',
   settings: 'set.title',
   notifications: 'header.notifications',
+  'sale-pad': 'qa.quickSale',
 }
 
 export function TopAppBar() {

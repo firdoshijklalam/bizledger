@@ -13,6 +13,7 @@ import { EmptyState, LoadingState } from '@/components/shared/states'
 import { useEffect, useMemo, useState } from 'react'
 import { InvoiceForm } from './billing/invoice-form'
 import { InvoicePreview } from './billing/invoice-preview'
+import { BillingTabs } from './billing/billing-tabs'
 import { Input } from '@/components/ui/input'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -80,10 +81,16 @@ export function BillingView() {
         </div>
       </div>
 
-      {/* New invoice CTA */}
+      {/* New invoice CTA + Hold tabs */}
       <Button onClick={() => setShowInvoiceForm(true)} className="w-full h-12 text-base">
         <Plus className="w-5 h-5 mr-2" /> {t('bill.newInvoice')}
       </Button>
+
+      {/* Multi-tab hold system (PRD v2 §10.6) */}
+      <div className="pt-2">
+        <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1.5 px-1">Hold Bills (Drafts)</p>
+        <BillingTabs />
+      </div>
 
       {/* Search */}
       <Input

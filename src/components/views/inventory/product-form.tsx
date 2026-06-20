@@ -3,7 +3,7 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost, apiPut } from '@/hooks/use-fetch'
-import type { Product } from '@/lib/types'
+import type { Product, Party } from '@/lib/types'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -40,7 +40,12 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   const [gstRate, setGstRate] = useState('0')
   const [stock, setStock] = useState('')
   const [lowStockThreshold, setLowStockThreshold] = useState('5')
+  const [supplierId, setSupplierId] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // Category autocomplete (PRD v2 §9.4) + Supplier linking (PRD v2 §9.3)
+  const { data: categories } = useFetch<string[]>('/api/products/categories', [])
+  const { data: suppliers } = useFetch<Party[]>('/api/parties?type=supplier', [])
 
   useEffect(() => {
     if (existing) {
@@ -55,10 +60,11 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
       setGstRate(String(existing.gstRate))
       setStock(String(existing.stock))
       setLowStockThreshold(String(existing.lowStockThreshold))
+      setSupplierId(existing.supplierId || '')
     } else if (!productId) {
       setName(''); setSku(''); setCategory(''); setUnit('pcs')
       setPurchasePrice(''); setSalePrice(''); setMrp(''); setWholesalePrice('')
-      setGstRate('0'); setStock(''); setLowStockThreshold('5')
+      setGstRate('0'); setStock(''); setLowStockThreshold('5'); setSupplierId('')
     }
   }, [existing, productId, open])
 
@@ -91,6 +97,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
         gstRate: Number(gstRate) || 0,
         stock: Number(stock) || 0,
         lowStockThreshold: Number(lowStockThreshold) || 5,
+        supplierId: supplierId || null,
       }
       if (productId) {
         await apiPut(`/api/products/${productId}`, payload)
@@ -132,8 +139,34 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cat" className="text-xs">Category</Label>
-              <Input id="cat" value={category} onChange={(e) => setCategory(e.target.value)} className="h-11" placeholder="Electronics" />
+              <Input
+                id="cat"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="h-11"
+                placeholder="Electronics"
+                list="category-list"
+              />
+              <datalist id="category-list">
+                {(categories || []).map((c) => <option key={c} value={c} />)}
+              </datalist>
             </div>
+          </div>
+
+          {/* Supplier linking (PRD v2 §9.3) */}
+          <div className="space-y-1.5">
+            <Label htmlFor="supplier" className="text-xs">সাপ্লায়ারের নাম (Supplier)</Label>
+            <select
+              id="supplier"
+              value={supplierId}
+              onChange={(e) => setSupplierId(e.target.value)}
+              className="w-full h-11 rounded-xl bg-muted px-3 text-sm border-0 outline-none"
+            >
+              <option value="">— None —</option>
+              {(suppliers || []).map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
           </div>
 
           <div>

@@ -6,7 +6,7 @@ import { useFetch } from '@/hooks/use-fetch'
 import type { Invoice } from '@/lib/types'
 import { formatCurrency, formatDate, GRADE_META } from '@/lib/utils'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Download, Share2, Printer, X } from 'lucide-react'
+import { ArrowLeft, Download, Share2, Printer, X, MessageCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { useEffect, useRef } from 'react'
@@ -37,6 +37,40 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
     }
   }
 
+  const handleWhatsAppShare = () => {
+    // PRD v2 §10.4 — clean text format with Pay Now link (no QR in share)
+    const payUrl = `${window.location.origin}/payment/${invoice.paymentLandingToken || invoice.id}`
+    const phone = invoice.party?.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
+    const lines = [
+      `প্রিয় কাস্টমার,`,
+      ``,
+      `${business?.name}-এর বিল জেনারেট হয়েছে।`,
+      ``,
+      `🧾 Invoice: ${invoice.invoiceNumber}`,
+      `📅 Date: ${formatDate(invoice.createdAt)}`,
+      `💰 Total: ${formatCurrency(invoice.grandTotal, currency)}`,
+    ]
+    if (invoice.amountDue > 0) {
+      lines.push(`⚠️ Due: ${formatCurrency(invoice.amountDue, currency)}`)
+    }
+    lines.push(``, `💳 Pay Now: ${payUrl}`, ``, `Thank you! 🙏`)
+    const text = encodeURIComponent(lines.join('\n'))
+    const waUrl = phone
+      ? `https://wa.me/${phone}?text=${text}`
+      : `https://wa.me/?text=${text}`
+    window.open(waUrl, '_blank')
+    toast.success('Opening WhatsApp…')
+  }
+
+  const handleSMSShare = () => {
+    const payUrl = `${window.location.origin}/payment/${invoice.paymentLandingToken || invoice.id}`
+    const phone = invoice.party?.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
+    const text = encodeURIComponent(
+      `${business?.name} বিল: #${invoice.invoiceNumber}, মোট: ${formatCurrency(invoice.grandTotal, currency)}। পেমেন্ট করতে ক্লিক করুন: ${payUrl}`
+    )
+    window.location.href = phone ? `sms:${phone}?body=${text}` : `sms:?body=${text}`
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 20 }}
@@ -53,6 +87,9 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h2 className="text-base font-semibold flex-1">{invoice.invoiceNumber}</h2>
+        <button onClick={handleWhatsAppShare} className="w-10 h-10 rounded-full hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center justify-center text-emerald-600" aria-label="Share on WhatsApp">
+          <MessageCircle className="w-4 h-4" />
+        </button>
         <button onClick={handleShare} className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center" aria-label="Share">
           <Share2 className="w-4 h-4" />
         </button>
@@ -175,12 +212,15 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
       </div>
 
       {/* Action buttons (no-print) */}
-      <div className="grid grid-cols-2 gap-2 action-buttons">
-        <Button variant="outline" onClick={handleShare} className="h-11">
-          <Share2 className="w-4 h-4 mr-1.5" /> {t('bill.share')}
+      <div className="grid grid-cols-3 gap-2 action-buttons">
+        <Button variant="outline" onClick={handleWhatsAppShare} className="h-11 text-emerald-600 border-emerald-300 dark:border-emerald-800">
+          <MessageCircle className="w-4 h-4 mr-1" /> WhatsApp
+        </Button>
+        <Button variant="outline" onClick={handleSMSShare} className="h-11">
+          <Share2 className="w-4 h-4 mr-1" /> SMS
         </Button>
         <Button onClick={handlePrint} className="h-11">
-          <Printer className="w-4 h-4 mr-1.5" /> {t('bill.download')}
+          <Printer className="w-4 h-4 mr-1.5" /> PDF
         </Button>
       </div>
     </motion.div>

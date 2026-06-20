@@ -36,7 +36,7 @@ export function SideDrawerFab() {
 
   const handleAction = (id: string) => {
     if (id === 'quick-sale') {
-      setActiveView('billing')
+      setActiveView('sale-pad')
       setFabOpen(false)
       return
     }

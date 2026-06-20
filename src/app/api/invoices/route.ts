@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { generateToken, generateInvoiceNumber } from '@/lib/utils'
+import { recalculatePartyGrade } from '@/lib/grade-calculator'
 
 // GET /api/invoices
 export async function GET(req: NextRequest) {
@@ -115,6 +116,9 @@ export async function POST(req: NextRequest) {
           invoiceId: invoice.id,
         },
       })
+
+      // Trigger grade recalculation for this party (fire-and-forget)
+      recalculatePartyGrade(body.partyId).catch((e) => console.error('Grade recalc error:', e))
     }
 
     return NextResponse.json(invoice)

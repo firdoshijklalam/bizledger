@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
 import { Search, Plus, Trash2, ShoppingCart, Percent, IndianRupee } from 'lucide-react'
 import { FullScreenPicker } from '@/components/shared/full-screen-picker'
+import { useBillingStore } from '@/store/billing-store'
 
 interface LineItem {
   productId?: string
@@ -36,6 +37,7 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
   const { t } = useI18n()
   const { data: parties } = useFetch<Party[]>('/api/parties?type=customer', [open])
   const { data: products } = useFetch<Product[]>('/api/products', [open])
+  const { tabs, activeTabId, updateTab, addTab } = useBillingStore()
 
   const [customer, setCustomer] = useState<Party | null>(null)
   const [showCustSearch, setShowCustSearch] = useState(false)
@@ -125,11 +127,55 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
       triggerRefresh()
       onOpenChange(false)
       setSelectedInvoiceId(invoice.id)
+      // Clear the active billing tab on successful save
+      const activeTab = tabs.find((tb) => tb.id === activeTabId)
+      if (activeTab) {
+        updateTab(activeTab.id, {
+          hasDraft: false,
+          items: [],
+          customerId: undefined,
+          customerName: undefined,
+          discountValue: 0,
+        })
+      }
     } catch (e) {
       toast.error('Failed: ' + String(e))
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleHold = () => {
+    // Save current draft to the active billing tab (PRD v2 §10.6)
+    const activeTab = tabs.find((tb) => tb.id === activeTabId)
+    if (!activeTab) {
+      const newId = addTab()
+      if (newId) {
+        updateTab(newId, {
+          hasDraft: items.length > 0 || !!customer,
+          customerId: customer?.id,
+          customerName: customer?.name,
+          items: items as any,
+          discountMode,
+          discountValue: Number(discountValue) || 0,
+          isGst,
+          paymentMode,
+        })
+      }
+    } else {
+      updateTab(activeTab.id, {
+        hasDraft: items.length > 0 || !!customer,
+        customerId: customer?.id,
+        customerName: customer?.name,
+        items: items as any,
+        discountMode,
+        discountValue: Number(discountValue) || 0,
+        isGst,
+        paymentMode,
+      })
+    }
+    toast.success('Bill held — switch tabs to resume later')
+    onOpenChange(false)
   }
 
   const partyItems = (parties || []).map((p) => ({
@@ -340,6 +386,9 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} className="h-11">
             {t('common.cancel')}
+          </Button>
+          <Button variant="secondary" onClick={handleHold} className="h-11">
+            Hold
           </Button>
           <Button onClick={handleSave} disabled={saving} className="h-11 flex-1">
             {saving ? 'Saving…' : t('bill.save')}
