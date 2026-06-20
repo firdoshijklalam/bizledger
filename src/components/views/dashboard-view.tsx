@@ -27,7 +27,7 @@ const CHART_OPTIONS: Array<{ id: ChartType; label: string }> = [
 ]
 
 export function DashboardView() {
-  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId } = useAppStore()
+  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, triggerQuickAction } = useAppStore()
   const { t } = useI18n()
   const { data, loading } = useFetch<DashboardStats>('/api/dashboard')
   const [chartType, setChartType] = useState<ChartType>('revenue')
@@ -319,16 +319,19 @@ export function DashboardView() {
         <h3 className="text-sm font-semibold mb-3">{t('dash.quickActions')}</h3>
         <div className="grid grid-cols-4 gap-2">
           {[
-            { label: t('khata.addPartyShort'), icon: Users, view: 'khata' as const, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
-            { label: t('inv.addProductShort'), icon: Package, view: 'inventory' as const, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
-            { label: t('bill.newInvoiceShort'), icon: Receipt, view: 'billing' as const, color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/30' },
-            { label: t('qa.addTransaction'), icon: ArrowLeftRight, view: 'khata' as const, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30' },
+            { label: t('khata.addPartyShort'), icon: Users, view: 'khata' as const, action: 'add-party' as const, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
+            { label: t('inv.addProductShort'), icon: Package, view: 'inventory' as const, action: 'add-product' as const, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
+            { label: t('bill.newInvoiceShort'), icon: Receipt, view: 'billing' as const, action: 'new-invoice' as const, color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/30' },
+            { label: t('qa.addTransaction'), icon: ArrowLeftRight, view: 'khata' as const, action: 'add-transaction' as const, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30' },
           ].map((a) => {
             const Icon = a.icon
             return (
               <button
                 key={a.label}
-                onClick={() => setActiveView(a.view)}
+                onClick={() => {
+                  setActiveView(a.view)
+                  triggerQuickAction({ id: crypto.randomUUID(), type: a.action })
+                }}
                 className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-muted transition-colors min-h-[72px] justify-center"
               >
                 <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${a.color}`}>

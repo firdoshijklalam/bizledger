@@ -40,6 +40,18 @@ export function SideDrawerFab() {
       setFabOpen(false)
       return
     }
+    // Navigate to the correct view FIRST, then trigger the quick action
+    // so the view's useEffect picks it up and opens the form.
+    const viewMap: Record<string, string> = {
+      'add-party': 'khata',
+      'add-product': 'inventory',
+      'new-invoice': 'billing',
+      'add-transaction': 'khata',
+    }
+    const targetView = viewMap[id]
+    if (targetView) {
+      setActiveView(targetView as any)
+    }
     triggerQuickAction({ id: crypto.randomUUID(), type: id as any })
     setFabOpen(false)
   }

@@ -109,3 +109,37 @@ Stage Summary:
 - 4 new API routes: /api/grade-recalculate, /api/payment, /api/products/categories, /api/reset
 - Zero console errors, zero lint errors
 - Server running with watchdog persistence
+
+---
+Task ID: AUDIT-2
+Agent: main
+Task: Comprehensive audit of all buttons/features after Phase 2
+
+Work Log:
+- Found and fixed critical bug: Dashboard Quick Actions (Add Party, Add Product, New Invoice) and FAB quick actions only navigated to the view but did NOT open the form
+- Fixed side-drawer-fab.tsx: handleAction now navigates to correct view (khata/inventory/billing) BEFORE triggering quick action, so the view's useEffect picks it up
+- Fixed dashboard-view.tsx: Quick action buttons now call both setActiveView + triggerQuickAction
+- Fixed khata-view.tsx: Added handling for 'add-transaction' quick action (shows toast "Select a party to add a transaction" since a party must be selected first)
+- Added toast import to khata-view.tsx
+- Comprehensive browser audit verified ALL features working:
+  ✅ Dashboard: all 6 metric cards navigate correctly
+  ✅ Dashboard quick actions: Add Party/Product/Invoice all open forms now
+  ✅ FAB quick actions: all 5 (add-party, add-product, new-invoice, add-transaction, quick-sale) work
+  ✅ Sale Pad: full flow — add to cart, generate invoice (INV-2026-0007 created)
+  ✅ Billing hold: Add Item → Hold → yellow dot appears → "Bill held" toast → tab switching works
+  ✅ Invoice preview: WhatsApp/SMS/PDF share buttons present
+  ✅ Khata party detail: Edit opens prefilled form, Entry opens transaction form, save works
+  ✅ Inventory: Edit opens form with category autocomplete (datalist) + supplier dropdown, Delete shows confirm dialog
+  ✅ Reports: all 6 tabs switch, Export Excel downloads CSV with toast
+  ✅ Settings: Save Changes shows "Settings saved" toast
+  ✅ Search overlay: type query → results appear
+  ✅ Dark mode: toggles correctly (LIGHT ↔ DARK)
+  ✅ Language toggle: switches EN ↔ BN
+  ✅ View All buttons: navigate to correct views
+  ✅ Zero console errors throughout all tests
+
+Stage Summary:
+- 1 critical bug fixed (quick actions not opening forms)
+- ALL buttons and features now verified working
+- Zero console errors, zero lint errors
+- Server running with watchdog persistence

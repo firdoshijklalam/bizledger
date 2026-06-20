@@ -10,6 +10,7 @@ import { BookOpen, Plus, Users, Filter, Phone, ChevronRight } from 'lucide-react
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState, LoadingState } from '@/components/shared/states'
+import { toast } from 'sonner'
 import { useEffect, useMemo, useState } from 'react'
 import { PartyForm } from './khata/party-form'
 import { PartyDetail } from './khata/party-detail'
@@ -33,6 +34,10 @@ export function KhataView() {
   useEffect(() => {
     if (pendingQuickAction?.type === 'add-party') {
       setShowPartyForm(true)
+      clearQuickAction()
+    } else if (pendingQuickAction?.type === 'add-transaction') {
+      // Transaction needs a party — prompt user to select one
+      toast.info('Select a party to add a transaction')
       clearQuickAction()
     }
   }, [pendingQuickAction, setShowPartyForm, clearQuickAction])
