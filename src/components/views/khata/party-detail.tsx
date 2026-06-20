@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { useState } from 'react'
 import { TransactionForm } from './transaction-form'
+import { PartyForm } from './party-form'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -28,7 +29,7 @@ interface PartyDetailData extends Party {
 }
 
 export function PartyDetail({ partyId }: { partyId: string }) {
-  const { setSelectedPartyId, setActiveView, setShowInvoiceForm, business, setSelectedInvoiceId, setEditingPartyId } = useAppStore()
+  const { setSelectedPartyId, setActiveView, setShowInvoiceForm, business, setSelectedInvoiceId, setEditingPartyId, editingPartyId } = useAppStore()
   const { t } = useI18n()
   const { data, refetch } = useFetch<PartyDetailData>(`/api/parties/${partyId}`, [partyId])
   const [showTxn, setShowTxn] = useState(false)
@@ -216,6 +217,11 @@ export function PartyDetail({ partyId }: { partyId: string }) {
 
       <TransactionForm open={showTxn} onOpenChange={setShowTxn} party={data} />
       <SettleUpDialog open={showSettle} onOpenChange={setShowSettle} party={data} onConfirm={handleSettle} />
+      <PartyForm
+        open={!!editingPartyId}
+        onOpenChange={(o) => { if (!o) setEditingPartyId(null) }}
+        partyId={editingPartyId}
+      />
     </motion.div>
   )
 }

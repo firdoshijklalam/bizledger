@@ -4,7 +4,7 @@ import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
 import type { Party, Product } from '@/lib/types'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, GRADE_META } from '@/lib/utils'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -13,8 +13,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
-import { Search, X, Plus, Trash2, ShoppingCart, Percent, IndianRupee } from 'lucide-react'
-import { GRADE_META } from '@/lib/utils'
+import { Search, Plus, Trash2, ShoppingCart, Percent, IndianRupee } from 'lucide-react'
+import { FullScreenPicker } from '@/components/shared/full-screen-picker'
 
 interface LineItem {
   productId?: string
@@ -39,10 +39,8 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
 
   const [customer, setCustomer] = useState<Party | null>(null)
   const [showCustSearch, setShowCustSearch] = useState(false)
-  const [custQuery, setCustQuery] = useState('')
   const [items, setItems] = useState<LineItem[]>([])
   const [showProdSearch, setShowProdSearch] = useState(false)
-  const [prodQuery, setProdQuery] = useState('')
   const [discountMode, setDiscountMode] = useState<'flat' | 'percent'>('flat')
   const [discountValue, setDiscountValue] = useState('0')
   const [isGst, setIsGst] = useState(true)
@@ -134,16 +132,34 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
     }
   }
 
-  const filteredParties = (parties || []).filter((p) =>
-    p.name.toLowerCase().includes(custQuery.toLowerCase()) || (p.phone || '').includes(custQuery)
-  )
-  const filteredProducts = (products || []).filter((p) =>
-    p.name.toLowerCase().includes(prodQuery.toLowerCase()) || (p.sku || '').toLowerCase().includes(prodQuery)
-  )
+  const partyItems = (parties || []).map((p) => ({
+    id: p.id,
+    title: p.name,
+    subtitle: p.phone || 'No phone',
+    badge: p.qualityGrade,
+    badgeClass: `${GRADE_META[p.qualityGrade].bg} ${GRADE_META[p.qualityGrade].color}`,
+  }))
+
+  const productItems = (products || []).map((p) => ({
+    id: p.id,
+    title: p.name,
+    subtitle: `Stock: ${p.stock} ${p.unit}`,
+    trailing: formatCurrency(p.salePrice, currency),
+  }))
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[92vh] overflow-y-auto scroll-area">
+      <DialogContent
+        className="max-w-md max-h-[92vh] overflow-y-auto scroll-area"
+        // When a child picker is open, allow pointer events to pass through to the picker portal
+        onPointerDownOutside={(e) => {
+          if (showCustSearch || showProdSearch) e.preventDefault()
+        }}
+        onInteractOutside={(e) => {
+          if (showCustSearch || showProdSearch) e.preventDefault()
+        }}
+        style={showCustSearch || showProdSearch ? { pointerEvents: 'none' } : undefined}
+      >
         <DialogHeader>
           <DialogTitle>{t('bill.newInvoice')}</DialogTitle>
         </DialogHeader>
@@ -166,8 +182,8 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
                   </div>
                   <p className="text-[11px] text-muted-foreground">{customer.phone || 'No phone'}</p>
                 </div>
-                <button onClick={() => setCustomer(null)} className="text-muted-foreground hover:text-foreground">
-                  <X className="w-4 h-4" />
+                <button onClick={() => setCustomer(null)} className="text-muted-foreground hover:text-foreground" aria-label="Remove customer">
+                  <Plus className="w-4 h-4 rotate-45" />
                 </button>
               </div>
             ) : (
@@ -331,93 +347,33 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
         </DialogFooter>
       </DialogContent>
 
-      {/* Customer search modal */}
-      {showCustSearch && (
-        <div className="fixed inset-0 z-[60] bg-background flex flex-col">
-          <div className="flex items-center gap-2 p-3 border-b border-border">
-            <div className="flex-1 flex items-center gap-2 bg-muted rounded-xl px-3 h-11">
-              <Search className="w-5 h-5 text-muted-foreground" />
-              <input
-                autoFocus
-                value={custQuery}
-                onChange={(e) => setCustQuery(e.target.value)}
-                placeholder="Search customer…"
-                className="flex-1 bg-transparent outline-none text-sm"
-              />
-            </div>
-            <button onClick={() => setShowCustSearch(false)} className="w-11 h-11 flex items-center justify-center">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-1">
-            {filteredParties.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No customers found</p>
-            ) : (
-              filteredParties.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => { setCustomer(p); setShowCustSearch(false); setCustQuery('') }}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left"
-                >
-                  <div className="w-9 h-9 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold">
-                    {p.name.charAt(0)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{p.name}</p>
-                    <p className="text-[11px] text-muted-foreground">{p.phone || 'No phone'}</p>
-                  </div>
-                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${GRADE_META[p.qualityGrade].bg} ${GRADE_META[p.qualityGrade].color}`}>
-                    {p.qualityGrade}
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
+      {/* Customer search picker (portal — escapes Radix focus trap) */}
+      <FullScreenPicker
+        open={showCustSearch}
+        onClose={() => setShowCustSearch(false)}
+        onSelect={(item) => {
+          const p = (parties || []).find((x) => x.id === item.id)
+          if (p) setCustomer(p)
+          setShowCustSearch(false)
+        }}
+        items={partyItems}
+        placeholder="Search customer…"
+        emptyText="No customers found"
+      />
 
-      {/* Product search modal */}
-      {showProdSearch && (
-        <div className="fixed inset-0 z-[60] bg-background flex flex-col">
-          <div className="flex items-center gap-2 p-3 border-b border-border">
-            <div className="flex-1 flex items-center gap-2 bg-muted rounded-xl px-3 h-11">
-              <Search className="w-5 h-5 text-muted-foreground" />
-              <input
-                autoFocus
-                value={prodQuery}
-                onChange={(e) => setProdQuery(e.target.value)}
-                placeholder="Search product…"
-                className="flex-1 bg-transparent outline-none text-sm"
-              />
-            </div>
-            <button onClick={() => setShowProdSearch(false)} className="w-11 h-11 flex items-center justify-center">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-1">
-            {filteredProducts.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No products found</p>
-            ) : (
-              filteredProducts.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => addProduct(p)}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left"
-                >
-                  <div className="w-9 h-9 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-                    <Plus className="w-4 h-4 text-amber-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{p.name}</p>
-                    <p className="text-[11px] text-muted-foreground">Stock: {p.stock} {p.unit}</p>
-                  </div>
-                  <span className="text-sm font-semibold tabular">{formatCurrency(p.salePrice, currency)}</span>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
+      {/* Product search picker (portal) */}
+      <FullScreenPicker
+        open={showProdSearch}
+        onClose={() => setShowProdSearch(false)}
+        onSelect={(item) => {
+          const p = (products || []).find((x) => x.id === item.id)
+          if (p) addProduct(p)
+          setShowProdSearch(false)
+        }}
+        items={productItems}
+        placeholder="Search product…"
+        emptyText="No products found"
+      />
     </Dialog>
   )
 }

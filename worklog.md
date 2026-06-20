@@ -38,3 +38,39 @@ Stage Summary:
 - PRD v2 features implemented: Side-Drawer FAB, dual-mode discount, premium invoice UI, print CSS fix, grade badges, Bengali i18n terms (পাবো/দেবো/বাকি আছে)
 - Mobile-first responsive design with bottom tab nav, sticky header, touch targets ≥44px
 - Lint clean, no console errors, HTTP 200 on all routes
+
+---
+Task ID: FIX-1
+Agent: main
+Task: Audit and fix all non-working buttons/features
+
+Work Log:
+- Identified issues via comprehensive browser testing:
+  1. Party "Edit" button on party detail view didn't open form (PartyForm not rendered in PartyDetail)
+  2. Invoice form Customer/Product search modals didn't work inside Radix Dialog (focus trap + pointer-events blocking)
+  3. Settings "Reset Demo Data" button was a no-op (no API endpoint)
+  4. Dark mode toggle not applying (next-themes missing attribute="class" config)
+- Fixed Party Edit: Added PartyForm render in party-detail.tsx, wired to editingPartyId store state
+- Fixed Invoice pickers: Created reusable FullScreenPicker component using createPortal to document.body (escapes Radix focus trap), added onInteractOutside preventDefault + pointerEvents:none on DialogContent when picker open
+- Fixed Reset: Created /api/reset endpoint that deletes all data and re-seeds fresh demo; wired reseed() to call it + reload page
+- Fixed Dark mode: Added attribute="class" defaultTheme="light" enableSystem={false} to ThemeProvider in layout.tsx
+- Verified ALL buttons/features working via Agent Browser:
+  - Dashboard: all 6 metric cards navigate, quick actions open forms, FAB opens with 5 actions
+  - Khata: party cards open detail, Call/Entry/New Invoice/Settle Up/Edit all work, transaction form saves
+  - Inventory: product cards, Edit opens form (prefilled), Delete shows confirm dialog, low-stock filter
+  - Billing: New Invoice form — customer picker (portal) + product picker (portal) + discount toggle + GST + payment modes + save → invoice preview (INV-2026-0004 created)
+  - Reports: all 6 report tabs switch, Export Excel downloads CSV with toast, Download PDF/Print
+  - Settings: all 4 tabs, Save Profile shows "Settings saved" toast, Export JSON/CSV, Reset Demo Data
+  - Notifications: 5 notifications with deep-link actions
+  - AI Tools: 6 tool cards
+  - Search overlay: searches parties/products/invoices/transactions
+  - Language toggle: EN ↔ BN (Bengali UI renders)
+  - Dark mode: toggles correctly (light ↔ dark)
+  - Side-Drawer FAB: opens with 5 quick actions
+
+Stage Summary:
+- ALL buttons and features now working correctly
+- Zero console errors throughout testing
+- Created /api/reset endpoint, FullScreenPicker reusable component
+- 4 bugs fixed: party edit, invoice pickers (Radix focus trap), reset data, dark mode
+- Server running with watchdog for persistence

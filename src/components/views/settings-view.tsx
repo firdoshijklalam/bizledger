@@ -92,9 +92,19 @@ export function SettingsView() {
   }
 
   const reseed = async () => {
-    if (!confirm('This will reset all demo data. Continue?')) return
-    // Delete everything by re-pushing schema isn't trivial; instead create fresh seed logic
-    toast.success('Demo data kept. Use export for backup.')
+    if (!confirm('This will DELETE all parties, products, invoices, and transactions and re-seed fresh demo data. Continue?')) return
+    try {
+      toast.loading('Resetting data…')
+      const res = await fetch('/api/reset', { method: 'POST' })
+      if (!res.ok) throw new Error('Reset failed')
+      toast.dismiss()
+      toast.success('Demo data reset successfully!')
+      // Reload the page to refresh all stores and data
+      setTimeout(() => window.location.reload(), 800)
+    } catch (e) {
+      toast.dismiss()
+      toast.error('Reset failed: ' + String(e))
+    }
   }
 
   return (
