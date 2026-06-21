@@ -41,6 +41,7 @@ export function ReportsView() {
   const { business, setActiveView } = useAppStore()
   const { t } = useI18n()
   const { data, loading } = useFetch<ReportData>('/api/reports', [])
+  const { data: allProducts } = useFetch<any[]>('/api/products', [])
   const [activeReport, setActiveReport] = useState<'pl' | 'gst' | 'party' | 'outstanding' | 'stock' | 'grade'>('pl')
 
   if (loading || !data) return <LoadingState />
@@ -176,21 +177,28 @@ export function ReportsView() {
               {data.partyLedger.map((p) => {
                 const meta = GRADE_META[p.grade]
                 return (
-                  <div key={p.id} className="flex items-center gap-3 p-2.5 rounded-xl bg-muted/50">
-                    <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center font-bold text-emerald-700 text-sm">
+                  <button
+                    key={p.id}
+                    onClick={() => {
+                      useAppStore.getState().setSelectedPartyId(p.id)
+                      useAppStore.getState().setActiveView('khata')
+                    }}
+                    className="w-full flex items-center gap-3 p-2.5 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-left"
+                  >
+                    <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center font-bold text-emerald-700 text-sm shrink-0">
                       {p.name.charAt(0)}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{p.name}</p>
                       <p className="text-[11px] text-muted-foreground capitalize">{p.type}</p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       <p className={`text-sm font-semibold tabular ${p.balance > 0 ? 'text-emerald-600' : p.balance < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
                         {formatCurrency(Math.abs(p.balance), currency)}
                       </p>
                       <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{p.grade}</span>
                     </div>
-                  </div>
+                  </button>
                 )
               })}
             </div>
@@ -214,15 +222,22 @@ export function ReportsView() {
             <Card className="p-5">
               <h3 className="text-sm font-semibold mb-3">Receivables (পাবো)</h3>
               <div className="space-y-2 max-h-48 overflow-y-auto scroll-area">
-                {data.outstanding.receivables.map((r, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2">
-                      <span className={`w-1.5 h-1.5 rounded-full ${GRADE_META[r.grade]?.bg}`} />
-                      {r.name}
-                    </span>
-                    <span className="font-semibold tabular text-emerald-600">{formatCurrency(r.amount, currency)}</span>
-                  </div>
-                ))}
+                {data.outstanding.receivables.map((r, i) => {
+                  const party = data.partyLedger.find((p) => p.name === r.name)
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => { if (party) { useAppStore.getState().setSelectedPartyId(party.id); useAppStore.getState().setActiveView('khata') } }}
+                      className="w-full flex items-center justify-between text-sm hover:bg-muted/50 rounded-lg p-1.5 text-left transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className={`w-1.5 h-1.5 rounded-full ${GRADE_META[r.grade]?.bg}`} />
+                        {r.name}
+                      </span>
+                      <span className="font-semibold tabular text-emerald-600">{formatCurrency(r.amount, currency)}</span>
+                    </button>
+                  )
+                })}
               </div>
             </Card>
           </div>
@@ -233,7 +248,18 @@ export function ReportsView() {
             <h3 className="text-sm font-semibold mb-4">{t('rep.stockAgeing')}</h3>
             <div className="space-y-2 max-h-[60vh] overflow-y-auto scroll-area">
               {data.stockAgeing.map((s) => (
-                <div key={s.name} className="flex items-center justify-between p-3 rounded-xl bg-muted/50">
+                <button
+                  key={s.name}
+                  onClick={() => {
+                    // Find product by name and navigate to inventory
+                    const product = allProducts?.find((p: any) => p.name === s.name)
+                    if (product) {
+                      useAppStore.getState().setSelectedProductId(product.id)
+                      useAppStore.getState().setActiveView('inventory')
+                    }
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-left"
+                >
                   <div>
                     <p className="text-sm font-medium">{s.name}</p>
                     <p className="text-[11px] text-muted-foreground">{s.stock} units · {formatCurrency(s.value, currency)}</p>
@@ -245,7 +271,7 @@ export function ReportsView() {
                   }`}>
                     {s.status.toUpperCase()}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           </Card>
