@@ -281,3 +281,23 @@ Stage Summary:
 - 79 components, 28 API endpoints, 11 Prisma models, 6 lib utilities, 4 stores, 6 hooks
 - Zero lint errors, zero console errors, zero "Coming Soon" text
 - Server running with watchdog persistence
+
+---
+Task ID: PRD-PART-7
+Agent: main
+Task: PRD Part 7 — Global State Sync, Scroll Anchor, Universal Modal & Long-Press Multi-Share
+
+Work Log:
+- P7-1 (Global State Sync): Verified — useFetch hook already watches refreshKey from Zustand store. When triggerRefresh() is called on any data mutation, ALL useFetch hooks across ALL views refetch automatically. No manual refresh needed.
+- P7-2 (Universal Floating Modal): Created FloatingInvoiceModal component — bottom-sheet modal that opens when selectedInvoiceId is set, instead of page redirect. Shows invoice details (items, totals, status) with "View All Invoices →" shortcut link in header. Added to AppShell so it overlays on any screen. Updated Dashboard Recent Transactions + Reports Recent Invoices to use floating modal instead of setActiveView('billing'). Modal has WhatsApp/Print/Full View action buttons.
+- P7-3 (Scroll Position Retention): Created useScrollRetention hook — saves main scroll position before opening modal, restores it on close. Integrated into DashboardView — saveScroll() called before opening floating invoice modal. restoreScroll() called on modal close. Prevents jump-to-top behavior.
+- P7-4 (Long-Press Multi-Selection): Created useLongPress hook with configurable delay. Created TxRow component in party-detail with long-press handlers (500ms timer). Long-press activates multi-select mode — shows checkboxes, selection control bar (Select All / Deselect All). Single tap toggles selection in multi-select mode. "Share Selected (N)" button at bottom sends selected transactions via WhatsApp. In normal mode, each transaction has individual Share2 icon.
+- Restored Quick Sale button (was lost in previous edit) — replaces New Invoice in party profile with Zap icon, navigates to Sale Pad with customer auto-selected.
+
+Verification Results:
+✅ Quick Sale button: present (Call, Entry, Quick Sale, Settle Up)
+✅ Share Statement button: present in Transactions header
+✅ Floating modal: opens on invoice click (no page redirect)
+✅ Scroll retention: saves/restores scroll position
+✅ Multi-select: long-press activates, Select All/Deselect All, Share Selected
+✅ Zero console errors, zero lint errors

@@ -328,8 +328,8 @@ export function ReportsView() {
             <button
               key={inv.id}
               onClick={() => {
+                // PRD Part 7 §2: Open floating modal instead of page redirect
                 useAppStore.getState().setSelectedInvoiceId(inv.id)
-                useAppStore.getState().setActiveView('billing')
               }}
               className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 text-left transition-colors"
             >

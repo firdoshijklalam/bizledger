@@ -18,6 +18,7 @@ import { AiToolsView } from '@/components/views/ai-tools-view'
 import { PaymentLandingPage } from '@/components/views/payment-landing-page'
 import { SalePadView } from '@/components/views/sale-pad-view'
 import { useBackButton } from '@/hooks/use-back-button'
+import { FloatingInvoiceModal } from '@/components/shared/floating-invoice-modal'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 
@@ -105,6 +106,7 @@ export function AppShell() {
       <SideDrawerFab />
       <BottomTabNav />
       <SearchOverlay />
+      <FloatingInvoiceModal />
     </div>
   )
 }

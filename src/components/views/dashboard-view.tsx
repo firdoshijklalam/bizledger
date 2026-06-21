@@ -16,6 +16,7 @@ import {
 } from 'recharts'
 import { Card } from '@/components/ui/card'
 import { LoadingState, EmptyState } from '@/components/shared/states'
+import { useScrollRetention } from '@/hooks/use-scroll-retention'
 import { useMemo, useState } from 'react'
 
 type ChartType = 'revenue' | 'profit' | 'cashflow'
@@ -30,11 +31,12 @@ const TIME_FILTERS: Array<{ id: TimeFilter; labelKey: string }> = [
 ]
 
 export function DashboardView() {
-  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction } = useAppStore()
+  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView } = useAppStore()
   const { t } = useI18n()
   const { data, loading } = useFetch<DashboardStats>('/api/dashboard')
   const [chartType, setChartType] = useState<ChartType>('revenue')
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('last7d')
+  const { saveScroll } = useScrollRetention()
 
   const chartOptions: Array<{ id: ChartType; label: string }> = [
     { id: 'revenue', label: t('dash.chart.revenue') },
@@ -326,10 +328,12 @@ export function DashboardView() {
                 <button
                   key={tx.id}
                   onClick={() => {
+                    saveScroll()
                     if (tx.invoiceId) {
+                      // PRD Part 7 §2: Open floating modal instead of page redirect
                       setSelectedInvoiceId(tx.invoiceId)
-                      setActiveView('billing')
                     } else if (tx.partyId) {
+                      setReturnToView('dashboard')
                       setSelectedPartyId(tx.partyId)
                       setActiveView('khata')
                     }
