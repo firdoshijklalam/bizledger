@@ -78,6 +78,7 @@ export function AppShell() {
           <Loader2 className="w-7 h-7 text-primary-foreground animate-spin" />
         </div>
         <p className="text-sm text-muted-foreground">Loading BizLedger…</p>
+        <p className="text-[10px] text-muted-foreground/50">v7.2 · Part 1-7 Complete</p>
       </div>
     )
   }
