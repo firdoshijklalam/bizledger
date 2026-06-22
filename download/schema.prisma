@@ -1,0 +1,232 @@
+// BizLedger — Prisma Schema (Phase 1 MVP)
+// SQLite for dev; Neon PG in Phase 3.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Business {
+  id        String   @id @default(cuid())
+  name      String
+  ownerName String?
+  phone     String?
+  email     String?
+  address   String?
+  state     String?
+  gstin     String?
+  pan       String?
+  upiId     String?
+  logoUrl   String?
+  currency  String   @default("INR")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parties      Party[]
+  products     Product[]
+  transactions Transaction[]
+  invoices     Invoice[]
+  settings     AppSettings?
+}
+
+model Party {
+  id                   String   @id @default(cuid())
+  businessId           String
+  name                 String
+  phone                String?
+  type                 String   @default("customer") // customer | supplier | both
+  balance              Float    @default(0) // +ve = receivable, -ve = payable
+  qualityGrade         String   @default("B") // A | B | C | D | E
+  creditLimit          Float?
+  openingBalance       Float    @default(0)
+  address              String?
+  gstin                String?
+  notes                String?
+  avgPaymentDays       Float?
+  avgDiscountPct       Float    @default(0)
+  gradeLastCalculated  DateTime?
+  gradeOverrideReason  String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  invoices     Invoice[]
+  partyNotes   PartyNote[]
+
+  @@index([businessId])
+}
+
+model Product {
+  id                 String   @id @default(cuid())
+  businessId         String
+  name               String
+  sku                String?
+  category           String?
+  unit               String   @default("pcs") // pcs | kg | bag | box
+  purchasePrice      Float    @default(0)
+  salePrice          Float    @default(0)
+  mrp                Float?
+  wholesalePrice     Float?
+  gstRate            Float    @default(0)
+  stock              Float    @default(0)
+  lowStockThreshold  Float    @default(5)
+  supplierId         String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  business    Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  images      ProductImage[]
+  invoiceItems InvoiceItem[]
+
+  @@index([businessId])
+  @@index([supplierId])
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  url       String
+  isPrimary Boolean  @default(false)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  businessId  String
+  partyId     String?
+  type        String // credit (money in / receivable reduced) | debit (money out / payable reduced) | sale | purchase | expense
+  amount      Float
+  balanceAfter Float?
+  description String?
+  category    String?
+  invoiceId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party    Party?   @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  invoice  Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@index([partyId])
+}
+
+model Invoice {
+  id              String   @id @default(cuid())
+  businessId      String
+  partyId         String?
+  invoiceNumber   String
+  type            String   @default("sales") // sales | purchase | retail | challan
+  status          String   @default("unpaid") // unpaid | partial | paid
+  isGst           Boolean  @default(false)
+  subtotal        Float    @default(0)
+  discountValue   Float    @default(0)
+  discountMode    String   @default("flat") // flat | percent
+  discountAmount  Float    @default(0)
+  gstAmount       Float    @default(0)
+  grandTotal      Float    @default(0)
+  amountPaid      Float    @default(0)
+  amountDue       Float    @default(0)
+  paymentMode     String?  // cash | upi | credit | cheque
+  notes           String?
+  paymentLandingToken String? @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party    Party?         @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  items    InvoiceItem[]
+  transactions Transaction[]
+
+  @@index([businessId])
+  @@index([partyId])
+}
+
+model InvoiceItem {
+  id        String @id @default(cuid())
+  invoiceId String
+  productId String?
+  name      String
+  quantity  Float
+  unitPrice Float
+  discount  Float  @default(0)
+  gstRate   Float  @default(0)
+  total     Float  @default(0)
+
+  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+}
+
+model PartyNote {
+  id        String   @id @default(cuid())
+  partyId   String
+  type      String   @default("general") // call | meeting | payment_promise | general
+  content   String
+  author    String?
+  createdAt DateTime @default(now())
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@index([partyId])
+}
+
+model AppSettings {
+  id                   String   @id @default(cuid())
+  businessId           String   @unique
+  notificationsEnabled Boolean  @default(true)
+  autoBackupEnabled    Boolean  @default(false)
+  language             String   @default("en")
+  dateFormat           String   @default("DD/MM/YYYY")
+  invoicePrefix        String   @default("INV")
+  pinEnabled           Boolean  @default(false)
+  pinHash              String?
+  lastBackupAt         DateTime?
+  // Phase 3 additions
+  userRole             String   @default("owner") // owner | manager | sales
+  telegramEnabled      Boolean  @default(false)
+  driveEnabled         Boolean  @default(false)
+  biometricEnabled     Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// Phase 3: Fingerprint records for customer recognition (hash only, no raw biometric)
+model FingerprintRecord {
+  id              String   @id @default(cuid())
+  fingerprintHash String   @unique
+  partyId         String?
+  businessId      String
+  hand            String   @default("right") // right | left
+  finger          String   @default("thumb") // thumb | index | middle | ring | pinky
+  createdAt       DateTime @default(now())
+
+  @@index([partyId])
+  @@index([businessId])
+}
+
+// Phase 3: Backup log for Telegram / Google Drive
+model BackupLog {
+  id         String   @id @default(cuid())
+  businessId String
+  channel    String   // telegram | drive
+  status     String   @default("success") // success | failed
+  fileUrl    String?
+  fileSize   Int?
+  createdAt  DateTime @default(now())
+
+  @@index([businessId])
+}
