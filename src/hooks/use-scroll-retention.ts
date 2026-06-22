@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useCallback, useRef } from 'react'
+import { useCallback, useRef } from 'react'
 
 /**
  * Scroll Position Retention Engine (PRD Part 7 §3).

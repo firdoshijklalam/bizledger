@@ -15,7 +15,6 @@ import { toast } from 'sonner'
 import { useState, useCallback, useRef } from 'react'
 import { TransactionForm } from './transaction-form'
 import { PartyForm } from './party-form'
-import { useLongPress } from '@/hooks/use-long-press'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
