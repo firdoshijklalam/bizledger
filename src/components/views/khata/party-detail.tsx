@@ -103,7 +103,13 @@ export function PartyDetail({ partyId }: { partyId: string }) {
       {/* Header */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => setSelectedPartyId(null)}
+          onClick={() => {
+            if (returnToView) {
+              setActiveView(returnToView)
+              setReturnToView(null)
+            }
+            setSelectedPartyId(null)
+          }}
           className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center"
           aria-label="Back"
         >

@@ -69,6 +69,15 @@ interface AppState {
   pendingQuickAction: QuickAction | null
   triggerQuickAction: (action: QuickAction) => void
   clearQuickAction: () => void
+
+  // Pending new customer (for auto-fill after creating from invoice form)
+  pendingNewCustomerId: string | null
+  pendingNewCustomerName: string | null
+  setPendingNewCustomer: (id: string | null, name: string | null) => void
+
+  // Return-to-view for back navigation (PRD Part 5 §3)
+  returnToView: ViewId | null
+  setReturnToView: (view: ViewId | null) => void
 }
 
 export const useAppStore = create<AppState>()((set) => ({
@@ -121,4 +130,11 @@ export const useAppStore = create<AppState>()((set) => ({
   pendingQuickAction: null,
   triggerQuickAction: (action) => set({ pendingQuickAction: action }),
   clearQuickAction: () => set({ pendingQuickAction: null }),
+
+  pendingNewCustomerId: null,
+  pendingNewCustomerName: null,
+  setPendingNewCustomer: (id, name) => set({ pendingNewCustomerId: id, pendingNewCustomerName: name }),
+
+  returnToView: null,
+  setReturnToView: (view) => set({ returnToView: view }),
 }))
