@@ -51,7 +51,7 @@ export default function RootLayout({
         </ThemeProvider>
         <script
           dangerouslySetInnerHTML={{
-            __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{})})}`,
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.getRegistrations().then(regs=>{regs.forEach(r=>r.unregister())});navigator.serviceWorker.register('/sw.js').catch(()=>{})})}`,
           }}
         />
       </body>
