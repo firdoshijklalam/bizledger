@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import { useState, useCallback, useRef } from 'react'
 import { TransactionForm } from './transaction-form'
 import { PartyForm } from './party-form'
+import { ShareSheet } from '@/components/shared/share-sheet'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -38,6 +39,10 @@ export function PartyDetail({ partyId }: { partyId: string }) {
   // Multi-select state (PRD Part 7 §4)
   const [multiSelectMode, setMultiSelectMode] = useState(false)
   const [selectedTxIds, setSelectedTxIds] = useState<Set<string>>(new Set())
+  // Share sheet state (PRD Part 10 §2)
+  const [showShareSheet, setShowShareSheet] = useState(false)
+  const [shareSheetText, setShareSheetText] = useState('')
+  const [shareSheetTitle, setShareSheetTitle] = useState('')
 
   // Multi-select handlers (PRD Part 7 §4) — must be before early return
   const toggleTxSelection = useCallback((txId: string) => {
@@ -61,18 +66,38 @@ export function PartyDetail({ partyId }: { partyId: string }) {
   const handleShareSelected = () => {
     const selected = data.transactions.filter((t) => selectedTxIds.has(t.id))
     if (selected.length === 0) return
-    const phone = data.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
-    const lines = [`*${business?.name || 'BizLedger'} — Selected Transactions*`, `Customer: ${data.name}`, ``]
+    // PRD Part 10: Open dynamic share sheet instead of direct WhatsApp
+    const lines = [
+      `${business?.name || 'BizLedger'} — Selected Transactions`,
+      `Customer: ${data.name}`,
+      ``,
+    ]
     selected.forEach((tx) => {
       const isCredit = tx.type === 'credit'
       lines.push(`${formatDate(tx.createdAt)} | ${isCredit ? 'পেলাম' : 'দিলাম'} | ${formatCurrency(tx.amount, currency)} | ${tx.description || ''}`)
     })
-    lines.push(``, `Total Selected: ${selected.length} transactions`)
-    const text = encodeURIComponent(lines.join('\n'))
-    window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank')
-    toast.success(`Sharing ${selected.length} transactions`)
-    setMultiSelectMode(false)
-    setSelectedTxIds(new Set())
+    lines.push(``, `Total: ${selected.length} transactions`)
+    setShareSheetText(lines.join('\n'))
+    setShareSheetTitle(`${selected.length} Transactions Statement`)
+    setShowShareSheet(true)
+  }
+
+  const handleShareStatement = () => {
+    // PRD Part 10: Share full statement via dynamic share sheet
+    const lines = [
+      `${business?.name || 'BizLedger'} — Ledger Statement`,
+      `Customer: ${data.name}`,
+      ``,
+      `Date | Type | Amount | Description`,
+    ]
+    data.transactions.forEach((tx) => {
+      const isCredit = tx.type === 'credit'
+      lines.push(`${formatDate(tx.createdAt)} | ${isCredit ? 'পেলাম' : 'দিলাম'} | ${formatCurrency(tx.amount, currency)} | ${tx.description || ''}`)
+    })
+    lines.push(``, `Current Balance: ${formatCurrency(data.balance, currency)}`)
+    setShareSheetText(lines.join('\n'))
+    setShareSheetTitle('Full Ledger Statement')
+    setShowShareSheet(true)
   }
 
   if (!data) return null
@@ -212,18 +237,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
           <div className="flex items-center gap-2">
             {data.transactions.length > 0 && !multiSelectMode && (
               <button
-                onClick={() => {
-                  const phone = data.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
-                  const lines = [`*${business?.name || 'BizLedger'} — Ledger Statement*`, `Customer: ${data.name}`, ``, `Date | Type | Amount | Description`]
-                  data.transactions.forEach((tx) => {
-                    const isCredit = tx.type === 'credit'
-                    lines.push(`${formatDate(tx.createdAt)} | ${isCredit ? 'পেলাম' : 'দিলাম'} | ${isCredit ? '+' : '-'}${formatCurrency(tx.amount, currency)} | ${tx.description || ''}`)
-                  })
-                  lines.push(``, `Current Balance: ${formatCurrency(data.balance, currency)}`)
-                  const text = encodeURIComponent(lines.join('\n'))
-                  window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank')
-                  toast.success('Statement sent via WhatsApp')
-                }}
+                onClick={handleShareStatement}
                 className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-1 rounded-lg flex items-center gap-1"
               >
                 <FileText className="w-3 h-3" /> Share Statement
@@ -262,11 +276,6 @@ export function PartyDetail({ partyId }: { partyId: string }) {
                     currency={currency}
                     onLongPress={() => { setMultiSelectMode(true); setSelectedTxIds(new Set([tx.id])) }}
                     onToggle={() => toggleTxSelection(tx.id)}
-                    onShare={() => {
-                      const phone = data.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
-                      const text = encodeURIComponent(`${data.name} — ${tx.description || tx.type}\n${isCredit ? 'পেলাম' : 'দিলাম'}: ${formatCurrency(tx.amount, currency)}\nDate: ${formatDate(tx.createdAt)}`)
-                      window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank')
-                    }}
                   />
                 )
               })}
@@ -319,6 +328,14 @@ export function PartyDetail({ partyId }: { partyId: string }) {
         onOpenChange={(o) => { if (!o) setEditingPartyId(null) }}
         partyId={editingPartyId}
       />
+      <ShareSheet
+        open={showShareSheet}
+        onClose={() => setShowShareSheet(false)}
+        customerName={data.name}
+        customerPhone={data.phone}
+        shareText={shareSheetText}
+        shareTitle={shareSheetTitle}
+      />
     </motion.div>
   )
 }
@@ -363,7 +380,7 @@ function SettleUpDialog({
 }
 
 // Transaction row with long-press multi-select (PRD Part 7 §4)
-function TxRow({ tx, isCredit, isSelected, multiSelectMode, currency, onLongPress, onToggle, onShare }: {
+function TxRow({ tx, isCredit, isSelected, multiSelectMode, currency, onLongPress, onToggle }: {
   tx: any
   isCredit: boolean
   isSelected: boolean
@@ -371,7 +388,6 @@ function TxRow({ tx, isCredit, isSelected, multiSelectMode, currency, onLongPres
   currency: string
   onLongPress: () => void
   onToggle: () => void
-  onShare: () => void
 }) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressedRef = useRef(false)
@@ -418,15 +434,6 @@ function TxRow({ tx, isCredit, isSelected, multiSelectMode, currency, onLongPres
       <span className={`text-sm font-semibold tabular shrink-0 ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>
         {isCredit ? '+' : '-'}{formatCurrency(tx.amount, currency)}
       </span>
-      {!multiSelectMode && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onShare() }}
-          className="w-7 h-7 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground shrink-0"
-          aria-label="Share transaction"
-        >
-          <Share2 className="w-3.5 h-3.5" />
-        </button>
-      )}
     </div>
   )
 }
