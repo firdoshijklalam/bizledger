@@ -309,7 +309,7 @@ export function DashboardView() {
       <Card className="p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold">{t('dash.topDebtors')}</h3>
-          <button onClick={() => { setKhataFilter('receivable'); setActiveView('khata') }} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
+          <button onClick={() => { saveScroll(); setKhataFilter('receivable'); setActiveView('khata') }} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
         </div>
         {data.topDebtors.length === 0 ? <p className="text-sm text-muted-foreground py-4 text-center">No outstanding receivables 🎉</p> : (
           <div className="space-y-2">
@@ -331,7 +331,7 @@ export function DashboardView() {
       <Card className="p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold">{t('dash.recent')}</h3>
-          <button onClick={() => setActiveView('khata')} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
+          <button onClick={() => { saveScroll(); setActiveView('billing') }} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
         </div>
         {data.recentTransactions.length === 0 ? <p className="text-sm text-muted-foreground py-4 text-center">No transactions yet</p> : (
           <div className="space-y-1">

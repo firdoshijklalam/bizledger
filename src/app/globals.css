@@ -163,27 +163,51 @@
   scrollbar-width: none;
 }
 
-/* Print styles — hide action buttons, show all content, no blank page */
+/* Print styles — hide ALL app UI, show only invoice content (PRD Part 9 §3.1) */
 @media print {
   body {
     overflow: visible !important;
     height: auto !important;
     background: white !important;
   }
+  /* Hide ALL app chrome — header, nav, FAB, search, etc */
   .no-print,
-  .action-buttons {
+  .action-buttons,
+  header,
+  nav,
+  [class*="fixed"][class*="bottom"],
+  [class*="sticky"][class*="top"],
+  [class*="SideDrawer"],
+  [class*="FloatingInvoice"],
+  [class*="BottomTab"],
+  [class*="TopAppBar"],
+  [class*="SearchOverlay"],
+  [class*="GlobalVoiceInput"],
+  [aria-label="Quick Actions"],
+  [aria-label="Search"],
+  [aria-label="Notifications"],
+  [aria-label="Toggle language"],
+  [aria-label="Toggle theme"],
+  [aria-label="Start voice input"],
+  [aria-label="Stop voice input"] {
     display: none !important;
   }
-  .invoice-content {
+  /* Show only invoice content */
+  .invoice-content,
+  .print-area {
+    display: block !important;
     page-break-inside: avoid;
     box-shadow: none !important;
     border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
   }
-  .print-area {
-    display: block !important;
-  }
+  /* Force black text for print */
   * {
     color: black !important;
     box-shadow: none !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }

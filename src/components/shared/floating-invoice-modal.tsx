@@ -47,12 +47,42 @@ export function FloatingInvoiceModal() {
   const payUrl = `${window.location.origin}/?payment=${invoice.paymentLandingToken || invoice.id}`
 
   const handleWhatsApp = () => {
+    // PRD Part 9 §2.2: Share FULL professional invoice details (not just summary)
     const phone = invoice.party?.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
-    const text = encodeURIComponent(
-      `${business?.name || 'BizLedger'}\nInvoice: ${invoice.invoiceNumber}\nTotal: ${formatCurrency(invoice.grandTotal, currency)}\n${invoice.amountDue > 0 ? `Due: ${formatCurrency(invoice.amountDue, currency)}\n` : ''}Pay: ${payUrl}`
-    )
+    const lines = [
+      `*${business?.name || 'BizLedger'}*`,
+      `${business?.address || ''}`,
+      `${business?.phone || ''}${business?.gstin ? ` | GSTIN: ${business.gstin}` : ''}`,
+      ``,
+      `*Invoice: ${invoice.invoiceNumber}*`,
+      `Date: ${formatDate(invoice.createdAt)}`,
+      ``,
+      `*Billed To:* ${invoice.party?.name || 'Walk-in Customer'}`,
+      invoice.party?.phone ? `Phone: ${invoice.party.phone}` : '',
+      ``,
+      `*Items:*`,
+    ]
+    if (invoice.items && invoice.items.length > 0) {
+      invoice.items.forEach((it) => {
+        lines.push(`${it.name} × ${it.quantity} = ${formatCurrency(it.total, currency)}`)
+      })
+    }
+    lines.push(``, `Subtotal: ${formatCurrency(invoice.subtotal, currency)}`)
+    if (invoice.discountAmount > 0) lines.push(`Discount: -${formatCurrency(invoice.discountAmount, currency)}`)
+    if (invoice.gstAmount > 0) lines.push(`GST: ${formatCurrency(invoice.gstAmount, currency)}`)
+    lines.push(`*Grand Total: ${formatCurrency(invoice.grandTotal, currency)}*`)
+    if (invoice.amountDue > 0) {
+      lines.push(`⚠️ Due: ${formatCurrency(invoice.amountDue, currency)}`)
+    } else {
+      lines.push(`✓ Paid`)
+    }
+    if (business?.upiId) {
+      lines.push(``, `💳 Pay Now: ${payUrl}`)
+    }
+    lines.push(``, `Thank you! 🙏`)
+    const text = encodeURIComponent(lines.filter(Boolean).join('\n'))
     window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank')
-    toast.success('Opening WhatsApp…')
+    toast.success('Opening WhatsApp with full invoice…')
   }
 
   return (
