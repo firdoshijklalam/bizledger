@@ -41,6 +41,12 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   const [stock, setStock] = useState('')
   const [lowStockThreshold, setLowStockThreshold] = useState('5')
   const [supplierId, setSupplierId] = useState('')
+  // PRD Part 11: Dual-stock + retail config
+  const [retailEnabled, setRetailEnabled] = useState(false)
+  const [retailUnit, setRetailUnit] = useState('kg')
+  const [conversionFactor, setConversionFactor] = useState('')
+  const [retailSalePrice, setRetailSalePrice] = useState('')
+  const [looseStock, setLooseStock] = useState('')
   const [saving, setSaving] = useState(false)
 
   // Category autocomplete (PRD v2 §9.4) + Supplier linking (PRD v2 §9.3)
@@ -61,10 +67,16 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
       setStock(String(existing.stock))
       setLowStockThreshold(String(existing.lowStockThreshold))
       setSupplierId(existing.supplierId || '')
+      setRetailEnabled((existing as any).retailEnabled ?? false)
+      setRetailUnit((existing as any).retailUnit || 'kg')
+      setConversionFactor((existing as any).conversionFactor ? String((existing as any).conversionFactor) : '')
+      setRetailSalePrice((existing as any).retailSalePrice ? String((existing as any).retailSalePrice) : '')
+      setLooseStock((existing as any).looseStock ? String((existing as any).looseStock) : '')
     } else if (!productId) {
       setName(''); setSku(''); setCategory(''); setUnit('pcs')
       setPurchasePrice(''); setSalePrice(''); setMrp(''); setWholesalePrice('')
       setGstRate('0'); setStock(''); setLowStockThreshold('5'); setSupplierId('')
+      setRetailEnabled(false); setRetailUnit('kg'); setConversionFactor(''); setRetailSalePrice(''); setLooseStock('')
     }
   }, [existing, productId, open])
 
@@ -98,6 +110,12 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
         stock: Number(stock) || 0,
         lowStockThreshold: Number(lowStockThreshold) || 5,
         supplierId: supplierId || null,
+        // PRD Part 11: Dual-stock + retail config
+        retailEnabled,
+        retailUnit: retailEnabled ? retailUnit : null,
+        conversionFactor: retailEnabled ? (Number(conversionFactor) || null) : null,
+        retailSalePrice: retailEnabled ? (Number(retailSalePrice) || 0) : null,
+        looseStock: retailEnabled ? (Number(looseStock) || 0) : 0,
       }
       if (productId) {
         await apiPut(`/api/products/${productId}`, payload)
@@ -167,6 +185,77 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
+          </div>
+
+          {/* PRD Part 11 §1: Retail / Loose Product Configuration */}
+          <div className="p-3 rounded-xl border border-dashed border-primary/30 bg-primary/5">
+            <button
+              type="button"
+              onClick={() => setRetailEnabled(!retailEnabled)}
+              className="w-full flex items-center justify-between"
+            >
+              <div className="flex items-center gap-2">
+                <Plus className={`w-4 h-4 text-primary transition-transform ${retailEnabled ? 'rotate-45' : ''}`} />
+                <span className="text-sm font-medium">খুচরো / লুজ প্রোডাক্ট (Retail / Loose)</span>
+              </div>
+              <Switch checked={retailEnabled} onCheckedChange={setRetailEnabled} />
+            </button>
+            {retailEnabled && (
+              <div className="mt-3 space-y-3">
+                {/* Sub-unit selection */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">খুচরো সাব-ইউনিট (Sub-Unit)</Label>
+                    <select
+                      value={retailUnit}
+                      onChange={(e) => setRetailUnit(e.target.value)}
+                      className="w-full h-11 rounded-xl bg-muted px-3 text-sm border-0 outline-none"
+                    >
+                      {['kg', 'gm', 'pcs', 'ltr', 'meter'].map((u) => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">কনভার্সন ফ্যাক্টর (1 {unit} = ? {retailUnit})</Label>
+                    <Input
+                      value={conversionFactor}
+                      onChange={(e) => setConversionFactor(e.target.value)}
+                      className="h-11"
+                      inputMode="numeric"
+                      placeholder="25"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">খুচরো দর (₹ per {retailUnit})</Label>
+                    <Input
+                      value={retailSalePrice}
+                      onChange={(e) => setRetailSalePrice(e.target.value)}
+                      className="h-11"
+                      inputMode="numeric"
+                      placeholder="55"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">খোলা স্টক ({retailUnit})</Label>
+                    <Input
+                      value={looseStock}
+                      onChange={(e) => setLooseStock(e.target.value)}
+                      className="h-11"
+                      inputMode="numeric"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+                {conversionFactor && Number(conversionFactor) > 0 && (
+                  <p className="text-[10px] text-muted-foreground">
+                    ১ {unit} = {conversionFactor} {retailUnit} · খুচরো মূল্য: ₹{retailSalePrice || '0'}/{retailUnit}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div>

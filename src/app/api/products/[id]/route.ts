@@ -31,6 +31,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       stock: Number(body.stock) || 0,
       lowStockThreshold: Number(body.lowStockThreshold) || 5,
       supplierId: body.supplierId || null,
+      // PRD Part 11: Dual-stock + retail config
+      retailEnabled: body.retailEnabled ?? false,
+      retailUnit: body.retailEnabled ? (body.retailUnit || null) : null,
+      conversionFactor: body.retailEnabled ? (Number(body.conversionFactor) || null) : null,
+      retailSalePrice: body.retailEnabled ? (Number(body.retailSalePrice) || 0) : null,
+      looseStock: body.retailEnabled ? (Number(body.looseStock) || 0) : 0,
     },
   })
   return NextResponse.json(updated)

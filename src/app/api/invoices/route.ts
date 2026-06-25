@@ -85,13 +85,51 @@ export async function POST(req: NextRequest) {
       include: { items: true },
     })
 
-    // Update product stock (sale reduces stock)
+    // Update product stock — PRD Part 11 §3: Dual-stock with auto bulk-to-loose conversion
     for (const item of items) {
       if (item.productId) {
-        await db.product.update({
-          where: { id: item.productId },
-          data: { stock: { decrement: Number(item.quantity) } },
-        })
+        const product = await db.product.findUnique({ where: { id: item.productId } })
+        if (!product) continue
+        const qty = Number(item.quantity)
+        // Check if this is a loose/retail sale (item has retailUnit or product has retailEnabled)
+        const isRetailSale = (product as any).retailEnabled && (product as any).conversionFactor
+        if (isRetailSale) {
+          // PRD Part 11 §3.1: Fractional deduction engine
+          const factor = (product as any).conversionFactor
+          let bulkStock = product.stock
+          let looseStock = (product as any).looseStock || 0
+          let remaining = qty
+          // First use loose stock
+          if (looseStock >= remaining) {
+            looseStock -= remaining
+            remaining = 0
+          } else {
+            remaining -= looseStock
+            looseStock = 0
+          }
+          // Cut bags from bulk if needed
+          while (remaining > 0 && bulkStock > 0) {
+            bulkStock -= 1
+            looseStock += factor
+            if (looseStock >= remaining) {
+              looseStock -= remaining
+              remaining = 0
+            } else {
+              remaining -= looseStock
+              looseStock = 0
+            }
+          }
+          await db.product.update({
+            where: { id: item.productId },
+            data: { stock: bulkStock, looseStock },
+          })
+        } else {
+          // Normal bulk sale — just decrement stock
+          await db.product.update({
+            where: { id: item.productId },
+            data: { stock: { decrement: qty } },
+          })
+        }
       }
     }
 
