@@ -19,6 +19,7 @@ const VIEW_TITLES: Record<string, string> = {
   settings: 'set.title',
   notifications: 'header.notifications',
   'sale-pad': 'qa.quickSale',
+  sourcing: 'B2B Sourcing',
 }
 
 export function TopAppBar() {

@@ -20,17 +20,30 @@ const STATUS_COLORS: Record<string, string> = {
   paid: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
   unpaid: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
   partial: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
+  overdue: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
+  hold: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
+}
+
+type BillingStatusFilter = 'all' | 'paid' | 'unpaid' | 'overdue' | 'hold'
+
+const isOverdue = (inv: Invoice): boolean => {
+  if (inv.status === 'paid') return false
+  const created = new Date(inv.createdAt).getTime()
+  const daysSince = (Date.now() - created) / 86400000
+  return daysSince > 30 && inv.amountDue > 0
 }
 
 export function BillingView() {
   const {
     showInvoiceForm, setShowInvoiceForm,
     selectedInvoiceId,
+    floatingInvoiceOpen, setFloatingInvoiceOpen,
     pendingQuickAction, clearQuickAction,
     business,
   } = useAppStore()
   const { t } = useI18n()
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<BillingStatusFilter>('all')
 
   const { data: invoices, loading } = useFetch<Invoice[]>('/api/invoices', [])
 
@@ -43,12 +56,30 @@ export function BillingView() {
 
   const currency = business?.currency || 'INR'
 
+  const counts = useMemo(() => {
+    if (!invoices) return { all: 0, paid: 0, unpaid: 0, overdue: 0, hold: 0 }
+    return {
+      all: invoices.length,
+      paid: invoices.filter((i) => i.status === 'paid').length,
+      unpaid: invoices.filter((i) => i.status === 'unpaid').length,
+      overdue: invoices.filter((i) => isOverdue(i)).length,
+      hold: 0, // PRD Part 16: hold = billing drafts (in localStorage); show as 0 unless tracked
+    }
+  }, [invoices])
+
   const filtered = useMemo(() => {
     if (!invoices) return []
-    if (!search.trim()) return invoices
-    const q = search.toLowerCase()
-    return invoices.filter((i) => i.invoiceNumber.toLowerCase().includes(q) || (i.party?.name || '').toLowerCase().includes(q))
-  }, [invoices, search])
+    let list = invoices
+    if (statusFilter === 'paid') list = list.filter((i) => i.status === 'paid')
+    else if (statusFilter === 'unpaid') list = list.filter((i) => i.status === 'unpaid')
+    else if (statusFilter === 'overdue') list = list.filter((i) => isOverdue(i))
+    // 'hold' tab shows billing drafts (handled by BillingTabs component below)
+    if (statusFilter !== 'hold' && search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter((i) => i.invoiceNumber.toLowerCase().includes(q) || (i.party?.name || '').toLowerCase().includes(q))
+    }
+    return list
+  }, [invoices, statusFilter, search])
 
   const stats = useMemo(() => {
     if (!invoices) return { total: 0, paid: 0, due: 0 }
@@ -59,9 +90,18 @@ export function BillingView() {
     }
   }, [invoices])
 
-  if (selectedInvoiceId) {
+  // Floating Invoice modal mode (PRD Part 7 §2)
+  if (selectedInvoiceId && floatingInvoiceOpen) {
     return <InvoicePreview invoiceId={selectedInvoiceId} />
   }
+
+  const FILTER_TABS: Array<{ id: BillingStatusFilter; label: string; count: number }> = [
+    { id: 'all', label: 'All', count: counts.all },
+    { id: 'paid', label: 'Paid', count: counts.paid },
+    { id: 'unpaid', label: 'Unpaid', count: counts.unpaid },
+    { id: 'overdue', label: 'Overdue', count: counts.overdue },
+    { id: 'hold', label: 'Hold', count: counts.hold },
+  ]
 
   return (
     <div className="space-y-4">
@@ -92,65 +132,100 @@ export function BillingView() {
         <BillingTabs />
       </div>
 
-      {/* Search */}
-      <Input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder={t('common.search') + ' invoices…'}
-        className="h-11"
-      />
+      {/* Status filter tabs with live counts (PRD Part 16 §1) */}
+      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
+        {FILTER_TABS.map((f) => (
+          <button
+            key={f.id}
+            onClick={() => setStatusFilter(f.id)}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all min-h-[36px] flex items-center gap-1.5 ${
+              statusFilter === f.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+            }`}
+          >
+            {f.label}
+            <span className={`px-1.5 py-0.5 rounded-full text-[9px] ${
+              statusFilter === f.id ? 'bg-primary-foreground/20' : 'bg-background'
+            }`}>{f.count}</span>
+          </button>
+        ))}
+      </div>
 
-      {/* Invoice list */}
-      {loading ? (
-        <LoadingState />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={Receipt}
-          title={t('bill.empty')}
-          description="Create your first invoice to start tracking sales."
+      {/* Search (hidden on hold tab since it shows drafts) */}
+      {statusFilter !== 'hold' && (
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t('common.search') + ' invoices…'}
+          className="h-11"
         />
+      )}
+
+      {/* Hold tab content */}
+      {statusFilter === 'hold' ? (
+        <Card className="p-5 text-center">
+          <p className="text-sm text-muted-foreground">
+            Held bills appear as tabs above. Tap a tab with a yellow dot to resume drafting.
+          </p>
+        </Card>
       ) : (
-        <div className="space-y-2">
-          <AnimatePresence>
-            {filtered.map((inv, i) => (
-              <motion.div
-                key={inv.id}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.02 }}
-                layout
-              >
-                <Card className="p-3.5 hover:shadow-md transition-shadow">
-                  <button
-                    onClick={() => useAppStore.getState().setSelectedInvoiceId(inv.id)}
-                    className="w-full flex items-center gap-3 text-left"
+        <>
+          {/* Invoice list */}
+          {loading ? (
+            <LoadingState />
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={Receipt}
+              title={t('bill.empty')}
+              description="Create your first invoice to start tracking sales."
+            />
+          ) : (
+            <div className="space-y-2">
+              <AnimatePresence>
+                {filtered.map((inv, i) => (
+                  <motion.div
+                    key={inv.id}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.02 }}
+                    layout
                   >
-                    <div className="w-11 h-11 rounded-xl bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
-                      <Receipt className="w-5 h-5 text-orange-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold truncate">{inv.invoiceNumber}</p>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${STATUS_COLORS[inv.status]}`}>
-                          {inv.status}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground truncate">
-                        {inv.party?.name || 'Walk-in'} · {formatDate(inv.createdAt)}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-sm font-bold tabular">{formatCurrency(inv.grandTotal, currency)}</p>
-                      {inv.amountDue > 0 && (
-                        <p className="text-[10px] text-red-600">Due: {formatCurrency(inv.amountDue, currency)}</p>
-                      )}
-                    </div>
-                  </button>
-                </Card>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
+                    <Card className="p-3.5 hover:shadow-md transition-shadow">
+                      <button
+                        onClick={() => {
+                          // Open as floating modal (PRD Part 7 §2)
+                          setFloatingInvoiceOpen(true)
+                          useAppStore.getState().setSelectedInvoiceId(inv.id)
+                        }}
+                        className="w-full flex items-center gap-3 text-left"
+                      >
+                        <div className="w-11 h-11 rounded-xl bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
+                          <Receipt className="w-5 h-5 text-orange-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-semibold truncate">{inv.invoiceNumber}</p>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${STATUS_COLORS[inv.status]}`}>
+                              {inv.status}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {inv.party?.name || 'Walk-in'} · {formatDate(inv.createdAt)}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-sm font-bold tabular">{formatCurrency(inv.grandTotal, currency)}</p>
+                          {inv.amountDue > 0 && (
+                            <p className="text-[10px] text-red-600">Due: {formatCurrency(inv.amountDue, currency)}</p>
+                          )}
+                        </div>
+                      </button>
+                    </Card>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
+        </>
       )}
 
       <InvoiceForm open={showInvoiceForm} onOpenChange={setShowInvoiceForm} />

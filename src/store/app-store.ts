@@ -46,6 +46,8 @@ interface AppState {
   setShowInvoiceForm: (show: boolean) => void
   selectedInvoiceId: string | null
   setSelectedInvoiceId: (id: string | null) => void
+  floatingInvoiceOpen: boolean
+  setFloatingInvoiceOpen: (open: boolean) => void
 
   // Notifications
   showNotifications: boolean
@@ -112,6 +114,8 @@ export const useAppStore = create<AppState>()((set) => ({
   setShowInvoiceForm: (show) => set({ showInvoiceForm: show }),
   selectedInvoiceId: null,
   setSelectedInvoiceId: (id) => set({ selectedInvoiceId: id }),
+  floatingInvoiceOpen: false,
+  setFloatingInvoiceOpen: (open) => set({ floatingInvoiceOpen: open }),
 
   showNotifications: false,
   setShowNotifications: (show) => set({ showNotifications: show }),

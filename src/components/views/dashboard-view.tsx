@@ -18,7 +18,8 @@ import {
 import { Card } from '@/components/ui/card'
 import { LoadingState, EmptyState } from '@/components/shared/states'
 import { useScrollRetention } from '@/hooks/use-scroll-retention'
-import { useMemo, useState } from 'react'
+import { useScrollStore } from '@/store/scroll-store'
+import { useMemo, useState, useEffect } from 'react'
 
 type ChartType = 'revenue' | 'profit' | 'cashflow' | 'collections' | 'categories' | 'inventory'
 type ChartView = 'line' | 'bar'
@@ -57,6 +58,25 @@ export function DashboardView() {
   const [showCustomPicker, setShowCustomPicker] = useState(false)
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null)
   const { saveScroll } = useScrollRetention()
+  const { save: saveScrollPos, restore: restoreScrollPos } = useScrollStore()
+
+  // PRD Part 7 §3: restore scroll position on mount
+  useEffect(() => {
+    restoreScrollPos('dashboard')
+  }, [restoreScrollPos])
+
+  // PRD Part 7 §3: save scroll position when leaving the view
+  useEffect(() => {
+    return () => {
+      saveScrollPos('dashboard')
+    }
+  }, [saveScrollPos])
+
+  // PRD Part 7 §3: helper that saves scroll synchronously before navigating to party detail
+  const saveScrollAndOpenParty = (partyId: string) => {
+    saveScrollPos('dashboard')
+    setSelectedPartyId(partyId)
+  }
 
   const apiUrl = useMemo(() => {
     if (timeRange === 'custom' && customStart && customEnd) {
@@ -316,7 +336,7 @@ export function DashboardView() {
             {data.topDebtors.slice(0, 4).map((d) => {
               const meta = GRADE_META[d.grade]
               return (
-                <button key={d.id} onClick={() => { setReturnToView('dashboard'); setSelectedPartyId(d.id); setActiveView('khata') }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
+                <button key={d.id} onClick={() => { setReturnToView('dashboard'); saveScrollAndOpenParty(d.id); setActiveView('khata') }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
                   <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-xs font-bold">{d.name.charAt(0)}</div>
                   <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
                   <div className="text-right"><p className="text-sm font-semibold tabular text-emerald-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>

@@ -8,7 +8,8 @@ import { formatCurrency } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShoppingBag, Package, Plus, Minus, Trash2, UserPlus, Receipt,
-  Store, Boxes, CheckCircle2, X,
+  Store, Boxes, CheckCircle2, X, Wallet, QrCode, CreditCard, FileCheck,
+  ChevronDown, ChevronUp, Calculator,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -27,6 +28,8 @@ interface CartItem {
   total: number
 }
 
+type PaymentMode = 'cash' | 'upi' | 'credit' | 'cheque'
+
 export function SalePadView() {
   const { business, setActiveView, setSelectedInvoiceId, triggerRefresh } = useAppStore()
   const { t } = useI18n()
@@ -39,6 +42,12 @@ export function SalePadView() {
   const [customer, setCustomer] = useState<Party | null>(null)
   const [showCustPicker, setShowCustPicker] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  // Multi-payment (PRD Part 17 §3)
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('cash')
+  const [cashReceived, setCashReceived] = useState('')
+  const [partialPaid, setPartialPaid] = useState('')
+  const [chequeNo, setChequeNo] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const currency = business?.currency || 'INR'
 
@@ -48,11 +57,18 @@ export function SalePadView() {
     return ['All', ...cats]
   }, [products])
 
+  // Retail filter: in retail mode, only show products with retailEnabled (PRD Part 17 §2)
   const filteredProducts = useMemo(() => {
     if (!products) return []
-    if (activeCategory === 'All') return products
-    return products.filter((p) => p.category === activeCategory)
-  }, [products, activeCategory])
+    let list = products
+    if (mode === 'retail') {
+      list = list.filter((p) => (p as any).retailEnabled)
+    }
+    if (activeCategory !== 'All') {
+      list = list.filter((p) => p.category === activeCategory)
+    }
+    return list
+  }, [products, mode, activeCategory])
 
   const getPrice = (p: Product) => {
     if (mode === 'wholesale' && p.wholesalePrice) return p.wholesalePrice
@@ -64,9 +80,10 @@ export function SalePadView() {
     setCart((prev) => {
       const existing = prev.find((i) => i.productId === p.id)
       if (existing) {
+        const qty = Number((existing.quantity + 1).toFixed(3))
         return prev.map((i) =>
           i.productId === p.id
-            ? { ...i, quantity: i.quantity + 1, total: (i.quantity + 1) * i.price }
+            ? { ...i, quantity: qty, total: qty * i.price }
             : i
         )
       }
@@ -77,11 +94,13 @@ export function SalePadView() {
   const updateQty = (productId: string, delta: number) => {
     setCart((prev) =>
       prev
-        .map((i) =>
-          i.productId === productId
-            ? { ...i, quantity: Math.max(0, i.quantity + delta), total: Math.max(0, i.quantity + delta) * i.price }
-            : i
-        )
+        .map((i) => {
+          if (i.productId !== productId) return i
+          // PRD Part 17 §6: decimal qty support
+          const step = mode === 'retail' ? 0.5 : 1
+          const newQty = Math.max(0, Number((i.quantity + delta * step).toFixed(3)))
+          return { ...i, quantity: newQty, total: newQty * i.price }
+        })
         .filter((i) => i.quantity > 0)
     )
   }
@@ -102,6 +121,10 @@ export function SalePadView() {
 
   const grandTotal = cart.reduce((s, i) => s + i.total, 0)
 
+  // Cash exchange calculator (PRD Part 17 §3.1)
+  const cashReceivedNum = Number(cashReceived) || 0
+  const changeDue = Math.max(0, cashReceivedNum - grandTotal)
+
   const handleGenerateInvoice = async () => {
     if (cart.length === 0) {
       toast.error('Cart is empty')
@@ -109,7 +132,70 @@ export function SalePadView() {
     }
     setConfirming(true)
     try {
+      const amountPaid = paymentMode === 'cash'
+        ? grandTotal
+        : paymentMode === 'credit'
+        ? (Number(partialPaid) || 0)
+        : grandTotal
       const invoice = await apiPost('/api/invoices', {
+        partyId: customer?.id,
+        items: cart.map((i) => ({
+          productId: i.productId,
+          name: i.name,
+          quantity: i.quantity,
+          unitPrice: i.price,
+          discount: 0,
+          gstRate: 0,
+          total: i.total,
+        })),
+        discountMode: 'flat',
+        discountValue: 0,
+        isGst: false,
+        paymentMode,
+        type: 'retail',
+        amountPaid,
+      })
+      toast.success('Invoice generated')
+      triggerRefresh()
+      setCart([])
+      setCustomer(null)
+      setCashReceived('')
+      setPartialPaid('')
+      setChequeNo('')
+      setConfirming(false)
+      setSelectedInvoiceId(invoice.id)
+      setActiveView('billing')
+    } catch (e) {
+      toast.error('Failed: ' + String(e))
+      setConfirming(false)
+    }
+  }
+
+  const handleCashSale = async () => {
+    if (cart.length === 0) return
+    setConfirming(true)
+    try {
+      // Cash Sale: track as a transaction AND deduct stock (PRD Part 17 §7)
+      if (customer) {
+        await apiPost('/api/transactions', {
+          partyId: customer.id,
+          type: 'credit',
+          amount: grandTotal,
+          description: `Cash sale (${mode})`,
+          category: 'Cash Sale',
+        })
+      } else {
+        // Walk-in: record as anonymous cash sale (no party needed)
+        await apiPost('/api/transactions', {
+          partyId: null,
+          type: 'credit',
+          amount: grandTotal,
+          description: `Walk-in cash sale (${mode})`,
+          category: 'Cash Sale',
+        })
+      }
+      // Stock deduction: post each item as invoice with paymentMode=cash, amountPaid=total (auto-deduct stock)
+      await apiPost('/api/invoices', {
         partyId: customer?.id,
         items: cart.map((i) => ({
           productId: i.productId,
@@ -127,37 +213,11 @@ export function SalePadView() {
         type: 'retail',
         amountPaid: grandTotal,
       })
-      toast.success('Invoice generated')
+      toast.success('Cash sale recorded — stock updated')
       triggerRefresh()
       setCart([])
       setCustomer(null)
-      setConfirming(false)
-      setSelectedInvoiceId(invoice.id)
-      setActiveView('billing')
-    } catch (e) {
-      toast.error('Failed: ' + String(e))
-      setConfirming(false)
-    }
-  }
-
-  const handleCashSale = async () => {
-    if (cart.length === 0) return
-    setConfirming(true)
-    try {
-      // Record as a cash sale transaction (no invoice)
-      if (customer) {
-        await apiPost('/api/transactions', {
-          partyId: customer.id,
-          type: 'credit',
-          amount: grandTotal,
-          description: `Cash sale (${mode})`,
-          category: 'Cash Sale',
-        })
-      }
-      toast.success('Cash sale recorded')
-      triggerRefresh()
-      setCart([])
-      setCustomer(null)
+      setCashReceived('')
       setConfirming(false)
     } catch (e) {
       toast.error('Failed: ' + String(e))
@@ -173,27 +233,27 @@ export function SalePadView() {
 
   return (
     <div className="space-y-4 pb-4">
-      {/* Mode selector */}
+      {/* Mode selector — PRD Part 17 §1 */}
       <div className="grid grid-cols-2 gap-3">
         <button
           onClick={() => setMode('retail')}
-          className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-1 min-h-[80px] justify-center ${
-            mode === 'retail' ? 'border-primary bg-primary/5' : 'border-border bg-muted/30'
+          className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-1 min-h-[88px] justify-center ${
+            mode === 'retail' ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30' : 'border-border bg-muted/30'
           }`}
         >
-          <Store className={`w-6 h-6 ${mode === 'retail' ? 'text-primary' : 'text-muted-foreground'}`} />
-          <span className={`text-sm font-bold ${mode === 'retail' ? 'text-primary' : 'text-muted-foreground'}`}>🌾 খুচরো</span>
+          <Store className={`w-6 h-6 ${mode === 'retail' ? 'text-emerald-600' : 'text-muted-foreground'}`} />
+          <span className={`text-sm font-bold ${mode === 'retail' ? 'text-emerald-600' : 'text-muted-foreground'}`}>🟢 খুচরো প্রোডাক্ট</span>
           <span className="text-[10px] text-muted-foreground">Retail (per kg)</span>
         </button>
         <button
           onClick={() => setMode('wholesale')}
-          className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-1 min-h-[80px] justify-center ${
-            mode === 'wholesale' ? 'border-primary bg-primary/5' : 'border-border bg-muted/30'
+          className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-1 min-h-[88px] justify-center ${
+            mode === 'wholesale' ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30' : 'border-border bg-muted/30'
           }`}
         >
-          <Boxes className={`w-6 h-6 ${mode === 'wholesale' ? 'text-primary' : 'text-muted-foreground'}`} />
-          <span className={`text-sm font-bold ${mode === 'wholesale' ? 'text-primary' : 'text-muted-foreground'}`}>📦 পূর্ণ জিনিস</span>
-          <span className="text-[10px] text-muted-foreground">Full Product (per bag/box)</span>
+          <Boxes className={`w-6 h-6 ${mode === 'wholesale' ? 'text-amber-600' : 'text-muted-foreground'}`} />
+          <span className={`text-sm font-bold ${mode === 'wholesale' ? 'text-amber-600' : 'text-muted-foreground'}`}>🟤 আস্ত প্রোডাক্ট</span>
+          <span className="text-[10px] text-muted-foreground">Full Product (per bag)</span>
         </button>
       </div>
 
@@ -215,10 +275,14 @@ export function SalePadView() {
       {/* Product grid */}
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-          {mode === 'retail' ? 'Select Products (per kg)' : 'Select Products (per bag)'}
+          {mode === 'retail' ? 'Select Retail Products (per kg)' : 'Select Products (per bag/box)'}
         </p>
         {filteredProducts.length === 0 ? (
-          <EmptyState icon={Package} title="No products" />
+          <EmptyState
+            icon={Package}
+            title={mode === 'retail' ? 'No retail-enabled products' : 'No products'}
+            description={mode === 'retail' ? 'Enable "খুচরো প্রোডাক্ট" in product form.' : undefined}
+          />
         ) : (
           <div className="grid grid-cols-2 gap-2">
             {filteredProducts.map((p) => {
@@ -229,7 +293,7 @@ export function SalePadView() {
                   key={p.id}
                   whileTap={{ scale: 0.96 }}
                   onClick={() => addToCart(p)}
-                  className={`p-3 rounded-2xl border text-left transition-all ${
+                  className={`relative p-3 rounded-2xl border text-left transition-all ${
                     inCart ? 'border-primary bg-primary/5' : 'border-border bg-card hover:border-primary/30'
                   }`}
                 >
@@ -237,7 +301,11 @@ export function SalePadView() {
                     <Package className="w-4 h-4 text-amber-600" />
                   </div>
                   <p className="text-xs font-medium truncate">{p.name}</p>
-                  <p className="text-[10px] text-muted-foreground">{p.stock} {p.unit} in stock</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {mode === 'retail' && (p as any).looseStock !== undefined
+                      ? `${(p as any).looseStock} ${(p as any).retailUnit || 'kg'}`
+                      : `${p.stock} ${p.unit}`} in stock
+                  </p>
                   <p className="text-sm font-bold tabular text-primary mt-0.5">{formatCurrency(price, currency)}</p>
                   {inCart && (
                     <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
@@ -280,8 +348,9 @@ export function SalePadView() {
                     <input
                       value={item.quantity}
                       onChange={(e) => setQty(item.productId, Number(e.target.value) || 0)}
-                      className="w-12 h-7 text-center text-sm tabular bg-card rounded-lg border-0 outline-none"
-                      inputMode="numeric"
+                      className="w-14 h-7 text-center text-sm tabular bg-card rounded-lg border-0 outline-none"
+                      inputMode="decimal"
+                      step="any"
                     />
                     <button onClick={() => updateQty(item.productId, 1)} className="w-7 h-7 rounded-lg bg-card flex items-center justify-center" aria-label="Increase">
                       <Plus className="w-3 h-3" />
@@ -316,10 +385,153 @@ export function SalePadView() {
               )}
             </button>
 
+            {/* Payment Mode selector (PRD Part 17 §3) */}
+            <div className="mt-3">
+              <p className="text-[10px] text-muted-foreground uppercase mb-1.5">Payment Mode</p>
+              <div className="grid grid-cols-4 gap-1.5">
+                <button
+                  onClick={() => setPaymentMode('cash')}
+                  className={`flex flex-col items-center gap-1 py-2 rounded-lg text-[10px] font-medium ${
+                    paymentMode === 'cash' ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                  }`}
+                >
+                  <Wallet className="w-3.5 h-3.5" /> Cash
+                </button>
+                <button
+                  onClick={() => setPaymentMode('upi')}
+                  className={`flex flex-col items-center gap-1 py-2 rounded-lg text-[10px] font-medium ${
+                    paymentMode === 'upi' ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                  }`}
+                >
+                  <QrCode className="w-3.5 h-3.5" /> UPI
+                </button>
+                <button
+                  onClick={() => setPaymentMode('credit')}
+                  className={`flex flex-col items-center gap-1 py-2 rounded-lg text-[10px] font-medium ${
+                    paymentMode === 'credit' ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                  }`}
+                >
+                  <CreditCard className="w-3.5 h-3.5" /> Credit
+                </button>
+                <button
+                  onClick={() => setPaymentMode('cheque')}
+                  className={`flex flex-col items-center gap-1 py-2 rounded-lg text-[10px] font-medium ${
+                    paymentMode === 'cheque' ? 'bg-primary text-primary-foreground' : 'bg-muted'
+                  }`}
+                >
+                  <FileCheck className="w-3.5 h-3.5" /> Cheque
+                </button>
+              </div>
+            </div>
+
+            {/* Payment mode-specific inputs (PRD Part 17 §3) */}
+            <AnimatePresence>
+              {paymentMode === 'cash' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden mt-2"
+                >
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Calculator className="w-4 h-4 text-emerald-600" />
+                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Exchange Calculator</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">Cash Received</label>
+                        <Input
+                          value={cashReceived}
+                          onChange={(e) => setCashReceived(e.target.value)}
+                          className="h-9 text-sm"
+                          inputMode="numeric"
+                          placeholder="0"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">Change Due</label>
+                        <div className="h-9 rounded-lg bg-card flex items-center justify-center text-sm font-bold tabular text-emerald-600">
+                          {formatCurrency(changeDue, currency)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+              {paymentMode === 'credit' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden mt-2"
+                >
+                  <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30">
+                    <label className="text-[10px] text-muted-foreground">Partial Payment (Due: {formatCurrency(grandTotal, currency)})</label>
+                    <Input
+                      value={partialPaid}
+                      onChange={(e) => setPartialPaid(e.target.value)}
+                      className="h-9 text-sm"
+                      inputMode="numeric"
+                      placeholder="0"
+                    />
+                  </div>
+                </motion.div>
+              )}
+              {paymentMode === 'cheque' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden mt-2"
+                >
+                  <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30">
+                    <label className="text-[10px] text-muted-foreground">Cheque Number</label>
+                    <Input
+                      value={chequeNo}
+                      onChange={(e) => setChequeNo(e.target.value)}
+                      className="h-9 text-sm"
+                      placeholder="CHQ-001234"
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Advanced Options toggle (PRD Part 17 §4) */}
+            <button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="w-full mt-3 flex items-center justify-between p-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <span>Advanced Options</span>
+              {showAdvanced ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+            <AnimatePresence>
+              {showAdvanced && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-3 rounded-xl bg-muted/30 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="text-muted-foreground">Discount %</label>
+                      <Input className="h-9" placeholder="0" inputMode="numeric" />
+                    </div>
+                    <div>
+                      <label className="text-muted-foreground">GST %</label>
+                      <Input className="h-9" placeholder="0" inputMode="numeric" />
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Actions */}
             <div className="grid grid-cols-2 gap-2 mt-3">
               <Button variant="outline" onClick={handleCashSale} disabled={confirming} className="h-11">
-                <ShoppingBag className="w-4 h-4 mr-1.5" /> Cash Sale
+                <ShoppingBag className="w-4 h-4 mr-1.5" /> Done / সম্পূর্ণ হয়েছে
               </Button>
               <Button onClick={handleGenerateInvoice} disabled={confirming} className="h-11">
                 <Receipt className="w-4 h-4 mr-1.5" /> {confirming ? '…' : 'Invoice'}

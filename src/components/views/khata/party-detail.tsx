@@ -3,12 +3,12 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
-import type { Party, Transaction, Invoice } from '@/lib/types'
+import type { Party, Transaction, Invoice, SupplierCatalogItem } from '@/lib/types'
 import { formatCurrency, formatDate, GRADE_META } from '@/lib/utils'
 import { motion } from 'framer-motion'
 import {
   ArrowLeft, Phone, Plus, Receipt, FileEdit, ArrowDownLeft, ArrowUpRight,
-  CheckCircle2, MessageSquare, X, Zap, Share2, FileText,
+  CheckCircle2, MessageSquare, X, Zap, Share2, FileText, Award, Package,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -16,12 +16,14 @@ import { useState, useCallback, useRef } from 'react'
 import { TransactionForm } from './transaction-form'
 import { PartyForm } from './party-form'
 import { ShareSheet } from '@/components/shared/share-sheet'
+import { CompareSuppliersModal } from '@/components/shared/compare-suppliers-modal'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { useScrollStore } from '@/store/scroll-store'
 
 interface PartyDetailData extends Party {
   transactions: Transaction[]
@@ -36,6 +38,31 @@ export function PartyDetail({ partyId }: { partyId: string }) {
   const [showTxn, setShowTxn] = useState(false)
   const [showSettle, setShowSettle] = useState(false)
   const [showNote, setShowNote] = useState(false)
+  const [showCompare, setShowCompare] = useState(false)
+  const [compareProduct, setCompareProduct] = useState<string>('')
+
+  // PRD Part 7 §3: restore scroll on back button (party detail → khata)
+  const { restore: restoreScrollPos } = useScrollStore()
+  const handleBack = () => {
+    if (returnToView) {
+      setActiveView(returnToView)
+      setReturnToView(null)
+    } else {
+      setActiveView('khata')
+    }
+    setSelectedPartyId(null)
+    // Restore scroll after view transition
+    setTimeout(() => restoreScrollPos('khata'), 50)
+    setTimeout(() => restoreScrollPos('khata'), 150)
+    setTimeout(() => restoreScrollPos('khata'), 300)
+  }
+
+  // PRD Part 24: Source Products section for suppliers (fetches catalog)
+  const isSupplier = data?.type === 'supplier' || data?.type === 'both'
+  const { data: supplierCatalog } = useFetch<SupplierCatalogItem[]>(
+    isSupplier ? `/api/suppliers/${partyId}/catalog` : null,
+    [partyId, isSupplier]
+  )
   // Multi-select state (PRD Part 7 §4)
   const [multiSelectMode, setMultiSelectMode] = useState(false)
   const [selectedTxIds, setSelectedTxIds] = useState<Set<string>>(new Set())
@@ -128,13 +155,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
       {/* Header */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => {
-            if (returnToView) {
-              setActiveView(returnToView)
-              setReturnToView(null)
-            }
-            setSelectedPartyId(null)
-          }}
+          onClick={handleBack}
           className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center"
           aria-label="Back"
         >
@@ -321,6 +342,36 @@ export function PartyDetail({ partyId }: { partyId: string }) {
         </div>
       )}
 
+      {/* PRD Part 24: Source Products section for suppliers */}
+      {isSupplier && supplierCatalog && supplierCatalog.length > 0 && (
+        <div className="rounded-2xl bg-card border border-border p-4 shadow-sm">
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
+            <Package className="w-4 h-4 text-purple-600" /> Source Products ({supplierCatalog.length})
+          </h3>
+          <div className="space-y-2 max-h-72 overflow-y-auto scroll-area">
+            {supplierCatalog.map((item) => (
+              <div key={item.id} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium truncate">{item.productName}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    Base: {formatCurrency(item.basePrice, currency)} · Landed: {formatCurrency(item.perUnitLandedCost || 0, currency)}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setCompareProduct(item.productName)
+                    setShowCompare(true)
+                  }}
+                  className="text-[10px] font-medium text-purple-600 bg-purple-100 dark:bg-purple-900/30 px-2 py-1 rounded-lg flex items-center gap-0.5 shrink-0"
+                >
+                  <Award className="w-3 h-3" /> Compare
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <TransactionForm open={showTxn} onOpenChange={setShowTxn} party={data} />
       <SettleUpDialog open={showSettle} onOpenChange={setShowSettle} party={data} onConfirm={handleSettle} />
       <PartyForm
@@ -335,6 +386,13 @@ export function PartyDetail({ partyId }: { partyId: string }) {
         customerPhone={data.phone}
         shareText={shareSheetText}
         shareTitle={shareSheetTitle}
+      />
+
+      {/* Compare Suppliers Modal (PRD Part 24) */}
+      <CompareSuppliersModal
+        open={showCompare}
+        onClose={() => setShowCompare(false)}
+        productName={compareProduct}
       />
     </motion.div>
   )

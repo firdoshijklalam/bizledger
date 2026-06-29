@@ -31,6 +31,8 @@ model Business {
   transactions Transaction[]
   invoices     Invoice[]
   settings     AppSettings?
+  supplierCatalogItems SupplierCatalogItem[]
+  purchaseOrders PurchaseOrder[]
 }
 
 model Party {
@@ -57,6 +59,8 @@ model Party {
   transactions Transaction[]
   invoices     Invoice[]
   partyNotes   PartyNote[]
+  purchaseOrders PurchaseOrder[]
+  supplierCatalogItems SupplierCatalogItem[] @relation("SupplierCatalogItems")
 
   @@index([businessId])
 }
@@ -82,6 +86,7 @@ model Product {
   conversionFactor   Float?   // 1 bag = 25 kg
   retailSalePrice    Float?   // price per sub-unit (₹55 per kg)
   looseStock         Float    @default(0) // loose/fractional stock (kg)
+  subCategory        String?  // PRD Part 13: sub-category (e.g. Rice → Miniket)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -235,4 +240,72 @@ model BackupLog {
   createdAt  DateTime @default(now())
 
   @@index([businessId])
+}
+
+// PRD Part 13: B2B Sourcing — Supplier Catalog Item
+model SupplierCatalogItem {
+  id              String   @id @default(cuid())
+  businessId      String
+  supplierId      String
+  productName     String
+  category        String?
+  basePrice       Float    @default(0)
+  transportFare   Float    @default(0)
+  coolieCharge    Float    @default(0)
+  unit            String   @default("pcs")
+  minOrderQty     Int      @default(1)
+  notes           String?
+  isActive        Boolean  @default(true)
+  matchedProductId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  supplier Party    @relation("SupplierCatalogItems", fields: [supplierId], references: [id], onDelete: Cascade)
+  purchaseOrderItems PurchaseOrderItem[]
+
+  @@index([businessId])
+  @@index([supplierId])
+}
+
+// PRD Part 13: B2B Sourcing — Purchase Order
+model PurchaseOrder {
+  id            String   @id @default(cuid())
+  businessId    String
+  supplierId    String
+  poNumber      String
+  status        String   @default("sent") // sent | dispatched | received | cancelled
+  totalAmount   Float    @default(0)
+  notes         String?
+  dispatchedAt  DateTime?
+  receivedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  business Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  supplier Party              @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  items    PurchaseOrderItem[]
+
+  @@index([businessId])
+  @@index([supplierId])
+}
+
+// PRD Part 13: B2B Sourcing — Purchase Order Item (line items)
+model PurchaseOrderItem {
+  id              String   @id @default(cuid())
+  purchaseOrderId String
+  catalogItemId   String?
+  productName     String
+  category        String?
+  quantity        Int      @default(1)
+  unitPrice       Float    @default(0)
+  transportFare   Float    @default(0)
+  coolieCharge    Float    @default(0)
+  totalCost       Float    @default(0)
+  matchedProductId String?
+
+  purchaseOrder PurchaseOrder       @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  catalogItem   SupplierCatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+
+  @@index([purchaseOrderId])
 }

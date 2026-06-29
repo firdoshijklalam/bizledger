@@ -32,6 +32,7 @@ export function InventoryView() {
   const { t } = useI18n()
   const [search, setSearch] = useState('')
   const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [activeCategory, setActiveCategory] = useState<string>('All')
 
   const { data: products, loading, refetch } = useFetch<Product[]>('/api/products', [])
 
@@ -44,18 +45,27 @@ export function InventoryView() {
 
   const currency = business?.currency || 'INR'
 
+  const categories = useMemo(() => {
+    if (!products) return ['All']
+    const cats = Array.from(new Set(products.map((p) => p.category).filter(Boolean))) as string[]
+    return ['All', ...cats]
+  }, [products])
+
   const filtered = useMemo(() => {
     if (!products) return []
     let list = products
     if (inventoryFilter === 'low-stock') {
       list = list.filter((p) => p.stock <= p.lowStockThreshold)
     }
+    if (activeCategory !== 'All') {
+      list = list.filter((p) => p.category === activeCategory)
+    }
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter((p) => p.name.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q))
     }
     return list
-  }, [products, inventoryFilter, search])
+  }, [products, inventoryFilter, search, activeCategory])
 
   const stats = useMemo(() => {
     if (!products) return { total: 0, lowStock: 0, value: 0 }
@@ -138,6 +148,23 @@ export function InventoryView() {
         ))}
       </div>
 
+      {/* Category filter chips (PRD Part 18 §1) */}
+      {categories.length > 1 && (
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setActiveCategory(cat)}
+              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all min-h-[36px] ${
+                activeCategory === cat ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Product list */}
       {loading ? (
         <LoadingState />
@@ -181,6 +208,11 @@ export function InventoryView() {
                             {p.category && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground flex items-center gap-0.5">
                                 <Tag className="w-2.5 h-2.5" />{p.category}
+                              </span>
+                            )}
+                            {(p as any).subCategory && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
+                                {(p as any).subCategory}
                               </span>
                             )}
                             {p.sku && <span className="text-[10px] text-muted-foreground">{p.sku}</span>}

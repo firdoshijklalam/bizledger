@@ -8,7 +8,7 @@ import { formatCurrency, GRADE_META } from '@/lib/utils'
 import { motion } from 'framer-motion'
 import {
   ArrowLeft, FileEdit, Trash2, Package, Tag, Boxes, BadgePercent,
-  AlertTriangle, Plus, Minus, TrendingUp, ShoppingCart,
+  AlertTriangle, Plus, Minus, TrendingUp, ShoppingCart, Award,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { CompareSuppliersModal } from '@/components/shared/compare-suppliers-modal'
 
 interface ProductWithImages extends Product {
   images?: ProductImage[]
@@ -35,6 +36,7 @@ export function ProductProfile({ productId }: { productId: string }) {
   const [showDelete, setShowDelete] = useState(false)
   const [showRestock, setShowRestock] = useState(false)
   const [restockQty, setRestockQty] = useState('')
+  const [showCompare, setShowCompare] = useState(false)
 
   if (!product) return null
   const currency = business?.currency || 'INR'
@@ -192,6 +194,14 @@ export function ProductProfile({ productId }: { productId: string }) {
         >
           <Plus className="w-5 h-5 mr-2" /> Restock
         </Button>
+        {/* PRD Part 18 §3: Compare Suppliers button */}
+        <Button
+          onClick={() => setShowCompare(true)}
+          variant="outline"
+          className="w-full h-12 text-base text-purple-600 border-purple-300 dark:border-purple-800 hover:bg-purple-50 dark:hover:bg-purple-950/30"
+        >
+          <Award className="w-5 h-5 mr-2" /> Compare Suppliers
+        </Button>
         <Button
           onClick={() => setEditingProductId(productId)}
           variant="outline"
@@ -223,9 +233,9 @@ export function ProductProfile({ productId }: { productId: string }) {
               <Label className="text-xs">Quantity to add ({product.unit})</Label>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setRestockQty(String(Math.max(0, (Number(restockQty) || 0) - 10)))}
+                  onClick={() => setRestockQty(String(Math.max(0, (Number(restockQty) || 0) - 1)))}
                   className="w-11 h-11 rounded-xl bg-muted flex items-center justify-center shrink-0"
-                  aria-label="Decrease by 10"
+                  aria-label="Decrease by 1"
                 >
                   <Minus className="w-4 h-4" />
                 </button>
@@ -238,9 +248,9 @@ export function ProductProfile({ productId }: { productId: string }) {
                   autoFocus
                 />
                 <button
-                  onClick={() => setRestockQty(String((Number(restockQty) || 0) + 10))}
+                  onClick={() => setRestockQty(String((Number(restockQty) || 0) + 1))}
                   className="w-11 h-11 rounded-xl bg-muted flex items-center justify-center shrink-0"
-                  aria-label="Increase by 10"
+                  aria-label="Increase by 1"
                 >
                   <Plus className="w-4 h-4" />
                 </button>
@@ -291,6 +301,15 @@ export function ProductProfile({ productId }: { productId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Compare Suppliers Modal (PRD Part 18 §3) */}
+      <CompareSuppliersModal
+        open={showCompare}
+        onClose={() => setShowCompare(false)}
+        productName={product.name}
+        productId={product.id}
+        quantity={Math.max(10, Math.ceil(product.lowStockThreshold) * 2)}
+      />
     </motion.div>
   )
 }

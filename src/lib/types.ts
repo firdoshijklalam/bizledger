@@ -10,6 +10,7 @@ export type ViewId =
   | 'settings'
   | 'notifications'
   | 'sale-pad'
+  | 'sourcing'
 
 export type PartyType = 'customer' | 'supplier' | 'both'
 export type QualityGrade = 'A' | 'B' | 'C' | 'D' | 'E'
@@ -72,6 +73,12 @@ export interface Product {
   stock: number
   lowStockThreshold: number
   supplierId?: string | null
+  retailEnabled?: boolean
+  retailUnit?: string | null
+  conversionFactor?: number | null
+  retailSalePrice?: number | null
+  looseStock?: number
+  subCategory?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -145,4 +152,79 @@ export interface AppSettingsData {
   dateFormat: string
   invoicePrefix: string
   pinEnabled: boolean
+}
+
+// PRD Part 13: B2B Sourcing types
+export interface SupplierCatalogItem {
+  id: string
+  businessId: string
+  supplierId: string
+  productName: string
+  category?: string | null
+  basePrice: number
+  transportFare: number
+  coolieCharge: number
+  unit: string
+  minOrderQty: number
+  notes?: string | null
+  isActive: boolean
+  matchedProductId?: string | null
+  createdAt: string
+  updatedAt: string
+  supplierName?: string
+  perUnitLandedCost?: number
+}
+
+export interface PurchaseOrderItem {
+  id: string
+  purchaseOrderId: string
+  catalogItemId?: string | null
+  productName: string
+  category?: string | null
+  quantity: number
+  unitPrice: number
+  transportFare: number
+  coolieCharge: number
+  totalCost: number
+  matchedProductId?: string | null
+}
+
+export type PurchaseOrderStatus = 'sent' | 'dispatched' | 'received' | 'cancelled'
+
+export interface PurchaseOrder {
+  id: string
+  businessId: string
+  supplierId: string
+  poNumber: string
+  status: PurchaseOrderStatus
+  totalAmount: number
+  notes?: string | null
+  dispatchedAt?: string | null
+  receivedAt?: string | null
+  createdAt: string
+  updatedAt: string
+  items?: PurchaseOrderItem[]
+  supplier?: Party | null
+}
+
+export interface SourcingMatch {
+  catalogItemId: string
+  supplierId: string
+  supplierName: string
+  productName: string
+  basePrice: number
+  transportFare: number
+  coolieCharge: number
+  perUnitLandedCost: number
+  totalLandedCost: number
+  unit: string
+  minOrderQty: number
+  similarity: number
+  isBestChoice?: boolean
+}
+
+export interface SourcingCompareResult {
+  query: string
+  quantity: number
+  matches: SourcingMatch[]
 }

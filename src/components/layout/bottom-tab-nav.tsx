@@ -2,7 +2,7 @@
 
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
-import { Home, BookOpen, Package, Receipt, MoreHorizontal, BarChart3, Sparkles, Settings, Bell } from 'lucide-react'
+import { Home, BookOpen, Package, Receipt, MoreHorizontal, BarChart3, Sparkles, Settings, Bell, Store } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ViewId } from '@/lib/types'
 import { useState } from 'react'
@@ -17,8 +17,10 @@ const TABS: Array<{ id: ViewId | 'more'; icon: typeof Home; labelKey: string }> 
 ]
 
 const MORE_ITEMS = [
+  { id: 'sourcing' as ViewId, icon: Store, labelKey: 'B2B Sourcing', color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/30' },
   { id: 'reports' as ViewId, icon: BarChart3, labelKey: 'rep.title', color: 'text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30' },
-  { id: 'ai-tools' as ViewId, icon: Sparkles, labelKey: 'ai.tools', color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/30' },
+  { id: 'sourcing' as ViewId, icon: Store, labelKey: 'nav.sourcing', color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/30' },
+  { id: 'ai-tools' as ViewId, icon: Sparkles, labelKey: 'ai.tools', color: 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' },
   { id: 'notifications' as ViewId, icon: Bell, labelKey: 'header.notifications', color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30' },
   { id: 'settings' as ViewId, icon: Settings, labelKey: 'set.title', color: 'text-teal-600 bg-teal-100 dark:bg-teal-900/30' },
 ]
@@ -48,7 +50,7 @@ export function BottomTabNav() {
           {TABS.map((tab) => {
             const isActive =
               tab.id === 'more'
-                ? ['reports', 'ai-tools', 'settings', 'notifications'].includes(activeView)
+                ? ['reports', 'sourcing', 'ai-tools', 'settings', 'notifications'].includes(activeView)
                 : activeView === tab.id
             const Icon = tab.icon
             return (
@@ -109,19 +111,19 @@ export function BottomTabNav() {
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-5 gap-2">
                 {MORE_ITEMS.map((item) => {
                   const Icon = item.icon
                   return (
                     <button
                       key={item.id}
                       onClick={() => pickMore(item.id)}
-                      className="flex flex-col items-center gap-2 p-3 rounded-2xl hover:bg-muted transition-colors min-h-[88px] justify-center"
+                      className="flex flex-col items-center gap-2 p-2 rounded-2xl hover:bg-muted transition-colors min-h-[80px] justify-center"
                     >
-                      <span className={`w-12 h-12 rounded-2xl flex items-center justify-center ${item.color}`}>
-                        <Icon className="w-6 h-6" />
+                      <span className={`w-11 h-11 rounded-2xl flex items-center justify-center ${item.color}`}>
+                        <Icon className="w-5 h-5" />
                       </span>
-                      <span className="text-[11px] font-medium text-center leading-tight">{t(item.labelKey)}</span>
+                      <span className="text-[10px] font-medium text-center leading-tight">{t(item.labelKey)}</span>
                     </button>
                   )
                 })}

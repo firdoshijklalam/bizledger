@@ -65,6 +65,7 @@ export async function POST(req: NextRequest) {
         conversionFactor: body.retailEnabled ? (Number(body.conversionFactor) || null) : null,
         retailSalePrice: body.retailEnabled ? (Number(body.retailSalePrice) || 0) : null,
         looseStock: body.retailEnabled ? (Number(body.looseStock) || 0) : 0,
+        subCategory: body.subCategory || null,
       },
     })
     return NextResponse.json(product)

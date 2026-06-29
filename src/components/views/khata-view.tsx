@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { PartyForm } from './khata/party-form'
 import { PartyDetail } from './khata/party-detail'
 import { Input } from '@/components/ui/input'
+import { useScrollStore } from '@/store/scroll-store'
 
 export function KhataView() {
   const {
@@ -29,6 +30,18 @@ export function KhataView() {
   const [search, setSearch] = useState('')
 
   const { data: parties, loading } = useFetch<Party[]>('/api/parties', [])
+
+  // PRD Part 7 §3: scroll retention
+  const { save: saveScrollPos, restore: restoreScrollPos } = useScrollStore()
+  useEffect(() => {
+    if (!selectedPartyId) {
+      restoreScrollPos('khata')
+    }
+    // Save on unmount
+    return () => {
+      if (!selectedPartyId) saveScrollPos('khata')
+    }
+  }, [selectedPartyId, saveScrollPos, restoreScrollPos])
 
   // Handle quick action trigger
   useEffect(() => {

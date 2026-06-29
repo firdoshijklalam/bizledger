@@ -1,8 +1,13 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
-// GET /api/forecast — 3-month demand prediction per product based on sales history
-export async function GET() {
+// GET /api/forecast?months=1|3|6 — demand prediction per product based on sales history
+// Trend math fix: 0% trend when no sales data (not 100%)
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url)
+  const monthsParam = searchParams.get('months')
+  const months = [1, 3, 6].includes(Number(monthsParam)) ? Number(monthsParam) : 3
+
   const business = await db.business.findFirst()
   if (!business) return NextResponse.json([])
 
@@ -16,27 +21,42 @@ export async function GET() {
   })
 
   const now = new Date()
-  const forecasts = products.map((p) => {
-    // Last 90 days sales volume
-    const ninetyDaysAgo = new Date(now.getTime() - 90 * 86400000)
-    const recentSales = p.invoiceItems.filter((it) => new Date(it.invoice.createdAt) >= ninetyDaysAgo)
-    const recentQty = recentSales.reduce((s, it) => s + it.quantity, 0)
-    const avgPerMonth = recentQty / 3
+  const msPerMonth = 30 * 86400000
+  const windowStart = new Date(now.getTime() - months * msPerMonth)
 
-    // Simple trend: compare last 30 days vs previous 30 days
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000)
-    const sixtyDaysAgo = new Date(now.getTime() - 60 * 86400000)
-    const last30 = p.invoiceItems.filter((it) => new Date(it.invoice.createdAt) >= thirtyDaysAgo).reduce((s, it) => s + it.quantity, 0)
-    const prev30 = p.invoiceItems.filter((it) => {
+  const forecasts = products.map((p) => {
+    // Aggregate sales over the configured window
+    const recentSales = p.invoiceItems.filter((it) => new Date(it.invoice.createdAt) >= windowStart)
+    const recentQty = recentSales.reduce((s, it) => s + it.quantity, 0)
+    const avgPerMonth = recentQty / months
+
+    // Trend: compare the most recent half-window vs the older half-window
+    const halfWindowMs = (months * msPerMonth) / 2
+    const halfWindowStart = new Date(now.getTime() - halfWindowMs)
+    const recentHalf = p.invoiceItems.filter((it) => new Date(it.invoice.createdAt) >= halfWindowStart)
+      .reduce((s, it) => s + it.quantity, 0)
+    const olderHalf = p.invoiceItems.filter((it) => {
       const d = new Date(it.invoice.createdAt)
-      return d >= sixtyDaysAgo && d < thirtyDaysAgo
+      return d >= windowStart && d < halfWindowStart
     }).reduce((s, it) => s + it.quantity, 0)
 
-    const trend = prev30 > 0 ? (last30 - prev30) / prev30 : (last30 > 0 ? 1 : 0)
-    const predicted = Math.max(0, Math.round(avgPerMonth * (1 + trend * 0.3)))
+    // FIXED: when both halves are zero, trend = 0 (not 100%)
+    let trendPct = 0
+    if (olderHalf === 0 && recentHalf === 0) {
+      trendPct = 0
+    } else if (olderHalf === 0) {
+      // recent sales exist but no older — full growth
+      trendPct = 100
+    } else {
+      trendPct = Math.round(((recentHalf - olderHalf) / olderHalf) * 100)
+    }
 
-    // Confidence: based on data volume
-    const confidence = recentSales.length >= 10 ? 'high' : recentSales.length >= 3 ? 'medium' : 'low'
+    // Predicted next-month demand
+    const trendFactor = 1 + (trendPct / 100) * 0.3
+    const predicted = Math.max(0, Math.round(avgPerMonth * trendFactor))
+
+    // Confidence based on data volume
+    const confidence: 'high' | 'medium' | 'low' = recentSales.length >= 10 ? 'high' : recentSales.length >= 3 ? 'medium' : 'low'
 
     const daysUntilOutOfStock = avgPerMonth > 0 ? Math.round(p.stock / (avgPerMonth / 30)) : null
 
@@ -48,13 +68,14 @@ export async function GET() {
       unit: p.unit,
       recentMonthlyAvg: Math.round(avgPerMonth * 10) / 10,
       predictedNextMonth: predicted,
-      trend: Math.round(trend * 100),
+      trend: trendPct,
       confidence,
       daysUntilOutOfStock,
       needsRestock: daysUntilOutOfStock !== null && daysUntilOutOfStock <= 14,
+      supplierId: p.supplierId,
+      months,
     }
   })
 
-  // Sort by predicted demand descending
   return NextResponse.json(forecasts.sort((a, b) => b.predictedNextMonth - a.predictedNextMonth))
 }

@@ -13,8 +13,9 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
-import { Package, Tag, DollarSign, Boxes, AlertTriangle, X } from 'lucide-react'
+import { Package, Tag, DollarSign, Boxes, AlertTriangle, X, Plus } from 'lucide-react'
 import { BadgePercent } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
 
 interface Props {
   open: boolean
@@ -47,6 +48,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   const [conversionFactor, setConversionFactor] = useState('')
   const [retailSalePrice, setRetailSalePrice] = useState('')
   const [looseStock, setLooseStock] = useState('')
+  const [subCategory, setSubCategory] = useState('')
   const [saving, setSaving] = useState(false)
 
   // Category autocomplete (PRD v2 §9.4) + Supplier linking (PRD v2 §9.3)
@@ -72,11 +74,13 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
       setConversionFactor((existing as any).conversionFactor ? String((existing as any).conversionFactor) : '')
       setRetailSalePrice((existing as any).retailSalePrice ? String((existing as any).retailSalePrice) : '')
       setLooseStock((existing as any).looseStock ? String((existing as any).looseStock) : '')
+      setSubCategory((existing as any).subCategory || '')
     } else if (!productId) {
       setName(''); setSku(''); setCategory(''); setUnit('pcs')
       setPurchasePrice(''); setSalePrice(''); setMrp(''); setWholesalePrice('')
       setGstRate('0'); setStock(''); setLowStockThreshold('5'); setSupplierId('')
       setRetailEnabled(false); setRetailUnit('kg'); setConversionFactor(''); setRetailSalePrice(''); setLooseStock('')
+      setSubCategory('')
     }
   }, [existing, productId, open])
 
@@ -116,6 +120,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
         conversionFactor: retailEnabled ? (Number(conversionFactor) || null) : null,
         retailSalePrice: retailEnabled ? (Number(retailSalePrice) || 0) : null,
         looseStock: retailEnabled ? (Number(looseStock) || 0) : 0,
+        subCategory: subCategory.trim() || null,
       }
       if (productId) {
         await apiPut(`/api/products/${productId}`, payload)
@@ -169,6 +174,22 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
                 {(categories || []).map((c) => <option key={c} value={c} />)}
               </datalist>
             </div>
+          </div>
+
+          {/* PRD Part 18 §2: subCategory field with dynamic suggestions */}
+          <div className="space-y-1.5">
+            <Label htmlFor="subcat" className="text-xs">Sub-Category</Label>
+            <Input
+              id="subcat"
+              value={subCategory}
+              onChange={(e) => setSubCategory(e.target.value)}
+              className="h-11"
+              placeholder="e.g. Miniket, Jaya, Ratna"
+              list="subcat-list"
+            />
+            <datalist id="subcat-list">
+              {getSubCategorySuggestions(category).map((s) => <option key={s} value={s} />)}
+            </datalist>
           </div>
 
           {/* Supplier linking (PRD v2 §9.3) */}
@@ -352,4 +373,27 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
       </DialogContent>
     </Dialog>
   )
+}
+
+// PRD Part 18 §2: dynamic sub-category suggestions based on selected category
+function getSubCategorySuggestions(category: string): string[] {
+  const c = (category || '').toLowerCase().trim()
+  const map: Record<string, string[]> = {
+    rice: ['Miniket', 'Jaya', 'Ratna', 'Sona Masuri', 'Basmati', 'Gobindobhog', 'Ponni'],
+    cement: ['OPC 53', 'OPC 43', 'PPC', 'PSC', 'White Cement'],
+    steel: ['TMT 12mm', 'TMT 16mm', 'TMT 8mm', 'TMT 20mm', 'TMT 10mm'],
+    paint: ['Premium Emulsion', 'Distemper', 'Primer', 'Enamel', 'Texture'],
+    oil: ['Mustard', 'Sunflower', 'Soybean', 'Refined', 'Coconut'],
+    flour: ['Atta', 'Maida', 'Suji', 'Besan'],
+    pulse: ['Masoor', 'Moong', 'Chana', 'Toor', 'Urad'],
+    electronic: ['LED Bulb', 'Tube Light', 'Fan', 'Switch', 'Wire'],
+    electrical: ['LED Bulb', 'Tube Light', 'Fan', 'Switch', 'Wire'],
+    plumbing: ['PVC Pipe', 'Tape', 'Faucet', 'Joint', 'Valve'],
+    construction: ['Brick', 'Sand', 'Aggregate', 'Cement', 'Steel'],
+  }
+  if (map[c]) return map[c]
+  for (const key of Object.keys(map)) {
+    if (c.includes(key)) return map[key]
+  }
+  return []
 }

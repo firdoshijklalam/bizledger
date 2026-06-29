@@ -8,7 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import { motion } from 'framer-motion'
 import {
   Building2, Sliders, Database, Shield, Download, Upload, Save,
-  Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles,
+  Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -19,6 +19,7 @@ import { Switch } from '@/components/ui/switch'
 import { toast } from 'sonner'
 import { useState } from 'react'
 import type { Business, AppSettingsData } from '@/lib/types'
+import { PALETTES, usePaletteStore } from '@/store/palette-store'
 
 const TABS = [
   { id: 'profile', labelKey: 'set.profile', icon: Building2 },
@@ -31,6 +32,7 @@ export function SettingsView() {
   const { business, setBusiness, triggerRefresh } = useAppStore()
   const { t, language, setLanguage } = useI18n()
   const { theme, setTheme } = useTheme()
+  const { activeId: activePaletteId, setPalette: setPaletteId } = usePaletteStore()
   const [tab, setTab] = useState<'profile' | 'preferences' | 'data' | 'security'>('profile')
 
   const { data: settings } = useFetch<AppSettingsData & { id: string }>('/api/app-settings', [])
@@ -192,6 +194,50 @@ export function SettingsView() {
               checked={theme === 'dark'}
               onChange={(v) => setTheme(v ? 'dark' : 'light')}
             />
+
+            {/* Color Palette Picker (PRD Part 23 §1) */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <span className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
+                  <Palette className="w-4 h-4" />
+                </span>
+                <div>
+                  <p className="text-sm font-medium">Color Palette</p>
+                  <p className="text-[11px] text-muted-foreground">Choose accent color theme</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {PALETTES.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => {
+                      setPaletteId(p.id)
+                      toast.success(`Palette: ${p.label} ${p.emoji}`)
+                    }}
+                    className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition-all ${
+                      activePaletteId === p.id ? 'border-primary' : 'border-border'
+                    }`}
+                  >
+                    <span className="text-xl">{p.emoji}</span>
+                    <span className="text-[10px] font-medium">{p.label}</span>
+                    <div className="flex items-center gap-0.5 mt-0.5">
+                      <span
+                        className="w-3 h-3 rounded-full"
+                        style={{ background: p.light['--primary'] }}
+                      />
+                      <span
+                        className="w-3 h-3 rounded-full"
+                        style={{ background: p.light['--chart-2'] }}
+                      />
+                      <span
+                        className="w-3 h-3 rounded-full"
+                        style={{ background: p.light['--chart-3'] }}
+                      />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Language */}
             <div className="flex items-center justify-between gap-3">
