@@ -9,7 +9,7 @@ import { motion } from 'framer-motion'
 import {
   Building2, Sliders, Database, Shield, Download, Upload, Save,
   Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette, Mic, Keyboard,
-  AlertCircle, CheckCircle2, QrCode,
+  AlertCircle, CheckCircle2, QrCode, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,7 @@ import { useState, useMemo } from 'react'
 import type { Business, AppSettingsData } from '@/lib/types'
 import { PALETTES, usePaletteStore } from '@/store/palette-store'
 import { useVoiceSettings } from '@/store/voice-settings-store'
+import { useNotificationStore } from '@/store/notification-store'
 
 const TABS = [
   { id: 'profile', labelKey: 'set.profile', icon: Building2 },
@@ -36,6 +37,8 @@ export function SettingsView() {
   const { theme, setTheme } = useTheme()
   const { activeId: activePaletteId, setPalette: setPaletteId } = usePaletteStore()
   const { globalVoiceEnabled, tapToVoiceEnabled, setGlobalVoice, setTapToVoice } = useVoiceSettings()
+  const { channels, toggleChannel } = useNotificationStore()
+  const [showNotifChannels, setShowNotifChannels] = useState(false)
   const [tab, setTab] = useState<'profile' | 'preferences' | 'data' | 'security'>('profile')
 
   const { data: settings } = useFetch<AppSettingsData & { id: string }>('/api/app-settings', [])
@@ -449,13 +452,47 @@ export function SettingsView() {
               />
             </div>
 
-            {/* Notifications */}
-            <ToggleRow
-              icon={Bell}
-              label={t('set.notifications')}
-              checked={prefs.notificationsEnabled}
-              onChange={(v) => setPrefs({ ...prefs, notificationsEnabled: v })}
-            />
+            {/* Notifications with expandable channel sub-toggles */}
+            <div>
+              <button
+                onClick={() => setShowNotifChannels(!showNotifChannels)}
+                className="w-full flex items-center justify-between gap-3 py-1"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
+                    <Bell className="w-4 h-4" />
+                  </span>
+                  <p className="text-sm font-medium">{t('set.notifications')}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={prefs.notificationsEnabled}
+                    onCheckedChange={(v) => setPrefs({ ...prefs, notificationsEnabled: v })}
+                  />
+                  {showNotifChannels ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
+                </div>
+              </button>
+              {/* PRD Part 29 §2: Expandable granular channel sub-toggles */}
+              {showNotifChannels && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="ml-12 mt-2 space-y-2 overflow-hidden">
+                  <p className="text-[10px] text-muted-foreground uppercase mb-1">চ্যানেল প্রেফারেন্স</p>
+                  {([
+                    { key: 'lowStock' as const, label: 'Low Stock Alerts', labelBn: 'লো স্টক অ্যালার্ট' },
+                    { key: 'overduePayments' as const, label: 'Payment Overdue Warnings', labelBn: 'বকেয়া পেমেন্ট তাগাদা' },
+                    { key: 'gradeChanges' as const, label: 'Customer Grade Changes', labelBn: 'গ্রাহক গ্রেড পরিবর্তন' },
+                    { key: 'backups' as const, label: 'App System Backups', labelBn: 'সিস্টেম ব্যাকআপ' },
+                  ]).map((ch) => (
+                    <div key={ch.key} className="flex items-center justify-between gap-2 py-1">
+                      <div>
+                        <p className="text-xs font-medium">{ch.label}</p>
+                        <p className="text-[9px] text-muted-foreground">{ch.labelBn}</p>
+                      </div>
+                      <Switch checked={channels[ch.key]} onCheckedChange={() => toggleChannel(ch.key)} />
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+            </div>
 
             {/* Auto reminders */}
             <ToggleRow
@@ -465,6 +502,46 @@ export function SettingsView() {
               onChange={(v) => setPrefs({ ...prefs, autoBackupEnabled: v })}
             />
 
+            {/* PRD Part 29 §1: Voice & Input Settings (after Invoice Prefix, before Save) */}
+            <div className="p-4 rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 space-y-3">
+              <p className="text-xs font-semibold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+                <Mic className="w-3.5 h-3.5" /> ভয়েস ও ইনপুট সেটিংস (Voice & Input)
+              </p>
+              {/* Toggle 1: Enable Global Voice Input */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
+                    <Mic className="w-3.5 h-3.5" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-medium">Enable Global Voice Input</p>
+                    <p className="text-[9px] text-muted-foreground">টপ বারের মাইক ও ভয়েস কমান্ড</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={globalVoiceEnabled}
+                  onCheckedChange={(v) => { setGlobalVoice(v); toast.success(`Global Voice ${v ? 'চালু' : 'বন্ধ'}`) }}
+                />
+              </div>
+              {/* Toggle 2: Tap-to-Voice / Double-Tap Keyboard */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center">
+                    <Keyboard className="w-3.5 h-3.5" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-medium">Tap-to-Voice / Double-Tap Keyboard</p>
+                    <p className="text-[9px] text-muted-foreground">১-ক্লিকে মাইক, ২-ক্লিকে কীবোর্ড</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={tapToVoiceEnabled}
+                  onCheckedChange={(v) => { setTapToVoice(v); toast.success(`Tap-to-Voice ${v ? 'চালু' : 'বন্ধ'}`) }}
+                />
+              </div>
+            </div>
+
+            {/* PRD Part 29 §3: Save applies theme + language instantly (no restart) */}
             <Button onClick={savePrefs} className="w-full h-11">
               <Save className="w-4 h-4 mr-1.5" /> {t('set.save')}
             </Button>
@@ -547,52 +624,7 @@ export function SettingsView() {
 
         {tab === 'security' && (
           <div className="space-y-4">
-            {/* PRD Part 26 §3: Voice & Input Settings */}
-            <Card className="p-5 space-y-4">
-              <div className="flex items-center gap-3 mb-2">
-                <span className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                  <Mic className="w-5 h-5 text-purple-600" />
-                </span>
-                <div>
-                  <h3 className="text-sm font-semibold">Voice & Input Settings</h3>
-                  <p className="text-[11px] text-muted-foreground">গ্লোবাল ভয়েস ও ইনপুট কন্ট্রোল</p>
-                </div>
-              </div>
-
-              {/* Toggle 1: Enable Global Voice Input */}
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
-                    <Mic className="w-4 h-4" />
-                  </span>
-                  <div>
-                    <p className="text-sm font-medium">Enable Global Voice Input</p>
-                    <p className="text-[10px] text-muted-foreground">টপ বারের মাইক ও ভয়েস কমান্ড সক্রিয়</p>
-                  </div>
-                </div>
-                <Switch
-                  checked={globalVoiceEnabled}
-                  onCheckedChange={(v) => { setGlobalVoice(v); toast.success(`Global Voice ${v ? 'চালু' : 'বন্ধ'}`) }}
-                />
-              </div>
-
-              {/* Toggle 2: Enable Tap-to-Voice / Double-Tap Keyboard */}
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
-                    <Keyboard className="w-4 h-4" />
-                  </span>
-                  <div>
-                    <p className="text-sm font-medium">Tap-to-Voice / Double-Tap Keyboard</p>
-                    <p className="text-[10px] text-muted-foreground">১-ক্লিকে মাইক, ২-ক্লিকে কীবোর্ড</p>
-                  </div>
-                </div>
-                <Switch
-                  checked={tapToVoiceEnabled}
-                  onCheckedChange={(v) => { setTapToVoice(v); toast.success(`Tap-to-Voice ${v ? 'চালু' : 'বন্ধ'}`) }}
-                />
-              </div>
-            </Card>
+            {/* Voice & Input Settings moved to Preferences tab (PRD Part 29 §1) */}
 
             <Card className="p-5 space-y-4">
               <div className="flex items-center gap-3 mb-2">
