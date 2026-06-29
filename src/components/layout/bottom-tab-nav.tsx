@@ -2,6 +2,7 @@
 
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
+import { useFetch } from '@/hooks/use-fetch'
 import { Home, BookOpen, Package, Receipt, MoreHorizontal, BarChart3, Sparkles, Settings, Bell, Store } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ViewId } from '@/lib/types'
@@ -29,6 +30,15 @@ export function BottomTabNav() {
   const { activeView, setActiveView } = useAppStore()
   const { t } = useI18n()
   const [moreOpen, setMoreOpen] = useState(false)
+  // PRD Part 30 §2: RBAC — Sales role hides Khata & More
+  const { data: settings } = useFetch<any>('/api/app-settings', [])
+  const userRole = settings?.userRole || 'owner'
+  const visibleTabs = TABS.filter(tab => {
+    if (userRole === 'sales') {
+      return tab.id !== 'khata' && tab.id !== 'more'
+    }
+    return true
+  })
 
   const handleTab = (id: ViewId | 'more') => {
     if (id === 'more') {
@@ -47,7 +57,7 @@ export function BottomTabNav() {
     <>
       <nav className="fixed bottom-0 inset-x-0 z-40 bg-background/95 backdrop-blur-xl border-t border-border pb-[env(safe-area-inset-bottom)]">
         <div className="flex items-stretch h-16 max-w-2xl mx-auto">
-          {TABS.map((tab) => {
+          {visibleTabs.map((tab) => {
             const isActive =
               tab.id === 'more'
                 ? ['reports', 'sourcing', 'ai-tools', 'settings', 'notifications'].includes(activeView)

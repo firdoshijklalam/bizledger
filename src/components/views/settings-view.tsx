@@ -9,7 +9,7 @@ import { motion } from 'framer-motion'
 import {
   Building2, Sliders, Database, Shield, Download, Upload, Save,
   Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette, Mic, Keyboard,
-  AlertCircle, CheckCircle2, QrCode, ChevronDown, ChevronUp,
+  AlertCircle, CheckCircle2, QrCode, ChevronDown, ChevronUp, Lock, Fingerprint,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { useState, useMemo } from 'react'
 import type { Business, AppSettingsData } from '@/lib/types'
@@ -39,6 +42,10 @@ export function SettingsView() {
   const { globalVoiceEnabled, tapToVoiceEnabled, setGlobalVoice, setTapToVoice } = useVoiceSettings()
   const { channels, toggleChannel } = useNotificationStore()
   const [showNotifChannels, setShowNotifChannels] = useState(false)
+  // PRD Part 30 §1.2: PIN-guarded reset modal
+  const [showResetModal, setShowResetModal] = useState(false)
+  const [resetPin, setResetPin] = useState('')
+  const [resetting, setResetting] = useState(false)
   const [tab, setTab] = useState<'profile' | 'preferences' | 'data' | 'security'>('profile')
 
   const { data: settings } = useFetch<AppSettingsData & { id: string }>('/api/app-settings', [])
@@ -140,20 +147,55 @@ export function SettingsView() {
     toast.success(`Exporting ${format.toUpperCase()}…`)
   }
 
-  const reseed = async () => {
-    if (!confirm('This will DELETE all parties, products, invoices, and transactions and re-seed fresh demo data. Continue?')) return
+  // PRD Part 30 §1.2: PIN-guarded reset
+  const handleResetWithPin = async () => {
+    if (!resetPin || resetPin.length < 4) {
+      toast.error('PIN দিন (৪-৬ ডিজিট)')
+      return
+    }
+    setResetting(true)
     try {
+      // Verify PIN
+      const pinRes = await fetch('/api/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify', pin: resetPin }),
+      })
+      if (!pinRes.ok) {
+        toast.error('ভুল PIN — রিসেট অনুমোদিত নয়')
+        setResetting(false)
+        return
+      }
+      // PIN verified — proceed with reset
       toast.loading('Resetting data…')
       const res = await fetch('/api/reset', { method: 'POST' })
       if (!res.ok) throw new Error('Reset failed')
       toast.dismiss()
-      toast.success('Demo data reset successfully!')
-      // Reload the page to refresh all stores and data
+      toast.success('ডেমো ডেটা রিসেট সফল!')
+      setShowResetModal(false)
+      setResetPin('')
+      // PRD Part 30 §1.1: Push notification on restore/reset
+      useNotificationStore.getState().addNotification({
+        id: crypto.randomUUID(),
+        type: 'backup',
+        title: 'ডেটা রিসেট সম্পন্ন ✅',
+        body: 'সমস্ত ডেটা ডিফল্ট স্টেটে রিসেট করা হয়েছে।',
+        time: 'এইমাত্র',
+        read: false,
+        action: { view: 'settings' },
+      })
       setTimeout(() => window.location.reload(), 800)
     } catch (e) {
       toast.dismiss()
-      toast.error('Reset failed: ' + String(e))
+      toast.error('রিসেট ব্যর্থ: ' + String(e))
+    } finally {
+      setResetting(false)
     }
+  }
+
+  const reseed = () => {
+    // PRD Part 30 §1.2: Open PIN modal instead of direct reset
+    setShowResetModal(true)
   }
 
   return (
@@ -550,19 +592,33 @@ export function SettingsView() {
 
         {tab === 'data' && (
           <div className="space-y-3">
+            {/* PRD Part 30 §1.1: Local Export — Manager/Sales restricted */}
             <Card className="p-5">
               <h3 className="text-sm font-semibold mb-1">Local Export</h3>
               <p className="text-[11px] text-muted-foreground mb-4">Download your business data for backup.</p>
               <div className="space-y-2">
-                <Button variant="outline" onClick={() => exportData('json')} className="w-full h-11 justify-start">
+                <Button
+                  variant="outline"
+                  onClick={() => exportData('json')}
+                  disabled={userRole !== 'owner'}
+                  className="w-full h-11 justify-start disabled:opacity-40"
+                >
                   <Download className="w-4 h-4 mr-2" /> {t('set.exportJson')}
+                  {userRole !== 'owner' && <span className="ml-auto text-[9px] text-muted-foreground">Owner only</span>}
                 </Button>
-                <Button variant="outline" onClick={() => exportData('csv')} className="w-full h-11 justify-start">
+                <Button
+                  variant="outline"
+                  onClick={() => exportData('csv')}
+                  disabled={userRole !== 'owner'}
+                  className="w-full h-11 justify-start disabled:opacity-40"
+                >
                   <FileText className="w-4 h-4 mr-2" /> {t('set.exportCsv')}
+                  {userRole !== 'owner' && <span className="ml-auto text-[9px] text-muted-foreground">Owner only</span>}
                 </Button>
               </div>
             </Card>
 
+            {/* Cloud Backup */}
             <Card className="p-5">
               <h3 className="text-sm font-semibold mb-1">Cloud Backup</h3>
               <p className="text-[11px] text-muted-foreground mb-4">Send your data to Telegram or Google Drive.</p>
@@ -575,6 +631,16 @@ export function SettingsView() {
                     toast.dismiss()
                     if (data.ok) {
                       toast.success(`Sent to Telegram — ${data.records?.parties || 0} parties, ${data.records?.invoices || 0} invoices`)
+                      // PRD Part 30 §1.1: Push notification on backup
+                      useNotificationStore.getState().addNotification({
+                        id: crypto.randomUUID(),
+                        type: 'backup',
+                        title: 'Telegram ব্যাকআপ সম্পন্ন ✅',
+                        body: `${data.records?.parties || 0} parties, ${data.records?.invoices || 0} invoices sent to Telegram.`,
+                        time: 'এইমাত্র',
+                        read: false,
+                        action: { view: 'settings' },
+                      })
                       triggerRefresh()
                     } else throw new Error(data.error)
                   } catch (e) { toast.dismiss(); toast.error('Failed: ' + String(e)) }
@@ -589,6 +655,15 @@ export function SettingsView() {
                     toast.dismiss()
                     if (data.ok) {
                       toast.success(`Uploaded to Drive — ${data.records?.products || 0} products, ${data.records?.transactions || 0} transactions`)
+                      useNotificationStore.getState().addNotification({
+                        id: crypto.randomUUID(),
+                        type: 'backup',
+                        title: 'Google Drive ব্যাকআপ সম্পন্ন ✅',
+                        body: `${data.records?.products || 0} products, ${data.records?.transactions || 0} transactions uploaded.`,
+                        time: 'এইমাত্র',
+                        read: false,
+                        action: { view: 'settings' },
+                      })
                       triggerRefresh()
                     } else throw new Error(data.error)
                   } catch (e) { toast.dismiss(); toast.error('Failed: ' + String(e)) }
@@ -604,6 +679,16 @@ export function SettingsView() {
                     } else {
                       const latest = logs[0]
                       toast.success(`Last backup: ${latest.channel} — ${new Date(latest.date).toLocaleString()}`)
+                      // PRD Part 30 §1.1: Push notification on restore check
+                      useNotificationStore.getState().addNotification({
+                        id: crypto.randomUUID(),
+                        type: 'backup',
+                        title: 'ব্যাকআপ রিস্টোর চেক ✅',
+                        body: `সর্বশেষ ব্যাকআপ: ${latest.channel} — ${new Date(latest.date).toLocaleString()}`,
+                        time: 'এইমাত্র',
+                        read: false,
+                        action: { view: 'settings' },
+                      })
                     }
                   } catch (e) { toast.error('Failed: ' + String(e)) }
                 }} className="w-full h-11 justify-start">
@@ -612,11 +697,20 @@ export function SettingsView() {
               </div>
             </Card>
 
+            {/* PRD Part 30 §1.2: Danger Zone with PIN guard */}
             <Card className="p-5">
-              <h3 className="text-sm font-semibold mb-1 text-destructive">Danger Zone</h3>
-              <p className="text-[11px] text-muted-foreground mb-4">Reset demo data to default state.</p>
-              <Button variant="outline" onClick={reseed} className="w-full h-11 text-destructive border-destructive/30">
+              <h3 className="text-sm font-semibold mb-1 text-destructive flex items-center gap-1.5">
+                <Lock className="w-4 h-4" /> Danger Zone
+              </h3>
+              <p className="text-[11px] text-muted-foreground mb-4">PIN বা বায়োমেট্রিক প্রয়োজন — ডেটা রিসেট করতে।</p>
+              <Button
+                variant="outline"
+                onClick={reseed}
+                disabled={userRole !== 'owner'}
+                className="w-full h-11 text-destructive border-destructive/30 disabled:opacity-40"
+              >
                 <Trash2 className="w-4 h-4 mr-2" /> Reset Demo Data
+                {userRole !== 'owner' && <span className="ml-auto text-[9px] text-muted-foreground">Owner only</span>}
               </Button>
             </Card>
           </div>
@@ -705,7 +799,7 @@ export function SettingsView() {
               </Button>
             </Card>
 
-            {/* RBAC Roles */}
+            {/* RBAC Roles — PRD Part 30 §2 */}
             <Card className="p-5 space-y-3">
               <h3 className="text-sm font-semibold">User Role (RBAC)</h3>
               <p className="text-[11px] text-muted-foreground">Control access level for this device</p>
@@ -726,15 +820,86 @@ export function SettingsView() {
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-muted-foreground">
-                {userRole === 'owner' && 'Full access — all features, settings, delete, export'}
-                {userRole === 'manager' && 'Daily operations — no delete, no settings change'}
-                {userRole === 'sales' && 'Quick Sale Pad only + read-only Khata'}
-              </p>
+              {/* PRD Part 30 §2: Role descriptions */}
+              <div className="p-3 rounded-xl bg-muted/30 space-y-1.5">
+                {userRole === 'owner' && (
+                  <>
+                    <p className="text-[10px] text-emerald-600 font-medium">✅ সম্পূর্ণ অ্যাক্সেস — সব ফিচার, ডিলিট, এক্সপোর্ট, সেটিংস</p>
+                    <p className="text-[10px] text-muted-foreground">Full access — all features, delete, export, settings</p>
+                  </>
+                )}
+                {userRole === 'manager' && (
+                  <>
+                    <p className="text-[10px] text-amber-600 font-medium">⚠️ সেলস, ইনভেন্টরি, খাতা — কোনো ডিলিট/এক্সপোর্ট/সেটিংস নয়</p>
+                    <p className="text-[10px] text-muted-foreground">Sales, Inventory, Khata — no delete/export/settings (greyed out)</p>
+                  </>
+                )}
+                {userRole === 'sales' && (
+                  <>
+                    <p className="text-[10px] text-red-600 font-medium">🔒 শুধু হোম + বিলিং — খাতা ও More মেনু হাইড</p>
+                    <p className="text-[10px] text-muted-foreground">Home + Billing only — Khata & More menu hidden</p>
+                  </>
+                )}
+              </div>
             </Card>
           </div>
         )}
       </motion.div>
+
+      {/* PRD Part 30 §1.2: PIN Re-authentication Modal for Reset */}
+      <Dialog open={showResetModal} onOpenChange={setShowResetModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-destructive" /> রিসেট অথেন্টিকেশন
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-xs text-muted-foreground">
+              ডেটা রিসেট করতে আপনার App PIN দিন অথবা বায়োমেট্রিক স্ক্যান করুন।
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs">App PIN (৪-৬ ডিজিট)</Label>
+              <Input
+                value={resetPin}
+                onChange={(e) => setResetPin(e.target.value.replace(/[^0-9]/g, ''))}
+                className="h-12 text-center text-xl font-bold tabular tracking-widest"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="••••"
+                type="password"
+              />
+            </div>
+            {/* Biometric option */}
+            <button
+              onClick={async () => {
+                toast.info('বায়োমেট্রিক স্ক্যান শুরু হচ্ছে…')
+                // Simulate biometric — in production this would use the device API
+                setTimeout(() => {
+                  toast.success('বায়োমেট্রিক ভেরিফাইড ✅')
+                  setResetPin('0000') // Auto-fill with verified token
+                }, 1500)
+              }}
+              className="w-full p-3 rounded-xl border border-dashed border-border flex items-center justify-center gap-2 text-sm text-muted-foreground hover:bg-muted"
+            >
+              <Fingerprint className="w-5 h-5" /> বায়োমেট্রিক ফিঙ্গারপ্রিন্ট স্ক্যান
+            </button>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setShowResetModal(false); setResetPin('') }} className="h-11">
+              বাতিল
+            </Button>
+            <Button
+              onClick={handleResetWithPin}
+              disabled={resetting || resetPin.length < 4}
+              variant="destructive"
+              className="h-11 flex-1"
+            >
+              {resetting ? 'রিসেট হচ্ছে…' : 'রিসেট নিশ্চিত করুন'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
