@@ -1,5 +1,6 @@
-// Notification store with deep-link actions (PRD v2 §13)
+// Notification store with deep-link actions (PRD v2 §13) + PRD Part 27 enhancements
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { ViewId } from '@/lib/types'
 
 export interface AppNotification {
@@ -9,7 +10,6 @@ export interface AppNotification {
   body: string
   time: string
   read: boolean
-  // Deep-link target
   action?: {
     view: ViewId
     partyId?: string
@@ -18,11 +18,22 @@ export interface AppNotification {
   }
 }
 
+// PRD Part 27 §3: Notification channel preferences
+export interface NotificationChannels {
+  lowStock: boolean
+  overduePayments: boolean
+  gradeChanges: boolean
+  backups: boolean
+}
+
 interface NotificationState {
   notifications: AppNotification[]
+  channels: NotificationChannels
   markRead: (id: string) => void
   markAllRead: () => void
+  dismiss: (id: string) => void
   addNotification: (n: AppNotification) => void
+  toggleChannel: (key: keyof NotificationChannels) => void
 }
 
 const DEMO_NOTIFS: AppNotification[] = [
@@ -64,16 +75,32 @@ const DEMO_NOTIFS: AppNotification[] = [
   },
 ]
 
-export const useNotificationStore = create<NotificationState>((set) => ({
-  notifications: DEMO_NOTIFS,
-  markRead: (id) =>
-    set((s) => ({
-      notifications: s.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
-    })),
-  markAllRead: () =>
-    set((s) => ({
-      notifications: s.notifications.map((n) => ({ ...n, read: true })),
-    })),
-  addNotification: (n) =>
-    set((s) => ({ notifications: [n, ...s.notifications] })),
-}))
+export const useNotificationStore = create<NotificationState>()(
+  persist(
+    (set) => ({
+      notifications: DEMO_NOTIFS,
+      channels: { lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
+      markRead: (id) =>
+        set((s) => ({
+          notifications: s.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
+        })),
+      markAllRead: () =>
+        set((s) => ({
+          notifications: s.notifications.map((n) => ({ ...n, read: true })),
+        })),
+      // PRD Part 27 §1: Swipe to dismiss
+      dismiss: (id) =>
+        set((s) => ({
+          notifications: s.notifications.filter((n) => n.id !== id),
+        })),
+      addNotification: (n) =>
+        set((s) => ({ notifications: [n, ...s.notifications] })),
+      // PRD Part 27 §3: Toggle channel
+      toggleChannel: (key) =>
+        set((s) => ({
+          channels: { ...s.channels, [key]: !s.channels[key] },
+        })),
+    }),
+    { name: 'bizledger-notif-channels' }
+  )
+)
