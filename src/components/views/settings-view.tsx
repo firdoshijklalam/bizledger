@@ -8,7 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import { motion } from 'framer-motion'
 import {
   Building2, Sliders, Database, Shield, Download, Upload, Save,
-  Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette,
+  Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette, Mic, Keyboard,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import { toast } from 'sonner'
 import { useState } from 'react'
 import type { Business, AppSettingsData } from '@/lib/types'
 import { PALETTES, usePaletteStore } from '@/store/palette-store'
+import { useVoiceSettings } from '@/store/voice-settings-store'
 
 const TABS = [
   { id: 'profile', labelKey: 'set.profile', icon: Building2 },
@@ -33,6 +34,7 @@ export function SettingsView() {
   const { t, language, setLanguage } = useI18n()
   const { theme, setTheme } = useTheme()
   const { activeId: activePaletteId, setPalette: setPaletteId } = usePaletteStore()
+  const { globalVoiceEnabled, tapToVoiceEnabled, setGlobalVoice, setTapToVoice } = useVoiceSettings()
   const [tab, setTab] = useState<'profile' | 'preferences' | 'data' | 'security'>('profile')
 
   const { data: settings } = useFetch<AppSettingsData & { id: string }>('/api/app-settings', [])
@@ -404,6 +406,53 @@ export function SettingsView() {
 
         {tab === 'security' && (
           <div className="space-y-4">
+            {/* PRD Part 26 §3: Voice & Input Settings */}
+            <Card className="p-5 space-y-4">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                  <Mic className="w-5 h-5 text-purple-600" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-semibold">Voice & Input Settings</h3>
+                  <p className="text-[11px] text-muted-foreground">গ্লোবাল ভয়েস ও ইনপুট কন্ট্রোল</p>
+                </div>
+              </div>
+
+              {/* Toggle 1: Enable Global Voice Input */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
+                    <Mic className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium">Enable Global Voice Input</p>
+                    <p className="text-[10px] text-muted-foreground">টপ বারের মাইক ও ভয়েস কমান্ড সক্রিয়</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={globalVoiceEnabled}
+                  onCheckedChange={(v) => { setGlobalVoice(v); toast.success(`Global Voice ${v ? 'চালু' : 'বন্ধ'}`) }}
+                />
+              </div>
+
+              {/* Toggle 2: Enable Tap-to-Voice / Double-Tap Keyboard */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
+                    <Keyboard className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium">Tap-to-Voice / Double-Tap Keyboard</p>
+                    <p className="text-[10px] text-muted-foreground">১-ক্লিকে মাইক, ২-ক্লিকে কীবোর্ড</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={tapToVoiceEnabled}
+                  onCheckedChange={(v) => { setTapToVoice(v); toast.success(`Tap-to-Voice ${v ? 'চালু' : 'বন্ধ'}`) }}
+                />
+              </div>
+            </Card>
+
             <Card className="p-5 space-y-4">
               <div className="flex items-center gap-3 mb-2">
                 <span className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">

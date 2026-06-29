@@ -20,6 +20,19 @@ import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { ProductProfile } from './inventory/product-profile'
 
+// PRD Part 26 §4: Simple Levenshtein distance for phonetic matching
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length
+  if (m === 0) return n; if (n === 0) return m
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
+  for (let i = 0; i <= m; i++) dp[i][0] = i
+  for (let j = 0; j <= n; j++) dp[0][j] = j
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+(a[i-1]===b[j-1]?0:1))
+  return dp[m][n]
+}
+
 export function InventoryView() {
   const {
     inventoryFilter, setInventoryFilter,
@@ -62,7 +75,26 @@ export function InventoryView() {
     }
     if (search.trim()) {
       const q = search.toLowerCase()
-      list = list.filter((p) => p.name.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q))
+      // PRD Part 26 §4: Phonetic search — match by sound, not just spelling
+      list = list.filter((p) => {
+        const nameMatch = p.name.toLowerCase().includes(q)
+        const skuMatch = (p.sku || '').toLowerCase().includes(q)
+        const catMatch = (p.category || '').toLowerCase().includes(q)
+        const subCatMatch = (p.subCategory || '').toLowerCase().includes(q)
+        // Phonetic: check if any part of the query sounds like the product name
+        const queryParts = q.split(/\s+/)
+        const nameParts = p.name.toLowerCase().split(/\s+/)
+        const phoneticMatch = queryParts.some(qp => {
+          if (qp.length < 2) return false
+          return nameParts.some(np => {
+            // Simple phonetic: same first 3 chars or Levenshtein distance <= 2
+            return np.startsWith(qp.substring(0, 3)) ||
+              np.includes(qp) ||
+              levenshtein(qp, np.substring(0, qp.length)) <= 2
+          })
+        })
+        return nameMatch || skuMatch || catMatch || subCatMatch || phoneticMatch
+      })
     }
     return list
   }, [products, inventoryFilter, search, activeCategory])

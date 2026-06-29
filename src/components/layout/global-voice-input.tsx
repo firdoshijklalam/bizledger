@@ -1,19 +1,23 @@
 'use client'
 
 import { useVoiceInput } from '@/hooks/use-voice-input'
+import { useVoiceSettings } from '@/store/voice-settings-store'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Mic, MicOff, X } from 'lucide-react'
+import { Mic, MicOff, X, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
+import { toast } from 'sonner'
 
 export function GlobalVoiceInput() {
   const { listening, transcript, parsed, start, stop, reset, isSupported } = useVoiceInput()
+  const { globalVoiceEnabled } = useVoiceSettings()
   const { language } = useI18n()
-  // Derive panel visibility from listening/transcript state (no effect needed)
+  const { setActiveView, setSelectedPartyId, setShowInvoiceForm } = useAppStore()
   const showPanel = listening || !!transcript
 
-  if (!isSupported) return null
+  // PRD Part 26 §3: If global voice is disabled, don't render mic button
+  if (!isSupported || !globalVoiceEnabled) return null
 
   const handleToggle = () => {
     if (listening) {
@@ -23,6 +27,35 @@ export function GlobalVoiceInput() {
       start()
     }
   }
+
+  // PRD Part 26 §1: NLP parsing — navigate based on parsed entities
+  const handleAction = () => {
+    if (!parsed) return
+    // If customer name + amount detected → navigate to billing
+    if (parsed.customerName && parsed.amount) {
+      toast.success(`${parsed.customerName} → ₹${parsed.amount} বিল তৈরি হচ্ছে…`)
+      setActiveView('billing')
+      setShowInvoiceForm(true)
+      reset()
+      return
+    }
+    // If item name → navigate to inventory
+    if (parsed.itemName) {
+      toast.success(`"${parsed.itemName}" খোঁজা হচ্ছে…`)
+      setActiveView('inventory')
+      reset()
+      return
+    }
+    // If customer name only → navigate to khata
+    if (parsed.customerName) {
+      toast.success(`${parsed.customerName} খাতায় খুঁজা হচ্ছে…`)
+      setActiveView('khata')
+      reset()
+      return
+    }
+  }
+
+  const hasActionableEntities = parsed && (parsed.customerName || parsed.itemName)
 
   return (
     <>
@@ -105,6 +138,12 @@ export function GlobalVoiceInput() {
                 </div>
                 {!parsed.amount && !parsed.customerName && !parsed.itemName && (
                   <p className="text-xs text-muted-foreground text-center py-2">No entities detected. Try: "অমিত ৫০০ টাকা জমা"</p>
+                )}
+                {/* PRD Part 26 §1: Action button to navigate based on parsed entities */}
+                {hasActionableEntities && (
+                  <Button onClick={handleAction} className="w-full h-10 text-xs">
+                    <ArrowRight className="w-3.5 h-3.5 mr-1" /> Action নিন
+                  </Button>
                 )}
               </div>
             )}
