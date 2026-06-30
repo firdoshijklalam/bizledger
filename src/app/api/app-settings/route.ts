@@ -31,6 +31,17 @@ export async function PUT(req: NextRequest) {
         pinEnabled: body.pinEnabled,
         userRole: body.userRole,
         biometricEnabled: body.biometricEnabled,
+        // PRD Part 32 §1: Biometric action gates config
+        gateOwnerSwitch: body.gateOwnerSwitch,
+        gateHighValueDiscount: body.gateHighValueDiscount,
+        gateDiscountLimit: body.gateDiscountLimit,
+        gateDataExport: body.gateDataExport,
+        gateInventoryPrice: body.gateInventoryPrice,
+        gateDangerZone: body.gateDangerZone,
+        // PRD Part 32 §2: External scanner
+        externalScannerEnabled: body.externalScannerEnabled,
+        // PRD Part 32 §3: Defaulter registry
+        defaulterRegistryEnabled: body.defaulterRegistryEnabled,
       },
       create: {
         businessId: business.id,
@@ -42,6 +53,14 @@ export async function PUT(req: NextRequest) {
         pinEnabled: body.pinEnabled ?? false,
         userRole: body.userRole ?? 'owner',
         biometricEnabled: body.biometricEnabled ?? false,
+        gateOwnerSwitch: body.gateOwnerSwitch ?? true,
+        gateHighValueDiscount: body.gateHighValueDiscount ?? true,
+        gateDiscountLimit: body.gateDiscountLimit ?? 5000,
+        gateDataExport: body.gateDataExport ?? true,
+        gateInventoryPrice: body.gateInventoryPrice ?? true,
+        gateDangerZone: body.gateDangerZone ?? true,
+        externalScannerEnabled: body.externalScannerEnabled ?? false,
+        defaulterRegistryEnabled: body.defaulterRegistryEnabled ?? true,
       },
     })
     return NextResponse.json(updated)

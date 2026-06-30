@@ -16,6 +16,8 @@ import { useEffect, useState } from 'react'
 import { Search, Plus, Trash2, ShoppingCart, Percent, IndianRupee } from 'lucide-react'
 import { FullScreenPicker } from '@/components/shared/full-screen-picker'
 import { useBillingStore } from '@/store/billing-store'
+import { useGateTrigger } from '@/store/biometric-gate-store'
+import { useFetch as useFetchHook } from '@/hooks/use-fetch'
 
 interface LineItem {
   productId?: string
@@ -124,18 +126,13 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
 
   const removeItem = (idx: number) => setItems(items.filter((_, i) => i !== idx))
 
-  const handleSave = async () => {
-    if (!customer) {
-      toast.error('Select a customer')
-      return
-    }
-    if (items.length === 0) {
-      toast.error('Add at least one item')
-      return
-    }
-    if (customer.qualityGrade === 'E') {
-      toast.warning('সতর্ক থাকুন — এই কাস্টমারের বকেয়া আছে (Grade E)')
-    }
+  // PRD Part 32 §1.2: High-Value Discount gate — fetch gate config
+  const triggerGate = useGateTrigger()
+  const { data: gateSettings } = useFetchHook<any>('/api/app-settings', [])
+  const gateHighValueDiscountEnabled = gateSettings?.gateHighValueDiscount ?? true
+  const gateDiscountLimit = gateSettings?.gateDiscountLimit ?? 5000
+
+  const performSave = async () => {
     setSaving(true)
     try {
       const invoice = await apiPost('/api/invoices', {
@@ -168,6 +165,30 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleSave = async () => {
+    if (!customer) {
+      toast.error('Select a customer')
+      return
+    }
+    if (items.length === 0) {
+      toast.error('Add at least one item')
+      return
+    }
+    if (customer.qualityGrade === 'E') {
+      toast.warning('সতর্ক থাকুন — এই কাস্টমারের বকেয়া আছে (Grade E)')
+    }
+    // PRD Part 32 §1.2: High-Value Discount gate
+    if (gateHighValueDiscountEnabled && discountAmount > gateDiscountLimit) {
+      triggerGate(
+        'high_value_discount',
+        `Discount of ${formatCurrency(discountAmount, currency)} exceeds limit of ${formatCurrency(gateDiscountLimit, currency)}`,
+        () => performSave()
+      )
+      return
+    }
+    await performSave()
   }
 
   const handleHold = () => {

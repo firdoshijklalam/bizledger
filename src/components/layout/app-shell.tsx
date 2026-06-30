@@ -21,6 +21,9 @@ import { SourcingView } from '@/components/views/sourcing-view'
 import { StaffManagementView } from '@/components/views/staff-management-view'
 import { useBackButton } from '@/hooks/use-back-button'
 import { FloatingInvoiceModal } from '@/components/shared/floating-invoice-modal'
+import { BiometricGateModal } from '@/components/shared/biometric-gate-modal'
+import { FloatingCustomerWidget } from '@/components/shared/floating-customer-widget'
+import { ExternalScannerSimulator } from '@/components/shared/external-scanner-simulator'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 
@@ -110,6 +113,10 @@ export function AppShell() {
       <BottomTabNav />
       <SearchOverlay />
       <FloatingInvoiceModal />
+      {/* PRD Part 32: Biometric ecosystem — global overlays */}
+      <BiometricGateModal />
+      <FloatingCustomerWidget />
+      <ExternalScannerSimulator />
     </div>
   )
 }
@@ -135,9 +142,9 @@ function renderView(view: string) {
     case 'sale-pad':
       return <SalePadView />
     case 'sourcing':
+      return <SourcingView />
     case 'staff':
       return <StaffManagementView />
-      return <SourcingView />
     default:
       return <DashboardView />
   }

@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
+import { useGateTrigger } from '@/store/biometric-gate-store'
 import { Package, Tag, DollarSign, Boxes, AlertTriangle, X, Plus } from 'lucide-react'
 import { BadgePercent } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
@@ -94,11 +95,13 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
     return null
   })()
 
-  const handleSave = async () => {
-    if (!name.trim()) {
-      toast.error('Enter product name')
-      return
-    }
+  // PRD Part 32 §1.4: Inventory Price Modification gate
+  const triggerGate = useGateTrigger()
+  const { data: gateSettings } = useFetch<any>('/api/app-settings', [])
+  const gateInventoryPriceEnabled = gateSettings?.gateInventoryPrice ?? true
+  const isEditingExisting = !!productId
+
+  const performSave = async () => {
     setSaving(true)
     try {
       const payload = {
@@ -137,6 +140,24 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleSave = async () => {
+    if (!name.trim()) {
+      toast.error('Enter product name')
+      return
+    }
+    // PRD Part 32 §1.4: Inventory Price Modification gate
+    // Gate only when EDITING an existing product's purchase price or bulk stock
+    if (isEditingExisting && gateInventoryPriceEnabled) {
+      triggerGate(
+        'inventory_price',
+        `Modify purchase price or stock for "${name.trim()}"`,
+        () => performSave()
+      )
+      return
+    }
+    await performSave()
   }
 
   return (

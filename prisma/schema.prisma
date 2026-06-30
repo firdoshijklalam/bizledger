@@ -33,6 +33,8 @@ model Business {
   settings     AppSettings?
   supplierCatalogItems SupplierCatalogItem[]
   purchaseOrders PurchaseOrder[]
+  fingerprints FingerprintRecord[]
+  biometricGateLogs BiometricGateLog[]
 }
 
 model Party {
@@ -52,6 +54,11 @@ model Party {
   avgDiscountPct       Float    @default(0)
   gradeLastCalculated  DateTime?
   gradeOverrideReason  String?
+  // PRD Part 32 §3.2: AI Credit Trust Score (1-5 stars)
+  creditTrustScore     Float    @default(3) // 1.0 - 5.0
+  maxCreditSuggestion  Float    @default(0) // AI-suggested max credit (₹)
+  trustScoreUpdatedAt  DateTime?
+  trustScoreReason     String?  // human-readable reason
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -61,6 +68,7 @@ model Party {
   partyNotes   PartyNote[]
   purchaseOrders PurchaseOrder[]
   supplierCatalogItems SupplierCatalogItem[] @relation("SupplierCatalogItems")
+  fingerprints FingerprintRecord[]
 
   @@index([businessId])
 }
@@ -151,6 +159,11 @@ model Invoice {
   paymentMode     String?  // cash | upi | credit | cheque
   notes           String?
   paymentLandingToken String? @unique
+  // PRD Part 32 §4.3: Auto-tagging audit trail (sub-tag on invoice)
+  collectedByName String? // e.g. "Rahim's Son" (when family member collects)
+  collectedByRole String? // family | partner | agent | primary
+  paidToName      String? // e.g. "Partner - Amit" (when paid to supplier partner)
+  paidToRole      String? // partner | agent | primary
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -209,13 +222,25 @@ model AppSettings {
   telegramEnabled      Boolean  @default(false)
   driveEnabled         Boolean  @default(false)
   biometricEnabled     Boolean  @default(false)
+  // PRD Part 32 §1: Biometric action gates config
+  gateOwnerSwitch      Boolean  @default(true)  // Owner mode re-switching
+  gateHighValueDiscount Boolean  @default(true)  // Discount above limit
+  gateDiscountLimit    Float    @default(5000)  // ₹ threshold for high-value discount gate
+  gateDataExport       Boolean  @default(true)  // JSON/CSV export or Telegram backup
+  gateInventoryPrice   Boolean  @default(true)  // Purchase price / bulk stock edit
+  gateDangerZone       Boolean  @default(true)  // Demo reset or khata delete
+  // PRD Part 32 §2: External scanner (USB OTG) enabled
+  externalScannerEnabled Boolean @default(false)
+  // PRD Part 32 §3: Merchant mesh defaulter registry
+  defaulterRegistryEnabled Boolean @default(true)
+  gateLockdownUntil    DateTime? // when 2 wrong PINs entered, locked until this time
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
-// Phase 3: Fingerprint records for customer recognition (hash only, no raw biometric)
+// Phase 3 + PRD Part 32: Fingerprint records for customer recognition (hash only, no raw biometric)
 model FingerprintRecord {
   id              String   @id @default(cuid())
   fingerprintHash String   @unique
@@ -223,10 +248,20 @@ model FingerprintRecord {
   businessId      String
   hand            String   @default("right") // right | left
   finger          String   @default("thumb") // thumb | index | middle | ring | pinky
+  // PRD Part 32 §4: Role-based fingerprint mapping
+  role            String   @default("primary") // primary | family | partner | agent
+  linkedName      String?  // e.g. "Rahim's Son", "Partner - Amit"
+  relation        String?  // son | wife | brother | partner | cashier | collection_agent
+  scannerType     String   @default("native") // native (WebAuthn) | external (USB OTG MFS100/Morpho)
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  party    Party?   @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([partyId])
   @@index([businessId])
+  @@index([role])
 }
 
 // Phase 3: Backup log for Telegram / Google Drive
@@ -240,6 +275,44 @@ model BackupLog {
   createdAt  DateTime @default(now())
 
   @@index([businessId])
+}
+
+// PRD Part 32 §3.1: Shared Defaulter Registry (cloud-synced across merchant group)
+model DefaulterRegistry {
+  id              String   @id @default(cuid())
+  fingerprintHash String?  // links to a fingerprint (if available)
+  partyName       String
+  partyPhone      String?
+  defaultAmount   Float    @default(0)
+  merchantName    String   // merchant reporting the default
+  merchantArea    String?  // local area for matching
+  status          String   @default("active") // active | resolved | disputed
+  notes           String?
+  reportedAt      DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([fingerprintHash])
+  @@index([status])
+  @@index([partyPhone])
+}
+
+// PRD Part 32 §1: Biometric gate verification log (audit trail of gate attempts)
+model BiometricGateLog {
+  id          String   @id @default(cuid())
+  businessId  String
+  gateType    String   // owner_switch | high_value_discount | data_export | inventory_price | danger_zone
+  method      String   // biometric | pin | lockdown
+  result      String   // success | failed | locked
+  staffName   String?
+  ipAddress   String?
+  metadata    String?  // JSON string of extra context
+  createdAt   DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([gateType])
+  @@index([result])
 }
 
 // PRD Part 13: B2B Sourcing — Supplier Catalog Item

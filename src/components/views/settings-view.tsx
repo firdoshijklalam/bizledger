@@ -26,6 +26,7 @@ import type { Business, AppSettingsData } from '@/lib/types'
 import { PALETTES, usePaletteStore } from '@/store/palette-store'
 import { useVoiceSettings } from '@/store/voice-settings-store'
 import { useNotificationStore } from '@/store/notification-store'
+import { useGateTrigger } from '@/store/biometric-gate-store'
 
 const TABS = [
   { id: 'profile', labelKey: 'set.profile', icon: Building2 },
@@ -41,6 +42,7 @@ export function SettingsView() {
   const { activeId: activePaletteId, setPalette: setPaletteId } = usePaletteStore()
   const { globalVoiceEnabled, tapToVoiceEnabled, setGlobalVoice, setTapToVoice } = useVoiceSettings()
   const { channels, toggleChannel } = useNotificationStore()
+  const triggerGate = useGateTrigger()
   const [showNotifChannels, setShowNotifChannels] = useState(false)
   // PRD Part 30 §1.2: PIN-guarded reset modal
   const [showResetModal, setShowResetModal] = useState(false)
@@ -71,12 +73,33 @@ export function SettingsView() {
   const [pinEnabled, setPinEnabled] = useState(false)
   const [biometricEnabled, setBiometricEnabled] = useState(false)
   const [userRole, setRole] = useState<'owner' | 'manager' | 'sales'>('owner')
+  // PRD Part 32 §1: Biometric gate config state
+  const [gateConfig, setGateConfig] = useState({
+    gateOwnerSwitch: true,
+    gateHighValueDiscount: true,
+    gateDiscountLimit: 5000,
+    gateDataExport: true,
+    gateInventoryPrice: true,
+    gateDangerZone: true,
+    externalScannerEnabled: false,
+    defaulterRegistryEnabled: true,
+  })
   const [lastSettingsId, setLastSettingsId] = useState<string | null>(null)
   if (settings && settings.id !== lastSettingsId) {
     setLastSettingsId(settings.id)
     setPinEnabled(settings.pinEnabled ?? false)
     setBiometricEnabled((settings as any).biometricEnabled ?? false)
     setRole(((settings as any).userRole as 'owner' | 'manager' | 'sales') ?? 'owner')
+    setGateConfig({
+      gateOwnerSwitch: (settings as any).gateOwnerSwitch ?? true,
+      gateHighValueDiscount: (settings as any).gateHighValueDiscount ?? true,
+      gateDiscountLimit: (settings as any).gateDiscountLimit ?? 5000,
+      gateDataExport: (settings as any).gateDataExport ?? true,
+      gateInventoryPrice: (settings as any).gateInventoryPrice ?? true,
+      gateDangerZone: (settings as any).gateDangerZone ?? true,
+      externalScannerEnabled: (settings as any).externalScannerEnabled ?? false,
+      defaulterRegistryEnabled: (settings as any).defaulterRegistryEnabled ?? true,
+    })
     setPrefs({
       notificationsEnabled: settings.notificationsEnabled,
       autoBackupEnabled: settings.autoBackupEnabled,
@@ -143,8 +166,20 @@ export function SettingsView() {
   }
 
   const exportData = async (format: 'json' | 'csv') => {
-    window.location.href = `/api/data-export?format=${format}`
-    toast.success(`Exporting ${format.toUpperCase()}…`)
+    // PRD Part 32 §1.3: Data Export Security gate
+    if (gateConfig.gateDataExport) {
+      triggerGate(
+        'data_export',
+        `Export all business data to ${format.toUpperCase()} format`,
+        () => {
+          window.location.href = `/api/data-export?format=${format}`
+          toast.success(`Exporting ${format.toUpperCase()}…`)
+        }
+      )
+    } else {
+      window.location.href = `/api/data-export?format=${format}`
+      toast.success(`Exporting ${format.toUpperCase()}…`)
+    }
   }
 
   // PRD Part 30 §1.2: PIN-guarded reset
@@ -194,8 +229,16 @@ export function SettingsView() {
   }
 
   const reseed = () => {
-    // PRD Part 30 §1.2: Open PIN modal instead of direct reset
-    setShowResetModal(true)
+    // PRD Part 32 §1.5: Danger Zone biometric gate → then PIN modal
+    if (gateConfig.gateDangerZone) {
+      triggerGate(
+        'danger_zone',
+        'Permanently reset all demo data — this cannot be undone',
+        () => setShowResetModal(true)
+      )
+    } else {
+      setShowResetModal(true)
+    }
   }
 
   return (
@@ -623,50 +666,66 @@ export function SettingsView() {
               <h3 className="text-sm font-semibold mb-1">Cloud Backup</h3>
               <p className="text-[11px] text-muted-foreground mb-4">Send your data to Telegram or Google Drive.</p>
               <div className="space-y-2">
-                <Button variant="outline" onClick={async () => {
-                  try {
-                    toast.loading('Sending to Telegram…')
-                    const res = await fetch('/api/backup/telegram', { method: 'POST' })
-                    const data = await res.json()
-                    toast.dismiss()
-                    if (data.ok) {
-                      toast.success(`Sent to Telegram — ${data.records?.parties || 0} parties, ${data.records?.invoices || 0} invoices`)
-                      // PRD Part 30 §1.1: Push notification on backup
-                      useNotificationStore.getState().addNotification({
-                        id: crypto.randomUUID(),
-                        type: 'backup',
-                        title: 'Telegram ব্যাকআপ সম্পন্ন ✅',
-                        body: `${data.records?.parties || 0} parties, ${data.records?.invoices || 0} invoices sent to Telegram.`,
-                        time: 'এইমাত্র',
-                        read: false,
-                        action: { view: 'settings' },
-                      })
-                      triggerRefresh()
-                    } else throw new Error(data.error)
-                  } catch (e) { toast.dismiss(); toast.error('Failed: ' + String(e)) }
+                <Button variant="outline" onClick={() => {
+                  // PRD Part 32 §1.3: Data Export gate for Telegram backup
+                  const doBackup = async () => {
+                    try {
+                      toast.loading('Sending to Telegram…')
+                      const res = await fetch('/api/backup/telegram', { method: 'POST' })
+                      const data = await res.json()
+                      toast.dismiss()
+                      if (data.ok) {
+                        toast.success(`Sent to Telegram — ${data.records?.parties || 0} parties, ${data.records?.invoices || 0} invoices`)
+                        // PRD Part 30 §1.1: Push notification on backup
+                        useNotificationStore.getState().addNotification({
+                          id: crypto.randomUUID(),
+                          type: 'backup',
+                          title: 'Telegram ব্যাকআপ সম্পন্ন ✅',
+                          body: `${data.records?.parties || 0} parties, ${data.records?.invoices || 0} invoices sent to Telegram.`,
+                          time: 'এইমাত্র',
+                          read: false,
+                          action: { view: 'settings' },
+                        })
+                        triggerRefresh()
+                      } else throw new Error(data.error)
+                    } catch (e) { toast.dismiss(); toast.error('Failed: ' + String(e)) }
+                  }
+                  if (gateConfig.gateDataExport) {
+                    triggerGate('data_export', 'Send business data backup to Telegram', doBackup)
+                  } else {
+                    doBackup()
+                  }
                 }} className="w-full h-11 justify-start">
                   <Upload className="w-4 h-4 mr-2" /> Send to Telegram
                 </Button>
-                <Button variant="outline" onClick={async () => {
-                  try {
-                    toast.loading('Uploading to Google Drive…')
-                    const res = await fetch('/api/backup/drive', { method: 'POST' })
-                    const data = await res.json()
-                    toast.dismiss()
-                    if (data.ok) {
-                      toast.success(`Uploaded to Drive — ${data.records?.products || 0} products, ${data.records?.transactions || 0} transactions`)
-                      useNotificationStore.getState().addNotification({
-                        id: crypto.randomUUID(),
-                        type: 'backup',
-                        title: 'Google Drive ব্যাকআপ সম্পন্ন ✅',
-                        body: `${data.records?.products || 0} products, ${data.records?.transactions || 0} transactions uploaded.`,
-                        time: 'এইমাত্র',
-                        read: false,
-                        action: { view: 'settings' },
-                      })
-                      triggerRefresh()
-                    } else throw new Error(data.error)
-                  } catch (e) { toast.dismiss(); toast.error('Failed: ' + String(e)) }
+                <Button variant="outline" onClick={() => {
+                  // PRD Part 32 §1.3: Data Export gate for Drive backup
+                  const doBackup = async () => {
+                    try {
+                      toast.loading('Uploading to Google Drive…')
+                      const res = await fetch('/api/backup/drive', { method: 'POST' })
+                      const data = await res.json()
+                      toast.dismiss()
+                      if (data.ok) {
+                        toast.success(`Uploaded to Drive — ${data.records?.products || 0} products, ${data.records?.transactions || 0} transactions`)
+                        useNotificationStore.getState().addNotification({
+                          id: crypto.randomUUID(),
+                          type: 'backup',
+                          title: 'Google Drive ব্যাকআপ সম্পন্ন ✅',
+                          body: `${data.records?.products || 0} products, ${data.records?.transactions || 0} transactions uploaded.`,
+                          time: 'এইমাত্র',
+                          read: false,
+                          action: { view: 'settings' },
+                        })
+                        triggerRefresh()
+                      } else throw new Error(data.error)
+                    } catch (e) { toast.dismiss(); toast.error('Failed: ' + String(e)) }
+                  }
+                  if (gateConfig.gateDataExport) {
+                    triggerGate('data_export', 'Upload business data backup to Google Drive', doBackup)
+                  } else {
+                    doBackup()
+                  }
                 }} className="w-full h-11 justify-start">
                   <Upload className="w-4 h-4 mr-2" /> Backup to Google Drive
                 </Button>
@@ -808,6 +867,20 @@ export function SettingsView() {
                   <button
                     key={role}
                     onClick={async () => {
+                      // PRD Part 32 §1.1: Owner Mode Re-switching gate
+                      // Only gate when switching TO owner from a non-owner role
+                      if (role === 'owner' && userRole !== 'owner' && gateConfig.gateOwnerSwitch) {
+                        triggerGate(
+                          'owner_switch',
+                          `Switch from ${userRole} mode back to Owner mode`,
+                          async () => {
+                            setRole('owner')
+                            await apiPut('/api/app-settings', { userRole: 'owner' })
+                            toast.success('Role set: owner')
+                          }
+                        )
+                        return
+                      }
                       setRole(role)
                       await apiPut('/api/app-settings', { userRole: role })
                       toast.success(`Role set: ${role}`)
@@ -840,6 +913,110 @@ export function SettingsView() {
                     <p className="text-[10px] text-muted-foreground">Home + Billing only — Khata & More menu hidden</p>
                   </>
                 )}
+              </div>
+            </Card>
+
+            {/* PRD Part 32 §1: Biometric Action Gates config */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Fingerprint className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-sm font-semibold">Biometric Action Gates</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Mandatory fingerprint/PIN verification at 5 critical action gates. 2 wrong attempts → 2-min lockdown + Telegram alert.
+              </p>
+              <div className="space-y-2">
+                {[
+                  { key: 'gateOwnerSwitch', label: 'Owner Mode Re-switching', desc: 'Switching back from Manager/Sales to Owner', icon: Shield },
+                  { key: 'gateHighValueDiscount', label: 'High-Value Discount', desc: 'Discount above the limit (₹)', icon: Fingerprint },
+                  { key: 'gateDataExport', label: 'Data Export Security', desc: 'JSON/CSV export or Telegram backup', icon: Download },
+                  { key: 'gateInventoryPrice', label: 'Inventory Price Modification', desc: 'Edit purchase price or bulk stock', icon: AlertCircle },
+                  { key: 'gateDangerZone', label: 'Danger Zone Authentication', desc: 'Demo data reset or khata delete', icon: Lock },
+                ].map((g) => (
+                  <div key={g.key} className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-muted/30">
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                      <g.icon className="w-3.5 h-3.5 text-emerald-600 mt-0.5 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium">{g.label}</p>
+                        <p className="text-[10px] text-muted-foreground">{g.desc}</p>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={(gateConfig as any)[g.key]}
+                      onCheckedChange={async (checked) => {
+                        const newConfig = { ...gateConfig, [g.key]: checked }
+                        setGateConfig(newConfig)
+                        await apiPut('/api/app-settings', { [g.key]: checked })
+                        toast.success(`${g.label}: ${checked ? 'Enabled' : 'Disabled'}`)
+                      }}
+                    />
+                  </div>
+                ))}
+                {/* Discount limit input */}
+                <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-muted/30">
+                  <div className="flex items-start gap-2 flex-1 min-w-0">
+                    <IndianRupee className="w-3.5 h-3.5 text-emerald-600 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium">High-Value Discount Limit (₹)</p>
+                      <p className="text-[10px] text-muted-foreground">Discounts above this trigger the gate</p>
+                    </div>
+                  </div>
+                  <Input
+                    type="number"
+                    value={gateConfig.gateDiscountLimit}
+                    onChange={(e) => setGateConfig({ ...gateConfig, gateDiscountLimit: Number(e.target.value) })}
+                    onBlur={async () => {
+                      await apiPut('/api/app-settings', { gateDiscountLimit: gateConfig.gateDiscountLimit })
+                      toast.success('Discount limit updated')
+                    }}
+                    className="w-24 h-9 text-xs"
+                    inputMode="numeric"
+                  />
+                </div>
+              </div>
+            </Card>
+
+            {/* PRD Part 32 §2 & §3: External Scanner + Defaulter Registry */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Fingerprint className="w-4 h-4 text-purple-600" />
+                <h3 className="text-sm font-semibold">External Biometric & Merchant Mesh</h3>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-muted/30">
+                  <div className="flex items-start gap-2 flex-1">
+                    <Fingerprint className="w-3.5 h-3.5 text-purple-600 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium">External USB OTG Scanner</p>
+                      <p className="text-[10px] text-muted-foreground">Mantra MFS100 / Morpho SDK support</p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={gateConfig.externalScannerEnabled}
+                    onCheckedChange={async (checked) => {
+                      setGateConfig({ ...gateConfig, externalScannerEnabled: checked })
+                      await apiPut('/api/app-settings', { externalScannerEnabled: checked })
+                      toast.success(`External scanner: ${checked ? 'Enabled' : 'Disabled'}`)
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-muted/30">
+                  <div className="flex items-start gap-2 flex-1">
+                    <Shield className="w-3.5 h-3.5 text-red-600 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium">Merchant Mesh Defaulter Registry</p>
+                      <p className="text-[10px] text-muted-foreground">Shared blacklist across local merchant group</p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={gateConfig.defaulterRegistryEnabled}
+                    onCheckedChange={async (checked) => {
+                      setGateConfig({ ...gateConfig, defaulterRegistryEnabled: checked })
+                      await apiPut('/api/app-settings', { defaulterRegistryEnabled: checked })
+                      toast.success(`Defaulter registry: ${checked ? 'Enabled' : 'Disabled'}`)
+                    }}
+                  />
+                </div>
               </div>
             </Card>
           </div>
