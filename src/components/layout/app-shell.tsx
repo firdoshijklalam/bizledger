@@ -18,6 +18,7 @@ import { AiToolsView } from '@/components/views/ai-tools-view'
 import { PaymentLandingPage } from '@/components/views/payment-landing-page'
 import { SalePadView } from '@/components/views/sale-pad-view'
 import { SourcingView } from '@/components/views/sourcing-view'
+import { StaffManagementView } from '@/components/views/staff-management-view'
 import { useBackButton } from '@/hooks/use-back-button'
 import { FloatingInvoiceModal } from '@/components/shared/floating-invoice-modal'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -134,6 +135,8 @@ function renderView(view: string) {
     case 'sale-pad':
       return <SalePadView />
     case 'sourcing':
+    case 'staff':
+      return <StaffManagementView />
       return <SourcingView />
     default:
       return <DashboardView />

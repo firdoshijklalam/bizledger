@@ -309,3 +309,55 @@ model PurchaseOrderItem {
 
   @@index([purchaseOrderId])
 }
+
+// PRD Part 31: Staff Management & Multi-Business
+model Staff {
+  id            String   @id @default(cuid())
+  businessId    String
+  name          String
+  phone         String?
+  role          String   @default("sales") // manager | sales
+  staffId       String   @unique // 6-digit unique ID
+  qrToken       String   @unique // QR linking token
+  isActive      Boolean  @default(true)
+  // Permission checkboxes (PRD Part 31 §2)
+  permBilling       Boolean @default(true)
+  permInventory     Boolean @default(false)
+  permKhata         Boolean @default(false)
+  permReports       Boolean @default(false)
+  permSourcing      Boolean @default(false)
+  permSettings      Boolean @default(false)
+  permExport        Boolean @default(false)
+  permDelete        Boolean @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([businessId])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  businessId  String
+  staffId     String?
+  staffName   String
+  action      String   // create_invoice | modify_invoice | delete_invoice | khata_entry | restock | settings_change
+  entityType  String   // invoice | party | product | transaction | settings
+  entityId    String?
+  description String
+  createdAt   DateTime @default(now())
+
+  @@index([businessId])
+  @@index([staffId])
+}
+
+model BusinessLink {
+  id          String   @id @default(cuid())
+  staffPhone  String
+  businessId  String
+  businessName String
+  role        String   @default("sales")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([staffPhone])
+}
