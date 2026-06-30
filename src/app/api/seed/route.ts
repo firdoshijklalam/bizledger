@@ -22,6 +22,13 @@ export async function POST() {
         pan: 'ABCDE1234F',
         upiId: 'sharmatrading@upi',
         currency: 'INR',
+        // PRD Part 33: marketplace fields
+        storeSlug: 'sharma-trading-co',
+        deliveryRadiusKm: 5,
+        latitude: 22.5958,
+        longitude: 88.2636,
+        subscriptionPlan: 'trial',
+        trialEndsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30-day trial
       },
     })
 

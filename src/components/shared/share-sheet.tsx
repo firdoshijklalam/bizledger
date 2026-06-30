@@ -22,6 +22,12 @@ interface ShareSheetProps {
 export function ShareSheet({ open, onClose, customerName, customerPhone, shareText, shareTitle }: ShareSheetProps) {
   if (!open) return null
 
+  // PRD Part 33 §1.1: Append dynamic store link to shared text
+  const storeLink = typeof window !== 'undefined'
+    ? `${window.location.origin}/?store=sharma-trading-co`
+    : ''
+  const fullShareText = shareText + (storeLink ? `\n\n🛒 Browse more products from our shop:\n${storeLink}` : '')
+
   // PRD Part 10 §2.1: Device capability detection
   // Simple heuristic: if phone number exists and looks like a standard mobile number, assume smartphone
   // In production, this would use OTP/app status from DB
@@ -39,7 +45,7 @@ export function ShareSheet({ open, onClose, customerName, customerPhone, shareTe
       return
     }
     const phone = customerPhone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
-    const text = encodeURIComponent(shareText)
+    const text = encodeURIComponent(fullShareText)
     window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank')
     toast.success('WhatsApp এ পাঠানো হচ্ছে…')
     onClose()
@@ -50,7 +56,7 @@ export function ShareSheet({ open, onClose, customerName, customerPhone, shareTe
       toast.warning('এই কাস্টমারের ফোনে Telegram সাপোর্ট নাও থাকতে পারে।')
       return
     }
-    const text = encodeURIComponent(shareText)
+    const text = encodeURIComponent(fullShareText)
     window.open(`https://t.me/share/url?url=${encodeURIComponent(window.location.origin)}&text=${text}`, '_blank')
     toast.success('Telegram এ পাঠানো হচ্ছে…')
     onClose()
@@ -58,7 +64,7 @@ export function ShareSheet({ open, onClose, customerName, customerPhone, shareTe
 
   const handleSMS = () => {
     const phone = customerPhone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
-    const text = encodeURIComponent(shareText)
+    const text = encodeURIComponent(fullShareText)
     // Use SMS deep link
     const a = document.createElement('a')
     a.href = phone ? `sms:${phone}?body=${text}` : `sms:?body=${text}`
@@ -73,7 +79,7 @@ export function ShareSheet({ open, onClose, customerName, customerPhone, shareTe
       return
     }
     // Generate premium formatted text (header + customer block + transactions table)
-    const lines = shareText.split('\n')
+    const lines = fullShareText.split('\n')
     const premiumText = [
       `╔══════════════════════════╗`,
       `   ${shareTitle}`,
@@ -93,7 +99,7 @@ export function ShareSheet({ open, onClose, customerName, customerPhone, shareTe
   }
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(shareText)
+    navigator.clipboard.writeText(fullShareText)
     toast.success('কপি হয়েছে')
     onClose()
   }

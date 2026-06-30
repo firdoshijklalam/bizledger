@@ -1,0 +1,938 @@
+     1→'use client'
+     2→
+     3→import { useEffect, useMemo, useState } from 'react'
+     4→import { motion, AnimatePresence } from 'framer-motion'
+     5→import {
+     6→  ShoppingCart, MapPin, Search, Plus, Minus, Trash2, X, Package,
+     7→  Store, Smartphone, ChevronRight, CheckCircle2, AlertTriangle,
+     8→  ShoppingBag, Phone, Navigation, Home, Sparkles,
+     9→} from 'lucide-react'
+    10→import { useFetch, apiPost } from '@/hooks/use-fetch'
+    11→import { formatCurrency, formatDate } from '@/lib/utils'
+    12→import { toast } from 'sonner'
+    13→import { Button } from '@/components/ui/button'
+    14→import { Input } from '@/components/ui/input'
+    15→import { Textarea } from '@/components/ui/textarea'
+    16→import { Badge } from '@/components/ui/badge'
+    17→import { StoreOrderConfirmation } from './store-order-confirmation'
+    18→
+    19→interface StoreCatalogViewProps {
+    20→  slug: string
+    21→  invoiceToken?: string
+    22→}
+    23→
+    24→interface StoreProduct {
+    25→  id: string
+    26→  name: string
+    27→  sku: string | null
+    28→  category: string | null
+    29→  unit: string | null
+    30→  salePrice: number
+    31→  mrp: number | null
+    32→  wholesalePrice: number | null
+    33→  gstRate: number | null
+    34→  stock: number
+    35→  retailEnabled: boolean
+    36→  retailUnit: string | null
+    37→  retailSalePrice: number | null
+    38→  subCategory: string | null
+    39→}
+    40→
+    41→interface StoreData {
+    42→  id: string
+    43→  name: string
+    44→  ownerName: string | null
+    45→  phone: string | null
+    46→  address: string | null
+    47→  state: string | null
+    48→  logoUrl: string | null
+    49→  upiId: string | null
+    50→  currency: string
+    51→  deliveryRadiusKm: number | null
+    52→  latitude: number | null
+    53→  longitude: number | null
+    54→  products: StoreProduct[]
+    55→}
+    56→
+    57→interface InvoiceData {
+    58→  invoice: {
+    59→    id: string
+    60→    invoiceNumber: string
+    61→    grandTotal: number
+    62→    amountPaid: number
+    63→    amountDue: number
+    64→    status: string
+    65→    createdAt: string
+    66→    items: Array<{ id: string; name: string; quantity: number; total: number }>
+    67→  }
+    68→  party: { name: string; phone: string | null } | null
+    69→  business: {
+    70→    name: string
+    71→    phone: string | null
+    72→    upiId: string | null
+    73→    logoUrl: string | null
+    74→    address: string | null
+    75→    currency: string
+    76→  }
+    77→}
+    78→
+    79→interface CartItem {
+    80→  productId: string
+    81→  name: string
+    82→  unit: string | null
+    83→  unitPrice: number
+    84→  quantity: number
+    85→  total: number
+    86→}
+    87→
+    88→const LOW_STOCK_THRESHOLD = 10
+    89→
+    90→const AVATAR_GRADIENTS = [
+    91→  'from-emerald-500 to-teal-600',
+    92→  'from-rose-500 to-pink-600',
+    93→  'from-amber-500 to-orange-600',
+    94→  'from-violet-500 to-purple-600',
+    95→  'from-cyan-500 to-blue-600',
+    96→  'from-lime-500 to-green-600',
+    97→]
+    98→
+    99→function gradientFor(seed: string): string {
+   100→  let hash = 0
+   101→  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0
+   102→  return AVATAR_GRADIENTS[Math.abs(hash) % AVATAR_GRADIENTS.length]
+   103→}
+   104→
+   105→export function StoreCatalogView({ slug, invoiceToken }: StoreCatalogViewProps) {
+   106→  const { data: store, loading: storeLoading } = useFetch<StoreData>(`/api/store/${slug}`, [slug])
+   107→  const { data: invoiceData } = useFetch<InvoiceData>(
+   108→    invoiceToken ? `/api/payment?token=${invoiceToken}` : null,
+   109→    [invoiceToken]
+   110→  )
+   111→
+   112→  const [cart, setCart] = useState<CartItem[]>([])
+   113→  const [search, setSearch] = useState('')
+   114→  const [activeCategory, setActiveCategory] = useState<string>('All')
+   115→  const [cartOpen, setCartOpen] = useState(false)
+   116→  const [customerName, setCustomerName] = useState('')
+   117→  const [customerPhone, setCustomerPhone] = useState('')
+   118→  const [customerAddress, setCustomerAddress] = useState('')
+   119→  const [deliveryCharge, setDeliveryCharge] = useState('0')
+   120→  const [placing, setPlacing] = useState(false)
+   121→  const [placedOrderId, setPlacedOrderId] = useState<string | null>(null)
+   122→
+   123→  const currency = store?.currency || 'INR'
+   124→
+   125→  // Reset everything when "Place Another Order" is tapped on confirmation screen.
+   126→  const resetOrder = () => {
+   127→    setCart([])
+   128→    setCustomerName('')
+   129→    setCustomerPhone('')
+   130→    setCustomerAddress('')
+   131→    setDeliveryCharge('0')
+   132→    setPlacedOrderId(null)
+   133→    setCartOpen(false)
+   134→  }
+   135→
+   136→  // ---------- Derived product list ----------
+   137→  const categories = useMemo(() => {
+   138→    if (!store?.products) return ['All']
+   139→    const cats = Array.from(
+   140→      new Set(store.products.map((p) => p.category).filter(Boolean))
+   141→    ) as string[]
+   142→    return ['All', ...cats.sort()]
+   143→  }, [store])
+   144→
+   145→  const filteredProducts = useMemo(() => {
+   146→    if (!store?.products) return []
+   147→    let list = store.products
+   148→    if (activeCategory !== 'All') {
+   149→      list = list.filter((p) => p.category === activeCategory)
+   150→    }
+   151→    const q = search.trim().toLowerCase()
+   152→    if (q) {
+   153→      list = list.filter(
+   154→        (p) =>
+   155→          p.name.toLowerCase().includes(q) ||
+   156→          (p.subCategory?.toLowerCase().includes(q) ?? false) ||
+   157→          (p.sku?.toLowerCase().includes(q) ?? false)
+   158→      )
+   159→    }
+   160→    return list
+   161→  }, [store, activeCategory, search])
+   162→
+   163→  // ---------- Cart operations ----------
+   164→  const addToCart = (p: StoreProduct) => {
+   165→    setCart((prev) => {
+   166→      const existing = prev.find((it) => it.productId === p.id)
+   167→      const price = p.salePrice
+   168→      if (existing) {
+   169→        return prev.map((it) =>
+   170→          it.productId === p.id
+   171→            ? { ...it, quantity: it.quantity + 1, total: (it.quantity + 1) * it.unitPrice }
+   172→            : it
+   173→        )
+   174→      }
+   175→      return [
+   176→        ...prev,
+   177→        {
+   178→          productId: p.id,
+   179→          name: p.name,
+   180→          unit: p.unit,
+   181→          unitPrice: price,
+   182→          quantity: 1,
+   183→          total: price,
+   184→        },
+   185→      ]
+   186→    })
+   187→    toast.success(`${p.name} added to cart`)
+   188→  }
+   189→
+   190→  const updateQty = (productId: string, delta: number) => {
+   191→    setCart((prev) =>
+   192→      prev
+   193→        .map((it) => {
+   194→          if (it.productId !== productId) return it
+   195→          const nextQty = it.quantity + delta
+   196→          return { ...it, quantity: nextQty, total: nextQty * it.unitPrice }
+   197→        })
+   198→        .filter((it) => it.quantity > 0)
+   199→    )
+   200→  }
+   201→
+   202→  const removeFromCart = (productId: string) => {
+   203→    setCart((prev) => prev.filter((it) => it.productId !== productId))
+   204→  }
+   205→
+   206→  const cartCount = cart.reduce((sum, it) => sum + it.quantity, 0)
+   207→  const subtotal = cart.reduce((sum, it) => sum + it.total, 0)
+   208→  const delivery = Number(deliveryCharge) || 0
+   209→  const grandTotal = subtotal + delivery
+   210→
+   211→  // ---------- Place order ----------
+   212→  const handlePlaceOrder = async () => {
+   213→    if (!customerName.trim()) {
+   214→      toast.error('Please enter your name')
+   215→      return
+   216→    }
+   217→    if (cart.length === 0) {
+   218→      toast.error('Your cart is empty')
+   219→      return
+   220→    }
+   221→    setPlacing(true)
+   222→    try {
+   223→      const body = {
+   224→        customerName: customerName.trim(),
+   225→        customerPhone: customerPhone.trim() || undefined,
+   226→        customerAddress: customerAddress.trim() || undefined,
+   227→        items: cart.map((it) => ({
+   228→          productId: it.productId,
+   229→          name: it.name,
+   230→          quantity: it.quantity,
+   231→          unitPrice: it.unitPrice,
+   232→          total: it.total,
+   233→        })),
+   234→        deliveryCharge: delivery,
+   235→        source: 'catalog',
+   236→      }
+   237→      const order = await apiPost(`/api/store/${slug}/order`, body)
+   238→      setPlacedOrderId(order.id)
+   239→      setCartOpen(false)
+   240→      toast.success('Order placed successfully!')
+   241→    } catch (e: any) {
+   242→      toast.error(e?.message || 'Failed to place order. Please try again.')
+   243→    } finally {
+   244→      setPlacing(false)
+   245→    }
+   246→  }
+   247→
+   248→  // ---------- Add to Home Screen hint ----------
+   249→  const showAddToHomeScreenHint = () => {
+   250→    const ua = navigator.userAgent
+   251→    const isIOS = /iPad|iPhone|iPod/.test(ua)
+   252→    const isAndroid = /Android/.test(ua)
+   253→    if (isIOS) {
+   254→      toast.info(
+   255→        'Add to Home Screen: tap the Share icon in Safari, then "Add to Home Screen".',
+   256→        { duration: 6000 }
+   257→      )
+   258→    } else if (isAndroid) {
+   259→      toast.info(
+   260→        'Add to Home Screen: tap the ⋮ menu in Chrome, then "Add to Home screen".',
+   261→        { duration: 6000 }
+   262→      )
+   263→    } else {
+   264→      toast.info('Add to Home Screen: drag the URL to your desktop/taskbar.', {
+   265→        duration: 6000,
+   266→      })
+   267→    }
+   268→  }
+   269→
+   270→  // ---------- Pay Now (UPI deep link) ----------
+   271→  const handlePayNow = () => {
+   272→    if (!invoiceData || !invoiceData.business.upiId) return
+   273→    const amount = invoiceData.invoice.amountDue
+   274→    const pn = encodeURIComponent(invoiceData.business.name)
+   275→    const tn = encodeURIComponent(`Invoice ${invoiceData.invoice.invoiceNumber}`)
+   276→    window.location.href = `upi://pay?pa=${invoiceData.business.upiId}&pn=${pn}&am=${amount}&tn=${tn}`
+   277→  }
+   278→
+   279→  // ---------- Confirmation screen ----------
+   280→  if (placedOrderId && store) {
+   281→    return (
+   282→      <StoreOrderConfirmation
+   283→        orderId={placedOrderId}
+   284→        storeName={store.name}
+   285→        onPlaceAnother={resetOrder}
+   286→      />
+   287→    )
+   288→  }
+   289→
+   290→  // ---------- Loading ----------
+   291→  if (storeLoading) {
+   292→    return (
+   293→      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-background to-muted/30">
+   294→        <div className="w-12 h-12 rounded-2xl bg-emerald-600 flex items-center justify-center mb-3 animate-pulse">
+   295→          <Store className="w-6 h-6 text-white" />
+   296→        </div>
+   297→        <div className="w-8 h-8 border-[3px] border-emerald-600 border-t-transparent rounded-full animate-spin" />
+   298→        <p className="text-sm text-muted-foreground mt-3">Loading store…</p>
+   299→      </div>
+   300→    )
+   301→  }
+   302→
+   303→  // ---------- Not found ----------
+   304→  if (!store) {
+   305→    return (
+   306→      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-background to-muted/30 px-6 text-center">
+   307→        <div className="w-16 h-16 rounded-2xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center mb-4">
+   308→          <AlertTriangle className="w-8 h-8 text-amber-600" />
+   309→        </div>
+   310→        <h1 className="text-lg font-bold">Store not found</h1>
+   311→        <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+   312→          The store you're looking for doesn't exist or has been removed.
+   313→        </p>
+   314→      </div>
+   315→    )
+   316→  }
+   317→
+   318→  return (
+   319→    <div className="min-h-screen bg-gradient-to-b from-background to-muted/30 flex flex-col">
+   320→      {/* ============================ STICKY HEADER ============================ */}
+   321→      <header className="sticky top-0 z-30 bg-card/80 backdrop-blur-xl border-b border-border">
+   322→        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+   323→          {/* Logo / Avatar */}
+   324→          {store.logoUrl ? (
+   325→            <img
+   326→              src={store.logoUrl}
+   327→              alt={store.name}
+   328→              className="w-11 h-11 rounded-xl object-cover ring-1 ring-border"
+   329→            />
+   330→          ) : (
+   331→            <div
+   332→              className={`w-11 h-11 rounded-xl bg-gradient-to-br ${gradientFor(
+   333→                store.id
+   334→              )} flex items-center justify-center text-white font-bold text-lg shadow-sm`}
+   335→            >
+   336→              {store.name.charAt(0).toUpperCase()}
+   337→            </div>
+   338→          )}
+   339→
+   340→          {/* Name + owner + address */}
+   341→          <div className="flex-1 min-w-0">
+   342→            <h1 className="font-bold text-foreground leading-tight truncate">{store.name}</h1>
+   343→            {store.ownerName && (
+   344→              <p className="text-xs text-muted-foreground truncate">
+   345→                by {store.ownerName}
+   346→              </p>
+   347→            )}
+   348→            {store.address && (
+   349→              <p className="text-[11px] text-muted-foreground/80 flex items-center gap-0.5 mt-0.5 truncate">
+   350→                <MapPin className="w-3 h-3 shrink-0" />
+   351→                <span className="truncate">{store.address}</span>
+   352→              </p>
+   353→            )}
+   354→          </div>
+   355→
+   356→          {/* Cart button with badge */}
+   357→          <button
+   358→            onClick={() => setCartOpen(true)}
+   359→            className="relative w-11 h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-sm active:scale-95 transition-transform"
+   360→            aria-label={`Cart with ${cartCount} items`}
+   361→          >
+   362→            <ShoppingCart className="w-5 h-5" />
+   363→            {cartCount > 0 && (
+   364→              <motion.span
+   365→                key={cartCount}
+   366→                initial={{ scale: 0 }}
+   367→                animate={{ scale: 1 }}
+   368→                transition={{ type: 'spring', stiffness: 500, damping: 15 }}
+   369→                className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-card"
+   370→              >
+   371→                {cartCount}
+   372→              </motion.span>
+   373→            )}
+   374→          </button>
+   375→        </div>
+   376→
+   377→        {/* Delivery radius badge bar */}
+   378→        {store.deliveryRadiusKm && store.deliveryRadiusKm > 0 && (
+   379→          <div className="max-w-2xl mx-auto px-4 pb-2">
+   380→            <Badge
+   381→              variant="secondary"
+   382→              className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/50 gap-1"
+   383→            >
+   384→              <Navigation className="w-3 h-3" />
+   385→              Delivers within {store.deliveryRadiusKm}km
+   386→            </Badge>
+   387→          </div>
+   388→        )}
+   389→      </header>
+   390→
+   391→      {/* ============================ MAIN CONTENT ============================ */}
+   392→      <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-4 space-y-6">
+   393→        {/* ---------- Invoice section (optional) ---------- */}
+   394→        {invoiceToken && invoiceData && (
+   395→          <motion.section
+   396→            initial={{ opacity: 0, y: 10 }}
+   397→            animate={{ opacity: 1, y: 0 }}
+   398→            className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-5 shadow-sm"
+   399→          >
+   400→            <div className="flex items-center justify-between mb-3">
+   401→              <div className="flex items-center gap-2">
+   402→                <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center">
+   403→                  <Package className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+   404→                </div>
+   405→                <div>
+   406→                  <h2 className="font-bold text-foreground text-base leading-tight">
+   407→                    Invoice #{invoiceData.invoice.invoiceNumber}
+   408→                  </h2>
+   409→                  <p className="text-[11px] text-muted-foreground">
+   410→                    {formatDate(invoiceData.invoice.createdAt)}
+   411→                  </p>
+   412→                </div>
+   413→              </div>
+   414→              <Badge
+   415→                className={
+   416→                  invoiceData.invoice.status === 'paid'
+   417→                    ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/50'
+   418→                    : 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/50'
+   419→                }
+   420→                variant="outline"
+   421→              >
+   422→                {invoiceData.invoice.status === 'paid' ? (
+   423→                  <CheckCircle2 className="w-3 h-3" />
+   424→                ) : (
+   425→                  <AlertTriangle className="w-3 h-3" />
+   426→                )}
+   427→                {invoiceData.invoice.status.toUpperCase()}
+   428→              </Badge>
+   429→            </div>
+   430→
+   431→            {/* Item list */}
+   432→            <div className="space-y-1.5 mb-3">
+   433→              {invoiceData.invoice.items.map((it) => (
+   434→                <div key={it.id} className="flex justify-between text-sm">
+   435→                  <span className="flex-1 truncate text-muted-foreground">
+   436→                    {it.name} × {it.quantity}
+   437→                  </span>
+   438→                  <span className="tabular font-medium text-foreground">
+   439→                    {formatCurrency(it.total, invoiceData.business.currency)}
+   440→                  </span>
+   441→                </div>
+   442→              ))}
+   443→            </div>
+   444→
+   445→            {/* Totals */}
+   446→            <div className="border-t border-border pt-3 space-y-1 text-sm">
+   447→              <div className="flex justify-between text-muted-foreground">
+   448→                <span>Grand Total</span>
+   449→                <span className="tabular">
+   450→                  {formatCurrency(
+   451→                    invoiceData.invoice.grandTotal,
+   452→                    invoiceData.business.currency
+   453→                  )}
+   454→                </span>
+   455→              </div>
+   456→              {invoiceData.invoice.amountPaid > 0 && (
+   457→                <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
+   458→                  <span>Already Paid</span>
+   459→                  <span className="tabular">
+   460→                    {formatCurrency(
+   461→                      invoiceData.invoice.amountPaid,
+   462→                      invoiceData.business.currency
+   463→                    )}
+   464→                  </span>
+   465→                </div>
+   466→              )}
+   467→              <div className="flex justify-between font-bold text-foreground text-base pt-1">
+   468→                <span>Amount Due</span>
+   469→                <span className="tabular">
+   470→                  {formatCurrency(
+   471→                    invoiceData.invoice.amountDue,
+   472→                    invoiceData.business.currency
+   473→                  )}
+   474→                </span>
+   475→              </div>
+   476→            </div>
+   477→
+   478→            {/* Pay Now button */}
+   479→            {invoiceData.invoice.amountDue > 0 && invoiceData.business.upiId && (
+   480→              <Button
+   481→                onClick={handlePayNow}
+   482→                className="w-full mt-4 h-12 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 dark:from-emerald-600 dark:to-emerald-800 text-white font-semibold shadow-lg shadow-emerald-600/20 hover:shadow-xl hover:shadow-emerald-600/30"
+   483→              >
+   484→                <Smartphone className="w-4 h-4" />
+   485→                Pay {formatCurrency(invoiceData.invoice.amountDue, invoiceData.business.currency)} via UPI
+   486→              </Button>
+   487→            )}
+   488→
+   489→            {/* Divider */}
+   490→            <div className="flex items-center gap-3 my-1 mt-5">
+   491→              <div className="flex-1 h-px bg-border" />
+   492→              <span className="text-xs text-muted-foreground font-medium whitespace-nowrap">
+   493→                👇 More Products from Our Shop
+   494→              </span>
+   495→              <div className="flex-1 h-px bg-border" />
+   496→            </div>
+   497→          </motion.section>
+   498→        )}
+   499→
+   500→        {/* ---------- Product catalog ---------- */}
+   501→        <section>
+   502→          <div className="flex items-baseline justify-between mb-3">
+   503→            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+   504→              <ShoppingBag className="w-4 h-4 text-emerald-600" />
+   505→              Our Products
+   506→            </h2>
+   507→            <span className="text-xs text-muted-foreground">
+   508→              {store.products.length} {store.products.length === 1 ? 'item' : 'items'}
+   509→            </span>
+   510→          </div>
+   511→
+   512→          {/* Search */}
+   513→          <div className="relative mb-3">
+   514→            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+   515→            <Input
+   516→              value={search}
+   517→              onChange={(e) => setSearch(e.target.value)}
+   518→              placeholder="Search products…"
+   519→              className="pl-9 h-11 rounded-xl bg-card border-border"
+   520→            />
+   521→          </div>
+   522→
+   523→          {/* Category chips */}
+   524→          {categories.length > 1 && (
+   525→            <div className="flex gap-2 overflow-x-auto pb-2 mb-3 -mx-4 px-4 no-scrollbar">
+   526→              {categories.map((cat) => (
+   527→                <button
+   528→                  key={cat}
+   529→                  onClick={() => setActiveCategory(cat)}
+   530→                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all active:scale-95 ${
+   531→                    activeCategory === cat
+   532→                      ? 'bg-emerald-600 text-white shadow-sm'
+   533→                      : 'bg-card border border-border text-muted-foreground hover:bg-muted'
+   534→                  }`}
+   535→                >
+   536→                  {cat}
+   537→                </button>
+   538→              ))}
+   539→            </div>
+   540→          )}
+   541→
+   542→          {/* Product grid */}
+   543→          {filteredProducts.length === 0 ? (
+   544→            <div className="flex flex-col items-center justify-center text-center py-16 px-4">
+   545→              <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-4">
+   546→                <Package className="w-8 h-8 text-muted-foreground" />
+   547→              </div>
+   548→              <h3 className="text-base font-semibold mb-1">No products available right now.</h3>
+   549→              <p className="text-sm text-muted-foreground max-w-xs">
+   550→                {search || activeCategory !== 'All'
+   551→                  ? 'Try a different search or category filter.'
+   552→                  : 'Please check back later.'}
+   553→              </p>
+   554→            </div>
+   555→          ) : (
+   556→            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+   557→              {filteredProducts.map((p) => (
+   558→                <ProductCard
+   559→                  key={p.id}
+   560→                  product={p}
+   561→                  currency={currency}
+   562→                  onAdd={() => addToCart(p)}
+   563→                />
+   564→              ))}
+   565→            </div>
+   566→          )}
+   567→        </section>
+   568→      </main>
+   569→
+   570→      {/* ============================ FOOTER ============================ */}
+   571→      <footer className="mt-auto border-t border-border bg-card/60 backdrop-blur-xl">
+   572→        <div className="max-w-2xl mx-auto px-4 py-5 flex flex-col items-center gap-2 text-center">
+   573→          <div className="flex items-center gap-1.5 text-sm">
+   574→            <Store className="w-4 h-4 text-emerald-600" />
+   575→            <span className="font-semibold text-foreground">{store.name}</span>
+   576→            <span className="text-muted-foreground">·</span>
+   577→            <span className="text-muted-foreground text-xs">
+   578→              Powered by{' '}
+   579→              <span className="font-semibold text-emerald-600 dark:text-emerald-400">BizLedger</span>
+   580→            </span>
+   581→          </div>
+   582→          <button
+   583→            onClick={showAddToHomeScreenHint}
+   584→            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 rounded-full border border-border bg-background/50"
+   585→          >
+   586→            <Home className="w-3 h-3" />
+   587→            Add to Home Screen
+   588→            <ChevronRight className="w-3 h-3" />
+   589→          </button>
+   590→          {store.phone && (
+   591→            <a
+   592→              href={`tel:${store.phone}`}
+   593→              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-emerald-600 transition-colors mt-1"
+   594→            >
+   595→              <Phone className="w-3 h-3" />
+   596→              {store.phone}
+   597→            </a>
+   598→          )}
+   599→        </div>
+   600→      </footer>
+   601→
+   602→      {/* ============================ CART DRAWER ============================ */}
+   603→      <AnimatePresence>
+   604→        {cartOpen && (
+   605→          <>
+   606→            {/* Backdrop */}
+   607→            <motion.div
+   608→              initial={{ opacity: 0 }}
+   609→              animate={{ opacity: 1 }}
+   610→              exit={{ opacity: 0 }}
+   611→              onClick={() => setCartOpen(false)}
+   612→              className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+   613→            />
+   614→            {/* Bottom sheet */}
+   615→            <motion.div
+   616→              initial={{ y: '100%' }}
+   617→              animate={{ y: 0 }}
+   618→              exit={{ y: '100%' }}
+   619→              transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+   620→              className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-2xl bg-background rounded-t-3xl border-t border-border shadow-2xl max-h-[92vh] flex flex-col"
+   621→            >
+   622→              {/* Drag handle */}
+   623→              <div className="pt-3 pb-1 flex justify-center shrink-0">
+   624→                <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
+   625→              </div>
+   626→
+   627→              {/* Header */}
+   628→              <div className="flex items-center justify-between px-5 pb-3 border-b border-border shrink-0">
+   629→                <div className="flex items-center gap-2">
+   630→                  <ShoppingCart className="w-5 h-5 text-emerald-600" />
+   631→                  <h3 className="font-bold text-foreground">Your Cart</h3>
+   632→                  {cartCount > 0 && (
+   633→                    <Badge variant="secondary" className="bg-muted">
+   634→                      {cartCount}
+   635→                    </Badge>
+   636→                  )}
+   637→                </div>
+   638→                <button
+   639→                  onClick={() => setCartOpen(false)}
+   640→                  className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center"
+   641→                  aria-label="Close cart"
+   642→                >
+   643→                  <X className="w-4 h-4" />
+   644→                </button>
+   645→              </div>
+   646→
+   647→              {/* Body — scrollable */}
+   648→              <div className="flex-1 overflow-y-auto px-5 py-3">
+   649→                {cart.length === 0 ? (
+   650→                  <div className="flex flex-col items-center justify-center text-center py-12">
+   651→                    <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-3">
+   652→                      <ShoppingCart className="w-7 h-7 text-muted-foreground" />
+   653→                    </div>
+   654→                    <p className="font-semibold text-sm">Your cart is empty</p>
+   655→                    <p className="text-xs text-muted-foreground mt-1">
+   656→                      Browse products above and tap "Add" to start.
+   657→                    </p>
+   658→                  </div>
+   659→                ) : (
+   660→                  <div className="space-y-2">
+   661→                    {cart.map((it) => (
+   662→                      <motion.div
+   663→                        key={it.productId}
+   664→                        layout
+   665→                        initial={{ opacity: 0, x: -10 }}
+   666→                        animate={{ opacity: 1, x: 0 }}
+   667→                        exit={{ opacity: 0, x: 10 }}
+   668→                        className="flex items-center gap-3 p-2.5 rounded-xl bg-card border border-border"
+   669→                      >
+   670→                        <div
+   671→                          className={`w-10 h-10 rounded-lg bg-gradient-to-br ${gradientFor(
+   672→                            it.productId
+   673→                          )} flex items-center justify-center text-white font-bold shrink-0`}
+   674→                        >
+   675→                          {it.name.charAt(0).toUpperCase()}
+   676→                        </div>
+   677→                        <div className="flex-1 min-w-0">
+   678→                          <p className="text-sm font-medium truncate">{it.name}</p>
+   679→                          <p className="text-xs text-muted-foreground">
+   680→                            {formatCurrency(it.unitPrice, currency)}
+   681→                            {it.unit ? ` / ${it.unit}` : ''}
+   682→                          </p>
+   683→                        </div>
+   684→                        {/* Stepper */}
+   685→                        <div className="flex items-center gap-1.5">
+   686→                          <button
+   687→                            onClick={() => updateQty(it.productId, -1)}
+   688→                            className="w-7 h-7 rounded-lg bg-muted hover:bg-muted-foreground/20 flex items-center justify-center active:scale-90 transition-transform"
+   689→                            aria-label="Decrease quantity"
+   690→                          >
+   691→                            <Minus className="w-3.5 h-3.5" />
+   692→                          </button>
+   693→                          <span className="w-6 text-center text-sm font-semibold tabular">
+   694→                            {it.quantity}
+   695→                          </span>
+   696→                          <button
+   697→                            onClick={() => updateQty(it.productId, 1)}
+   698→                            className="w-7 h-7 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 flex items-center justify-center active:scale-90 transition-transform"
+   699→                            aria-label="Increase quantity"
+   700→                          >
+   701→                            <Plus className="w-3.5 h-3.5" />
+   702→                          </button>
+   703→                          <button
+   704→                            onClick={() => removeFromCart(it.productId)}
+   705→                            className="w-7 h-7 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-500 flex items-center justify-center ml-1 active:scale-90 transition-transform"
+   706→                            aria-label="Remove item"
+   707→                          >
+   708→                            <Trash2 className="w-3.5 h-3.5" />
+   709→                          </button>
+   710→                        </div>
+   711→                      </motion.div>
+   712→                    ))}
+   713→
+   714→                    {/* Delivery charge */}
+   715→                    <div className="flex items-center gap-2 pt-2">
+   716→                      <label className="text-sm text-muted-foreground flex-1">
+   717→                        Delivery charge
+   718→                      </label>
+   719→                      <div className="relative">
+   720→                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+   721→                          {currency === 'INR' ? '₹' : currency}
+   722→                        </span>
+   723→                        <Input
+   724→                          type="number"
+   725→                          inputMode="decimal"
+   726→                          min="0"
+   727→                          value={deliveryCharge}
+   728→                          onChange={(e) => setDeliveryCharge(e.target.value)}
+   729→                          className="pl-8 h-9 w-28 text-right tabular"
+   730→                        />
+   731→                      </div>
+   732→                    </div>
+   733→
+   734→                    {/* Customer info form */}
+   735→                    <div className="pt-3 border-t border-border mt-3 space-y-2.5">
+   736→                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+   737→                        <Sparkles className="w-3 h-3 text-emerald-600" />
+   738→                        Delivery Details
+   739→                      </p>
+   740→                      <Input
+   741→                        value={customerName}
+   742→                        onChange={(e) => setCustomerName(e.target.value)}
+   743→                        placeholder="Your name *"
+   744→                        className="h-10"
+   745→                      />
+   746→                      <Input
+   747→                        value={customerPhone}
+   748→                        onChange={(e) => setCustomerPhone(e.target.value)}
+   749→                        placeholder="Phone number"
+   750→                        inputMode="tel"
+   751→                        className="h-10"
+   752→                      />
+   753→                      <Textarea
+   754→                        value={customerAddress}
+   755→                        onChange={(e) => setCustomerAddress(e.target.value)}
+   756→                        placeholder="Delivery address"
+   757→                        rows={2}
+   758→                        className="resize-none"
+   759→                      />
+   760→                    </div>
+   761→                  </div>
+   762→                )}
+   763→              </div>
+   764→
+   765→              {/* Footer — totals + place order */}
+   766→              {cart.length > 0 && (
+   767→                <div className="shrink-0 border-t border-border px-5 py-3 bg-card/80 backdrop-blur-xl space-y-3">
+   768→                  <div className="space-y-1 text-sm">
+   769→                    <div className="flex justify-between text-muted-foreground">
+   770→                      <span>Subtotal</span>
+   771→                      <span className="tabular">{formatCurrency(subtotal, currency)}</span>
+   772→                    </div>
+   773→                    <div className="flex justify-between text-muted-foreground">
+   774→                      <span>Delivery</span>
+   775→                      <span className="tabular">{formatCurrency(delivery, currency)}</span>
+   776→                    </div>
+   777→                    <div className="flex justify-between font-bold text-base text-foreground pt-1">
+   778→                      <span>Total</span>
+   779→                      <span className="tabular text-emerald-600 dark:text-emerald-400">
+   780→                        {formatCurrency(grandTotal, currency)}
+   781→                      </span>
+   782→                    </div>
+   783→                  </div>
+   784→                  <Button
+   785→                    onClick={handlePlaceOrder}
+   786→                    disabled={placing || !customerName.trim()}
+   787→                    className="w-full h-12 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 dark:from-emerald-600 dark:to-emerald-800 text-white font-semibold shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+   788→                  >
+   789→                    {placing ? (
+   790→                      <>
+   791→                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+   792→                        Placing Order…
+   793→                      </>
+   794→                    ) : (
+   795→                      <>
+   796→                        <CheckCircle2 className="w-4 h-4" />
+   797→                        Place Order · {formatCurrency(grandTotal, currency)}
+   798→                      </>
+   799→                    )}
+   800→                  </Button>
+   801→                  {!customerName.trim() && (
+   802→                    <p className="text-[11px] text-amber-600 dark:text-amber-400 text-center">
+   803→                      Please enter your name to place the order
+   804→                    </p>
+   805→                  )}
+   806→                </div>
+   807→              )}
+   808→            </motion.div>
+   809→          </>
+   810→        )}
+   811→      </AnimatePresence>
+   812→    </div>
+   813→  )
+   814→}
+   815→
+   816→// ============================ Product Card ============================
+   817→function ProductCard({
+   818→  product,
+   819→  currency,
+   820→  onAdd,
+   821→}: {
+   822→  product: StoreProduct
+   823→  currency: string
+   824→  onAdd: () => void
+   825→}) {
+   826→  const discount =
+   827→    product.mrp && product.mrp > product.salePrice
+   828→      ? Math.round(((product.mrp - product.salePrice) / product.mrp) * 100)
+   829→      : 0
+   830→  const lowStock = product.stock > 0 && product.stock < LOW_STOCK_THRESHOLD
+   831→  const outOfStock = product.stock <= 0
+   832→
+   833→  return (
+   834→    <motion.div
+   835→      initial={{ opacity: 0, y: 8 }}
+   836→      animate={{ opacity: 1, y: 0 }}
+   837→      whileHover={{ scale: 1.02, boxShadow: '0 10px 30px -10px rgba(0,0,0,0.15)' }}
+   838→      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+   839→      className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl overflow-hidden flex flex-col"
+   840→    >
+   841→      {/* Image placeholder with first letter */}
+   842→      <div
+   843→        className={`relative aspect-square bg-gradient-to-br ${gradientFor(
+   844→          product.id
+   845→        )} flex items-center justify-center`}
+   846→      >
+   847→        <span className="text-4xl font-bold text-white/90 drop-shadow-sm">
+   848→          {product.name.charAt(0).toUpperCase()}
+   849→        </span>
+   850→        {/* Discount badge */}
+   851→        {discount > 0 && (
+   852→          <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded-md bg-rose-500 text-white text-[10px] font-bold">
+   853→            {discount}% OFF
+   854→          </span>
+   855→        )}
+   856→        {/* Stock badge */}
+   857→        <div className="absolute top-2 right-2">
+   858→          {outOfStock ? (
+   859→            <span className="px-1.5 py-0.5 rounded-md bg-zinc-900/70 text-white text-[10px] font-medium">
+   860→              Out of stock
+   861→            </span>
+   862→          ) : lowStock ? (
+   863→            <span className="px-1.5 py-0.5 rounded-md bg-amber-500/90 text-white text-[10px] font-medium">
+   864→              Low stock
+   865→            </span>
+   866→          ) : (
+   867→            <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/90 text-white text-[10px] font-medium">
+   868→              In stock
+   869→            </span>
+   870→          )}
+   871→        </div>
+   872→      </div>
+   873→
+   874→      {/* Body */}
+   875→      <div className="p-2.5 flex flex-col flex-1 gap-1.5">
+   876→        {/* Category */}
+   877→        {product.category && (
+   878→          <div className="flex items-center gap-1 flex-wrap">
+   879→            <Badge
+   880→              variant="secondary"
+   881→              className="bg-muted text-muted-foreground text-[9px] px-1.5 py-0 h-4"
+   882→            >
+   883→              {product.category}
+   884→            </Badge>
+   885→            {product.subCategory && (
+   886→              <span className="text-[9px] text-muted-foreground/70 truncate">
+   887→                · {product.subCategory}
+   888→              </span>
+   889→            )}
+   890→          </div>
+   891→        )}
+   892→
+   893→        {/* Name */}
+   894→        <h3 className="text-sm font-semibold leading-snug line-clamp-2 min-h-[2.4em]">
+   895→          {product.name}
+   896→        </h3>
+   897→
+   898→        {/* Price */}
+   899→        <div className="mt-auto">
+   900→          <div className="flex items-baseline gap-1.5">
+   901→            <span className="text-base font-bold text-emerald-600 dark:text-emerald-400 tabular">
+   902→              {formatCurrency(product.salePrice, currency)}
+   903→            </span>
+   904→            {product.unit && (
+   905→              <span className="text-[10px] text-muted-foreground">/ {product.unit}</span>
+   906→            )}
+   907→          </div>
+   908→          {product.mrp && product.mrp > product.salePrice && (
+   909→            <span className="text-[11px] text-muted-foreground line-through tabular">
+   910→              {formatCurrency(product.mrp, currency)}
+   911→            </span>
+   912→          )}
+   913→          {/* Retail price alternative */}
+   914→          {product.retailEnabled && product.retailSalePrice && product.retailUnit && (
+   915→            <p className="text-[10px] text-muted-foreground mt-0.5">
+   916→              Retail:{' '}
+   917→              <span className="font-medium text-foreground/80">
+   918→                {formatCurrency(product.retailSalePrice, currency)}/{product.retailUnit}
+   919→              </span>
+   920→            </p>
+   921→          )}
+   922→        </div>
+   923→
+   924→        {/* Add to Cart */}
+   925→        <Button
+   926→          onClick={onAdd}
+   927→          disabled={outOfStock}
+   928→          size="sm"
+   929→          className="w-full mt-1 h-8 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+   930→        >
+   931→          <Plus className="w-3.5 h-3.5" />
+   932→          Add
+   933→        </Button>
+   934→      </div>
+   935→    </motion.div>
+   936→  )
+   937→}
+   938→

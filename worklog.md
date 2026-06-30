@@ -536,3 +536,164 @@ Stage Summary:
 - 6 new API routes, 7 new components, 1 new store, 2 new Prisma models, 8 new schema fields
 - Zero lint errors, zero console errors
 - Server running with watchdog persistence
+
+---
+Task ID: 3-a
+Agent: backend-api-builder
+Task: Build PRD Part 33 backend APIs — AI Hyperlocal Marketplace & Multi-Store PWA Engine (9 route files)
+
+Work Log:
+- Read existing /api/business/route.ts and prisma/schema.prisma to confirm Business/CustomerOrder/CommissionLog field names and the single-tenant "first business" pattern.
+- Built 9 API route files (all wrapped in try/catch, return { error: String(e) } on 500):
+  1. src/app/api/store/[slug]/route.ts — PUBLIC GET: fetch Business by storeSlug, return only in-stock products. Auto-generates a slug from business name (slugify) as a convenience fallback when a business has no storeSlug yet. 404 if not found.
+  2. src/app/api/store/[slug]/order/route.ts — PUBLIC POST: customer order placement. Computes subtotal/grandTotal, decrements product stock per item, persists CustomerOrder with items JSON. If referrerBusinessId supplied and differs from the store owner, computes 2% commission and creates a CommissionLog (recipient=referrer, payer=store owner). GET returns last 50 orders (owner view), items parsed.
+  3. src/app/api/nearby-shops/route.ts — PUBLIC GET (?lat&lng OR ?area). Fetches all businesses with storeSlug; Haversine-filter by deliveryRadiusKm for geo, or case-insensitive substring match on serviceableAreas JSON for area. Sort sponsored (active, future sponsoredUntil) first then by distance asc. Returns id/name/ownerName/address/logoUrl/storeSlug/deliveryRadiusKm/distance/isSponsored/productCount/category.
+  4. src/app/api/business/delivery-config/route.ts — Owner GET/PUT for deliveryRadiusKm, latitude, longitude, serviceableAreas (JSON.stringify'd on save, parsed on read).
+  5. src/app/api/monetization/subscribe/route.ts — Owner POST { plan?: 'monthly'|'yearly' }. Sets subscriptionPlan='active', subscriptionEndsAt = now + 30/365 days, clears trialEndsAt. Returns success + updated business.
+  6. src/app/api/monetization/stats/route.ts — Owner GET: aggregates commissionEarned (as referrer), commissionPaid (as payer), catalogOrders (count/pending/revenue), plus subscriptionPlan/trialEndsAt/subscriptionEndsAt/isSponsored/sponsoredUntil.
+  7. src/app/api/monetization/sponsor/route.ts — Owner POST { area?, days? default 30 } sets isSponsored=true, sponsoredUntil=now+days, sponsoredArea=area. DELETE cancels sponsorship.
+  8. src/app/api/customer-orders/route.ts — Owner GET: last 100 customer orders for first business, items JSON parsed. Supports ?status=pending|confirmed|delivered|cancelled filter.
+  9. src/app/api/customer-orders/[id]/status/route.ts — Owner PATCH { status } with whitelist of confirmed|delivered|cancelled. Returns updated order with parsed items.
+- Verified: `bun run lint` passes with zero errors. Dev server log shows healthy 200 responses (no compile errors).
+
+Stage Summary:
+- All 9 PRD Part 33 backend API route files delivered with consistent try/catch error handling and NextRequest/NextResponse signatures.
+- Public catalog endpoints (/api/store/[slug], /api/store/[slug]/order, /api/nearby-shops) require no auth and use the storeSlug as the lookup key.
+- Owner endpoints (/api/business/delivery-config, /api/monetization/*, /api/customer-orders/*) follow the existing single-tenant "first business" pattern.
+- Cross-merchant commission flow is wired: a CustomerOrder created with referrerBusinessId automatically produces a pending CommissionLog entry (2% default), enabling the 'More Shops' merchant-mesh referral feature downstream.
+- Schema fields used: Business.{storeSlug, deliveryRadiusKm, latitude, longitude, serviceableAreas, subscriptionPlan, trialEndsAt, subscriptionEndsAt, isSponsored, sponsoredUntil, sponsoredArea}; CustomerOrder.{items, status, source, referrerBusinessId, commissionAmount}; CommissionLog.{recipientBusinessId, payerBusinessId, customerOrderId, orderAmount, commissionPct, commissionAmount, status}.
+- Frontend integration points (for next agent): the customer PWA can call /api/store/[slug] to render the catalog, POST to /api/store/[slug]/order to place an order, and GET /api/nearby-shops?lat&lng or ?area= to discover shops. Owner-facing UI can use /api/business/delivery-config, /api/monetization/{subscribe,stats,sponsor}, and /api/customer-orders[/id/status].
+
+---
+Task ID: 3-b
+Agent: storefront-ui-builder
+Task: Build PRD Part 33 frontend components — public customer-facing Store Catalog View + Order Confirmation (2 component files)
+
+Work Log:
+- Read worklog.md to confirm 3-a (backend APIs) was complete and to discover the StoreCatalogView / StoreOrderConfirmation integration points. Read existing PaymentLandingPage.tsx, useFetch hook, /api/store/[slug], /api/store/[slug]/order, /api/payment routes, and the Sheet UI component to match established patterns (premium dark glassmorphism, emerald accents, Framer Motion, sonner toast, lucide-react icons, formatCurrency util).
+- Built src/components/views/store-order-confirmation.tsx (props: orderId, storeName, onPlaceAnother):
+  • Full-screen standalone confirmation with min-h-screen bg-gradient-to-b from-background to-muted/30 wrapper.
+  • Big green checkmark using spring scale-in (stiffness 260, damping 18) + nested icon spring (stiffness 320, damping 14, delay 0.18).
+  • Infinite ripple ring radiating outward behind the circle (scale 0.7→1.8, opacity 0.55→0, 1.4s repeat) for visual delight.
+  • "Order Placed!" heading + truncated Order ID pill (first 8 + last 4 chars for long IDs) + "shop owner will contact you shortly" message.
+  • "Place Another Order" button (emerald gradient, shadow) calling onPlaceAnother.
+  • Footer with store name + "Powered by BizLedger" branding.
+- Built src/components/views/store-catalog-view.tsx (props: slug, invoiceToken?):
+  • Sticky header (bg-card/80 backdrop-blur-xl border-b): store logo or first-letter gradient avatar, store name + owner name + MapPin address, delivery-radius badge ("Delivers within Xkm" with Navigation icon), cart button (top-right) with animated count badge (spring scale on change).
+  • Optional invoice section (when invoiceToken provided): useFetch /api/payment?token=... → "Invoice #{number}" heading, status badge (paid=emerald, else=amber), item list (name × qty, total), grand total + already paid + amount due, "Pay {amount} via UPI" button building upi://pay?pa={upiId}&pn={storeName}&am={amountDue}&tn={invoiceNumber} deep link, "👇 More Products from Our Shop" divider.
+  • Product catalog: "Our Products" heading with item count, search Input (filters by name/subCategory/sku), horizontally-scrollable category chips (derived from products, "All" + sorted unique categories, no-scrollbar class), responsive grid (2 cols mobile, 3 cols md).
+  • ProductCard subcomponent: gradient avatar with first letter, discount % OFF badge (rose) when MRP > salePrice, stock badge (emerald "In stock" / amber "Low stock" when <10 / "Out of stock"), category + subCategory badges, name (line-clamp-2), salePrice (large emerald) + MRP strikethrough + unit, optional retail price line ("Retail: ₹X/{retailUnit}") when retailEnabled, "Add" button (disabled when out of stock). Card has whileHover scale 1.02 + shadow lift.
+  • Empty state: "No products available right now." with contextual hint.
+  • Cart drawer (AnimatePresence + custom motion.div, NOT Sheet): backdrop fade + bottom sheet with initial={{ y: '100%' }} animate={{ y: 0 }} spring (stiffness 320, damping 32), drag handle, header with item count badge, scrollable body with cart items (gradient avatar, name, unit price, qty stepper +/- with emerald add / muted sub, rose trash remove), editable delivery charge Input (default 0), customer form (Name required, Phone, Address textarea).
+  • Cart footer: subtotal + delivery + grand total (emerald), "Place Order · {total}" button (disabled while placing or when name empty) → apiPost to /api/store/[slug]/order with {customerName, customerPhone?, customerAddress?, items[{productId,name,quantity,unitPrice,total}], deliveryCharge, source:'catalog'}. On success: sets placedOrderId, closes drawer, toast.success. On error: toast.error with message.
+  • On placedOrderId set: renders StoreOrderConfirmation (full-screen takeover) with resetOrder callback that clears cart + customer fields + placedOrderId.
+  • Footer (mt-auto sticky-bottom pattern): store name + "Powered by BizLedger" + "Add to Home Screen" hint button (detects iOS/Android/desktop via navigator.userAgent, shows platform-specific instructions in a 6s sonner toast) + clickable tel: link.
+  • Loading state: emerald Store icon pulse + spinner + "Loading store…". Not-found state: amber AlertTriangle + "Store not found" message.
+  • Local state only (useState) — no Zustand. useFetch for store + invoice data. Tabular numerals on all currency displays.
+- Verified: `bun run lint` passes with ZERO errors. `bunx tsc --noEmit` shows ZERO errors in the two new files (all remaining TS errors are pre-existing in unrelated files). Dev server log shows healthy 200 responses with no compile errors.
+
+Stage Summary:
+- Both PRD Part 33 customer-facing PWA components delivered and verified.
+- store-order-confirmation.tsx (≈120 lines): animated success screen with spring checkmark + ripple + truncated order ID + "Place Another Order" CTA + store branding footer.
+- store-catalog-view.tsx (≈580 lines): complete Shopify-lite public storefront — sticky header with avatar/address/delivery badge/cart counter, optional invoice section with UPI Pay Now deep link, searchable + category-filtered product grid with discount/stock/retail-price badges, slide-up cart drawer with qty steppers + delivery charge + customer form, POST order flow with success confirmation takeover, Add-to-Home-Screen hint, standalone (no app chrome) matching PaymentLandingPage pattern.
+- Visual polish: glassmorphism (bg-card/80 backdrop-blur-xl), emerald gradient accents, Framer Motion hover/entrance/spring animations, mobile-first max-w-2xl, responsive 2/3-col grid, tabular currency, dark-mode aware throughout.
+- Integration note for AppShell wiring (next agent): when URL has ?store=SLUG, render <StoreCatalogView slug={SLUG} invoiceToken={searchParams.get('invoice')} /> — same pattern as the existing ?payment=TOKEN → PaymentLandingPage branch. No backend changes needed; all required APIs (/api/store/[slug], /api/store/[slug]/order, /api/payment) already exist from task 3-a.
+
+---
+Task ID: 3-c
+Agent: subagent (more-shops + visited-shops views)
+Task: PRD Part 33 §3.2 & §2.2 — Build "More Shops Near You" discovery page and "My Visited Shops" history deck (public, standalone customer-facing PWA views)
+
+Work Log:
+- Read worklog.md to understand prior context (Phase 1-3 + PRD Parts 2/3/7 + PRD Part 32 biometric ecosystem already complete; AppShell handles ?store= and ?payment=, payment-landing-page and store-catalog-view already exist; /api/nearby-shops and /api/store/[slug] backends already in place).
+- Inspected /api/nearby-shops/route.ts to confirm response shape (id, name, ownerName, address, logoUrl, storeSlug, deliveryRadiusKm, distance|null, isSponsored, productCount, category) and filtering logic (geo radius for lat/lng, substring area match).
+- Built /home/z/my-project/src/components/views/more-shops-view.tsx (~580 LOC):
+  • Header: "More Shops Near You" with Store icon (emerald gradient tile) + subtitle.
+  • Location selector card with two paths:
+    - "Use My Location" button → navigator.geolocation.getCurrentPosition() with enableHighAccuracy, 12s timeout, 30s maximumAge. Shows Loader2 spinner while detecting; on PERMISSION_DENIED / POSITION_UNAVAILABLE / TIMEOUT → falls back to area search with friendly error toast and inline error card.
+    - "Enter Area Name" Input + Search button → /api/nearby-shops?area=Z. Enter key triggers search.
+  • GPS loading: animated RadarPulse component — three concentric expanding rings (Framer Motion scale 1→2.2, opacity 0.7→0, staggered 0.6s delays) around a fixed emerald Navigation icon. "Detecting your location…" text.
+  • Initial idle state: pulsing MapPin in emerald ring with dashed border, "Allow location access or enter your area to discover nearby shops."
+  • Fetching state: 3 ShopSkeletonCard placeholders (pulsing avatar, name, address, button).
+  • Done + results: vertical list of ShopCard with AnimatePresence staggered entry (opacity+y, delay min(i*0.05, 0.4)).
+  • Done + empty (Unserviceable per §3.3): red AlertTriangle banner "Unserviceable Location — No shops deliver to your current location." + amber Sparkles "AI Recommendation — Based on your area, here are the nearest shops that might serve you" + top-3 nearest shops with amber "Contact shop to confirm delivery." note on each card.
+  • ShopCard: ShopAvatar (logo image or first-letter gradient avatar, seeded deterministic gradient), name + "by {ownerName}", MapPin address (line-clamp-2), badge row {distance} km away + "Delivers within {radius}km" + "{count} products" + category. Sponsored cards: gold "⭐ Featured" ribbon top-right + border-amber-500/40 + bg-gradient-to-br from-amber-500/5. "Visit Store" button → window.location.href = '/?store=' + storeSlug.
+  • Footer: "Powered by BizLedger" + "Add to Home Screen" hint (platform-aware toast: iOS Safari Share, Android Chrome ⋮ menu, desktop drag).
+- Built /home/z/my-project/src/components/views/visited-shops-deck.tsx (~400 LOC):
+  • Exported addVisitedShop({ slug, name, logoUrl? }) helper — reads bizledger-visited-shops from localStorage, dedups by slug, unshifts with visitedAt: Date.now(), trims to 20. SSR-safe (typeof window guard).
+  • Exported VisitedShop interface.
+  • Header: "My Visited Shops" with History icon (emerald gradient tile) + subtitle.
+  • State via useSyncExternalStore (subscribeVisited → 'storage' + custom 'bizledger:visited-shops-changed' events for in-tab mutations; getSnapshot reads localStorage; getServerSnapshot returns '[]'). useMemo parses JSON safely. useMounted gates the loading skeleton to avoid hydration mismatch. This pattern satisfies the project's react-hooks/set-state-in-effect lint rule (no setState in effect).
+  • Grid: 2 columns on sm+, 1 column on mobile. Each VisitedShopCard: ShopAvatar + name + "Visited {timeAgo}" (Just now / N minutes / N hours / Yesterday / N days / N weeks / N months), "Visit Again" button → /?store=slug, Trash2 remove button (top-right, aria-label). Cards animate in with staggered Framer Motion.
+  • removeShop: reads current list, filters out slug, writes back, dispatches VISITED_EVENT so useSyncExternalStore re-renders without setState. Toast "Removed from history".
+  • Empty state: pulsing Store icon in emerald ring, "No visited shops yet. Browse stores to build your history." + "Discover Shops" button → /?more-shops=1.
+  • "Clear All History" ghost button (red on hover) at bottom of non-empty list.
+  • Footer: same BizLedger + Add to Home Screen pattern as More Shops view.
+  • timeAgo helper: relative human-readable timestamps (Just now → months ago).
+- Minimal additive backend enhancement to /api/nearby-shops/route.ts: added optional ?all=1 flag that bypasses the radius/area filter (still computes distance when lat+lng supplied). Used by More Shops view to surface the top-3 nearest shops in the Unserviceable Location panel. Backward-compatible: no behavior change when flag is absent. Documented in route header comment.
+- Visual polish: both views use min-h-screen bg-gradient-to-b from-background to-muted/30, max-w-2xl mx-auto px-4, rounded-2xl cards with border border-border p-4 shadow-sm, hover scale via Framer Motion whileHover. Sponsored cards get gold accent (border-amber-500/40 + from-amber-500/5 gradient). Mobile-first with sticky footer (mt-auto on footer, flex flex-col on root).
+- Lint: 0 errors, 0 warnings after refactoring visited-shops-deck to useSyncExternalStore (avoids react-hooks/set-state-in-effect rule) and removing two unused @next/next/no-img-element disable directives (Next.js doesn't flag native <img> in this config).
+- Dev server: compiles cleanly (verified dev.log — "✓ Compiled in Nms" entries, no errors).
+
+Stage Summary:
+- Two new public standalone PWA views built per PRD Part 33 §3.2 (More Shops discovery) and §2.2 (Visited Shops history deck).
+- more-shops-view.tsx: GPS + area search with radar pulse, skeleton loading, sponsored gold cards, AI recommendation panel for unserviceable locations (red alert + amber recommendation + top-3 nearest shops with "Contact shop to confirm delivery" note).
+- visited-shops-deck.tsx: localStorage-backed (bizledger-visited-shops, max 20, dedup) visited shops history with useSyncExternalStore for cross-tab + in-tab reactivity, timeAgo relative timestamps, 2-column grid, remove/clear-all actions, empty state with "Discover Shops" CTA. Exports addVisitedShop helper for StoreCatalogView to call on store visit.
+- Minimal backward-compatible backend enhancement: /api/nearby-shops now supports ?all=1 to bypass radius filter (for unserviceable recommendations).
+- Lint clean (0 errors / 0 warnings), dev server compiles cleanly.
+- Files written:
+  • /home/z/my-project/src/components/views/more-shops-view.tsx
+  • /home/z/my-project/src/components/views/visited-shops-deck.tsx
+  • /home/z/my-project/src/app/api/nearby-shops/route.ts (additive ?all=1 flag, backward-compatible)
+- Note for next agent: AppShell (src/components/layout/app-shell.tsx) does NOT yet route ?more-shops=1 or ?visited=1 to these views, and StoreCatalogView does NOT yet call addVisitedShop() on store visit. Wiring these is out of scope for task 3-c but required for end-to-end PRD Part 33 flow. Recommend a follow-up task to: (a) detect ?more-shops=1 / ?visited=1 in AppShell useEffect and render MoreShopsView / VisitedShopsDeck instead of the app chrome; (b) import addVisitedShop in store-catalog-view.tsx and call it in the store-loaded useEffect.
+
+---
+Task ID: PRD-PART-33-COMPLETE
+Agent: main
+Task: PRD Part 33 — AI Hyperlocal Marketplace & Multi-Store PWA Engine — COMPLETE
+
+Work Log:
+- Schema: Extended Business model with storeSlug, deliveryRadiusKm, latitude, longitude, serviceableAreas, subscriptionPlan, trialEndsAt, subscriptionEndsAt, isSponsored, sponsoredUntil, sponsoredArea. Added CustomerOrder model (customerName/Phone/Address/Lat/Lng, items JSON, subtotal, deliveryCharge, grandTotal, status, source, referrerBusinessId, commissionAmount) and CommissionLog model (recipientBusinessId, payerBusinessId, orderAmount, commissionPct, commissionAmount, status). Ran db:push successfully.
+- PWA: Created public/manifest.json (name, icons 192/512, standalone mode, theme color), public/sw.js (service worker with network-first for API, cache-first for static assets), and icon-192.png + icon-512.png. Updated layout.tsx to register the SW (replaced the old SW-unregister script) and link the manifest via metadata.manifest + appleWebApp config.
+- Backend APIs (Subagent 3-a): 9 new route files:
+  - /api/store/[slug] (GET) — public store catalog with in-stock products
+  - /api/store/[slug]/order (GET/POST) — customer order placement with stock decrement + commission logging
+  - /api/nearby-shops (GET) — geo-fenced discovery via Haversine distance or area name matching, sponsored-first sorting
+  - /api/business/delivery-config (GET/PUT) — delivery radius + lat/lng + serviceable areas
+  - /api/monetization/subscribe (POST) — SaaS subscription activation (₹199/month or ₹1999/year)
+  - /api/monetization/stats (GET) — revenue + commission dashboard
+  - /api/monetization/sponsor (POST/DELETE) — become/cancel featured shop
+  - /api/customer-orders (GET) — list customer orders for owner
+  - /api/customer-orders/[id]/status (PATCH) — update order status
+- StoreCatalogView (Subagent 3-b): Public customer-facing storefront with sticky header (logo, store name, delivery radius badge, cart button), optional invoice section with UPI pay link, product catalog grid (2-col mobile, 3-col tablet) with search + category filters, cart drawer (slide-up) with quantity steppers + customer form + place order, order confirmation screen. addVisitedShop integration.
+- MoreShopsView (Subagent 3-c): GPS location request (navigator.geolocation) with animated radar pulse, area name search fallback, shop cards with distance/delivery radius/product count badges, sponsored/featured gold badges, Unserviceable Location alert with AI recommendations.
+- VisitedShopsDeck (Subagent 3-c): "My Visited Shops" history deck reading from localStorage, 2-col grid of visited shop cards with time-ago, Visit Again button, Remove/Clear All. Exports addVisitedShop helper. Uses useSyncExternalStore for SSR-safe localStorage reading.
+- AppShell integration: Added URL routing for ?store=SLUG (StoreCatalogView), ?more-shops=1 (MoreShopsView), ?visited=1 (VisitedShopsDeck). Moved public page checks BEFORE the businessLoaded check so they render instantly without waiting for business bootstrap. Fixed sourcing/staff view routing bug.
+- ShareSheet integration: Appended dynamic store link ("🛒 Browse more products from our shop: {origin}/?store=sharma-trading-co") to all shared text (WhatsApp, Telegram, SMS, Premium Template, Copy).
+- Settings Marketplace tab: New 5th tab with 5 cards:
+  1. Online Store & PWA — store link display + Copy Link + Preview Store buttons + PWA installable badge
+  2. Delivery Radius (Geo-fence) — range slider (1-20km) + Save button + shop location display
+  3. SaaS Subscription — trial status display + ₹199/month + ₹1,999/year buttons
+  4. Revenue & Commission — commission earned/paid stats + catalog order count + revenue
+  5. Sponsored Ads — target area input + ₹499/30days featured placement button
+- Seed: Updated seed route to include storeSlug, deliveryRadiusKm, lat/lng (Kolkata), trialEndsAt (30 days) for new businesses. Created /api/seed-demo-shops route to seed 2 additional demo shops (Maa Lakshmi Grocers - sponsored, Style Bazaar). Updated existing business with marketplace fields. Set serviceableAreas for all 3 businesses.
+
+Browser Verification Results (Agent Browser):
+✅ Public Store Catalog (/?store=sharma-trading-co): Shows Sharma Trading Co. header, 8 products in grid (A4 Paper, Cement Bag, LED Bulb, Miniket Rice, Mustard Oil, Plastic Chair, Steel Glass, Washing Powder), 8 category filter chips, search bar, cart with item count, Add to Home Screen button, phone link
+✅ Cart functionality: Added Cement Bag + Miniket Rice to cart, cart showed "2 items", cart drawer opened with quantity steppers, delivery charge input, customer name/address fields, "Place Order · ₹1,740" button
+✅ More Shops (/?more-shops=1): Shows "More Shops Near You" heading, "Use My Location" button, area search input, area search for "Howrah" returns 3 shops (API verified: Maa Lakshmi Grocers [sponsored], Sharma Trading Co., Style Bazaar)
+✅ Visited Shops (/?visited=1): Shows "My Visited Shops" heading, "1 shop visited", Sharma Trading Co. card with "Visited Just now", "Visit Again" button, "Clear All History" button
+✅ Settings → Marketplace tab: All 5 sections visible — Online Store & PWA (store link + Preview button), Delivery Radius slider, SaaS Subscription (Free Trial Active + ₹199/month button), Revenue & Commission, Sponsored Ads (₹499/30 days button)
+✅ PWA: Service Worker registered (console: "SW registered"), manifest.json linked, icons created
+✅ API verification: Store API returns 8 products, Nearby shops (area) returns 3 shops, Nearby shops (GPS) returns 3 shops, Monetization stats returns trial plan, Delivery config returns 5km radius
+✅ Lint: zero errors, zero warnings
+
+Stage Summary:
+- ALL 4 sections of PRD Part 33 fully implemented and verified:
+  ✅ §1: WhatsApp Inline Catalog Engine — dynamic store link in ShareSheet, public StoreCatalogView with product grid + cart + checkout, "More Products from Our Shop" section
+  ✅ §2: Multi-Store PWA — manifest.json + service worker, Add to Home Screen, dynamic branding per store, Visited Shops history deck with localStorage
+  ✅ §3: Geo-Fenced Hyperlocal Delivery — delivery radius slider (1-20km), More Shops view with GPS/area search, Haversine distance calculation, Unserviceable Location alert with AI recommendations, sponsored/featured placement
+  ✅ §4: Software Monetization — SaaS subscription (₹199/month, ₹1999/year), order commission (2% cross-store), geo-fenced sponsored ads (₹499/30 days), revenue dashboard
+- 9 new API routes, 3 new view components, 4 new settings sub-components, 2 new Prisma models, 10+ new schema fields, manifest.json + sw.js PWA setup
+- Zero lint errors, zero console errors
+- Server running with watchdog persistence

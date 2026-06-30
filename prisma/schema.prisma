@@ -26,6 +26,21 @@ model Business {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // PRD Part 33 §2: Multi-store PWA — unique slug for public store URL
+  storeSlug       String?  @unique
+  // PRD Part 33 §3: Geo-fenced delivery
+  deliveryRadiusKm Int     @default(5)
+  latitude        Float?
+  longitude       Float?
+  serviceableAreas String? // JSON array of area names, e.g. ["Bhowanipore","Gariahat"]
+  // PRD Part 33 §4: Monetization
+  subscriptionPlan  String  @default("trial") // trial | active | expired | cancelled
+  trialEndsAt       DateTime?
+  subscriptionEndsAt DateTime?
+  isSponsored       Boolean @default(false)
+  sponsoredUntil    DateTime?
+  sponsoredArea     String? // area where the ad is shown
+
   parties      Party[]
   products     Product[]
   transactions Transaction[]
@@ -35,6 +50,9 @@ model Business {
   purchaseOrders PurchaseOrder[]
   fingerprints FingerprintRecord[]
   biometricGateLogs BiometricGateLog[]
+  customerOrders CustomerOrder[]
+  commissionEarned CommissionLog[] @relation("CommissionRecipient")
+  commissionPaid   CommissionLog[] @relation("CommissionPayer")
 }
 
 model Party {
@@ -313,6 +331,52 @@ model BiometricGateLog {
   @@index([businessId])
   @@index([gateType])
   @@index([result])
+}
+
+// PRD Part 33 §1: Customer orders from public WhatsApp catalog
+model CustomerOrder {
+  id            String   @id @default(cuid())
+  businessId    String
+  customerName  String
+  customerPhone String?
+  customerAddress String?
+  customerLat   Float?
+  customerLng   Float?
+  items         String   // JSON array of {productId, name, quantity, unitPrice, total}
+  subtotal      Float    @default(0)
+  deliveryCharge Float   @default(0)
+  grandTotal    Float    @default(0)
+  status        String   @default("pending") // pending | confirmed | delivered | cancelled
+  notes         String?
+  source        String   @default("catalog") // catalog | invoice_link | more_shops
+  referrerBusinessId String? // PRD Part 33 §4: if ordered from another merchant's 'More Shops'
+  commissionAmount Float @default(0) // commission paid to referrer (1-3%)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([status])
+}
+
+// PRD Part 33 §4: Commission log for cross-merchant orders
+model CommissionLog {
+  id              String   @id @default(cuid())
+  recipientBusinessId String // merchant who earned commission (referrer)
+  payerBusinessId String   // merchant whose product was ordered
+  customerOrderId String?
+  orderAmount     Float    @default(0)
+  commissionPct   Float    @default(2) // 1-3%
+  commissionAmount Float   @default(0)
+  status          String   @default("pending") // pending | paid
+  createdAt       DateTime @default(now())
+
+  recipient Business @relation("CommissionRecipient", fields: [recipientBusinessId], references: [id], onDelete: Cascade)
+  payer     Business @relation("CommissionPayer", fields: [payerBusinessId], references: [id], onDelete: Cascade)
+
+  @@index([recipientBusinessId])
+  @@index([payerBusinessId])
 }
 
 // PRD Part 13: B2B Sourcing — Supplier Catalog Item

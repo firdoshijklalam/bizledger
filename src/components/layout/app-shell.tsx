@@ -19,6 +19,9 @@ import { PaymentLandingPage } from '@/components/views/payment-landing-page'
 import { SalePadView } from '@/components/views/sale-pad-view'
 import { SourcingView } from '@/components/views/sourcing-view'
 import { StaffManagementView } from '@/components/views/staff-management-view'
+import { StoreCatalogView } from '@/components/views/store-catalog-view'
+import { MoreShopsView } from '@/components/views/more-shops-view'
+import { VisitedShopsDeck } from '@/components/views/visited-shops-deck'
 import { useBackButton } from '@/hooks/use-back-button'
 import { FloatingInvoiceModal } from '@/components/shared/floating-invoice-modal'
 import { BiometricGateModal } from '@/components/shared/biometric-gate-modal'
@@ -37,16 +40,30 @@ export function AppShell() {
   } = useAppStore()
   const { setLanguage } = useI18n()
   const [paymentToken, setPaymentToken] = useState<string | null>(null)
+  // PRD Part 33: public store / more-shops / visited-shops URL routing
+  const [storeSlug, setStoreSlug] = useState<string | null>(null)
+  const [storeInvoiceToken, setStoreInvoiceToken] = useState<string | null>(null)
+  const [showMoreShops, setShowMoreShops] = useState(false)
+  const [showVisitedDeck, setShowVisitedDeck] = useState(false)
 
   // Android back button navigation with history back-stack (PRD Part 3 §4)
   useBackButton()
 
   // Check for payment landing page token in URL (?payment=TOKEN)
+  // PRD Part 33: also check for ?store=SLUG, ?more-shops=1, ?visited=1
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
     const token = params.get('payment')
     if (token) setPaymentToken(token)
+    const store = params.get('store')
+    if (store) {
+      setStoreSlug(store)
+      const invToken = params.get('invoice')
+      if (invToken) setStoreInvoiceToken(invToken)
+    }
+    if (params.get('more-shops')) setShowMoreShops(true)
+    if (params.get('visited')) setShowVisitedDeck(true)
   }, [])
 
   // Bootstrap: ensure seeded + load business + load language setting
@@ -76,6 +93,27 @@ export function AppShell() {
     }
   }, [])
 
+  // PRD Part 33: Public pages render immediately — no business loading required
+  // Payment Landing Page — public, no app chrome (PRD v2 §10.5)
+  if (paymentToken) {
+    return <PaymentLandingPage token={paymentToken} />
+  }
+
+  // PRD Part 33 §1-2: Public store catalog — customer-facing, no app chrome
+  if (storeSlug) {
+    return <StoreCatalogView slug={storeSlug} invoiceToken={storeInvoiceToken} />
+  }
+
+  // PRD Part 33 §3: More Shops discovery — public, no app chrome
+  if (showMoreShops) {
+    return <MoreShopsView />
+  }
+
+  // PRD Part 33 §2.2: Visited Shops deck — public, no app chrome
+  if (showVisitedDeck) {
+    return <VisitedShopsDeck />
+  }
+
   if (!businessLoaded) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background">
@@ -86,11 +124,6 @@ export function AppShell() {
         <p className="text-[10px] text-muted-foreground/50">v7.2 · Part 1-7 Complete</p>
       </div>
     )
-  }
-
-  // Payment Landing Page — public, no app chrome (PRD v2 §10.5)
-  if (paymentToken) {
-    return <PaymentLandingPage token={paymentToken} />
   }
 
   return (

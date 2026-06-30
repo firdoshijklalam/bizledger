@@ -10,6 +10,8 @@ import {
   Building2, Sliders, Database, Shield, Download, Upload, Save,
   Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette, Mic, Keyboard,
   AlertCircle, CheckCircle2, QrCode, ChevronDown, ChevronUp, Lock, Fingerprint,
+  Store, MapPin, Navigation, Star, TrendingUp, ShoppingCart, Crown, ExternalLink,
+  Smartphone, Radio,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -32,6 +34,7 @@ const TABS = [
   { id: 'profile', labelKey: 'set.profile', icon: Building2 },
   { id: 'preferences', labelKey: 'set.preferences', icon: Sliders },
   { id: 'data', labelKey: 'set.data', icon: Database },
+  { id: 'marketplace', labelKey: 'set.marketplace', icon: Store },
   { id: 'security', labelKey: 'set.security', icon: Shield },
 ] as const
 
@@ -48,7 +51,7 @@ export function SettingsView() {
   const [showResetModal, setShowResetModal] = useState(false)
   const [resetPin, setResetPin] = useState('')
   const [resetting, setResetting] = useState(false)
-  const [tab, setTab] = useState<'profile' | 'preferences' | 'data' | 'security'>('profile')
+  const [tab, setTab] = useState<'profile' | 'preferences' | 'data' | 'marketplace' | 'security'>('profile')
 
   const { data: settings } = useFetch<AppSettingsData & { id: string }>('/api/app-settings', [])
 
@@ -775,6 +778,104 @@ export function SettingsView() {
           </div>
         )}
 
+        {/* PRD Part 33: Marketplace & Monetization tab */}
+        {tab === 'marketplace' && (
+          <div className="space-y-4">
+            {/* Store Link & PWA */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Store className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-sm font-semibold">Online Store & PWA</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Your shop is live as a Progressive Web App. Customers can browse and order from any browser — no app install needed.
+              </p>
+              <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 space-y-1.5">
+                <p className="text-[10px] text-muted-foreground">Your Store Link</p>
+                <p className="text-sm font-mono text-emerald-600 break-all">
+                  {typeof window !== 'undefined' ? `${window.location.origin}/?store=${business?.storeSlug || 'sharma-trading-co'}` : ''}
+                </p>
+                <div className="flex gap-2 mt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-[11px]"
+                    onClick={() => {
+                      const url = `${window.location.origin}/?store=${business?.storeSlug || 'sharma-trading-co'}`
+                      navigator.clipboard.writeText(url)
+                      toast.success('Store link copied!')
+                    }}
+                  >
+                    <ExternalLink className="w-3 h-3 mr-1" /> Copy Link
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-[11px]"
+                    onClick={() => {
+                      window.open(`/?store=${business?.storeSlug || 'sharma-trading-co'}`, '_blank')
+                    }}
+                  >
+                    <Store className="w-3 h-3 mr-1" /> Preview Store
+                  </Button>
+                </div>
+              </div>
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                  <div>
+                    <p className="text-xs font-medium">PWA Installable</p>
+                    <p className="text-[10px] text-muted-foreground">Customers can "Add to Home Screen"</p>
+                  </div>
+                </div>
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              </div>
+            </Card>
+
+            {/* Delivery Radius & Geo-fence */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-sm font-semibold">Delivery Radius (Geo-fence)</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Set the maximum delivery area. Customers outside this radius will see "Unserviceable Location" with AI recommendations.
+              </p>
+              <DeliveryRadiusControl />
+            </Card>
+
+            {/* Monetization: SaaS Subscription */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Crown className="w-4 h-4 text-amber-600" />
+                <h3 className="text-sm font-semibold">SaaS Subscription</h3>
+              </div>
+              <SubscriptionControl />
+            </Card>
+
+            {/* Monetization: Commission & Revenue Stats */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-sm font-semibold">Revenue & Commission</h3>
+              </div>
+              <RevenueStats />
+            </Card>
+
+            {/* Monetization: Sponsored Ads */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Star className="w-4 h-4 text-amber-600" />
+                <h3 className="text-sm font-semibold">Sponsored Ads (Featured Placement)</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Pay to appear at the top of "More Shops" listings in your area. Featured shops get a gold badge + priority placement.
+              </p>
+              <SponsoredAdsControl />
+            </Card>
+          </div>
+        )}
+
         {tab === 'security' && (
           <div className="space-y-4">
             {/* Voice & Input Settings moved to Preferences tab (PRD Part 29 §1) */}
@@ -1100,6 +1201,268 @@ function ToggleRow({ icon: Icon, label, checked, onChange }: { icon: any; label:
         <p className="text-sm font-medium">{label}</p>
       </div>
       <Switch checked={checked} onCheckedChange={onChange} />
+    </div>
+  )
+}
+
+// PRD Part 33 §3.1: Delivery Radius & Geo-fence control
+function DeliveryRadiusControl() {
+  const { business, setBusiness } = useAppStore()
+  const [radius, setRadius] = useState(business?.deliveryRadiusKm ?? 5)
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/business/delivery-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deliveryRadiusKm: radius }),
+      })
+      const updated = await res.json()
+      setBusiness(updated)
+      toast.success(`Delivery radius set to ${radius} km`)
+    } catch (e) {
+      toast.error('Failed: ' + String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">Radius</span>
+        <span className="text-2xl font-bold text-emerald-600 tabular">{radius} km</span>
+      </div>
+      <input
+        type="range"
+        min={1}
+        max={20}
+        value={radius}
+        onChange={(e) => setRadius(Number(e.target.value))}
+        className="w-full h-2 rounded-full appearance-none bg-muted cursor-pointer accent-emerald-600"
+      />
+      <div className="flex justify-between text-[10px] text-muted-foreground">
+        <span>1 km</span>
+        <span>5 km</span>
+        <span>10 km</span>
+        <span>15 km</span>
+        <span>20 km</span>
+      </div>
+      <div className="p-2.5 rounded-xl bg-muted/30 text-[11px] text-muted-foreground">
+        <MapPin className="w-3 h-3 inline mr-1" />
+        Shop location: {business?.latitude ? `${business.latitude.toFixed(4)}, ${business.longitude?.toFixed(4)}` : 'Not set'}
+      </div>
+      <Button onClick={handleSave} disabled={saving} className="w-full h-10">
+        {saving ? <Radio className="w-4 h-4 mr-1.5 animate-spin" /> : <Save className="w-4 h-4 mr-1.5" />}
+        Save Delivery Radius
+      </Button>
+    </div>
+  )
+}
+
+// PRD Part 33 §4.1: SaaS Subscription control
+function SubscriptionControl() {
+  const { business, setBusiness } = useAppStore()
+  const [subscribing, setSubscribing] = useState(false)
+  const plan = business?.subscriptionPlan ?? 'trial'
+  const trialEnds = (business as any)?.trialEndsAt
+  const subEnds = (business as any)?.subscriptionEndsAt
+
+  const handleSubscribe = async (planType: 'monthly' | 'yearly') => {
+    setSubscribing(true)
+    try {
+      const res = await fetch('/api/monetization/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: planType }),
+      })
+      const updated = await res.json()
+      setBusiness(updated)
+      toast.success(`Subscription activated — ${planType === 'monthly' ? '₹199/month' : '₹1999/year'}`)
+    } catch (e) {
+      toast.error('Failed: ' + String(e))
+    } finally {
+      setSubscribing(false)
+    }
+  }
+
+  if (plan === 'active') {
+    return (
+      <div className="space-y-2">
+        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <p className="text-sm font-medium text-emerald-700">Active Subscription</p>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Renews on {subEnds ? new Date(subEnds).toLocaleDateString() : 'N/A'}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {plan === 'trial' && (
+        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30">
+          <div className="flex items-center gap-2">
+            <Crown className="w-4 h-4 text-amber-600" />
+            <p className="text-sm font-medium text-amber-700">Free Trial Active</p>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            {trialEnds ? `Expires on ${new Date(trialEnds).toLocaleDateString()}` : 'Subscribe to continue after trial'}
+          </p>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <Button onClick={() => handleSubscribe('monthly')} disabled={subscribing} className="h-12 flex-col">
+          <span className="text-sm font-bold">₹199</span>
+          <span className="text-[10px] opacity-80">per month</span>
+        </Button>
+        <Button onClick={() => handleSubscribe('yearly')} disabled={subscribing} variant="outline" className="h-12 flex-col">
+          <span className="text-sm font-bold">₹1,999</span>
+          <span className="text-[10px] opacity-80">per year (save 16%)</span>
+        </Button>
+      </div>
+      <p className="text-[10px] text-muted-foreground text-center">
+        Includes unlimited khata, billing, GST, AI tools & marketplace listing
+      </p>
+    </div>
+  )
+}
+
+// PRD Part 33 §4: Revenue & Commission stats
+function RevenueStats() {
+  const { data: stats } = useFetch<any>('/api/monetization/stats', [])
+
+  if (!stats) {
+    return <div className="h-20 animate-pulse rounded-xl bg-muted/30" />
+  }
+
+  const formatNum = (n: number) => `₹${n.toLocaleString('en-IN')}`
+
+  return (
+    <div className="space-y-2">
+      {/* Commission Earned */}
+      <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+            <TrendingUp className="w-3 h-3" /> Commission Earned
+          </p>
+          <span className="text-[10px] text-emerald-600">{stats.commissionEarned.count} orders</span>
+        </div>
+        <p className="text-xl font-bold text-emerald-600 tabular">{formatNum(stats.commissionEarned.total)}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">
+          Pending: {formatNum(stats.commissionEarned.pending)} · Paid: {formatNum(stats.commissionEarned.paid)}
+        </p>
+      </div>
+
+      {/* Commission Paid */}
+      <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+            <ShoppingCart className="w-3 h-3" /> Commission Paid (More Shops)
+          </p>
+          <span className="text-[10px] text-amber-600">{stats.commissionPaid.count} orders</span>
+        </div>
+        <p className="text-xl font-bold text-amber-600 tabular">{formatNum(stats.commissionPaid.total)}</p>
+      </div>
+
+      {/* Catalog Orders */}
+      <div className="p-3 rounded-xl bg-muted/30">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+            <Store className="w-3 h-3" /> Online Catalog Orders
+          </p>
+          <span className="text-[10px] text-muted-foreground">{stats.catalogOrders.pending} pending</span>
+        </div>
+        <p className="text-xl font-bold tabular">{stats.catalogOrders.total} orders</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">
+          Revenue: {formatNum(stats.catalogOrders.revenue)}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// PRD Part 33 §4.3: Sponsored Ads control
+function SponsoredAdsControl() {
+  const { business, setBusiness } = useAppStore()
+  const [sponsoring, setSponsoring] = useState(false)
+  const [area, setArea] = useState((business as any)?.sponsoredArea || 'Howrah')
+  const isSponsored = (business as any)?.isSponsored ?? false
+  const sponsoredUntil = (business as any)?.sponsoredUntil
+
+  const handleSponsor = async () => {
+    setSponsoring(true)
+    try {
+      const res = await fetch('/api/monetization/sponsor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ area, days: 30 }),
+      })
+      const updated = await res.json()
+      setBusiness(updated)
+      toast.success(`Sponsored for 30 days in ${area}! You'll appear at the top of "More Shops".`)
+    } catch (e) {
+      toast.error('Failed: ' + String(e))
+    } finally {
+      setSponsoring(false)
+    }
+  }
+
+  const handleCancel = async () => {
+    setSponsoring(true)
+    try {
+      const res = await fetch('/api/monetization/sponsor', { method: 'DELETE' })
+      const updated = await res.json()
+      setBusiness(updated)
+      toast.success('Sponsored ad cancelled')
+    } catch (e) {
+      toast.error('Failed: ' + String(e))
+    } finally {
+      setSponsoring(false)
+    }
+  }
+
+  if (isSponsored) {
+    return (
+      <div className="space-y-2">
+        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30">
+          <div className="flex items-center gap-2">
+            <Star className="w-4 h-4 text-amber-600 fill-amber-500" />
+            <p className="text-sm font-medium text-amber-700">Featured Shop Active!</p>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Area: {area} · Until {sponsoredUntil ? new Date(sponsoredUntil).toLocaleDateString() : 'N/A'}
+          </p>
+        </div>
+        <Button onClick={handleCancel} disabled={sponsoring} variant="outline" className="w-full h-9 text-xs">
+          Cancel Sponsored Ad
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="space-y-1.5">
+        <Label className="text-xs">Target Area</Label>
+        <Input value={area} onChange={(e) => setArea(e.target.value)} className="h-9 text-sm" placeholder="e.g. Howrah, Gariahat" />
+      </div>
+      <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/20">
+        <p className="text-[11px] text-muted-foreground">
+          <Star className="w-3 h-3 inline mr-1 text-amber-600" />
+          30 days featured placement: <span className="font-bold text-amber-700">₹499</span>
+        </p>
+      </div>
+      <Button onClick={handleSponsor} disabled={sponsoring} className="w-full h-10 bg-gradient-to-r from-amber-500 to-orange-500">
+        {sponsoring ? <Radio className="w-4 h-4 mr-1.5 animate-spin" /> : <Star className="w-4 h-4 mr-1.5" />}
+        Become Featured Shop
+      </Button>
     </div>
   )
 }

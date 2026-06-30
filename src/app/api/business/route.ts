@@ -32,6 +32,11 @@ export async function PUT(req: NextRequest) {
         upiId: body.upiId,
         currency: body.currency,
         logoUrl: body.logoUrl,
+        // PRD Part 33: marketplace fields
+        storeSlug: body.storeSlug,
+        deliveryRadiusKm: body.deliveryRadiusKm,
+        latitude: body.latitude,
+        longitude: body.longitude,
       },
     })
     return NextResponse.json(updated)

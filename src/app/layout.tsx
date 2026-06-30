@@ -19,6 +19,12 @@ export const metadata: Metadata = {
   description: "Mobile-first business management platform for Indian traders. Khata, inventory, billing, GST & reports.",
   keywords: ["BizLedger", "Khata", "Billing", "GST", "Inventory", "Indian Business", "Ledger"],
   authors: [{ name: "BizLedger" }],
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    title: "BizLedger",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export const viewport: Viewport = {
@@ -45,7 +51,7 @@ export default function RootLayout({
         </ThemeProvider>
         <script
           dangerouslySetInnerHTML={{
-            __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.getRegistrations().then(function(regs){regs.forEach(function(r){r.unregister();console.log('SW unregistered')})}).catch(function(){})})}`,
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').then(function(reg){console.log('SW registered',reg.scope)}).catch(function(err){console.log('SW reg failed',err)})})}`,
           }}
         />
       </body>
