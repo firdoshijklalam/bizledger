@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
 
 // GET /api/parties — list parties, optional ?type=customer|supplier|both&q=search&phonetic=true
@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   const type = searchParams.get('type')
   const q = searchParams.get('q') || ''
   const usePhonetic = searchParams.get('phonetic') === 'true'
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json([])
 
   let parties = await db.party.findMany({
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
     const party = await db.party.create({

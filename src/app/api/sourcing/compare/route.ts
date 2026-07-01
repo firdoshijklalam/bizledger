@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { productSimilarity, SIMILARITY_THRESHOLD, calcLandedCost } from '@/lib/landed-cost'
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -7,7 +7,7 @@ export async function GET(req: NextRequest) {
   const name = searchParams.get('name')
   const category = searchParams.get('category')
   const quantity = Number(searchParams.get('quantity') || 1) || 1
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ productName: '', matches: [] })
   let targetName = name || '', targetCategory = category || null
   if (productId) { const p = await db.product.findUnique({ where: { id: productId } }); if (!p) return NextResponse.json({ error: 'Not found' }, { status: 404 }); targetName = p.name; targetCategory = p.category || null }

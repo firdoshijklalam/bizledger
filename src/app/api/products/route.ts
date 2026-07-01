@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
 
 // GET /api/products — supports ?q=search&phonetic=true for cross-language phonetic search
@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   const lowStock = searchParams.get('lowStock') === 'true'
   const q = searchParams.get('q') || ''
   const usePhonetic = searchParams.get('phonetic') === 'true'
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json([])
 
   let products = await db.product.findMany({
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
     const product = await db.product.create({

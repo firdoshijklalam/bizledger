@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { createHash } from 'crypto'
 
 // Biometric action gate verification (PRD Part 32 §1).
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     const staffName: string | undefined = body.staffName
     const metadata: any = body.metadata
 
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) {
       return NextResponse.json({ error: 'No business' }, { status: 400 })
     }
@@ -225,7 +225,7 @@ export async function POST(req: NextRequest) {
 // GET — current lockdown status + 10 most recent gate log entries.
 export async function GET() {
   try {
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) {
       return NextResponse.json({ lockdownActive: false, logs: [] })
     }

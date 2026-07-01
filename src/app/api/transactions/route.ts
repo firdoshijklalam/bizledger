@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { recalculatePartyGrade } from '@/lib/grade-calculator'
 import { generateToken, generateInvoiceNumber } from '@/lib/utils'
 
@@ -7,7 +7,7 @@ import { generateToken, generateInvoiceNumber } from '@/lib/utils'
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const partyId = searchParams.get('partyId')
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json([])
 
   const transactions = await db.transaction.findMany({
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
     const amount = Number(body.amount)

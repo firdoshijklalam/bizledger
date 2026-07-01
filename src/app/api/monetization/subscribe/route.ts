@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // POST /api/monetization/subscribe — owner: activate SaaS subscription (₹199/month default).
 // Body: { plan?: 'monthly' | 'yearly' } (default 'monthly').
@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     const plan: 'monthly' | 'yearly' = body.plan === 'yearly' ? 'yearly' : 'monthly'
     const days = plan === 'yearly' ? 365 : 30
 
-    const existing = await db.business.findFirst()
+    const existing = await getCurrentBusiness()
     if (!existing) {
       return NextResponse.json({ error: 'No business found' }, { status: 404 })
     }

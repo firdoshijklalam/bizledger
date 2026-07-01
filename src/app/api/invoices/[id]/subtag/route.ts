@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // Invoice auto-tagging sub-tags (PRD Part 32 §4.3).
 // PATCH — selectively update collectedByName/Role and paidToName/Role on an
@@ -37,9 +37,16 @@ export async function PATCH(
       )
     }
 
-    const existing = await db.invoice.findUnique({ where: { id } })
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'No business found' }, { status: 400 })
+    }
+
+    const existing = await db.invoice.findFirst({
+      where: { id, businessId: business.id },
+    })
     if (!existing) {
-      return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Invoice not found in your business' }, { status: 404 })
     }
 
     const updated = await db.invoice.update({

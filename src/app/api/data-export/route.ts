@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // GET /api/data-export?format=json|csv
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const format = searchParams.get('format') || 'json'
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
   const [parties, products, invoices, transactions] = await Promise.all([

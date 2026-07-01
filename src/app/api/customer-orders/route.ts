@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // GET /api/customer-orders — owner: list last 100 customer orders for the current business.
 // Query: ?status=pending|confirmed|delivered|cancelled to filter.
@@ -7,7 +7,7 @@ import { db } from '@/lib/db'
 
 export async function GET(req: NextRequest) {
   try {
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) {
       return NextResponse.json({ error: 'No business found' }, { status: 404 })
     }

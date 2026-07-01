@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // GET /api/reports — aggregated report data
 export async function GET() {
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json(null)
 
   const parties = await db.party.findMany({ where: { businessId: business.id } })

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // AI Credit Trust Score (PRD Part 32 §3.2).
 // GET/POST — compute a 1.0–5.0★ trust score for a party + max credit suggestion.
@@ -133,6 +133,12 @@ export async function GET(
 ) {
   try {
     const { partyId } = await params
+    // Multi-tenant isolation: verify party belongs to current business
+    const business = await getCurrentBusiness()
+    if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
+    const party = await db.party.findFirst({ where: { id: partyId, businessId: business.id } })
+    if (!party) return NextResponse.json({ error: 'Party not found in your business' }, { status: 404 })
+
     const result = await computeAndPersist(partyId)
     return NextResponse.json(result)
   } catch (e) {
@@ -147,6 +153,12 @@ export async function POST(
 ) {
   try {
     const { partyId } = await params
+    // Multi-tenant isolation: verify party belongs to current business
+    const business = await getCurrentBusiness()
+    if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
+    const party = await db.party.findFirst({ where: { id: partyId, businessId: business.id } })
+    if (!party) return NextResponse.json({ error: 'Party not found in your business' }, { status: 404 })
+
     const result = await computeAndPersist(partyId)
     return NextResponse.json({ ok: true, ...result })
   } catch (e) {

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // GET /api/app-settings
 export async function GET() {
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json(null)
   const settings = await db.appSettings.findUnique({ where: { businessId: business.id } })
   if (!settings) {
@@ -17,7 +17,7 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   try {
     const body = await req.json()
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
     const updated = await db.appSettings.upsert({

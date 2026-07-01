@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 export async function GET() {
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json([])
   const logs = await db.auditLog.findMany({ where: { businessId: business.id }, orderBy: { createdAt: 'desc' }, take: 50 })
   return NextResponse.json(logs)
@@ -10,7 +10,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
   const log = await db.auditLog.create({
     data: {

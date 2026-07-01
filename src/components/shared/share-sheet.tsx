@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MessageCircle, Send, FileText, Smartphone, X, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -20,11 +21,29 @@ interface ShareSheetProps {
  * - Feature phone: Only SMS/Plain Text (WhatsApp/Telegram disabled)
  */
 export function ShareSheet({ open, onClose, customerName, customerPhone, shareText, shareTitle }: ShareSheetProps) {
+  // PRD Part 33 §1.1: Append dynamic store link to shared text.
+  // Uses the slugify fallback the /api/store/[slug] endpoint provides if no storeSlug is set.
+  const [storeSlug, setStoreSlug] = useState<string>('')
+
+  useEffect(() => {
+    if (!open) return
+    fetch('/api/business')
+      .then((r) => r.json())
+      .then((biz) => {
+        if (biz?.storeSlug) {
+          setStoreSlug(biz.storeSlug)
+        } else if (biz?.name) {
+          // Fallback: slugify business name (matches /api/store/[slug] fallback logic)
+          setStoreSlug(biz.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''))
+        }
+      })
+      .catch(() => {})
+  }, [open])
+
   if (!open) return null
 
-  // PRD Part 33 §1.1: Append dynamic store link to shared text
-  const storeLink = typeof window !== 'undefined'
-    ? `${window.location.origin}/?store=sharma-trading-co`
+  const storeLink = typeof window !== 'undefined' && storeSlug
+    ? `${window.location.origin}/?store=${storeSlug}`
     : ''
   const fullShareText = shareText + (storeLink ? `\n\n🛒 Browse more products from our shop:\n${storeLink}` : '')
 

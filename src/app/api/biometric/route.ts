@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { createHash, randomBytes } from 'crypto'
 
 // POST /api/biometric — register or recognize a fingerprint
@@ -9,7 +9,7 @@ import { createHash, randomBytes } from 'crypto'
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
     // Generate a simulated fingerprint hash (in production, scanner SDK provides this)
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
 
 // GET /api/biometric — check if biometric is enabled
 export async function GET() {
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ enabled: false })
 
   const settings = await db.appSettings.findUnique({ where: { businessId: business.id } })

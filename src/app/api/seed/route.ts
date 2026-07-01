@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { generateToken } from '@/lib/utils'
 
 // POST /api/seed — seed demo business + data (idempotent)
+// Security: checks for the SPECIFIC Sharma Trading Co. business, not just any business.
 export async function POST() {
   try {
-    const existing = await db.business.findFirst()
+    // Check if the Sharma Trading Co. business already exists (by name, not just any business)
+    const existing = await db.business.findFirst({
+      where: { name: 'Sharma Trading Co.' },
+    })
     if (existing) {
       return NextResponse.json({ ok: true, message: 'Already seeded', businessId: existing.id })
     }
@@ -228,6 +232,6 @@ export async function POST() {
 
 // GET /api/seed — check seed status
 export async function GET() {
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   return NextResponse.json({ seeded: !!business, businessId: business?.id })
 }

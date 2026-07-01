@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // GET /api/forecast?months=1|3|6 — demand prediction per product based on sales history
 // Trend math fix: 0% trend when no sales data (not 100%)
@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   const monthsParam = searchParams.get('months')
   const months = [1, 3, 6].includes(Number(monthsParam)) ? Number(monthsParam) : 3
 
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json([])
 
   const products = await db.product.findMany({

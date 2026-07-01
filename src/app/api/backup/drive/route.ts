@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // POST /api/backup/drive — backup to Google Drive (simulated)
 // In production, this would use Google Drive API with OAuth2.
 export async function POST() {
   try {
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
     const [parties, products, invoices, transactions] = await Promise.all([

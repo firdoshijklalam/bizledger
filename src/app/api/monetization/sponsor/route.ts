@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // POST /api/monetization/sponsor — owner: become a sponsored/featured shop.
 // Body: { area?: string, days?: number } (default 30 days).
@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     const days = Number(body.days) > 0 ? Number(body.days) : 30
     const area = typeof body.area === 'string' ? body.area : null
 
-    const existing = await db.business.findFirst()
+    const existing = await getCurrentBusiness()
     if (!existing) {
       return NextResponse.json({ error: 'No business found' }, { status: 404 })
     }
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE() {
   try {
-    const existing = await db.business.findFirst()
+    const existing = await getCurrentBusiness()
     if (!existing) {
       return NextResponse.json({ error: 'No business found' }, { status: 404 })
     }

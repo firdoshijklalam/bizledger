@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // PATCH /api/customer-orders/[id]/status — owner: update order status.
 // Body: { status: 'confirmed' | 'delivered' | 'cancelled' }
+// Security: verifies the order belongs to the current business before updating.
 
 const ALLOWED = new Set(['confirmed', 'delivered', 'cancelled'])
 
@@ -20,6 +21,20 @@ export async function PATCH(
         { error: 'Invalid status. Must be confirmed | delivered | cancelled' },
         { status: 400 }
       )
+    }
+
+    // Multi-tenant isolation: get current business, verify ownership
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'No business found' }, { status: 400 })
+    }
+
+    // Verify the order belongs to this business
+    const existing = await db.customerOrder.findFirst({
+      where: { id, businessId: business.id },
+    })
+    if (!existing) {
+      return NextResponse.json({ error: 'Order not found in your business' }, { status: 404 })
     }
 
     const updated = await db.customerOrder.update({

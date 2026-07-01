@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // POST /api/backup/telegram — send JSON backup to Telegram channel
 // In production, this would use Telegram Bot API. Here we simulate + log.
 export async function POST() {
   try {
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
     // Gather all data for backup

@@ -140,14 +140,16 @@ export const useBiometricGateStore = create<BiometricGateState>()(
         if (newFails >= 2) {
           // 2-min lockdown
           const until = Date.now() + 2 * 60 * 1000
+          // Capture onCancel before nulling openGate so the caller is notified
+          const onCancel = get().openGate?.onCancel
           set({
             failedAttempts: 0,
             lockdownUntil: until,
             openGate: null,
             lastResult: 'locked',
           })
-          // also call onCancel so caller knows it was aborted
-          get().openGate?.onCancel?.()
+          // Notify the caller that the gate was aborted due to lockdown
+          onCancel?.()
         } else {
           set({ failedAttempts: newFails, lastResult: 'failed' })
         }

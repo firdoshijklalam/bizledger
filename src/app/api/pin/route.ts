@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { createHash } from 'crypto'
 
 function hashPin(pin: string): string {
@@ -11,7 +11,7 @@ function hashPin(pin: string): string {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
     const settings = await db.appSettings.findUnique({ where: { businessId: business.id } })
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
 // GET /api/pin — check if PIN is enabled
 export async function GET() {
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ enabled: false })
 
   const settings = await db.appSettings.findUnique({ where: { businessId: business.id } })

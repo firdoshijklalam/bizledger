@@ -2,23 +2,31 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { generateToken } from '@/lib/utils'
 
-// POST /api/reset — delete all data and re-seed fresh demo data
+// POST /api/reset — delete the current business's data and re-seed fresh demo data.
+// Security: only resets the FIRST business (Sharma Trading Co.), NOT demo shops.
 export async function POST() {
   try {
-    const business = await db.business.findFirst()
+    // Find the Sharma Trading Co. business specifically (not demo shops)
+    const business = await db.business.findFirst({
+      where: { name: 'Sharma Trading Co.' },
+    })
     if (!business) {
       // Nothing to reset; seed fresh
       await seed()
       return NextResponse.json({ ok: true, message: 'Seeded fresh' })
     }
 
-    // Delete everything in order (respect FK constraints)
+    // Delete everything in order (respect FK constraints) — ONLY for this business
     await db.transaction.deleteMany({ where: { businessId: business.id } })
-    await db.invoiceItem.deleteMany({})
+    await db.invoiceItem.deleteMany({ where: { invoice: { businessId: business.id } } })
     await db.invoice.deleteMany({ where: { businessId: business.id } })
-    await db.productImage.deleteMany({})
+    await db.productImage.deleteMany({ where: { product: { businessId: business.id } } })
+    await db.productMediaAsset.deleteMany({ where: { businessId: business.id } })
     await db.product.deleteMany({ where: { businessId: business.id } })
-    await db.partyNote.deleteMany({})
+    await db.partyNote.deleteMany({ where: { party: { businessId: business.id } } })
+    await db.fingerprintRecord.deleteMany({ where: { businessId: business.id } })
+    await db.biometricGateLog.deleteMany({ where: { businessId: business.id } })
+    await db.customerOrder.deleteMany({ where: { businessId: business.id } })
     await db.party.deleteMany({ where: { businessId: business.id } })
     await db.appSettings.deleteMany({ where: { businessId: business.id } })
     await db.business.delete({ where: { id: business.id } })
@@ -46,6 +54,13 @@ async function seed() {
       pan: 'ABCDE1234F',
       upiId: 'sharmatrading@upi',
       currency: 'INR',
+      // PRD Part 33: marketplace fields
+      storeSlug: 'sharma-trading-co',
+      deliveryRadiusKm: 5,
+      latitude: 22.5958,
+      longitude: 88.2636,
+      subscriptionPlan: 'trial',
+      trialEndsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     },
   })
   await db.appSettings.create({ data: { businessId: business.id } })

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { randomBytes } from 'crypto'
 
 export async function GET() {
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json([])
   const staff = await db.staff.findMany({ where: { businessId: business.id }, orderBy: { createdAt: 'desc' } })
   return NextResponse.json(staff)
@@ -11,7 +11,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
   
   // Generate 6-digit unique staff ID and QR token

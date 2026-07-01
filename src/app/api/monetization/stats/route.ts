@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // GET /api/monetization/stats — owner: revenue + commission + sponsorship summary.
 // Returns subscription status, commission earned (as referrer), commission paid (as payer),
@@ -7,7 +7,7 @@ import { db } from '@/lib/db'
 
 export async function GET() {
   try {
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) {
       return NextResponse.json({ error: 'No business found' }, { status: 404 })
     }

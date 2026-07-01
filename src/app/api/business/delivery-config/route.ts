@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // GET /api/business/delivery-config — owner: current delivery radius, location, serviceable areas.
 // PUT /api/business/delivery-config — owner: update delivery radius / lat / lng / serviceableAreas.
 
 export async function GET() {
   try {
-    const business = await db.business.findFirst()
+    const business = await getCurrentBusiness()
     if (!business) {
       return NextResponse.json({ error: 'No business found' }, { status: 404 })
     }
@@ -32,7 +32,7 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   try {
     const body = await req.json()
-    const existing = await db.business.findFirst()
+    const existing = await getCurrentBusiness()
     if (!existing) {
       return NextResponse.json({ error: 'No business found' }, { status: 404 })
     }

@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { calcLandedCost } from '@/lib/landed-cost'
 export async function GET() {
-  const business = await db.business.findFirst()
+  const business = await getCurrentBusiness()
   if (!business) return NextResponse.json([])
   const pos = await db.purchaseOrder.findMany({ where: { businessId: business.id }, include: { items: true, supplier: true }, orderBy: { createdAt: 'desc' } })
   return NextResponse.json(pos)
 }
 export async function POST(req: NextRequest) {
-  const body = await req.json(); const business = await db.business.findFirst()
+  const body = await req.json(); const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
   if (!body.supplierId) return NextResponse.json({ error: 'supplierId required' }, { status: 400 })
   const year = new Date().getFullYear()
