@@ -121,6 +121,34 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
     return parts.join(' > ')
   }
 
+  // PRD Part 35 §2: Persist nested category chain to DB for relational integrity
+  const persistCategoryTree = async () => {
+    const parts = [
+      { name: category.trim(), level: 0 },
+      { name: subCategory.trim(), level: 1 },
+      ...newSubCategories.filter((s) => s.name.trim()).map((s) => ({ name: s.name.trim(), level: s.level + 1 })),
+    ].filter((p) => p.name)
+
+    if (parts.length === 0) return
+
+    let parentId: string | null = null
+    for (const part of parts) {
+      try {
+        const res = await fetch('/api/category-tree', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: part.name, parentId }),
+        })
+        if (res.ok) {
+          const created = await res.json()
+          if (created?.id) parentId = created.id
+        }
+      } catch {
+        // Continue even if category creation fails (might already exist)
+      }
+    }
+  }
+
   // Category autocomplete (PRD v2 §9.4) + Supplier linking (PRD v2 §9.3)
   const { data: categories } = useFetch<string[]>('/api/products/categories', [])
   const { data: suppliers } = useFetch<Party[]>('/api/parties?type=supplier', [])
@@ -178,6 +206,9 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   const performSave = async () => {
     setSaving(true)
     try {
+      // PRD Part 35 §2: Persist nested category chain to DB before saving product
+      await persistCategoryTree()
+
       const payload = {
         name: name.trim(),
         sku: sku.trim(),

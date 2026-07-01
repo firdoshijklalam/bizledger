@@ -43,8 +43,7 @@ If a field is not visible, use null or 0. For items, extract every line item vis
           ],
         },
       ],
-      thinking: { type: 'disabled' },
-    })
+    } as any)
 
     const content = response.choices[0]?.message?.content || ''
 

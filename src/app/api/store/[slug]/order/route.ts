@@ -105,13 +105,54 @@ export async function POST(
     }
 
     // Decrement product stock for each ordered item.
+    // PRD Part 35 §3.3: For loose/retail products, reduce looseStock AND auto-convert bulk stock.
     await Promise.all(
-      items.map((it) =>
-        db.product.update({
-          where: { id: it.productId },
-          data: { stock: { decrement: Number(it.quantity || 0) } },
-        })
-      )
+      items.map(async (it) => {
+        const product = await db.product.findUnique({ where: { id: it.productId } })
+        if (!product) return
+
+        const orderedQty = Number(it.quantity || 0)
+
+        // Check if this is a loose/retail order (unitPrice matches retailSalePrice)
+        const isLooseOrder = product.retailEnabled &&
+          product.retailSalePrice &&
+          Math.abs(Number(it.unitPrice) - product.retailSalePrice) < 0.01
+
+        if (isLooseOrder && product.conversionFactor) {
+          // Loose order: reduce looseStock, auto-convert bulk if needed
+          let currentLoose = product.looseStock || 0
+
+          // If not enough loose stock, convert bulk → loose
+          while (currentLoose < orderedQty && product.stock > 0) {
+            // Convert 1 bulk unit to loose
+            const converted = product.conversionFactor
+            await db.product.update({
+              where: { id: product.id },
+              data: {
+                stock: { decrement: 1 },
+                looseStock: { increment: converted },
+              },
+            })
+            currentLoose += converted
+            product.stock -= 1
+            product.looseStock = currentLoose
+          }
+
+          // Now decrement looseStock by ordered weight
+          await db.product.update({
+            where: { id: product.id },
+            data: {
+              looseStock: { decrement: orderedQty },
+            },
+          })
+        } else {
+          // Bulk order: reduce stock directly
+          await db.product.update({
+            where: { id: product.id },
+            data: { stock: { decrement: orderedQty } },
+          })
+        }
+      })
     )
 
     return NextResponse.json({
