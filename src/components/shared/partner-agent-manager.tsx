@@ -134,7 +134,7 @@ export function PartnerAgentManager({
   open,
   onOpenChange,
 }: PartnerAgentManagerProps) {
-  const { data, loading, refetch } = useFetch<FingerprintsResponse>(
+  const { data, loading, refetch } = useFetch<any>(
     open ? `/api/fingerprints?partyId=${partyId}` : null,
     [partyId, open]
   )

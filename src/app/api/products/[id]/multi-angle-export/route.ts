@@ -31,7 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const body = await req.json()
 
     // Resolve angle list (default all 4)
-    let angles: Angle[] = VALID_ANGLES
+    let angles: Angle[] = [...VALID_ANGLES]
     if (Array.isArray(body.angles) && body.angles.length > 0) {
       angles = body.angles.filter((a: string): a is Angle =>
         (VALID_ANGLES as readonly string[]).includes(a)
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await sleep(1500)
 
     const imageUrl = asset.processedImageUrl ?? asset.inputUrl ?? ''
-    const createdImages = []
+    const createdImages: any[] = []
 
     // 3. Persist a ProductImage for each requested angle
     for (const angle of angles) {

@@ -112,7 +112,7 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
       },
     ])
     setShowProdSearch(false)
-    setProdQuery('')
+    setShowProdSearch(false)
   }
 
   const updateItem = (idx: number, patch: Partial<LineItem>) => {
@@ -136,7 +136,7 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
     setSaving(true)
     try {
       const invoice = await apiPost('/api/invoices', {
-        partyId: customer.id,
+        partyId: customer?.id,
         items: items.map((i) => ({ ...i, gstRate: isGst ? i.gstRate : 0 })),
         discountMode,
         discountValue: Number(discountValue) || 0,

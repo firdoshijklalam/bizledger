@@ -360,7 +360,7 @@ export function DashboardView() {
               return (
                 <button key={tx.id} onClick={() => { saveScroll(); if (tx.invoiceId) { setSelectedInvoiceId(tx.invoiceId) } else if (tx.partyId) { setReturnToView('dashboard'); setSelectedPartyId(tx.partyId); setActiveView('khata') } }} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left">
                   <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isCredit ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>{isCredit ? <ArrowDownRight className="w-4 h-4 text-emerald-600" /> : <ArrowUpRight className="w-4 h-4 text-red-600" />}</span>
-                  <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || tx.type}</p><p className="text-[11px] text-muted-foreground">{tx.party?.name || '—'} · {timeAgo(tx.createdAt)}</p></div>
+                  <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || tx.type}</p><p className="text-[11px] text-muted-foreground">{(tx as any)?.party?.name || "—"} · {timeAgo(tx.createdAt)}</p></div>
                   <span className={`text-sm font-semibold tabular ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>{isCredit ? '+' : '-'}{formatCurrency(tx.amount, currency)}</span>
                 </button>
               )

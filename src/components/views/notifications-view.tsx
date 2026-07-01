@@ -296,7 +296,7 @@ export function NotificationsView() {
         open={showRemindSheet}
         onClose={() => setShowRemindSheet(false)}
         customerName={remindParty?.name || ''}
-        customerPhone={remindParty?.phone}
+        customerPhone={remindParty?.phone ?? null}
         shareText={remindParty ? `প্রিয় ${remindParty.name},\n\nআপনার বকেয়া টাকা: ${remindParty.amount > 0 ? '₹' + remindParty.amount : 'নির্ধারিত'}\n\nঅনুগ্রহ করে শীঘ্র পরিশোধ করুন।\n\nধন্যবাদ,\n${business?.name || 'BizLedger'}` : ''}
         shareTitle="তাগাদা (Reminder)"
       />

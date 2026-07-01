@@ -10,9 +10,9 @@ import { formatCurrency } from '@/lib/utils'
 interface Props { productId?: string | null; name?: string | null; category?: string | null; quantity?: number; open: boolean; onOpenChange: (open: boolean) => void; onSelectSupplier?: (supplierId: string, supplierName: string) => void }
 export function CompareSuppliersModal({ productId, name, category, quantity = 1, open, onOpenChange, onSelectSupplier }: Props) {
   const query = productId ? `productId=${encodeURIComponent(productId)}` : `name=${encodeURIComponent(name||'')}${category?`&category=${encodeURIComponent(category)}`:''}`
-  const { data, loading } = useFetch<SourcingCompareResult>(open ? `/api/sourcing/compare?${query}&quantity=${quantity}` : null, [open, productId, name, category, quantity])
+  const { data, loading } = useFetch<any>(open ? `/api/sourcing/compare?${query}&quantity=${quantity}` : null, [open, productId, name, category, quantity])
   useEffect(() => { if (open && !loading && data && data.matches.length === 0) { const t = setTimeout(() => { toast.info('No suppliers currently stock this item'); onOpenChange(false) }, 1500); return () => clearTimeout(t) } }, [open, loading, data, onOpenChange])
-  const handleOrder = (m: SourcingMatch) => { if (onSelectSupplier) { onSelectSupplier(m.supplierId, m.supplierName) } else { toast.success(`Ordering from ${m.supplierName}…`) }; onOpenChange(false) }
+  const handleOrder = (m: any) => { if (onSelectSupplier) { onSelectSupplier(m.supplierId, m.supplierName) } else { toast.success(`Ordering from ${m.supplierName}…`) }; onOpenChange(false) }
   return (
     <AnimatePresence>{open && (
       <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={()=>onOpenChange(false)} className="fixed inset-0 z-[90] bg-black/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center">

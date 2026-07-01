@@ -168,7 +168,7 @@ export async function POST(req: NextRequest) {
 
     // 3. Biometric verification path.
     if (method === 'biometric') {
-      let record = null
+      let record: any = null
       if (fingerprintHash) {
         record = await db.fingerprintRecord.findUnique({
           where: { fingerprintHash },

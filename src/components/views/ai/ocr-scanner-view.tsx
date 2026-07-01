@@ -106,8 +106,8 @@ export function OcrScannerView() {
           setEditVendor(data.vendor || '')
           setEditDate(data.date || '')
           setEditItems(data.items || [])
-          setEditCgst(String(data.cgst || data.tax ? (data.tax / 2) : 0))
-          setEditSgst(String(data.cgst || data.tax ? (data.tax / 2) : 0))
+          setEditCgst(String(data.cgst || (data.tax ?? 0) ? ((data.tax ?? 0) / 2) : 0))
+          setEditSgst(String(data.cgst || (data.tax ?? 0) ? ((data.tax ?? 0) / 2) : 0))
           setEditGrandTotal(String(data.grandTotal || 0))
           // Try to match supplier
           const matchedSupplier = suppliers?.find((s) =>

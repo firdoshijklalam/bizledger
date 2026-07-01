@@ -315,8 +315,8 @@ export function ProductProfile({ productId }: { productId: string }) {
       {/* Compare Suppliers Modal (PRD Part 18 §3) */}
       <CompareSuppliersModal
         open={showCompare}
-        onClose={() => setShowCompare(false)}
-        productName={product.name}
+        onOpenChange={(o) => setShowCompare(o)}
+        name={product.name}
         productId={product.id}
         quantity={Math.max(10, Math.ceil(product.lowStockThreshold) * 2)}
       />

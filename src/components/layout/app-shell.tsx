@@ -62,7 +62,7 @@ export function AppShell() {
     if (token) setPaymentToken(token)
     const store = params.get('store')
     if (store) {
-      setStoreSlug(store)
+      setStoreSlug(store as string)
       const invToken = params.get('invoice')
       if (invToken) setStoreInvoiceToken(invToken)
     }
@@ -105,7 +105,7 @@ export function AppShell() {
 
   // PRD Part 33 §1-2: Public store catalog — customer-facing, no app chrome
   if (storeSlug) {
-    return <StoreCatalogView slug={storeSlug} invoiceToken={storeInvoiceToken} />
+    return <StoreCatalogView slug={storeSlug as string} invoiceToken={storeInvoiceToken ?? undefined} />
   }
 
   // PRD Part 33 §3: More Shops discovery — public, no app chrome

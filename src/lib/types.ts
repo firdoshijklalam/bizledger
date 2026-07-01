@@ -91,8 +91,24 @@ export interface Product {
   retailSalePrice?: number | null
   looseStock?: number
   subCategory?: string | null
+  description?: string | null
+  isPublished?: boolean
+  categoryPath?: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface ProductImage {
+  id: string
+  productId: string
+  url: string
+  isPrimary: boolean
+  order: number
+  imageType?: string
+  viewAngle?: string | null
+  isProcessed?: boolean
+  isHD?: boolean
+  createdAt: string
 }
 
 export interface Transaction {

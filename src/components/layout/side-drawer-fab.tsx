@@ -56,7 +56,7 @@ export function SideDrawerFab() {
     }
     window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp); window.addEventListener('pointercancel', onUp)
   }, [position, fabOpen, setFabOpen])
-  const isOnLeft = position.x >= 0 && position.x + FAB_SIZE/2 < (typeof window !== 'undefined' ? window.innerWidth/2 : true)
+  const isOnLeft = position.x >= 0 && position.x + FAB_SIZE/2 < (typeof window !== 'undefined' ? window.innerWidth/2 : 999)
   return (
     <>
       <AnimatePresence>{fabOpen && <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={() => setFabOpen(false)} className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]" />}</AnimatePresence>

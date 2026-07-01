@@ -137,7 +137,7 @@ export function FamilyMemberManager({
   open,
   onOpenChange,
 }: FamilyMemberManagerProps) {
-  const { data, loading, refetch } = useFetch<FingerprintsResponse>(
+  const { data, loading, refetch } = useFetch<any>(
     open ? `/api/fingerprints?partyId=${partyId}` : null,
     [partyId, open]
   )

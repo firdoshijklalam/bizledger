@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       where: { businessId: business.id },
       select: { id: true },
     })
-    const results = []
+    const results: any[] = []
     for (const p of parties) {
       const r = await recalculatePartyGrade(p.id)
       results.push({ partyId: p.id, grade: r?.grade })

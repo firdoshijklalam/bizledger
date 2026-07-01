@@ -10,10 +10,7 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { useScrollRetention } from '@/hooks/use-scroll-retention'
 
-interface InvoiceWithDetails extends Invoice {
-  party?: { id?: string; name: string; phone: string | null; qualityGrade: string } | null
-  items?: Array<{ id: string; name: string; quantity: number; unitPrice: number; total: number }>
-}
+type InvoiceWithDetails = Invoice
 
 /**
  * Universal Floating Modal for Invoice/Transaction preview (PRD Part 7 §2 + Part 16 §4).

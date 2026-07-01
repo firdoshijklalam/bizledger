@@ -1,13 +1,14 @@
 #!/bin/bash
-# Watchdog for BizLedger dev server
-# Keeps the Next.js dev server running across sandbox resets
+# Watchdog for BizLedger dev server — keeps it alive across sandbox resets
 cd /home/z/my-project
 while true; do
-  if ! lsof -ti:3000 >/dev/null 2>&1; then
-    echo "[$(date)] Starting dev server..." >> /home/z/my-project/watchdog.log
-    nohup bun run dev >> /home/z/my-project/dev.log 2>&1 &
+  if ! curl -s --max-time 3 "http://localhost:3000/api/business" >/dev/null 2>&1; then
+    echo "[$(date)] Server down — restarting..." >> /home/z/my-project/watchdog.log
+    pkill -9 -f "next" 2>/dev/null
+    sleep 2
+    nohup setsid bash -c 'cd /home/z/my-project && exec node node_modules/.bin/next dev --turbopack' >> /home/z/my-project/dev.log 2>&1 < /dev/null &
     disown
-    sleep 10
+    sleep 15
   fi
   sleep 5
 done

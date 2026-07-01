@@ -98,6 +98,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
   }, [])
 
   const selectAllTx = () => {
+    if (!data) return
     setSelectedTxIds(new Set(data.transactions.map((t) => t.id)))
   }
 
@@ -107,6 +108,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
   }
 
   const handleShareSelected = () => {
+    if (!data) return
     const selected = data.transactions.filter((t) => selectedTxIds.has(t.id))
     if (selected.length === 0) return
     // PRD Part 10: Open dynamic share sheet instead of direct WhatsApp
@@ -126,6 +128,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
   }
 
   const handleShareStatement = () => {
+    if (!data) return
     // PRD Part 10: Share full statement via dynamic share sheet
     const lines = [
       `${business?.name || 'BizLedger'} — Ledger Statement`,
@@ -442,7 +445,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
         open={showShareSheet}
         onClose={() => setShowShareSheet(false)}
         customerName={data.name}
-        customerPhone={data.phone}
+        customerPhone={data.phone ?? null}
         shareText={shareSheetText}
         shareTitle={shareSheetTitle}
       />
@@ -450,8 +453,8 @@ export function PartyDetail({ partyId }: { partyId: string }) {
       {/* Compare Suppliers Modal (PRD Part 24) */}
       <CompareSuppliersModal
         open={showCompare}
-        onClose={() => setShowCompare(false)}
-        productName={compareProduct}
+        onOpenChange={(o) => setShowCompare(o)}
+        name={compareProduct}
       />
 
       {/* PRD Part 32 §4: Family / Partner / Fingerprint modals */}
