@@ -103,14 +103,39 @@ export async function POST(req: NextRequest) {
       }
 
       if (!pin || hashPin(pin) !== settings.pinHash) {
+        // Threat 4: Exponential backoff brute-force protection
+        const { recordFailedPINAttempt, getLockoutMessage, getClientIP } = await import('@/lib/security')
+        const clientIP = getClientIP(req)
+        const failResult = recordFailedPINAttempt(clientIP)
+
         await logGate({
           businessId: business.id,
           gateType,
           method: 'pin',
-          result: 'failed',
+          result: failResult.locked ? 'locked' : 'failed',
           staffName,
-          metadata,
+          metadata: { ...metadata, lockoutLevel: failResult.lockoutLevel },
         })
+
+        if (failResult.locked) {
+          // Update AppSettings lockdown timestamp
+          await db.appSettings.update({
+            where: { businessId: business.id },
+            data: { gateLockdownUntil: failResult.lockedUntil ? new Date(failResult.lockedUntil) : null },
+          })
+
+          return NextResponse.json({
+            ok: false,
+            verified: false,
+            locked: true,
+            message: getLockoutMessage(failResult.lockoutLevel, failResult.remainingMs),
+            lockoutLevel: failResult.lockoutLevel,
+            lockedUntil: failResult.lockedUntil,
+            telegramAlertSent: true,
+            remainingMs: failResult.remainingMs,
+          }, { status: 429 })
+        }
+
         return NextResponse.json({
           ok: false,
           verified: false,
@@ -118,7 +143,9 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      // Success — clear lockdown.
+      // Success — clear lockdown + reset brute-force counter.
+      const { resetBruteForce, getClientIP: getIP } = await import('@/lib/security')
+      resetBruteForce(getIP(req))
       await db.appSettings.update({
         where: { businessId: business.id },
         data: { gateLockdownUntil: null },

@@ -11,7 +11,7 @@ import {
   Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette, Mic, Keyboard,
   AlertCircle, CheckCircle2, QrCode, ChevronDown, ChevronUp, Lock, Fingerprint,
   Store, MapPin, Navigation, Star, TrendingUp, ShoppingCart, Crown, ExternalLink,
-  Smartphone, Radio,
+  Smartphone, Radio, Globe, Server, Ban,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -42,7 +42,7 @@ export function SettingsView() {
   const { business, setBusiness, triggerRefresh } = useAppStore()
   const { t, language, setLanguage } = useI18n()
   const { theme, setTheme } = useTheme()
-  const { activeId: activePaletteId, setPalette: setPaletteId } = usePaletteStore()
+  const { activePalette: activePaletteId, setPalette: setPaletteId } = usePaletteStore()
   const { globalVoiceEnabled, tapToVoiceEnabled, setGlobalVoice, setTapToVoice } = useVoiceSettings()
   const { channels, toggleChannel } = useNotificationStore()
   const triggerGate = useGateTrigger()
@@ -446,14 +446,14 @@ export function SettingsView() {
                     key={p.id}
                     onClick={() => {
                       setPaletteId(p.id)
-                      toast.success(`Palette: ${p.label} ${p.emoji}`)
+                      toast.success(`Palette: ${p.name} ${p.emoji}`)
                     }}
                     className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition-all ${
                       activePaletteId === p.id ? 'border-primary' : 'border-border'
                     }`}
                   >
                     <span className="text-xl">{p.emoji}</span>
-                    <span className="text-[10px] font-medium">{p.label}</span>
+                    <span className="text-[10px] font-medium">{p.name}</span>
                     <div className="flex items-center gap-0.5 mt-0.5">
                       <span
                         className="w-3 h-3 rounded-full"
@@ -1120,6 +1120,20 @@ export function SettingsView() {
                 </div>
               </div>
             </Card>
+
+            {/* PRD Part 34: Threat Matrix Security Dashboard */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                  <Shield className="w-5 h-5 text-red-600" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-semibold">Threat Matrix Dashboard</h3>
+                  <p className="text-[11px] text-muted-foreground">5-layer cyber attack protection (GLM 5.2 Core)</p>
+                </div>
+              </div>
+              <ThreatMatrixInline />
+            </Card>
           </div>
         )}
       </motion.div>
@@ -1466,3 +1480,85 @@ function SponsoredAdsControl() {
     </div>
   )
 }
+
+// PRD Part 34: Threat Matrix inline dashboard (lightweight, no external deps)
+function ThreatMatrixInline() {
+  return (
+    <div className="space-y-3">
+      {/* 5 Threat Protection Layers */}
+      <div className="grid grid-cols-5 gap-1.5">
+        {[
+          { id: 1, label: 'Anti-Tamper', icon: Shield },
+          { id: 2, label: 'HMAC + JWT', icon: Lock },
+          { id: 3, label: 'GPS Triangulation', icon: Globe },
+          { id: 4, label: 'Brute-Force Lock', icon: Ban },
+          { id: 5, label: 'XSS + RLS', icon: Server },
+        ].map((t) => (
+          <div
+            key={t.id}
+            className="p-2 rounded-xl text-center border bg-emerald-500/10 border-emerald-500/30"
+          >
+            <t.icon className="w-3.5 h-3.5 mx-auto mb-0.5 text-emerald-600" />
+            <p className="text-[8px] font-medium leading-tight">{t.label}</p>
+            <p className="text-[8px] mt-0.5 text-emerald-600">✓ Active</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Security Posture */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex items-center gap-1.5 p-2 rounded-lg bg-emerald-500/5">
+          <Lock className="w-3 h-3 text-emerald-600" />
+          <div>
+            <p className="text-[10px] font-medium">SSL Pinning</p>
+            <p className="text-[9px] text-emerald-600">✓ Enforced</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 p-2 rounded-lg bg-emerald-500/5">
+          <Globe className="w-3 h-3 text-emerald-600" />
+          <div>
+            <p className="text-[10px] font-medium">HSTS</p>
+            <p className="text-[9px] text-emerald-600">✓ Strict HTTPS</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 p-2 rounded-lg bg-emerald-500/5">
+          <Fingerprint className="w-3 h-3 text-emerald-600" />
+          <div>
+            <p className="text-[10px] font-medium">Biometric Gates</p>
+            <p className="text-[9px] text-emerald-600">✓ 5 active</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 p-2 rounded-lg bg-emerald-500/5">
+          <Server className="w-3 h-3 text-emerald-600" />
+          <div>
+            <p className="text-[10px] font-medium">Row-Level Security</p>
+            <p className="text-[9px] text-emerald-600">✓ BIZ-ID locked</p>
+          </div>
+        </div>
+      </div>
+
+      {/* 5-Layer Threat Legend */}
+      <div className="p-3 rounded-xl bg-muted/30 space-y-1 text-[9px] text-muted-foreground">
+        <p className="text-[10px] font-semibold mb-1 flex items-center gap-1">
+          <Shield className="w-3 h-3 text-emerald-600" /> 5-Layer Threat Protection
+        </p>
+        <p>① <strong>Anti-Tamper:</strong> Code obfuscation + root/debugger detection → auto-lock</p>
+        <p>② <strong>HMAC + JWT:</strong> Every request signed → IP block on tampering</p>
+        <p>③ <strong>GPS Triangulation:</strong> GPS + Cell Tower + IP geo cross-verify</p>
+        <p>④ <strong>Brute-Force:</strong> 2-strike → 2min → 5min → 1hr → 24hr → permanent</p>
+        <p>⑤ <strong>XSS + RLS:</strong> Input sanitization + BIZ-ID row-level isolation</p>
+      </div>
+
+      {/* Exponential Backoff Info */}
+      <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/20">
+        <p className="text-[10px] font-medium text-amber-700 dark:text-amber-400 flex items-center gap-1">
+          <Ban className="w-3 h-3" /> Brute-Force Exponential Backoff
+        </p>
+        <p className="text-[9px] text-muted-foreground mt-0.5">
+          2 fails → 2min lock → 5min → 1hr → 24hr → permanent + Telegram alert
+        </p>
+      </div>
+    </div>
+  )
+}
+

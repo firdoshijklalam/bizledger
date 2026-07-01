@@ -23,6 +23,7 @@ import { StoreCatalogView } from '@/components/views/store-catalog-view'
 import { MoreShopsView } from '@/components/views/more-shops-view'
 import { VisitedShopsDeck } from '@/components/views/visited-shops-deck'
 import { useBackButton } from '@/hooks/use-back-button'
+import { useAntiTamper } from '@/hooks/use-anti-tamper'
 import { FloatingInvoiceModal } from '@/components/shared/floating-invoice-modal'
 import { BiometricGateModal } from '@/components/shared/biometric-gate-modal'
 import { FloatingCustomerWidget } from '@/components/shared/floating-customer-widget'
@@ -48,6 +49,9 @@ export function AppShell() {
 
   // Android back button navigation with history back-stack (PRD Part 3 §4)
   useBackButton()
+
+  // PRD Part 34 Threat 1: Anti-tamper & root detection (runs on mount + every 5min)
+  useAntiTamper()
 
   // Check for payment landing page token in URL (?payment=TOKEN)
   // PRD Part 33: also check for ?store=SLUG, ?more-shops=1, ?visited=1

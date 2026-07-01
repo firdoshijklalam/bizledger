@@ -35,6 +35,18 @@ export interface Business {
   upiId?: string | null
   logoUrl?: string | null
   currency: string
+  // PRD Part 33: Marketplace fields
+  storeSlug?: string | null
+  deliveryRadiusKm?: number
+  latitude?: number | null
+  longitude?: number | null
+  serviceableAreas?: string | null
+  subscriptionPlan?: string
+  trialEndsAt?: string | null
+  subscriptionEndsAt?: string | null
+  isSponsored?: boolean
+  sponsoredUntil?: string | null
+  sponsoredArea?: string | null
 }
 
 export interface Party {

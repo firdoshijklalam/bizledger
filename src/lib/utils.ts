@@ -79,3 +79,22 @@ export const GRADE_META: Record<string, { label: string; color: string; bg: stri
   D: { label: 'D', color: 'text-orange-700 dark:text-orange-300', bg: 'bg-orange-100 dark:bg-orange-900/40', ring: 'ring-orange-300', desc: 'Slow Pay' },
   E: { label: 'E', color: 'text-red-700 dark:text-red-300', bg: 'bg-red-100 dark:bg-red-900/40', ring: 'ring-red-300', desc: 'Defaulter' },
 }
+
+/**
+ * Format a date as a relative "time ago" string.
+ * e.g. "2s ago", "5m ago", "3h ago", "2d ago"
+ */
+export function formatDistanceToNow(date: Date): string {
+  const now = Date.now()
+  const diff = now - date.getTime()
+  const sec = Math.floor(diff / 1000)
+  const min = Math.floor(sec / 60)
+  const hr = Math.floor(min / 60)
+  const day = Math.floor(hr / 24)
+
+  if (sec < 60) return `${sec}s ago`
+  if (min < 60) return `${min}m ago`
+  if (hr < 24) return `${hr}h ago`
+  if (day < 7) return `${day}d ago`
+  return date.toLocaleDateString()
+}
