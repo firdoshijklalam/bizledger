@@ -11,6 +11,20 @@ export async function POST() {
       where: { name: 'Sharma Trading Co.' },
     })
     if (existing) {
+      // PRD Part 35: ensure storeSlug + geo fields are set on existing business
+      if (!existing.storeSlug) {
+        await db.business.update({
+          where: { id: existing.id },
+          data: {
+            storeSlug: 'sharma-trading-co',
+            deliveryRadiusKm: existing.deliveryRadiusKm || 5,
+            latitude: existing.latitude ?? 22.5958,
+            longitude: existing.longitude ?? 88.2636,
+            subscriptionPlan: existing.subscriptionPlan || 'trial',
+            trialEndsAt: existing.trialEndsAt ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          },
+        })
+      }
       return NextResponse.json({ ok: true, message: 'Already seeded', businessId: existing.id })
     }
 
