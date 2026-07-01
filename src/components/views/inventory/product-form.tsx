@@ -14,9 +14,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
 import { useGateTrigger } from '@/store/biometric-gate-store'
-import { Package, Tag, DollarSign, Boxes, AlertTriangle, X, Plus } from 'lucide-react'
+import { Package, Tag, DollarSign, Boxes, AlertTriangle, X, Plus, Upload, Camera, Sparkles, Loader2, ChevronRight, Globe, CheckCircle2 } from 'lucide-react'
 import { BadgePercent } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
+import { motion, AnimatePresence } from 'framer-motion'
 
 interface Props {
   open: boolean
@@ -50,7 +51,75 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   const [retailSalePrice, setRetailSalePrice] = useState('')
   const [looseStock, setLooseStock] = useState('')
   const [subCategory, setSubCategory] = useState('')
+  const [description, setDescription] = useState('')
+  const [isPublished, setIsPublished] = useState(true)
+  const [categoryPath, setCategoryPath] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // PRD Part 35 §1: AI auto-fill media dropzone
+  const [mediaImage, setMediaImage] = useState<string | null>(null)
+  const [aiScanning, setAiScanning] = useState(false)
+  const [aiScanned, setAiScanned] = useState(false)
+  const [aiSource, setAiSource] = useState<string>('')
+
+  // PRD Part 35 §2: Nested category tree
+  const [categoryTree, setCategoryTree] = useState<any[]>([])
+  const [showCategoryTree, setShowCategoryTree] = useState(false)
+  const [newSubCategories, setNewSubCategories] = useState<{ name: string; level: number }[]>([])
+  const { data: treeData, refetch: refetchTree } = useFetch<any[]>('/api/category-tree', [])
+
+  // Handle media upload + AI auto-fill
+  const handleMediaUpload = async (file: File) => {
+    const reader = new FileReader()
+    reader.onload = async (e) => {
+      const dataUrl = e.target?.result as string
+      setMediaImage(dataUrl)
+      setAiScanning(true)
+      setAiScanned(false)
+
+      try {
+        const res = await fetch('/api/products/ai-autofill', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: dataUrl }),
+        })
+        const result = await res.json()
+
+        if (result.ok && result.data) {
+          const d = result.data
+          // PRD Part 35 §1.3: Auto-fill fields but keep them editable
+          if (d.name) setName(d.name)
+          if (d.category) setCategory(d.category)
+          if (d.subCategory) setSubCategory(d.subCategory)
+          if (d.mrp) setMrp(String(d.mrp))
+          if (d.gstRate !== undefined) setGstRate(String(d.gstRate))
+          if (d.description) setDescription(d.description)
+          if (d.unit) setUnit(d.unit)
+          setAiSource(result.source || 'ai')
+          setAiScanned(true)
+          toast.success('AI auto-filled product details', {
+            description: 'Review and edit any field as needed',
+          })
+        }
+      } catch (err) {
+        toast.error('AI scan failed — fill manually')
+      } finally {
+        setAiScanning(false)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // PRD Part 35 §2: Add a new sub-category level dynamically
+  const addSubCategoryLevel = () => {
+    setNewSubCategories([...newSubCategories, { name: '', level: newSubCategories.length + 1 }])
+  }
+
+  // Build the full category path from category + subCategory + new levels
+  const buildCategoryPath = () => {
+    const parts = [category, subCategory, ...newSubCategories.map((s) => s.name)].filter(Boolean)
+    return parts.join(' > ')
+  }
 
   // Category autocomplete (PRD v2 §9.4) + Supplier linking (PRD v2 §9.3)
   const { data: categories } = useFetch<string[]>('/api/products/categories', [])
@@ -82,6 +151,11 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
       setGstRate('0'); setStock(''); setLowStockThreshold('5'); setSupplierId('')
       setRetailEnabled(false); setRetailUnit('kg'); setConversionFactor(''); setRetailSalePrice(''); setLooseStock('')
       setSubCategory('')
+      setDescription('')
+      setIsPublished(true)
+      setMediaImage(null)
+      setAiScanned(false)
+      setNewSubCategories([])
     }
   }, [existing, productId, open])
 
@@ -124,6 +198,9 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
         retailSalePrice: retailEnabled ? (Number(retailSalePrice) || 0) : null,
         looseStock: retailEnabled ? (Number(looseStock) || 0) : 0,
         subCategory: subCategory.trim() || null,
+        description: description.trim() || null,
+        isPublished,
+        categoryPath: buildCategoryPath() || null,
       }
       if (productId) {
         await apiPut(`/api/products/${productId}`, payload)
@@ -168,6 +245,68 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {/* PRD Part 35 §1.1: Top-most optional media dropzone */}
+          <div className="space-y-1.5">
+            <Label className="text-xs flex items-center gap-1.5">
+              <Camera className="w-3 h-3" /> প্রোডাক্ট ছবি (AI অটো-ফিলের জন্য — Optional)
+            </Label>
+            {!mediaImage ? (
+              <label className="flex flex-col items-center justify-center gap-1.5 p-5 rounded-xl border-2 border-dashed border-primary/30 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors min-h-[100px]">
+                <Upload className="w-6 h-6 text-primary/60" />
+                <span className="text-xs text-muted-foreground text-center">
+                  প্রোডাক্টের ছবি আপলোড করুন<br/>
+                  <span className="text-[10px]">AI তাৎক্ষণিকভাবে নাম, ক্যাটাগরি, MRP, GST অটো-ফিল করবে</span>
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handleMediaUpload(file)
+                  }}
+                />
+              </label>
+            ) : (
+              <div className="relative rounded-xl overflow-hidden border border-border">
+                <img src={mediaImage} alt="Product" className="w-full h-32 object-cover" />
+                {aiScanning && (
+                  <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
+                    <Loader2 className="w-6 h-6 text-emerald-400 animate-spin" />
+                    <p className="text-xs text-white font-medium">GLM 5.2 ভিশন স্ক্যান করছে...</p>
+                    <div className="flex gap-1">
+                      {[0, 1, 2].map((i) => (
+                        <motion.div
+                          key={i}
+                          className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+                          animate={{ opacity: [0.3, 1, 0.3] }}
+                          transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {aiScanned && (
+                  <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-500 text-white text-[10px] font-medium">
+                    <CheckCircle2 className="w-3 h-3" /> AI Filled
+                  </div>
+                )}
+                <button
+                  onClick={() => { setMediaImage(null); setAiScanned(false) }}
+                  className="absolute top-2 left-2 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+            {aiScanned && (
+              <p className="text-[10px] text-emerald-600 flex items-center gap-1">
+                <Sparkles className="w-3 h-3" />
+                AI ফিল্ডগুলো অটো-ফিল করেছে — প্রতিটি বক্স এডিটেবল. {aiSource === 'fallback' && '(সimulated)'}
+              </p>
+            )}
+          </div>
+
           <div className="space-y-1.5">
             <Label htmlFor="pname" className="text-xs">{t('common.name')} *</Label>
             <div className="relative">
@@ -211,6 +350,79 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
             <datalist id="subcat-list">
               {getSubCategorySuggestions(category).map((s) => <option key={s} value={s} />)}
             </datalist>
+          </div>
+
+          {/* PRD Part 35 §2: Dynamic nested sub-category tree with (+) button */}
+          {newSubCategories.map((sub, idx) => (
+            <div key={idx} className="space-y-1.5 ml-4 border-l-2 border-primary/20 pl-3">
+              <Label className="text-xs flex items-center gap-1 text-primary">
+                <ChevronRight className="w-3 h-3" />
+                Sub-Category Level {sub.level}
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  value={sub.name}
+                  onChange={(e) => {
+                    const updated = [...newSubCategories]
+                    updated[idx] = { ...updated[idx], name: e.target.value }
+                    setNewSubCategories(updated)
+                  }}
+                  className="h-11"
+                  placeholder={`e.g. Level ${sub.level} sub-category`}
+                />
+                <button
+                  onClick={() => setNewSubCategories(newSubCategories.filter((_, i) => i !== idx))}
+                  className="w-11 h-11 rounded-xl bg-muted flex items-center justify-center shrink-0"
+                >
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {/* PRD Part 35 §2.1: Dynamic (+) button for infinite nesting */}
+          <button
+            onClick={addSubCategoryLevel}
+            className="flex items-center gap-1.5 text-xs text-primary font-medium py-1"
+          >
+            <span className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center">
+              <Plus className="w-3 h-3" />
+            </span>
+            Add Sub-Category Level
+          </button>
+
+          {/* Category path preview */}
+          {(category || subCategory || newSubCategories.some((s) => s.name)) && (
+            <div className="p-2 rounded-lg bg-primary/5 text-[10px] text-muted-foreground">
+              <span className="font-medium">Full Path:</span> {buildCategoryPath()}
+            </div>
+          )}
+
+          {/* PRD Part 35 §1.2: AI-generated description */}
+          <div className="space-y-1.5">
+            <Label htmlFor="desc" className="text-xs flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-primary" /> Description
+              {aiScanned && <span className="text-[9px] text-primary">(AI-generated, editable)</span>}
+            </Label>
+            <Textarea
+              id="desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="min-h-[60px] text-sm"
+              placeholder="Product description will be auto-filled by AI when you upload an image, or type manually."
+            />
+          </div>
+
+          {/* PRD Part 35 §3.1: Online publishing toggle */}
+          <div className="flex items-center justify-between p-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
+            <div className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-emerald-600" />
+              <div>
+                <p className="text-xs font-medium">Publish to Online Store</p>
+                <p className="text-[10px] text-muted-foreground">Auto-list on PWA storefront when saved</p>
+              </div>
+            </div>
+            <Switch checked={isPublished} onCheckedChange={setIsPublished} />
           </div>
 
           {/* Supplier linking (PRD v2 §9.3) */}

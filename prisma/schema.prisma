@@ -54,6 +54,7 @@ model Business {
   commissionEarned CommissionLog[] @relation("CommissionRecipient")
   commissionPaid   CommissionLog[] @relation("CommissionPayer")
   mediaAssets  ProductMediaAsset[]
+  categories   Category[]
 }
 
 model Party {
@@ -114,6 +115,11 @@ model Product {
   retailSalePrice    Float?   // price per sub-unit (₹55 per kg)
   looseStock         Float    @default(0) // loose/fractional stock (kg)
   subCategory        String?  // PRD Part 13: sub-category (e.g. Rice → Miniket)
+  // PRD Part 35 §1.2: AI auto-filled description
+  description        String?  // AI-generated professional description from OCR + web scrape
+  // PRD Part 35 §3.1: online catalog publishing status
+  isPublished        Boolean  @default(true) // auto-published to PWA store on save
+  categoryPath       String?  // PRD Part 35 §2: full nested path (e.g. "Groceries > চাল > বাসমতি")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -124,6 +130,25 @@ model Product {
 
   @@index([businessId])
   @@index([supplierId])
+}
+
+// PRD Part 35 §2: Unlimited nested sub-category tree
+model Category {
+  id          String   @id @default(cuid())
+  businessId  String
+  name        String
+  parentId    String?  // null = root category
+  level       Int      @default(0) // 0 = root, 1 = sub, 2 = sub-sub, ...
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children Category[] @relation("CategoryTree")
+
+  @@index([businessId])
+  @@index([parentId])
 }
 
 model ProductImage {

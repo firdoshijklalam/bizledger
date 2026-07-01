@@ -169,14 +169,16 @@ export function StoreCatalogView({ slug, invoiceToken }: StoreCatalogViewProps) 
   }, [store, activeCategory, search])
 
   // ---------- Cart operations ----------
-  const addToCart = (p: StoreProduct) => {
+  // PRD Part 35 §3.2-3.3: addToCart supports dynamic weight + price sync
+  const addToCart = (p: StoreProduct, quantity: number = 1, unitPrice?: number, unitLabel?: string) => {
+    const price = unitPrice ?? p.salePrice
+    const qty = quantity || 1
     setCart((prev) => {
       const existing = prev.find((it) => it.productId === p.id)
-      const price = p.salePrice
       if (existing) {
         return prev.map((it) =>
           it.productId === p.id
-            ? { ...it, quantity: it.quantity + 1, total: (it.quantity + 1) * it.unitPrice }
+            ? { ...it, quantity: it.quantity + qty, total: (it.quantity + qty) * it.unitPrice }
             : it
         )
       }
@@ -185,14 +187,14 @@ export function StoreCatalogView({ slug, invoiceToken }: StoreCatalogViewProps) 
         {
           productId: p.id,
           name: p.name,
-          unit: p.unit,
+          unit: unitLabel || p.unit,
           unitPrice: price,
-          quantity: 1,
-          total: price,
+          quantity: qty,
+          total: price * qty,
         },
       ]
     })
-    toast.success(`${p.name} added to cart`)
+    toast.success(`${p.name} added to cart${qty > 1 ? ` (${qty})` : ''}`)
   }
 
   const updateQty = (productId: string, delta: number) => {
@@ -567,7 +569,7 @@ export function StoreCatalogView({ slug, invoiceToken }: StoreCatalogViewProps) 
                   key={p.id}
                   product={p}
                   currency={currency}
-                  onAdd={() => addToCart(p)}
+                  onAdd={(qty, price, label) => addToCart(p, qty, price, label)}
                 />
               ))}
             </div>
@@ -829,14 +831,36 @@ function ProductCard({
 }: {
   product: StoreProduct
   currency: string
-  onAdd: () => void
+  onAdd: (quantity: number, unitPrice: number, unitLabel: string) => void
 }) {
+  const [selectedWeight, setSelectedWeight] = useState(1)
+  const [useRetail, setUseRetail] = useState(false)
+
   const discount =
     product.mrp && product.mrp > product.salePrice
       ? Math.round(((product.mrp - product.salePrice) / product.mrp) * 100)
       : 0
   const lowStock = product.stock > 0 && product.stock < LOW_STOCK_THRESHOLD
   const outOfStock = product.stock <= 0
+
+  // PRD Part 35 §3.2: Dynamic weight options for loose/retail products
+  const weightOptions = product.retailEnabled && product.retailUnit
+    ? [1, 2, 5, 10]
+    : []
+
+  const currentPrice = useRetail && product.retailSalePrice
+    ? product.retailSalePrice * selectedWeight
+    : product.salePrice * selectedWeight
+
+  const currentUnitLabel = useRetail && product.retailUnit
+    ? `${selectedWeight} ${product.retailUnit}`
+    : selectedWeight > 1
+    ? `${selectedWeight} ${product.unit}s`
+    : product.unit || ''
+
+  const handleAdd = () => {
+    onAdd(selectedWeight, useRetail && product.retailSalePrice ? product.retailSalePrice : product.salePrice, currentUnitLabel)
+  }
 
   return (
     <motion.div
@@ -859,6 +883,12 @@ function ProductCard({
         {discount > 0 && (
           <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded-md bg-rose-500 text-white text-[10px] font-bold">
             {discount}% OFF
+          </span>
+        )}
+        {/* Loose product badge */}
+        {product.retailEnabled && (
+          <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded-md bg-violet-500 text-white text-[10px] font-bold">
+            Loose
           </span>
         )}
         {/* Stock badge */}
@@ -903,6 +933,13 @@ function ProductCard({
           {product.name}
         </h3>
 
+        {/* PRD Part 35 §1.2: AI-generated description */}
+        {(product as any).description && (
+          <p className="text-[10px] text-muted-foreground line-clamp-2">
+            {(product as any).description}
+          </p>
+        )}
+
         {/* Price */}
         <div className="mt-auto">
           <div className="flex items-baseline gap-1.5">
@@ -929,15 +966,57 @@ function ProductCard({
           )}
         </div>
 
+        {/* PRD Part 35 §3.2: Dynamic weight selector for loose products */}
+        {weightOptions.length > 0 && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setUseRetail(false)}
+                className={`flex-1 text-[9px] py-1 rounded-md font-medium ${
+                  !useRetail ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                }`}
+              >
+                Bulk ({product.unit})
+              </button>
+              <button
+                onClick={() => setUseRetail(true)}
+                className={`flex-1 text-[9px] py-1 rounded-md font-medium ${
+                  useRetail ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                }`}
+              >
+                Loose ({product.retailUnit})
+              </button>
+            </div>
+            {useRetail && (
+              <select
+                value={selectedWeight}
+                onChange={(e) => setSelectedWeight(Number(e.target.value))}
+                className="w-full h-7 rounded-md bg-muted px-1.5 text-[10px] border-0 outline-none"
+              >
+                {weightOptions.map((w) => (
+                  <option key={w} value={w}>{w} {product.retailUnit}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
+
+        {/* Dynamic total price preview */}
+        {selectedWeight > 1 && (
+          <p className="text-[10px] text-muted-foreground">
+            Total: <span className="font-bold text-foreground">{formatCurrency(currentPrice, currency)}</span>
+          </p>
+        )}
+
         {/* Add to Cart */}
         <Button
-          onClick={onAdd}
+          onClick={handleAdd}
           disabled={outOfStock}
           size="sm"
           className="w-full mt-1 h-8 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Plus className="w-3.5 h-3.5" />
-          Add
+          Add {selectedWeight > 1 ? `(${selectedWeight})` : ''}
         </Button>
       </div>
     </motion.div>

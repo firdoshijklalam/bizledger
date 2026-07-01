@@ -56,6 +56,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         retailSalePrice: body.retailEnabled ? (Number(body.retailSalePrice) || 0) : null,
         looseStock: body.retailEnabled ? (Number(body.looseStock) || 0) : 0,
         subCategory: body.subCategory || null,
+        // PRD Part 35: AI auto-fill + nested category + publishing
+        description: body.description || null,
+        isPublished: body.isPublished ?? true,
+        categoryPath: body.categoryPath || null,
       },
     })
     return NextResponse.json(updated)

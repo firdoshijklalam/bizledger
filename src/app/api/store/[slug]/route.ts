@@ -25,7 +25,8 @@ export async function GET(
       where: { storeSlug: slug },
       include: {
         products: {
-          where: { stock: { gt: 0 } },
+          // PRD Part 35 §3.1: only return published products with stock
+          where: { stock: { gt: 0 }, isPublished: true },
           orderBy: { name: 'asc' },
         },
       },
@@ -78,6 +79,10 @@ export async function GET(
       retailUnit: p.retailUnit,
       retailSalePrice: p.retailSalePrice,
       subCategory: p.subCategory,
+      // PRD Part 35: AI description + category path
+      description: p.description,
+      categoryPath: p.categoryPath,
+      isPublished: p.isPublished,
     }))
 
     return NextResponse.json({
