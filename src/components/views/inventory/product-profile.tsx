@@ -8,7 +8,7 @@ import { formatCurrency, GRADE_META } from '@/lib/utils'
 import { motion } from 'framer-motion'
 import {
   ArrowLeft, FileEdit, Trash2, Package, Tag, Boxes, BadgePercent,
-  AlertTriangle, Plus, Minus, TrendingUp, ShoppingCart, Award,
+  AlertTriangle, Plus, Minus, TrendingUp, ShoppingCart, Award, Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -24,6 +24,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { CompareSuppliersModal } from '@/components/shared/compare-suppliers-modal'
+import { AIReconstructStudio } from '@/components/shared/ai-reconstruct-studio'
 
 interface ProductWithImages extends Product {
   images?: ProductImage[]
@@ -37,6 +38,7 @@ export function ProductProfile({ productId }: { productId: string }) {
   const [showRestock, setShowRestock] = useState(false)
   const [restockQty, setRestockQty] = useState('')
   const [showCompare, setShowCompare] = useState(false)
+  const [show3DStudio, setShow3DStudio] = useState(false)
 
   if (!product) return null
   const currency = business?.currency || 'INR'
@@ -194,6 +196,14 @@ export function ProductProfile({ productId }: { productId: string }) {
         >
           <Plus className="w-5 h-5 mr-2" /> Restock
         </Button>
+        {/* PRD Part 34: AI 3D Reconstruction Studio button */}
+        <Button
+          onClick={() => setShow3DStudio(true)}
+          variant="outline"
+          className="w-full h-12 text-base text-emerald-600 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 bg-gradient-to-r from-emerald-50/50 to-teal-50/50 dark:from-emerald-950/20 dark:to-teal-950/20"
+        >
+          <Sparkles className="w-5 h-5 mr-2" /> AI 3D Studio
+        </Button>
         {/* PRD Part 18 §3: Compare Suppliers button */}
         <Button
           onClick={() => setShowCompare(true)}
@@ -309,6 +319,14 @@ export function ProductProfile({ productId }: { productId: string }) {
         productName={product.name}
         productId={product.id}
         quantity={Math.max(10, Math.ceil(product.lowStockThreshold) * 2)}
+      />
+
+      {/* PRD Part 34: AI 3D Reconstruction Studio */}
+      <AIReconstructStudio
+        productId={productId}
+        productName={product.name}
+        open={show3DStudio}
+        onOpenChange={setShow3DStudio}
       />
     </motion.div>
   )

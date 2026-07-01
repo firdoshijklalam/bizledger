@@ -53,6 +53,7 @@ model Business {
   customerOrders CustomerOrder[]
   commissionEarned CommissionLog[] @relation("CommissionRecipient")
   commissionPaid   CommissionLog[] @relation("CommissionPayer")
+  mediaAssets  ProductMediaAsset[]
 }
 
 model Party {
@@ -118,6 +119,7 @@ model Product {
 
   business    Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
   images      ProductImage[]
+  mediaAssets ProductMediaAsset[]
   invoiceItems InvoiceItem[]
 
   @@index([businessId])
@@ -125,16 +127,62 @@ model Product {
 }
 
 model ProductImage {
-  id        String   @id @default(cuid())
-  productId String
-  url       String
-  isPrimary Boolean  @default(false)
-  order     Int      @default(0)
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  productId  String
+  url        String
+  isPrimary  Boolean  @default(false)
+  order      Int      @default(0)
+  // PRD Part 34: AI Vision Core — image classification
+  imageType  String   @default("raw") // raw | processed | multi_angle | thumbnail
+  viewAngle  String?  // front | back | left | right | top | spin_frame
+  isProcessed Boolean @default(false) // AI ironing + bg removal applied
+  isHD       Boolean  @default(false) // ultra-HD text restoration applied
+  createdAt  DateTime @default(now())
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId])
+}
+
+// PRD Part 34 §1: Raw media ingest & 3D digital twin generation
+model ProductMediaAsset {
+  id           String   @id @default(cuid())
+  productId    String
+  businessId   String
+  // Input media
+  inputType    String   @default("image") // image | video
+  inputUrl     String?  // stored raw upload (data URL or file path)
+  inputCount   Int      @default(1) // number of images or video seconds
+  // Processing status
+  status       String   @default("pending") // pending | processing | completed | failed | rejected
+  progress     Int      @default(0) // 0-100
+  // Output: 3D mesh + processed images
+  meshData     String?  // JSON: { vertices, faces, bounds, confidenceScore }
+  processedImageUrl String? // primary cleaned image
+  spinVideoUrl String?  // 360-degree spinning video
+  frontViewUrl String?
+  backViewUrl  String?
+  leftViewUrl  String?
+  rightViewUrl String?
+  // Quality & guardrails (PRD Part 34 §3.1)
+  qualityScore Float?   // 0-100, must be >= 90 to pass
+  symmetryScore Float?  // 0-100
+  volumeMatch  Float?   // 0-100, volume preservation vs reference
+  matchScore   Float?   // 0-100, overall match to raw reference (must be >= 90)
+  rejectionReason String?
+  // Processing metadata
+  ironingApplied   Boolean @default(false) // §2.1 fold/scratch removal
+  textRestored     Boolean @default(false) // §2.2 HD text/logo re-render
+  bgRemoved        Boolean @default(false) // §1.1 background removal
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([businessId])
+  @@index([status])
 }
 
 model Transaction {

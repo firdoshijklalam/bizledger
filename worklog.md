@@ -697,3 +697,53 @@ Stage Summary:
 - 9 new API routes, 3 new view components, 4 new settings sub-components, 2 new Prisma models, 10+ new schema fields, manifest.json + sw.js PWA setup
 - Zero lint errors, zero console errors
 - Server running with watchdog persistence
+
+---
+Task ID: 2-a
+Agent: 3d-reconstruct-api-agent
+Task: Build 5 PRD Part 34 (AI Vision Core) API route files for 3D reconstruction pipeline
+
+Work Log:
+- Read existing worklog and Prisma schema (ProductMediaAsset + ProductImage.imageType/viewAngle/isProcessed/isHD already in place).
+- Verified lib/db.ts exports `db` (PrismaClient) and existing products/[id]/route.ts patterns (NextRequest/NextResponse, await params, try/catch + 500).
+- Created 5 API route files under src/app/api/products/[id]/:
+  1. 3d-reconstruct/route.ts — POST ingest raw media (image/video) and run simulated 6-stage GLM 5.2 Vision pipeline (analyze → bg removal → ironing → text restore → mesh gen → guardrail), with stage-level progress updates. Computes bounded quality scores (88-99 range). Anti-deformation guardrail: matchScore < 90 → status=rejected with reason string, returns {ok:false, rejected:true, reason, asset}. On success: status=completed, progress=100, meshData JSON, processedImageUrl + 4 view URLs set to first input (simulated), spinVideoUrl=null (deferred to multi-angle-export). GET returns latest media asset.
+  2. 3d-status/route.ts — GET polling endpoint. Optional ?assetId=X for specific asset, else latest by createdAt.
+  3. media-assets/route.ts — GET (list, desc by createdAt), POST (create new asset record for manual uploads / internal use), DELETE (?assetId=X required).
+  4. multi-angle-export/route.ts — POST generates multi-angle studio images + 360° spin video from latest COMPLETED asset. Returns 400 if none completed. 1.5s render delay. For each angle in body.angles (default front/back/left/right), creates ProductImage(imageType=multi_angle, viewAngle=angle, isProcessed=true, isHD=true). If generateSpinVideo (default true), sets asset.spinVideoUrl. GET returns existing multi_angle ProductImages.
+  5. media-assets/[assetId]/route.ts — GET single asset (404 if missing), PATCH with whitelisted numeric/string/boolean fields (status, progress, scores, urls, processing flags), DELETE.
+- All files: import { db } from '@/lib/db', NextRequest/NextResponse, try/catch with 500 + { error: String(e) }, brief top-of-file comment.
+- Total simulated reconstruction time ~4.1s (800+700+700+600+800+500 ms), stages 2-4 shortened to 200ms when their option is disabled (preserving pipeline structure while letting users toggle features).
+- ~10-15% rejection rate via matchScore random in [88, 99] → values 88, 89 reject.
+- Ran `bun run lint` → clean (no errors or warnings).
+- Dev server log healthy (no compile errors for new routes).
+
+Stage Summary:
+- PRD Part 34 §1/§2/§3 backend API surface complete: 5 routes covering ingest → simulated pipeline → status polling → asset CRUD → multi-angle + spin export. Frontend agent (task 2-b or later) can now wire up a 3D reconstruction UI that POSTs images, polls /3d-status, displays progress + score panel + rejection banners, and triggers multi-angle exports. No DB schema changes were needed (ProductMediaAsset already exists from earlier task). No new dependencies added.
+
+---
+Task ID: 2-b
+Agent: ai-reconstruct-studio-agent
+Task: Build PRD Part 34 frontend component — AI 3D Reconstruction Studio modal (single self-contained component file)
+
+Work Log:
+- Read worklog.md to confirm task 2-a (backend APIs for 3D reconstruction) was complete and to learn the exact response shapes of POST /api/products/[id]/3d-reconstruct (synchronous, ~4.1s, returns {ok, asset, rejected?, reason?}) and POST /api/products/[id]/multi-angle-export (returns {ok, asset, exportedAngles, images}).
+- Read /api/products/[id]/3d-reconstruct/route.ts and /api/products/[id]/multi-angle-export/route.ts and /api/products/[id]/media-assets/route.ts to confirm exact field names: asset.{status, progress, qualityScore, symmetryScore, volumeMatch, matchScore, processedImageUrl, frontViewUrl, backViewUrl, leftViewUrl, rightViewUrl, spinVideoUrl, rejectionReason, ironingApplied, textRestored, bgRemoved, meshData (JSON string), inputUrl, inputType}; media-assets GET returns {assets:[...]}; multi-angle-export returns {images:[{url, viewAngle, isHD}], asset:{spinVideoUrl}}.
+- Confirmed eslint.config.mjs turns OFF @next/next/no-img-element, @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps, react-compiler — so plain <img> and pragmatic types are fine. Removed all 4 unused eslint-disable directives after initial lint (rule is off → directives were flagged as unused).
+- Built /home/z/my-project/src/components/shared/ai-reconstruct-studio.tsx (~1370 LOC, self-contained, 'use client', local state only — no Zustand):
+  • Props: { productId, productName, open, onOpenChange }.
+  • 3-phase state machine: Phase = 'upload' | 'processing' | 'results'. AnimatePresence crossfades between phases.
+  • PHASE 1 (UPLOAD): Header with Boxes icon in emerald→teal gradient tile + title + product name + subtitle. Two-card input-type toggle (📷 Photos 4-5 images / 🎬 Video 5-10 sec). Dashed upload zone with hidden <input type=file accept=image/* multiple> or accept=video/*. Image input: FileReader.readAsDataURL per file → thumbnails grid (grid-cols-3/4) with per-tile X remove + "Add more" tile. Video input: extractFrames() helper using <video>+<canvas>, samples 5 frames at 0/20/40/60/80% of duration via seeked events (with 900ms fallback timeouts + 4s loadeddata timeout for robustness), toDataURL('image/jpeg',0.8), shows "Extracting frames…" Loader2 spinner during processing. Options card with 3 Checkbox rows (🗑️ Background Removal §1.1, 👕 AI Digital Ironing §2.1, ✨ HD Text & Logo Restoration §2.2) — all checked by default. Emerald-gradient "Start 3D Reconstruction" button (disabled until ≥1 image/frame). "View Previous Results" ghost button appears at bottom if a completed asset exists (fetched on open via GET /api/products/[id]/media-assets).
+  • PHASE 2 (PROCESSING): Top progress bar (gradient emerald→teal→emerald, motion width animation, % readout). 6-stage vertical pipeline with Framer Motion staggerChildren (0.12s) + per-stage x-slide entry. Stages: Eye "Analyzing raw media & spatial reference structure", Scissors "Background removal — isolating product", Wind "AI digital ironing — smoothing surfaces", Type "HD text & logo restoration", Box "3D mesh geometry generation", ShieldCheck "Anti-deformation guardrail check". Each stage icon in a circle: completed=emerald bg + Check icon, active=emerald bg + icon + pulsing ring (motion scale/opacity 1.4s loop) + Loader2 spinner on right, pending=muted bg + gray icon. Stage timer advances every 780ms (≈4.7s total, matching backend's 4.1s), caps at stage 5 (last) and stays pulsing until API response arrives. Footer: purple→pink gradient strip with "GLM 5.2 Vision Core is processing… — this usually takes 4-5 seconds". Calls POST /api/products/[id]/3d-reconstruct at phase entry; on response sets activeStage=6 + progress=100, then transitions to results after 400ms (brief all-complete flash).
+  • PHASE 3 (RESULTS): If rejected → red card with AlertTriangle spring-in, reason text (includes match score %), "Try Again" button → resets to phase 1. If completed → results dashboard: (a) Quality Scores — 4 SVG circular gauges (quality/symmetry/volumeMatch/matchScore) with animated stroke-dashoffset, color-coded (emerald ≥90 / amber 80-89 / red <80), spring-in check badge when ≥90, label pill below; (b) Before/After — 2 side-by-side rounded-xl images with "BEFORE (Raw)" black badge + "AFTER (AI)" emerald badge + "✨ Enhanced" corner badge; (c) Processing Applied — 3 pills (Background Removed / Ironing Applied / Text Restored) green with Check when true, muted with X when false; (d) 3D Mesh Info card — parses meshData JSON, shows vertices/faces/bounds(x×y×z)/confidence; (e) Multi-Angle Export section — "Generate Export" button (emerald outline) → spinner → 2x2 grid of angle images (Front/Back/Left/Right badges + HD corner badge) + 16:9 spin video card (uses <video controls> if spinVideoUrl set, else placeholder with rotating Box icon + "360° spin video generated — click to preview"); (f) Action buttons — "Download All" (emerald gradient, triggers toast), "Share to WhatsApp Catalog" (opens wa.me link in new tab + toast), "Done" (closes modal).
+  • Modal reset: wrapped onOpenChange → handleOpenChange calls resetState() on close (clears all state + interval) and fetchPreviousAssets() on open. Avoids setState-in-effect pattern (no data-fetch effect with setState). Only effect is unmount cleanup of the interval timer.
+  • Visual polish: bg-card/95 backdrop-blur-2xl, max-w-3xl max-h-[90vh] overflow-y-auto with thin custom scrollbar, emerald accents throughout, Framer Motion springs/timers, tabular-nums on all scores, responsive grid layouts (2-col mobile → 4-col desktop for gauges).
+  • ScoreGauge sub-component (defined in-file) renders SVG ring with motion.circle stroke-dashoffset animation + center percentage + spring check badge when ≥90.
+- Verified: `bunx tsc --noEmit` → 0 errors in the new file (after adding `type Variants` annotation to containerVariants/stageVariants to satisfy Framer Motion's strict ease literal typing). `bun run lint` → 0 errors, 0 warnings. Dev server log shows no compile errors.
+
+Stage Summary:
+- Single self-contained component delivered: /home/z/my-project/src/components/shared/ai-reconstruct-studio.tsx (~1370 LOC).
+- Full 3-phase AI 3D Reconstruction Studio modal matching the Midjourney/Luma AI premium vibe: upload (photos or video w/ frame extraction) → animated 6-stage GLM 5.2 Vision Core pipeline → results dashboard (quality gauges, before/after, mesh stats, multi-angle export with 2x2 grid + spin video, download/share/done actions) or rejection card with retry.
+- Wires to all 2-a backend endpoints: POST /3d-reconstruct (synchronous), GET /media-assets (previous results), POST /multi-angle-export (4 angles + spin video).
+- Clean lint (0/0) and clean TypeScript. No new dependencies. No Zustand. Local state only. Resets to phase 1 on close.
+- Integration note for next agent: import { AIReconstructStudio } from '@/components/shared/ai-reconstruct-studio' and render it from any product detail / product card with a trigger button that toggles `open`. Pass productId + productName. The modal is fully self-contained — no parent state plumbing needed beyond open/onOpenChange.
