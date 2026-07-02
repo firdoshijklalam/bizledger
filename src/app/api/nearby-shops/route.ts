@@ -45,11 +45,24 @@ export async function GET(req: NextRequest) {
     // Fetch all businesses with a published storeSlug.
     const businesses = await db.business.findMany({
       where: { storeSlug: { not: null } },
-      include: { products: { select: { category: true, stock: true } } },
+      include: {
+        products: { select: { category: true, stock: true } },
+        settings: true,
+      },
+    })
+
+    // PRD Part 37 §1.1 — Merchant Control Toggles:
+    //   Exclude businesses whose onlineSalesEnabled is false (or
+    //   offlineOnlyMode is true). These merchants have opted out of the public
+    //   marketplace and must not appear in nearby-shops discovery.
+    const onlineBusinesses = businesses.filter((b) => {
+      if (!b.settings) return true // no settings row → default to visible
+      if (b.settings.offlineOnlyMode) return false
+      return b.settings.onlineSalesEnabled
     })
 
     const now = new Date()
-    const results = businesses
+    const results = onlineBusinesses
       .map((b) => {
         let distance: number | null = null
 

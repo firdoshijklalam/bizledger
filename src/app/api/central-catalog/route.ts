@@ -54,7 +54,18 @@ export async function GET(req: NextRequest) {
       where: { storeSlug: { not: null } },
       include: {
         products: true,
+        settings: true,
       },
+    })
+
+    // PRD Part 37 §1.1 — Merchant Control Toggles:
+    //   If a business has AppSettings.onlineSalesEnabled = false (or
+    //   offlineOnlyMode = true), ALL of its products are excluded from the
+    //   central catalog and the shop is hidden from anonymous browse.
+    const onlineBusinesses = businesses.filter((b) => {
+      if (!b.settings) return true // no settings row → default to visible
+      if (b.settings.offlineOnlyMode) return false
+      return b.settings.onlineSalesEnabled
     })
 
     // 2. For each business with lat/lng, compute Haversine distance.
@@ -68,7 +79,7 @@ export async function GET(req: NextRequest) {
       distance: number | null
     }> = []
 
-    for (const b of businesses) {
+    for (const b of onlineBusinesses) {
       let distance: number | null = null
       if (hasGeo && b.latitude != null && b.longitude != null) {
         distance = haversine(lat, lng, b.latitude, b.longitude)

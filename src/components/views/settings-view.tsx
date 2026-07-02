@@ -11,7 +11,7 @@ import {
   Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette, Mic, Keyboard,
   AlertCircle, CheckCircle2, QrCode, ChevronDown, ChevronUp, Lock, Fingerprint,
   Store, MapPin, Navigation, Star, TrendingUp, ShoppingCart, Crown, ExternalLink,
-  Smartphone, Radio, Globe, Server, Ban,
+  Smartphone, Radio, Globe, Server, Ban, Cloud, User,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -23,7 +23,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import type { Business, AppSettingsData } from '@/lib/types'
 import { PALETTES, usePaletteStore } from '@/store/palette-store'
 import { useVoiceSettings } from '@/store/voice-settings-store'
@@ -873,6 +873,42 @@ export function SettingsView() {
               </p>
               <SponsoredAdsControl />
             </Card>
+
+            {/* PRD Part 37 §1.1: Merchant Control Toggles */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-sm font-semibold">Merchant Control Toggles</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Control your shop's online visibility and storage mode. Toggle off online sales to hide from the global catalog.
+              </p>
+              <MerchantToggles />
+            </Card>
+
+            {/* PRD Part 37 §1.2: Hybrid Dual-Storage */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-purple-600" />
+                <h3 className="text-sm font-semibold">Hybrid Dual-Storage</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Local Mode (Free): All data in SQLite, images compressed to 100-200KB. Cloud Sync Mode: Media pushed to Telegram as File IDs — zero cloud cost.
+              </p>
+              <StorageModeControl />
+            </Card>
+
+            {/* PRD Part 37 §3: Dual-Profile Switching */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Smartphone className="w-4 h-4 text-emerald-600" />
+                <h3 className="text-sm font-semibold">Dual-Profile Switching</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Switch between Customer and Merchant mode. Same phone number, separate data isolation.
+              </p>
+              <DualProfileControl />
+            </Card>
           </div>
         )}
 
@@ -1562,3 +1598,280 @@ function ThreatMatrixInline() {
   )
 }
 
+
+// PRD Part 37 §1.1: Merchant Control Toggles
+function MerchantToggles() {
+  const [toggles, setToggles] = useState({
+    onlineSalesEnabled: true,
+    offlineOnlyMode: false,
+  })
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/settings/toggles')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.onlineSalesEnabled !== undefined) {
+          setToggles({
+            onlineSalesEnabled: d.onlineSalesEnabled,
+            offlineOnlyMode: d.offlineOnlyMode,
+          })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const updateToggle = async (key: 'onlineSalesEnabled' | 'offlineOnlyMode', value: boolean) => {
+    setSaving(true)
+    try {
+      const res = await apiPut('/api/settings/toggles', { [key]: value })
+      const updated = await res
+      setToggles({
+        onlineSalesEnabled: (updated as any).onlineSalesEnabled ?? toggles.onlineSalesEnabled,
+        offlineOnlyMode: (updated as any).offlineOnlyMode ?? toggles.offlineOnlyMode,
+      })
+      toast.success(`${key === 'onlineSalesEnabled' ? 'Online Sales' : 'Offline Mode'}: ${value ? 'ON' : 'OFF'}`)
+    } catch (e) {
+      toast.error('Failed to update toggle')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-muted/30">
+        <div className="flex items-start gap-2 flex-1">
+          <Store className="w-3.5 h-3.5 text-emerald-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-xs font-medium">Online Sales</p>
+            <p className="text-[10px] text-muted-foreground">Show shop in global catalog & GPS map</p>
+          </div>
+        </div>
+        <Switch
+          checked={toggles.onlineSalesEnabled}
+          onCheckedChange={(checked) => updateToggle('onlineSalesEnabled', checked)}
+          disabled={saving}
+        />
+      </div>
+      <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-muted/30">
+        <div className="flex items-start gap-2 flex-1">
+          <Database className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-xs font-medium">Offline Billing Only</p>
+            <p className="text-[10px] text-muted-foreground">Pure offline ledger mode (disables online sales)</p>
+          </div>
+        </div>
+        <Switch
+          checked={toggles.offlineOnlyMode}
+          onCheckedChange={(checked) => updateToggle('offlineOnlyMode', checked)}
+          disabled={saving}
+        />
+      </div>
+      {toggles.offlineOnlyMode && (
+        <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-700 dark:text-amber-400">
+          ⚠️ Offline mode is ON. Your shop is hidden from the global catalog. Customers cannot find you on the marketplace.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// PRD Part 37 §1.2: Hybrid Dual-Storage Control
+function StorageModeControl() {
+  const [cloudSync, setCloudSync] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/settings/toggles')
+      .then((r) => r.json())
+      .then((d) => setCloudSync(d.cloudSyncMode ?? false))
+      .catch(() => {})
+  }, [])
+
+  const toggleCloudSync = async (enabled: boolean) => {
+    setSyncing(true)
+    try {
+      await apiPut('/api/settings/toggles', { cloudSyncMode: enabled, telegramFileIdMode: enabled })
+      setCloudSync(enabled)
+      toast.success(`Cloud Sync: ${enabled ? 'ON — media pushed to Telegram (zero cost)' : 'OFF — local storage only'}`)
+    } catch (e) {
+      toast.error('Failed to toggle cloud sync')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-muted/30">
+        <div className="flex items-start gap-2 flex-1">
+          <Cloud className="w-3.5 h-3.5 text-purple-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-xs font-medium">Cloud Sync Mode (Telegram)</p>
+            <p className="text-[10px] text-muted-foreground">AI-remodeled images + 360° videos pushed as Telegram File IDs</p>
+          </div>
+        </div>
+        <Switch checked={cloudSync} onCheckedChange={toggleCloudSync} disabled={syncing} />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className={`p-2.5 rounded-xl border text-center ${!cloudSync ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-muted/30 border-border'}`}>
+          <Database className="w-4 h-4 mx-auto mb-1 text-emerald-600" />
+          <p className="text-[10px] font-medium">Local Mode</p>
+          <p className="text-[9px] text-muted-foreground">SQLite + compressed images (100-200KB)</p>
+          <p className="text-[9px] text-emerald-600 font-medium mt-0.5">{!cloudSync ? '✓ Active' : 'Free'}</p>
+        </div>
+        <div className={`p-2.5 rounded-xl border text-center ${cloudSync ? 'bg-purple-500/5 border-purple-500/30' : 'bg-muted/30 border-border'}`}>
+          <Cloud className="w-4 h-4 mx-auto mb-1 text-purple-600" />
+          <p className="text-[10px] font-medium">Cloud Sync</p>
+          <p className="text-[9px] text-muted-foreground">Telegram File IDs — ₹0 cloud cost</p>
+          <p className="text-[9px] text-purple-600 font-medium mt-0.5">{cloudSync ? '✓ Active' : 'Zero cost'}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// PRD Part 37 §3: Dual-Profile Switching
+function DualProfileControl() {
+  const [phone, setPhone] = useState('')
+  const [profile, setProfile] = useState<any>(null)
+  const [showBecomeSeller, setShowBecomeSeller] = useState(false)
+  const [sellerName, setSellerName] = useState('')
+  const [pin, setPin] = useState('')
+  const [biometric, setBiometric] = useState(true)
+  const [loading, setLoading] = useState(false)
+
+  const checkProfile = async () => {
+    if (!phone) return
+    try {
+      const res = await fetch(`/api/profile/switch-role?phone=${phone}`)
+      if (res.ok) {
+        const d = await res.json()
+        setProfile(d)
+      }
+    } catch {}
+  }
+
+  const becomeSeller = async () => {
+    if (!phone || !pin || pin.length < 4) {
+      toast.error('Enter phone + 4-6 digit PIN')
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch('/api/profile/switch-role', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone,
+          customerName: profile?.customerName || 'Customer',
+          merchantName: sellerName || 'My Shop',
+          pin,
+          biometricEnabled: biometric,
+        }),
+      })
+      const d = await res.json()
+      if (d.ok) {
+        setProfile(d.profile)
+        setShowBecomeSeller(false)
+        toast.success('Seller account created! PIN + biometric set.')
+      } else {
+        toast.error(d.error || 'Failed')
+      }
+    } catch (e) {
+      toast.error('Failed: ' + String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const switchMode = async (targetMode: 'customer' | 'merchant') => {
+    if (!phone) {
+      toast.error('Enter phone first')
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch('/api/profile/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, targetMode, pin: targetMode === 'merchant' ? pin : undefined }),
+      })
+      const d = await res.json()
+      if (d.ok) {
+        toast.success(`Switched to ${targetMode} mode`)
+      } else {
+        toast.error(d.error || d.message || 'Failed')
+      }
+    } catch (e) {
+      toast.error('Failed: ' + String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label className="text-xs">Phone Number</Label>
+        <div className="flex gap-2">
+          <Input value={phone} onChange={(e) => setPhone(e.target.value)} className="h-9 text-sm" placeholder="+91 98300 12345" inputMode="tel" />
+          <Button onClick={checkProfile} variant="outline" size="sm" className="h-9">Check</Button>
+        </div>
+      </div>
+
+      {profile && (
+        <div className="p-3 rounded-xl bg-muted/30 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium">Role: {profile.role}</p>
+              <p className="text-[10px] text-muted-foreground">Seller: {profile.isSeller ? '✓ Yes' : '✗ No'}</p>
+            </div>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full ${profile.isSeller ? 'bg-emerald-500/10 text-emerald-600' : 'bg-muted text-muted-foreground'}`}>
+              {profile.role === 'dual' ? 'Dual Profile' : profile.role}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Button onClick={() => switchMode('customer')} disabled={loading} variant="outline" size="sm" className="h-8 text-xs">
+              <User className="w-3 h-3 mr-1" /> Customer Mode
+            </Button>
+            <Button onClick={() => switchMode('merchant')} disabled={loading || !profile.isSeller} variant="outline" size="sm" className="h-8 text-xs">
+              <Store className="w-3 h-3 mr-1" /> Merchant Mode
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {profile && !profile.isSeller && !showBecomeSeller && (
+        <Button onClick={() => setShowBecomeSeller(true)} className="w-full h-10 bg-gradient-to-r from-emerald-500 to-teal-500">
+          <Store className="w-4 h-4 mr-2" /> Become a Seller
+        </Button>
+      )}
+
+      {showBecomeSeller && (
+        <div className="p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-2">
+          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">Become a Seller</p>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Shop Name</Label>
+            <Input value={sellerName} onChange={(e) => setSellerName(e.target.value)} className="h-9 text-sm" placeholder="My Shop" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Master PIN (4-6 digits)</Label>
+            <Input value={pin} onChange={(e) => setPin(e.target.value)} className="h-9 text-sm" inputMode="numeric" placeholder="1234" />
+          </div>
+          <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30">
+            <span className="text-[10px] font-medium">Biometric (Fingerprint)</span>
+            <Switch checked={biometric} onCheckedChange={setBiometric} />
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={() => setShowBecomeSeller(false)} variant="outline" size="sm" className="flex-1 h-8">Cancel</Button>
+            <Button onClick={becomeSeller} disabled={loading} size="sm" className="flex-1 h-8 bg-emerald-600">
+              {loading ? 'Creating...' : 'Create Seller Account'}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

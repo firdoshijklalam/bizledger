@@ -325,6 +325,13 @@ model AppSettings {
   // PRD Part 32 §3: Merchant mesh defaulter registry
   defaulterRegistryEnabled Boolean @default(true)
   gateLockdownUntil    DateTime? // when 2 wrong PINs entered, locked until this time
+  // PRD Part 37 §1.1: Merchant control toggles
+  onlineSalesEnabled   Boolean  @default(true)  // Online Sales toggle — OFF hides from global catalog + GPS map
+  offlineOnlyMode      Boolean  @default(false) // Offline Billing Only — app works as pure offline ledger
+  cloudSyncMode        Boolean  @default(false) // Cloud Sync Mode — media pushed to Telegram as File IDs
+  telegramFileIdMode   Boolean  @default(false) // Store media as Telegram File IDs (zero cloud cost)
+  // PRD Part 37 §3: Dual-profile switching
+  appMode              String   @default("merchant") // merchant | customer — current active mode
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -654,4 +661,25 @@ model CustomerTrustScore {
   updatedAt       DateTime @updatedAt
 
   @@index([customerPhone])
+}
+
+// PRD Part 37 §3: Dual-profile switching — single phone number can be both customer and merchant
+model UserProfile {
+  id              String   @id @default(cuid())
+  phone           String   @unique // same phone for customer + merchant
+  role            String   @default("customer") // customer | merchant | dual
+  merchantId      String?  // linked Business ID if role includes merchant
+  customerName    String?
+  merchantName    String?
+  // Security
+  pinHash         String?  // 4-6 digit master PIN hash
+  pinEnabled      Boolean  @default(false)
+  biometricEnabled Boolean @default(false)
+  // Profile metadata
+  isSeller        Boolean  @default(false)
+  sellerSince     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([phone])
 }
