@@ -571,3 +571,87 @@ model BusinessLink {
 
   @@index([staffPhone])
 }
+
+// PRD Part 36 §1.2: Favorite Shop — auto-added when customer orders from a merchant's shared link
+model FavoriteShop {
+  id           String   @id @default(cuid())
+  customerPhone String  // customer identifier (phone or session)
+  businessId   String
+  businessName String
+  storeSlug    String
+  addedAt      DateTime @default(now())
+
+  @@unique([customerPhone, businessId])
+  @@index([customerPhone])
+}
+
+// PRD Part 36 §2.1: Order split — global cart auto-split by shop
+model OrderSplit {
+  id              String   @id @default(cuid())
+  parentOrderId   String   // the original global cart order ID
+  businessId      String
+  businessName    String
+  items           String   // JSON array of items for this shop
+  subtotal        Float    @default(0)
+  commissionPct   Float    @default(2)
+  commissionAmount Float   @default(0)
+  merchantAmount  Float    @default(0) // subtotal - commission
+  status          String   @default("pending") // pending | confirmed | delivered | returned | cancelled
+  deliveryOtp     String?  // 4-digit OTP for delivery verification
+  otpVerifiedAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([parentOrderId])
+  @@index([businessId])
+  @@index([status])
+}
+
+// PRD Part 36 §2.2: Payment split — auto-settlement to merchant wallets
+model PaymentSplit {
+  id              String   @id @default(cuid())
+  orderSplitId    String
+  businessId      String
+  totalAmount     Float    @default(0)
+  commissionPct   Float    @default(2)
+  commissionAmount Float   @default(0)
+  merchantAmount  Float    @default(0)
+  settlementStatus String  @default("pending") // pending | settled | reversed
+  settledAt       DateTime?
+  reversedAt      DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([orderSplitId])
+  @@index([businessId])
+}
+
+// PRD Part 36 §3.1: Return request — on-spot rejection with instant refund
+model ReturnRequest {
+  id              String   @id @default(cuid())
+  orderSplitId    String
+  customerPhone   String?
+  reason          String   // damaged | wrong_product | quality_issue | other
+  refundAmount    Float    @default(0)
+  refundStatus    String   @default("pending") // pending | refunded | denied
+  refundedAt      DateTime?
+  stockRestored   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([orderSplitId])
+}
+
+// PRD Part 36 §3.2: Customer trust score — anti-fraud return shield
+model CustomerTrustScore {
+  id              String   @id @default(cuid())
+  customerPhone   String   @unique
+  trustScore      Float    @default(5.0) // 0-5 stars
+  totalOrders     Int      @default(0)
+  totalReturns    Int      @default(0)
+  consecutiveReturns Int   @default(0)
+  codLocked       Boolean  @default(false) // locked after 3 consecutive returns
+  lastReturnAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([customerPhone])
+}

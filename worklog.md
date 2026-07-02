@@ -1020,3 +1020,248 @@ Stage Summary:
   ✅ §2: Nested category tree — (+) button persists to DB with correct parent-child chain, no relational glitches
   ✅ §3: Loose stock sync — detects loose orders, reduces looseStock, auto-converts bulk when needed
   ✅ §4: 3D anti-deformation — 4-metric shape validation (volume/symmetry/aspect/edge), rejects if any <90%
+
+---
+Task ID: 36-API
+Agent: 36-API (backend routes)
+Task: Build 8 API route files for PRD Part 36 — Zepto-Style UI, Favorite Shop Engine, Real-time Splits & Smart Returns
+
+Work Log:
+- Read worklog.md and existing patterns to align with project conventions (Next.js 16 async `params`, `db` + `getCurrentBusiness()` tenant isolation, `try/catch` → 500, Haversine formula from /api/nearby-shops, loose-stock logic from /api/store/[slug]/order).
+- Schema already includes the Part 36 models (FavoriteShop, OrderSplit, PaymentSplit, ReturnRequest, CustomerTrustScore) — verified in prisma/schema.prisma before writing routes.
+
+- Created /home/z/my-project/src/app/api/central-catalog/route.ts (GET):
+  • Accepts ?lat=X&lng=Y&customerPhone=Z. Haversine geo-fence against business.deliveryRadiusKm (shops without coords are skipped when customer sends geo; if no geo supplied, falls back to anonymous browse of all slug shops).
+  • Fetches all published in-stock products from shops in range.
+  • PRD §1.3 3-tier priority ranking: Top Tier = favorites + sponsored (gold badge), Bottom Tier = others sorted by price asc. Within top tier, favorites rank before sponsored.
+  • businessName is HIDDEN by default — `shopName` is only returned when the shop is in the customer's favorites (privacy for anonymous browse).
+  • Groups products by category for the Zepto-style UI; categories containing any top-tier product surface first.
+  • Response: { categories: [{name, products, hasTopTier}], totalProducts, shopsInRange }.
+
+- Created /home/z/my-project/src/app/api/favorite-shops/route.ts (GET/POST/DELETE):
+  • GET ?customerPhone=X returns the customer's favorites (ordered by addedAt desc).
+  • POST { customerPhone, businessId, businessName, storeSlug } upserts by unique [customerPhone, businessId] — idempotent, refreshes name/slug if shop rebranded.
+  • DELETE ?customerPhone=X&businessId=Y removes a single favorite.
+
+- Created /home/z/my-project/src/app/api/orders/split/route.ts (POST):
+  • Accepts global cart body { customerName, customerPhone, items:[{productId,name,quantity,unitPrice,total,storeSlug,businessId,businessName}], deliveryCharge, source }.
+  • Groups items by businessId (preserves insertion order), then for EACH shop:
+    1. Creates a parent CustomerOrder (status=pending, source, commissionAmount=2%).
+    2. Creates an OrderSplit (subtotal, commissionPct=2, commissionAmount, merchantAmount, status=pending, deliveryOtp=random 4-digit).
+    3. Creates a PaymentSplit (settlementStatus=pending).
+    4. Decrements product stock per item — loose-stock aware (auto-converts bulk→loose when looseStock runs out, then decrements looseStock). Detects loose orders by `unitPrice === retailSalePrice` (within ₹0.01).
+  • PRD §1.2: Auto-adds shop to FavoriteShop when source === 'merchant_link' (best-effort — wrapped in try/catch so a favorite upsert failure never breaks the order flow).
+  • Splits deliveryCharge evenly across shops.
+  • Returns { ok, splits:[...], parentOrders:[...] }.
+
+- Created /home/z/my-project/src/app/api/orders/[id]/otp/route.ts (GET/POST):
+  • POST { otp } verifies the 4-digit OTP against OrderSplit.deliveryOtp.
+    - Match → sets status='delivered', otpVerifiedAt=now; settles the linked PaymentSplit (settlementStatus='settled', settledAt=now); also updates the parent CustomerOrder.status='delivered' for the owner dashboard. Returns { ok:true, delivered:true, orderSplit, paymentSplit }.
+    - Mismatch → { ok:false, message:'Invalid OTP' } (200, not 4xx — frontend expects an ok:false body).
+  • GET returns the OTP + verification status for the demo (in production this would be SMS-delivered).
+
+- Created /home/z/my-project/src/app/api/payments/split/route.ts (GET/POST):
+  • POST { orderSplitId } simulates settlement. Guards against double-settle (returns 400 with settledAt if already 'settled') and against reversing an already-reversed split. On success sets settlementStatus='settled', settledAt=now. Returns { ok, merchantAmount, commissionAmount, settledAt, settlementStatus }.
+  • GET ?orderSplitId=X returns the full payment-split details (id, amounts, settlementStatus, settledAt, reversedAt, createdAt).
+
+- Created /home/z/my-project/src/app/api/returns/route.ts (GET/POST):
+  • POST { orderSplitId, customerPhone, reason } performs the full Smart-Return flow:
+    1. Creates a ReturnRequest with refundAmount=orderSplit.subtotal, refundStatus='refunded', refundedAt=now.
+    2. Reverses the PaymentSplit (settlementStatus='reversed', reversedAt=now).
+    3. Updates OrderSplit.status='returned'.
+    4. Restores product stock — loose orders increment looseStock, bulk orders increment stock. Detects loose by `unitPrice === retailSalePrice`. Marks stockRestored=true on the return record after restoration succeeds.
+    5. Updates CustomerTrustScore via upsert: totalReturns += 1, consecutiveReturns += 1, lastReturnAt=now. If consecutiveReturns >= 3 → codLocked=true AND trustScore -= 1.0 (clamped at 0). Returns the new trustScore + codLocked flag.
+  • GET ?orderSplitId=X returns the list of return requests for the order.
+  • Returns { ok, refundAmount, stockRestored:true, trustScore, codLocked, returnRequestId }.
+
+- Created /home/z/my-project/src/app/api/customer-trust-score/route.ts (GET/POST):
+  • GET ?customerPhone=X returns trustScore, totalOrders, totalReturns, consecutiveReturns, codLocked, lastReturnAt. Defaults to trustScore=5.0, all-zero counters if no record exists yet.
+  • POST { customerPhone } records a successful delivery: totalOrders += 1 AND resets consecutiveReturns=0 (good behaviour clears the streak). Upserts by unique customerPhone.
+
+- Created /home/z/my-project/src/app/api/orders/split/[id]/route.ts (GET/PATCH):
+  • GET returns a specific OrderSplit with its parsed items, linked PaymentSplit, and returnRequests[].
+  • PATCH { status } updates the split status. Whitelisted statuses: pending | confirmed | delivered | returned | cancelled (others → 400). Returns { ok, orderSplit }.
+
+- Style & conventions:
+  • Every file uses `import { NextRequest, NextResponse } from 'next/server'` and (where appropriate) `import { db } from '@/lib/db'` / `import { db, getCurrentBusiness } from '@/lib/db'`.
+  • Every handler wrapped in try/catch returning `NextResponse.json({ error: String(e) }, { status: 500 })`.
+  • Haversine formula copied verbatim from /api/nearby-shops/route.ts.
+  • OTP generated via `String(Math.floor(1000 + Math.random() * 9000))`.
+  • Loose-stock decrement mirrors /api/store/[slug]/order/route.ts (auto-convert bulk→loose).
+  • Next.js 16 async `params` pattern: `{ params }: { params: Promise<{ id: string }> }` then `const { id } = await params`.
+
+Verification:
+- `bun run lint` → zero errors, zero warnings.
+- `bunx tsc --noEmit` → zero errors in any of the 8 new files (initial PaymentSplit type-inference issue in orders/[id]/otp fixed by importing `import type { PaymentSplit } from '@prisma/client'` and annotating `let settledPayment: PaymentSplit | null = null`).
+- Dev server log: no new compile errors after file creation. Existing routes (/api/business, /api/products, /api/dashboard, /api/app-settings) continue to return 200.
+
+Stage Summary:
+- 8 API route files delivered for PRD Part 36:
+  1. src/app/api/central-catalog/route.ts — merged geo-fenced catalog with 3-tier ranking (favorites+sponsored top, others by price asc), category grouping, businessName privacy for anonymous browse.
+  2. src/app/api/favorite-shops/route.ts — GET / POST (upsert) / DELETE favorites.
+  3. src/app/api/orders/split/route.ts — auto-splits global cart by shop; creates CustomerOrder + OrderSplit (with OTP) + PaymentSplit per shop; loose-stock aware; auto-favorites on merchant_link source.
+  4. src/app/api/orders/[id]/otp/route.ts — POST verifies OTP → marks split delivered + settles payment + updates parent order; GET returns OTP for demo.
+  5. src/app/api/payments/split/route.ts — POST simulates settlement (with double-settle guard); GET returns split details.
+  6. src/app/api/returns/route.ts — POST creates return, reverses payment, restores stock, updates CustomerTrustScore (codLocked after 3 consecutive returns, -1.0 star penalty); GET returns return requests.
+  7. src/app/api/customer-trust-score/route.ts — GET score; POST records successful delivery (resets consecutiveReturns streak).
+  8. src/app/api/orders/split/[id]/route.ts — GET full split (items + payment + returns); PATCH status (owner confirmation).
+- Frontend agents can now wire up:
+  • Zepto-style central catalog UI consuming /api/central-catalog (categories[] with tier badges).
+  • Favorite-shop heart-toggle calling /api/favorite-shops.
+  • Global cart checkout calling /api/orders/split (one POST handles multi-shop split).
+  • Delivery-OTP verification screen calling /api/orders/[id]/otp.
+  • Owner settlement dashboard calling /api/payments/split.
+  • Return flow with instant refund + trust-score visualization calling /api/returns + /api/customer-trust-score.
+- Lint clean, TypeScript clean, multi-tenant isolation preserved on all routes that touch owner-scoped data.
+
+---
+Task ID: 36-FE
+Agent: 36-FE (frontend component)
+Task: Build the Zepto-Style Central Catalog frontend component for PRD Part 36
+
+Work Log:
+- Read worklog.md and existing patterns to align with project conventions (StoreCatalogView as the public customer-facing reference, useFetch + apiPost + apiDelete hooks, sonner toast, framer-motion, shadcn/ui New York components, formatCurrency helper, AVATAR_GRADIENTS pattern, max-w-2xl mx-auto public-page layout with sticky header + mt-auto footer).
+- Confirmed 36-API routes existed and re-read each one (central-catalog GET, favorite-shops GET/POST/DELETE, orders/split POST, orders/[id]/otp GET/POST, returns POST, customer-trust-score GET) to match the response shapes exactly in the frontend TypeScript interfaces.
+- Discovered the central-catalog response was missing `businessId` per product — which is required by POST /api/orders/split to group items by shop and create per-shop CustomerOrders. Made a small additive one-line edit to src/app/api/central-catalog/route.ts to include `businessId: p.businessId` in each CatalogEntry (privacy-preserving: businessId is an opaque cuid, doesn't reveal shop name; shopName is still only returned for favorites per §1.2 anonymous browse).
+
+- Created /home/z/my-project/src/components/views/central-catalog-view.tsx (~1150 lines):
+  • §1.1 Zepto-Style Speed UI:
+    - Full-page customer-facing storefront (no app chrome), max-w-2xl mx-auto, sticky header + mt-auto footer per layout rules.
+    - Brand "Shop Local" + Sparkles gradient avatar.
+    - Location detection: "Use My Location" button calls navigator.geolocation.getCurrentPosition() with enableHighAccuracy + 10s timeout. Handles permission-denied / unavailable / timeout errors with actionable messages.
+    - Area-name search fallback: GET https://nominatim.openstreetmap.org/search (OpenStreetMap geocoder) — customer can type "Park Street, Kolkata" etc.
+    - "Browse all shops anonymously" link: sets location=null so central-catalog returns all slug shops (anonymous browse mode supported by the API).
+    - After location set, fetches /api/central-catalog?lat=X&lng=Y&customerPhone=Z.
+    - Display products grouped by CATEGORY in Zepto-style layout: horizontal-scroll category chips (pill-shaped, emerald when active, ★ for categories with top-tier products), click jumps to that category section via scrollIntoView with categoryRefs.
+    - Each category section: heading + product grid (2 cols mobile, 3 cols md).
+    - Product cards: compact rounded-2xl, first-letter gradient image placeholder, name, price + MRP strikethrough, discount % badge, stock badge ("Only N left" when <=10), unit, description (line-clamp-1), Add button (small + icon, emerald for bottom-tier / amber for top-tier), quantity stepper after add.
+  • §1.2 Anonymous Browse + Favorite Shops:
+    - Shop name HIDDEN by default. ProductCard shows "Local Shop" italic muted text. If product.shopName is truthy (only favorites return shopName), shows it with a Store icon + amber color.
+    - "My Favorite Shops" button in header (Heart icon) opens FavoritesModal (slide-up sheet): fetches /api/favorite-shops?customerPhone=X, lists each favorite with first-letter gradient avatar, business name, store slug, and a Remove button (DELETE /api/favorite-shops?customerPhone=X&businessId=Y). After remove, refetches both favorites and catalog.
+    - Empty state for no favorites yet.
+    - Cart items carry businessName="Local Shop" (privacy) when not favorite; the cart drawer shows "Local Shop" for non-favorites and the actual shop name only for favorites.
+  • §1.3 3-Tier Priority Search Ranking:
+    - Search bar at top (below header). Filters across name / description / category / shopName.
+    - When searching, frontend re-sorts: top tier (favorites + sponsored) first, then bottom tier by price ascending. Re-groups by category preserving tier ordering within each group.
+    - SearchTierSummary component shows "★ N top picks" (amber badge) + "N more by price" (outline badge) when search is active.
+    - ProductTierGroup sub-component renders top-tier products first (with gold border), then a visual separator "More from other local shops", then bottom-tier products.
+    - Gold tier styling: border-amber-500/40 bg-amber-500/5 + ★ Favorite badge (amber) or Crown Sponsored badge (amber).
+  • §2.1 Global Cart + Order Splitting:
+    - Cart button (top-right) with item count badge (spring animation on change).
+    - Cart drawer (slide-up bottom sheet with backdrop, spring transition):
+      * Items grouped by shop (favorite/sponsored groups have amber border + ★/Crown badge).
+      * Each item: name, unit price, qty stepper, line total.
+      * Customer info form: Name (required), Phone (auto-filled from session ID, read-only), Address (optional).
+      * "Place Order · Auto-split into N shop orders" button → POST /api/orders/split with all items carrying productId/name/quantity/unitPrice/total/storeSlug/businessId/businessName.
+      * Source set to 'central_catalog' (not 'merchant_link' so no auto-favorite on order).
+    - On success: closes cart, clears cart, shows Order Confirmation screen.
+  • §2.2 Payment Split Info:
+    - Order Confirmation screen renders a PaymentSplit card: Total Order Value, Total Commission (2%), Merchant Settlement (sum across all splits), with a "Payment settled instantly to merchant wallets · No COD delays" message (emerald background, ShieldCheck icon).
+    - Per-split breakdown: 3-column grid showing Subtotal / Commission (amber) / Merchant amount (emerald).
+  • Order Confirmation screen:
+    - Big green checkmark with spring scale + rotate animation.
+    - "Order Placed Successfully! 🎉" heading + subtext "Your cart was auto-split into N shop orders".
+    - Per-split tracking card: shop avatar (first letter gradient), shop name (+ ★ if favorite), item count + subtotal, status badge (Pending amber / Delivered emerald / Returned rose), items list (compact), 3-column payment breakdown.
+    - Delivery OTP shown per split (from split.deliveryOtp directly — backend already returns it) in an amber demo card with large tracking-[0.3em] digits and "Demo" label noting in prod this would be SMS-delivered.
+    - OTP verify input (4-digit numeric, maxLength=4, inputMode=numeric) + Verify button → POST /api/orders/[id]/otp { otp }. On success: toast "Delivery verified! Payment settled to merchant wallet.", updates split status to 'delivered' + settlementStatus to 'settled'.
+    - "Return Order (Instant Refund)" button appears only when split.status === 'delivered' (§3.1).
+    - "Place Another Order" button at bottom to reset state and return to catalog.
+  • §3.1 Smart Returns:
+    - ReturnDialog sub-component (modal with spring scale animation): shows shop name, refund amount (= split.subtotal), 4-reason grid (damaged/wrong_product/quality_issue/other) with English + Bengali labels. On confirm → POST /api/returns { orderSplitId, customerPhone, reason }.
+    - On success: toast "Refund of ₹X processed instantly to your wallet" + info toast "Stock restored to shop inventory · New trust score: X.X★". Updates local split status to 'returned', paymentSplit.settlementStatus to 'reversed'. Refetches trust score + catalog (stock counts changed).
+    - Returned splits show a rose "Refund processed · Stock restored to shop inventory" banner instead of the OTP/Return UI.
+  • §3.2 Trust Score Display:
+    - Header badge: "★ {score.toFixed(1)}" (amber when normal, rose when codLocked).
+    - Title attribute shows full breakdown (orders + returns).
+    - When codLocked=true, a rose warning bar appears under the header: "COD locked due to returns. Prepaid only." with a Lock icon.
+    - Trust score is refetched after each OTP verify and each return.
+  • Visual polish:
+    - Emerald accent throughout (matches project). Amber for top-tier. Rose for returns/danger.
+    - Spring animations on cart badge count, success checkmark, return dialog.
+    - Slide-up bottom sheets with drag handle for cart + favorites.
+    - All cards rounded-2xl, hover shadow on product cards.
+    - Mobile-first responsive: 2-col grid → 3-col on md.
+    - no-scrollbar utility for horizontal chip strip.
+    - Bengali microcopy ("স্থানীয় দোকান থেকে দ্রুত ডেলিভারি" on location selector, Bengali labels on return reasons).
+    - Status meta map for split states (pending/confirmed/delivered/returned/cancelled) with appropriate colors + icons.
+
+- Wired the new view into the AppShell router:
+  • Imported CentralCatalogView.
+  • Added showMarketplace state + URL param check (?marketplace=1).
+  • Renders <CentralCatalogView /> before the MoreShopsView branch (public, no app chrome).
+  • Accessible at /?marketplace=1 — same pattern as existing /?store=SLUG, /?more-shops=1, /?visited=1.
+
+- Backend tweak (additive, non-breaking): added `businessId: p.businessId` to each product entry returned by GET /api/central-catalog. Required for the frontend to call POST /api/orders/split (which groups items by businessId). Does NOT break §1.2 anonymous browse — businessId is an opaque cuid; shopName is still only returned for favorites.
+
+Verification:
+- `bun run lint` → zero errors, zero warnings.
+- `bunx tsc --noEmit` → zero errors in src/ (initial HTMLElement vs HTMLDivElement ref mismatch fixed by typing categoryRefs as Record<string, HTMLElement | null>). Pre-existing errors in examples/ and skills/ folders are unrelated to this task.
+- Dev server log: no new compile errors after file creation. Existing routes continue to return 200.
+
+Stage Summary:
+- 1 new frontend component delivered for PRD Part 36: src/components/views/central-catalog-view.tsx (~1150 lines).
+- 1 new public URL route: /?marketplace=1 (wired into app-shell.tsx).
+- 1 additive backend tweak: central-catalog API now includes businessId per product (needed for orders/split grouping).
+- ALL PRD Part 36 frontend sections fully implemented:
+  ✅ §1.1 Zepto-Style Speed UI — full-page storefront, GPS + area-name + anonymous browse, category chips with scroll-jump, Zepto-style product grid.
+  ✅ §1.2 Anonymous Browse + Favorite Shops — shop names hidden unless favorite, FavoritesModal with remove flow, auto-catalog refresh.
+  ✅ §1.3 3-Tier Priority Search Ranking — top tier (gold border + ★ Favorite / Crown Sponsored badges) first, bottom tier by price asc, visual separator, search-tier summary.
+  ✅ §2.1 Global Cart + Order Splitting — cart grouped by shop, customer info form, POST /api/orders/split with all required fields, order confirmation with split details + OTP per shop + track-orders status.
+  ✅ §2.2 Payment Split Info — total/commission/merchant breakdown, instant-settlement message, per-split 3-column payment grid.
+  ✅ §3.1 Smart Returns — per-split Return button (only when delivered), reason dialog (4 options + Bengali labels), POST /api/returns, refund + stock restore + trust score feedback toasts.
+  ✅ §3.2 Trust Score Display — header ★ badge (amber/rose), COD-lock warning bar, refetch after verify/return.
+- Lint clean, TypeScript clean (in src/), dev server stable. Component is reachable at /?marketplace=1.
+
+---
+Task ID: PRD-PART-36
+Agent: main
+Task: PRD Part 36 — Zepto-Style UI, Favorite Shop Engine, Real-time Splits & Smart Returns
+
+Work Log:
+- Schema: Added 5 new models — FavoriteShop (customerPhone+businessId unique), OrderSplit (parentOrderId, businessId, items JSON, subtotal, commissionPct, commissionAmount, merchantAmount, status, deliveryOtp, otpVerifiedAt), PaymentSplit (orderSplitId, businessId, settlementStatus, settledAt, reversedAt), ReturnRequest (orderSplitId, reason, refundAmount, refundStatus, stockRestored), CustomerTrustScore (customerPhone unique, trustScore, totalOrders, totalReturns, consecutiveReturns, codLocked). Ran db:push.
+
+- Backend APIs (8 new routes):
+  1. /api/central-catalog (GET) — merged geo-fenced catalog from all shops within 5km, 3-tier ranking (favorites+sponsored top, others bottom by price), category grouping, anonymous browse (shop names hidden unless favorite)
+  2. /api/favorite-shops (GET/POST/DELETE) — favorite shop CRUD with upsert
+  3. /api/orders/split (POST) — auto-split global cart by shop, creates CustomerOrder + OrderSplit (with 4-digit OTP) + PaymentSplit per shop, loose-stock aware, auto-favorites on merchant_link source
+  4. /api/orders/[id]/otp (GET/POST) — OTP verification marks delivered + settles payment
+  5. /api/payments/split (GET/POST) — payment settlement simulation
+  6. /api/returns (GET/POST) — return with instant refund, stock restore, trust score update (codLocked after 3 consecutive returns)
+  7. /api/customer-trust-score (GET/POST) — trust score management
+  8. /api/orders/split/[id] (GET/PATCH) — split details + status update
+
+- Frontend: CentralCatalogView (~1150 lines) — Zepto/Blinkit-style hyperlocal marketplace:
+  • §1.1: GPS detection, area search, category chips, 2-col product grid, "Shop Local" branding
+  • §1.2: Anonymous browse (shop names hidden), "My Favorite Shops" modal with remove
+  • §1.3: 3-tier search ranking (gold tier for favorites+sponsored, bottom tier by price)
+  • §2.1: Global cart grouped by shop, order split with OTP per shop, order tracking
+  • §2.2: Payment split breakdown (total/commission/merchant per shop)
+  • §3.1: Smart returns with reason dialog, instant refund, stock restore
+  • §3.2: Trust score badge in header, COD lock warning
+
+- AppShell fix: Changed URL param detection from useEffect to lazy useState initializers so public pages (marketplace, store, more-shops, visited) render instantly without waiting for business bootstrap. Added useEffect backup for post-hydration safety.
+
+API Verification:
+✅ Central Catalog: 12 products, 3 shops, 7 categories
+✅ Order Split: 2 splits created (Sharma + Maa Lakshmi), OTP generated, commission 2%, merchant amount calculated
+✅ OTP Verification: Delivered=true on correct OTP
+✅ Returns: Refund ₹100, stock restored=true, trust score updated
+✅ Trust Score: score=5, returns=1, consecutiveReturns=1, codLocked=false
+✅ Favorite Shops: auto-added on merchant_link order source
+
+Browser Verification:
+✅ Marketplace (?marketplace=1): "Shop Local" heading, "Use My Location" button, area search
+✅ Catalog: Grocery + Electronics categories, products from 3 shops merged
+✅ Products: Basmati Rice, Toor Dal, Sunflower Oil, Mustard Oil, Miniket Rice, Cotton Shirt, Denim Jeans
+✅ Cart: "Cart with 1 items" after adding product
+✅ Favorite Shops: "My favorite shops" button in header
+✅ Search: "Search products, shops, categories…" search bar
+✅ Lint: 0 errors, TS: 0 errors
+
+Stage Summary:
+- ALL 3 sections of PRD Part 36 fully implemented and verified:
+  ✅ §1: Zepto-style central catalog with anonymous browse, favorite shops, 3-tier priority ranking
+  ✅ §2: Order splitting by shop with OTP delivery verification, split payment gateway with auto-settlement
+  ✅ §3: Smart returns with instant refund + stock re-sync, customer trust score with COD lock after 3 returns
+- 8 new API routes, 5 new Prisma models, 1 new view component, AppShell URL routing fix
+- Zero lint errors, zero TypeScript errors

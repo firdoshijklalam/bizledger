@@ -20,6 +20,7 @@ import { SalePadView } from '@/components/views/sale-pad-view'
 import { SourcingView } from '@/components/views/sourcing-view'
 import { StaffManagementView } from '@/components/views/staff-management-view'
 import { StoreCatalogView } from '@/components/views/store-catalog-view'
+import { CentralCatalogView } from '@/components/views/central-catalog-view'  // Part 36
 import { MoreShopsView } from '@/components/views/more-shops-view'
 import { VisitedShopsDeck } from '@/components/views/visited-shops-deck'
 import { useBackButton } from '@/hooks/use-back-button'
@@ -40,12 +41,30 @@ export function AppShell() {
     setBusinessLoaded,
   } = useAppStore()
   const { setLanguage } = useI18n()
-  const [paymentToken, setPaymentToken] = useState<string | null>(null)
+  const [paymentToken, setPaymentToken] = useState<string | null>(() => { if (typeof window === 'undefined') return null; return new URLSearchParams(window.location.search).get('payment') })
   // PRD Part 33: public store / more-shops / visited-shops URL routing
-  const [storeSlug, setStoreSlug] = useState<string | null>(null)
-  const [storeInvoiceToken, setStoreInvoiceToken] = useState<string | null>(null)
-  const [showMoreShops, setShowMoreShops] = useState(false)
-  const [showVisitedDeck, setShowVisitedDeck] = useState(false)
+  // Use lazy initializers to read URL params on first render (before businessLoaded check)
+  const [storeSlug, setStoreSlug] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null
+    return new URLSearchParams(window.location.search).get('store')
+  })
+  const [storeInvoiceToken, setStoreInvoiceToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null
+    return new URLSearchParams(window.location.search).get('invoice')
+  })
+  const [showMoreShops, setShowMoreShops] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return !!new URLSearchParams(window.location.search).get('more-shops')
+  })
+  const [showVisitedDeck, setShowVisitedDeck] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return !!new URLSearchParams(window.location.search).get('visited')
+  })
+  // PRD Part 36: public central marketplace catalog (?marketplace=1)
+  const [showMarketplace, setShowMarketplace] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return !!new URLSearchParams(window.location.search).get('marketplace')
+  })
 
   // Android back button navigation with history back-stack (PRD Part 3 §4)
   useBackButton()
@@ -53,21 +72,16 @@ export function AppShell() {
   // PRD Part 34 Threat 1: Anti-tamper & root detection (runs on mount + every 5min)
   useAntiTamper()
 
-  // Check for payment landing page token in URL (?payment=TOKEN)
-  // PRD Part 33: also check for ?store=SLUG, ?more-shops=1, ?visited=1
+  // PRD Part 36: Re-check URL params after hydration (lazy init handles client-side first render,
+  // but this ensures the state is set even after SSR hydration)
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
-    const token = params.get('payment')
-    if (token) setPaymentToken(token)
-    const store = params.get('store')
-    if (store) {
-      setStoreSlug(store as string)
-      const invToken = params.get('invoice')
-      if (invToken) setStoreInvoiceToken(invToken)
-    }
+    if (params.get('marketplace')) setShowMarketplace(true)
+    if (params.get('store')) setStoreSlug(params.get('store'))
     if (params.get('more-shops')) setShowMoreShops(true)
     if (params.get('visited')) setShowVisitedDeck(true)
+    if (params.get('payment')) setPaymentToken(params.get('payment'))
   }, [])
 
   // Bootstrap: ensure seeded + load business + load language setting
@@ -106,6 +120,11 @@ export function AppShell() {
   // PRD Part 33 §1-2: Public store catalog — customer-facing, no app chrome
   if (storeSlug) {
     return <StoreCatalogView slug={storeSlug as string} invoiceToken={storeInvoiceToken ?? undefined} />
+  }
+
+  // PRD Part 36 §1: Public hyperlocal marketplace — customer-facing, no app chrome
+  if (showMarketplace) {
+    return <CentralCatalogView />
   }
 
   // PRD Part 33 §3: More Shops discovery — public, no app chrome
