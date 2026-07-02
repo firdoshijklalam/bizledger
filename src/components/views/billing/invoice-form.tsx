@@ -146,6 +146,24 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
         amountPaid: paymentMode === 'credit' ? 0 : grandTotal,
       })
       toast.success(t('bill.saved'))
+      // PRD Part 37 — Sound Box: announce payment when invoice is saved (non-credit = paid)
+      if (paymentMode !== 'credit' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          const settings = JSON.parse(localStorage.getItem('bizledger-voice-settings') || '{}')
+          if (settings.state?.soundBoxEnabled !== false) {
+            const i18nState = JSON.parse(localStorage.getItem('bizledger-i18n') || '{}')
+            const lang = i18nState?.state?.language || 'bn'
+            const utterance = new SpeechSynthesisUtterance(
+              lang === 'bn' ? `নিশ্চিত ভুক্তি। ${Math.round(grandTotal)} টাকা প্রাপ্ত হয়েছে।` :
+              lang === 'hi' ? `भुगतान प्राप्त। ${Math.round(grandTotal)} रुपये प्राप्त हुए।` :
+              `Payment received. ${Math.round(grandTotal)} rupees received.`
+            )
+            utterance.lang = lang === 'bn' ? 'bn-IN' : lang === 'hi' ? 'hi-IN' : 'en-IN'
+            utterance.rate = 0.9
+            window.speechSynthesis.speak(utterance)
+          }
+        } catch {}
+      }
       triggerRefresh()
       onOpenChange(false)
       setSelectedInvoiceId(invoice.id)

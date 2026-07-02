@@ -11,7 +11,7 @@ import {
   Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette, Mic, Keyboard,
   AlertCircle, CheckCircle2, QrCode, ChevronDown, ChevronUp, Lock, Fingerprint,
   Store, MapPin, Navigation, Star, TrendingUp, ShoppingCart, Crown, ExternalLink,
-  Smartphone, Radio, Globe, Server, Ban, Cloud, User,
+  Smartphone, Radio, Globe, Server, Ban, Cloud, User, Volume2,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -43,7 +43,7 @@ export function SettingsView() {
   const { t, language, setLanguage } = useI18n()
   const { theme, setTheme } = useTheme()
   const { activePalette: activePaletteId, setPalette: setPaletteId } = usePaletteStore()
-  const { globalVoiceEnabled, tapToVoiceEnabled, setGlobalVoice, setTapToVoice } = useVoiceSettings()
+  const { globalVoiceEnabled, tapToVoiceEnabled, setGlobalVoice, setTapToVoice, soundBoxEnabled, setSoundBoxEnabled } = useVoiceSettings()
   const { channels, toggleChannel } = useNotificationStore()
   const triggerGate = useGateTrigger()
   const [showNotifChannels, setShowNotifChannels] = useState(false)
@@ -627,6 +627,46 @@ export function SettingsView() {
                   onCheckedChange={(v) => { setTapToVoice(v); toast.success(`Tap-to-Voice ${v ? 'চালু' : 'বন্ধ'}`) }}
                 />
               </div>
+              {/* PRD Part 37 — Sound Box Toggle */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                    <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-medium">সাউন্ড বক্স (Sound Box)</p>
+                    <p className="text-[9px] text-muted-foreground">পেমেন্ট এলে "₹৫০০ প্রাপ্ত হয়েছে" ঘোষণা</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={soundBoxEnabled}
+                  onCheckedChange={(v) => { setSoundBoxEnabled(v); toast.success(`সাউন্ড বক্স ${v ? 'চালু ✅' : 'বন্ধ'}`) }}
+                />
+              </div>
+              {/* Sound Box Test Button */}
+              {soundBoxEnabled && (
+                <button
+                  onClick={() => {
+                    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                      const lang = language
+                      const utterance = new SpeechSynthesisUtterance(
+                        lang === 'bn' ? `নিশ্চিত ভুক্তি। ৫০০ টাকা প্রাপ্ত হয়েছে।` :
+                        lang === 'hi' ? `भुगतान प्राप्त। 500 रुपये प्राप्त हुए।` :
+                        `Payment received. 500 rupees received.`
+                      )
+                      utterance.lang = lang === 'bn' ? 'bn-IN' : lang === 'hi' ? 'hi-IN' : 'en-IN'
+                      utterance.rate = 0.9
+                      window.speechSynthesis.speak(utterance)
+                      toast.success('সাউন্ড বক্স টেস্ট চলছে...')
+                    } else {
+                      toast.error('এই ব্রাউজারে সাউন্ড বক্স সাপোর্ট করে না')
+                    }
+                  }}
+                  className="w-full py-2 rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-medium flex items-center justify-center gap-1.5 hover:bg-emerald-500/20 transition-colors"
+                >
+                  <Volume2 className="w-3.5 h-3.5" /> টেস্ট করুন (Test Sound)
+                </button>
+              )}
             </div>
 
             {/* PRD Part 29 §3: Save applies theme + language instantly (no restart) */}

@@ -19,6 +19,8 @@ export function useAntiTamper() {
   const hasChecked = useRef(false)
 
   useEffect(() => {
+    // Skip anti-tamper checks in development mode (avoids false positives from dev tools)
+    if (process.env.NODE_ENV === 'development') return
     if (hasChecked.current) return
     hasChecked.current = true
 

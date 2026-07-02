@@ -5,9 +5,10 @@ import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { motion } from 'framer-motion'
-import { Shield, Phone, Smartphone, BookOpen, CheckCircle2 } from 'lucide-react'
+import { Shield, Phone, Smartphone, BookOpen, CheckCircle2, Volume2, VolumeX } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
+import { useSoundBox } from '@/hooks/use-sound-box'
 
 interface PaymentData {
   invoice: {
@@ -36,6 +37,7 @@ export function PaymentLandingPage({ token }: { token: string }) {
   const { t } = useI18n()
   const { data, loading } = useFetch<PaymentData>(`/api/payment?token=${token}`, [token])
   const [qrUrl, setQrUrl] = useState<string>('')
+  const { speak, speaking, soundBoxEnabled, supported: ttsSupported } = useSoundBox()
 
   useEffect(() => {
     if (!data?.business?.upiId) return
@@ -48,6 +50,14 @@ export function PaymentLandingPage({ token }: { token: string }) {
     QRCode.toDataURL(upiLink, { width: 280, margin: 1, color: { dark: '#0f172a', light: '#ffffff' } })
       .then(setQrUrl)
       .catch(() => {})
+  }, [data])
+
+  // PRD Part 37 — Sound Box: announce payment amount when page loads (if invoice is paid)
+  useEffect(() => {
+    if (data?.invoice?.status === 'paid') {
+      const amount = data.invoice.amountDue > 0 ? data.invoice.amountDue : data.invoice.grandTotal
+      speak({ amount, customerName: data.party?.name })
+    }
   }, [data])
 
   if (loading) {
