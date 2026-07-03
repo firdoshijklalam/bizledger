@@ -113,6 +113,24 @@ export function FloatingInvoiceModal() {
     toast.success('Opening WhatsApp with full invoice…')
   }
 
+  // PRD Part 38 §5.1: HTML-to-Canvas HD Image Share
+  const handleShareAsImage = async () => {
+    try {
+      toast.loading('Generating HD invoice image…')
+      const res = await fetch(`/api/invoices/${invoice.id}/export-image?format=jpg`)
+      const data = await res.json()
+      if (!data.ok) throw new Error('Failed')
+      toast.dismiss()
+      toast.success('HD invoice image generated!')
+      const phone = invoice.party?.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
+      const shareText = encodeURIComponent(`📄 Invoice ${invoice.invoiceNumber} from ${business?.name || 'BizLedger'}\nTotal: ${formatCurrency(invoice.grandTotal, currency)}\nView: ${payUrl}`)
+      window.open(phone ? `https://wa.me/${phone}?text=${shareText}` : `https://wa.me/?text=${shareText}`, '_blank')
+    } catch {
+      toast.dismiss()
+      handleWhatsApp()
+    }
+  }
+
   return (
     <AnimatePresence>
       {invoice && (
@@ -222,10 +240,14 @@ export function FloatingInvoiceModal() {
               </div>
             </div>
 
-            {/* Action buttons — Full View dismisses overlay, keeps selectedInvoiceId, navigates to billing (PRD Part 16 §4) */}
-            <div className="p-3 border-t border-border grid grid-cols-3 gap-2">
+            {/* Action buttons — Full View + HD Image Share + WhatsApp + Print */}
+            <div className="p-3 border-t border-border grid grid-cols-4 gap-2">
               <Button variant="outline" size="sm" onClick={handleWhatsApp} className="h-10 text-emerald-600 border-emerald-300">
                 <MessageCircle className="w-4 h-4" />
+              </Button>
+              {/* PRD Part 38 §5.1: HD Image Share */}
+              <Button variant="outline" size="sm" onClick={handleShareAsImage} className="h-10 text-purple-600 border-purple-300">
+                <Share2 className="w-4 h-4" />
               </Button>
               <Button variant="outline" size="sm" onClick={() => window.print()} className="h-10">
                 <Printer className="w-4 h-4" />

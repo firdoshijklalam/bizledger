@@ -43,6 +43,7 @@ export async function GET(req: NextRequest) {
     else { bucketType = 'month'; bucketCount = Math.ceil(days / 30) }
   } else {
     switch (range) {
+      case 'yesterday': rangeStart = new Date(now); rangeStart.setDate(rangeStart.getDate()-1); rangeStart.setHours(0,0,0,0); rangeEnd = new Date(now); rangeEnd.setDate(rangeEnd.getDate()-1); rangeEnd.setHours(23,59,59,999); bucketType = 'hour'; bucketCount = 24; break
       case '1d': rangeStart = new Date(now); rangeStart.setHours(0,0,0,0); bucketType = 'hour'; bucketCount = 24; break
       case '2d': rangeStart = new Date(now); rangeStart.setDate(rangeStart.getDate()-1); rangeStart.setHours(0,0,0,0); bucketType = 'day'; bucketCount = 2; break
       case '3d': rangeStart = new Date(now); rangeStart.setDate(rangeStart.getDate()-2); rangeStart.setHours(0,0,0,0); bucketType = 'day'; bucketCount = 3; break
@@ -89,7 +90,7 @@ export async function GET(req: NextRequest) {
   }))
 
   // Generate dynamic time buckets (PRD P4-1.2)
-  const salesTrend: Array<{ date: string; revenue: number; expense: number; profit: number; collected: number; creditGiven: number }> = []
+  const salesTrend: Array<{ date: string; fullDate?: string; revenue: number; expense: number; profit: number; collected: number; creditGiven: number }> = []
   for (let i = 0; i < bucketCount; i++) {
     let bucketStart: Date
     let bucketEnd: Date
@@ -146,6 +147,7 @@ export async function GET(req: NextRequest) {
 
     salesTrend.push({
       date: label,
+      fullDate: bucketStart.toISOString(),
       revenue,
       expense,
       profit: revenue - expense,

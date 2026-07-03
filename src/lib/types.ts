@@ -169,7 +169,7 @@ export interface DashboardStats {
   healthScore: number
   topDebtors: Array<{ id: string; name: string; balance: number; grade: QualityGrade }>
   recentTransactions: Transaction[]
-  salesTrend: Array<{ date: string; revenue: number; expense: number; profit: number }>
+  salesTrend: Array<{ date: string; fullDate?: string; revenue: number; expense: number; profit: number; collected?: number; creditGiven?: number }>
   gradeDistribution: Array<{ grade: QualityGrade; count: number }>
 }
 

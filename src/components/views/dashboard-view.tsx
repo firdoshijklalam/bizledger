@@ -3,27 +3,27 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
-import type { DashboardStats } from '@/lib/types'
+import type { DashboardStats, Product } from '@/lib/types'
 import { formatCurrency, formatDate, GRADE_META, timeAgo } from '@/lib/utils'
 import {
   TrendingUp, TrendingDown, Wallet, Heart, AlertTriangle, Package,
   ArrowUpRight, ArrowDownRight, ArrowLeftRight, Users, Receipt, ChevronRight,
-  BarChart3, LineChart, X,
+  BarChart3, LineChart, X, Loader2, Calendar,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid,
-  Bar, BarChart, Cell, Pie, PieChart, Line, ComposedChart,
+  Bar, BarChart, Cell, Pie, PieChart, Line, ComposedChart, ReferenceLine,
 } from 'recharts'
 import { Card } from '@/components/ui/card'
 import { LoadingState, EmptyState } from '@/components/shared/states'
 import { useScrollRetention } from '@/hooks/use-scroll-retention'
 import { useScrollStore } from '@/store/scroll-store'
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 
 type ChartType = 'revenue' | 'profit' | 'cashflow' | 'collections' | 'categories' | 'inventory'
 type ChartView = 'line' | 'bar'
-type TimeRange = '1d' | '2d' | '3d' | '5d' | '7d' | '1m' | '3m' | '6m' | '1y' | 'custom'
+type TimeRange = 'yesterday' | '1d' | '2d' | '3d' | '5d' | '7d' | '1m' | '3m' | '6m' | '1y' | 'custom'
 
 interface ExtendedDashboardStats extends DashboardStats {
   topCategories?: Array<{ name: string; value: number }>
@@ -33,7 +33,8 @@ interface ExtendedDashboardStats extends DashboardStats {
 }
 
 const TIME_RANGES: Array<{ id: TimeRange; label: string }> = [
-  { id: '1d', label: '1 Day' },
+  { id: '1d', label: 'Today' },
+  { id: 'yesterday', label: 'Yesterday' },
   { id: '2d', label: '2 Days' },
   { id: '3d', label: '3 Days' },
   { id: '5d', label: '5 Days' },
@@ -57,6 +58,10 @@ export function DashboardView() {
   const [customEnd, setCustomEnd] = useState('')
   const [showCustomPicker, setShowCustomPicker] = useState(false)
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null)
+  const [topTab, setTopTab] = useState<'debtors' | 'buyers' | 'payments' | 'products' | 'defaulters'>('debtors')
+  const [topExpanded, setTopExpanded] = useState(false)
+  const [hubTab, setHubTab] = useState<'transactions' | 'lowstock' | 'orders'>('transactions')
+  const [hubExpanded, setHubExpanded] = useState(false)
   const { saveScroll } = useScrollRetention()
   const { save: saveScrollPos, restore: restoreScrollPos } = useScrollStore()
 
@@ -85,7 +90,39 @@ export function DashboardView() {
     return `/api/dashboard?range=${timeRange}`
   }, [timeRange, customStart, customEnd])
 
-  const { data, loading } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl])
+  const { data, loading: apiLoading } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl])
+
+  // PRD Part 38 §4.2: Keep scroll position locked during time filter changes.
+  // Save scroll before data changes, restore immediately after.
+  const scrollPosRef = useRef(0)
+  const [loading, setLoading] = useState(false)
+  const prevUrlRef = useRef(apiUrl)
+
+  useEffect(() => {
+    if (prevUrlRef.current !== apiUrl) {
+      // Time filter changed — save scroll, show loading overlay without unmount
+      scrollPosRef.current = window.scrollY
+      prevUrlRef.current = apiUrl
+      // Use setTimeout to avoid setState-in-effect lint error
+      const timer = setTimeout(() => setLoading(true), 0)
+      return () => clearTimeout(timer)
+    }
+  }, [apiUrl])
+
+  useEffect(() => {
+    if (apiLoading) return
+    // Data loaded — hide loading, restore scroll instantly
+    const timer = setTimeout(() => {
+      setLoading(false)
+      if (scrollPosRef.current > 0) {
+        requestAnimationFrame(() => {
+          window.scrollTo({ top: scrollPosRef.current, behavior: 'instant' as ScrollBehavior })
+          setTimeout(() => window.scrollTo({ top: scrollPosRef.current, behavior: 'instant' as ScrollBehavior }), 50)
+        })
+      }
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [apiLoading])
 
   const chartOptions: Array<{ id: ChartType; label: string }> = [
     { id: 'revenue', label: t('dash.chart.revenue') },
@@ -98,16 +135,26 @@ export function DashboardView() {
 
   const currency = business?.currency || 'INR'
 
-  if (loading) return <LoadingState />
-  if (!data) return <EmptyState icon={Heart} title="No data yet" />
+  if (loading) {
+    // PRD Part 38 §3: Don't unmount — show overlay loader while keeping scroll
+    return (
+      <div className="relative">
+        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center min-h-[200px]">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </div>
+    )
+  }
+  if (!data && !apiLoading) return <EmptyState icon={Heart} title="No data yet" />
+  if (!data) return <LoadingState />
 
   const metrics = [
-    { label: t('dash.receivable'), value: formatCurrency(data.totalReceivable, currency), icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', onClick: () => { setKhataFilter('receivable'); setActiveView('khata') } },
-    { label: t('dash.payable'), value: formatCurrency(data.totalPayable, currency), icon: TrendingDown, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', onClick: () => { setKhataFilter('payable'); setActiveView('khata') } },
-    { label: t('dash.todaySales'), value: formatCurrency(data.todaySales, currency), icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', onClick: () => setActiveView('billing') },
-    { label: t('dash.health'), value: `${data.healthScore}/100`, icon: Heart, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', onClick: () => setActiveView('reports') },
-    { label: t('dash.lowStock'), value: String(data.lowStockCount), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', onClick: () => { setInventoryFilter('low-stock'); setActiveView('inventory') } },
-    { label: t('dash.monthlyRevenue'), value: formatCurrency(data.monthlyRevenue, currency), icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', onClick: () => setActiveView('reports') },
+    { label: t('dash.receivable'), value: formatCurrency(data.totalReceivable, currency), icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', onClick: () => { saveScrollPos('dashboard'); setKhataFilter('receivable'); setActiveView('khata') } },
+    { label: t('dash.payable'), value: formatCurrency(data.totalPayable, currency), icon: TrendingDown, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', onClick: () => { saveScrollPos('dashboard'); setKhataFilter('payable'); setActiveView('khata') } },
+    { label: t('dash.todaySales'), value: formatCurrency(data.todaySales, currency), icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', onClick: () => { saveScrollPos('dashboard'); setActiveView('billing') } },
+    { label: t('dash.health'), value: `${data.healthScore}/100`, icon: Heart, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', onClick: () => { saveScrollPos('dashboard'); setActiveView('reports') } },
+    { label: t('dash.lowStock'), value: String(data.lowStockCount), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', onClick: () => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') } },
+    { label: t('dash.monthlyRevenue'), value: formatCurrency(data.monthlyRevenue, currency), icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', onClick: () => { saveScrollPos('dashboard'); setActiveView('reports') } },
   ]
 
   return (
@@ -122,6 +169,66 @@ export function DashboardView() {
           <div><p className="text-[11px] opacity-75">{t('dash.payable')}</p><p className="text-lg font-bold tabular">{formatCurrency(data.totalPayable, currency)}</p></div>
         </div>
       </motion.div>
+
+      {/* PRD Part 38 §1.1: Horizontal swipe time filter bar — at top of dashboard */}
+      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 pb-1">
+        {([
+          { id: '1d' as TimeRange, label: 'Today' },
+          { id: 'yesterday' as TimeRange, label: 'Yesterday' },
+          { id: '3d' as TimeRange, label: '3 Days' },
+          { id: '5d' as TimeRange, label: '5 Days' },
+          { id: '7d' as TimeRange, label: '7 Days' },
+          { id: '1m' as TimeRange, label: '1 Month' },
+        ]).map((r) => (
+          <button
+            key={r.id}
+            onClick={() => { setTimeRange(r.id) }}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all min-h-[34px] ${
+              timeRange === r.id && timeRange !== 'custom'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'bg-muted text-muted-foreground'
+            }`}
+          >
+            {r.label}
+          </button>
+        ))}
+        {/* PRD Part 38 §1: Calendar / Custom Range button */}
+        <button
+          onClick={() => { setShowCustomPicker(true); setTimeRange('custom') }}
+          className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all min-h-[34px] flex items-center gap-1 ${
+            timeRange === 'custom'
+              ? 'bg-purple-500 text-white shadow-sm'
+              : 'bg-muted text-muted-foreground'
+          }`}
+        >
+          <Calendar className="w-3 h-3" /> Custom
+        </button>
+      </div>
+
+      {/* Custom Date Range Picker — PRD Part 38 §1 */}
+      <AnimatePresence>
+        {showCustomPicker && timeRange === 'custom' && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+            <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-purple-700 dark:text-purple-300">📅 Custom Date Range</p>
+                <button onClick={() => { setShowCustomPicker(false); setTimeRange('7d') }} className="text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-muted-foreground">Start Date</label>
+                  <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground">End Date</label>
+                  <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" />
+                </div>
+              </div>
+              {customStart && customEnd && <p className="text-[10px] text-emerald-600">✓ Range applied — data will filter to selected dates</p>}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Metric cards grid */}
       <div className="grid grid-cols-2 gap-3">
@@ -162,27 +269,8 @@ export function DashboardView() {
           </select>
         </div>
 
-        {/* Custom Date Range Picker */}
-        <AnimatePresence>
-          {showCustomPicker && timeRange === 'custom' && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden mb-3">
-              <div className="p-3 rounded-xl bg-muted/50 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold">Custom Date Range</p>
-                  <button onClick={() => { setShowCustomPicker(false); setTimeRange('7d') }} className="text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-[10px] text-muted-foreground">Start Date</label><input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" /></div>
-                  <div><label className="text-[10px] text-muted-foreground">End Date</label><input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" /></div>
-                </div>
-                {customStart && customEnd && <p className="text-[10px] text-emerald-600">✓ Range applied</p>}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* Chart rendering */}
-        <motion.div key={chartType + chartView + timeRange} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }} className="h-44 -ml-2">
+        <motion.div key={chartType + chartView} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }} className="h-44 -ml-2">
           <ResponsiveContainer width="100%" height="100%">
             {chartType === 'revenue' && chartView === 'line' ? (
               <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
@@ -190,7 +278,7 @@ export function DashboardView() {
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => formatCurrency(v, currency)} />
+                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" />
                 <Area type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} fill="url(#exp)" />
               </AreaChart>
@@ -199,7 +287,7 @@ export function DashboardView() {
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => formatCurrency(v, currency)} />
+                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Revenue" />
                 <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Expense" />
               </BarChart>
@@ -208,7 +296,7 @@ export function DashboardView() {
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => formatCurrency(v, currency)} />
+                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="profit" radius={[4, 4, 0, 0]}>{data.salesTrend.map((entry, i) => <Cell key={i} fill={entry.profit >= 0 ? '#10b981' : '#f87171'} />)}</Bar>
               </BarChart>
             ) : chartType === 'cashflow' ? (
@@ -216,7 +304,7 @@ export function DashboardView() {
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => formatCurrency(v, currency)} />
+                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Cash In" />
                 <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Cash Out" />
                 <Line type="monotone" dataKey="profit" stroke="#6366f1" strokeWidth={2} dot={false} name="Net" />
@@ -226,7 +314,7 @@ export function DashboardView() {
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => formatCurrency(v, currency)} />
+                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="collected" fill="#10b981" radius={[3, 3, 0, 0]} name="Collected" />
                 <Bar dataKey="creditGiven" fill="#ef4444" radius={[3, 3, 0, 0]} name="New Credit" />
               </BarChart>
@@ -243,7 +331,7 @@ export function DashboardView() {
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="month" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={36} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-                <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => formatCurrency(v, currency)} />
+                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Area type="monotone" dataKey="value" stroke="#8b5cf6" strokeWidth={2} fill="url(#inv)" name="Stock Value" />
               </AreaChart>
             )}
@@ -309,7 +397,7 @@ export function DashboardView() {
                     <>
                       <p className="text-xs text-muted-foreground px-1 mb-2">{count} customer{count !== 1 ? 's' : ''} in this grade</p>
                       {data.topDebtors.filter((d) => d.grade === selectedGrade).map((d) => (
-                        <button key={d.id} onClick={() => { setSelectedGrade(null); setReturnToView('dashboard'); setSelectedPartyId(d.id); setActiveView('khata') }} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
+                        <button key={d.id} onClick={() => { saveScrollPos('dashboard'); setSelectedGrade(null); setReturnToView('dashboard'); setSelectedPartyId(d.id); setActiveView('khata') }} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
                           <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center font-bold text-emerald-700">{d.name.charAt(0)}</span>
                           <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">Balance: ₹{d.balance}</p></div>
                           <ChevronRight className="w-4 h-4 text-muted-foreground" />
@@ -325,47 +413,224 @@ export function DashboardView() {
         )}
       </AnimatePresence>
 
-      {/* Top debtors */}
+      {/* PRD Part 38 §2: Dynamic widget tabs + Show More */}
       <Card className="p-4">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold">{t('dash.topDebtors')}</h3>
-          <button onClick={() => { saveScroll(); setKhataFilter('receivable'); setActiveView('khata') }} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar -mx-1 px-1">
+            {([
+              { id: 'debtors', label: 'Top Debtors' },
+              { id: 'buyers', label: 'Top Buyers' },
+              { id: 'payments', label: 'Top Payments' },
+              { id: 'products', label: 'Top Products' },
+              { id: 'defaulters', label: 'Defaulters' },
+            ] as const).map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setTopTab(tab.id)}
+                className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
+                  topTab === tab.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => { saveScrollPos('dashboard'); setKhataFilter('receivable'); setActiveView('khata') }} className="text-xs text-primary font-medium flex items-center shrink-0 ml-2">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
         </div>
-        {data.topDebtors.length === 0 ? <p className="text-sm text-muted-foreground py-4 text-center">No outstanding receivables 🎉</p> : (
+
+        {/* Tab content */}
+        {topTab === 'debtors' && (
           <div className="space-y-2">
-            {data.topDebtors.slice(0, 4).map((d) => {
-              const meta = GRADE_META[d.grade]
-              return (
-                <button key={d.id} onClick={() => { setReturnToView('dashboard'); saveScrollAndOpenParty(d.id); setActiveView('khata') }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
-                  <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-xs font-bold">{d.name.charAt(0)}</div>
-                  <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
-                  <div className="text-right"><p className="text-sm font-semibold tabular text-emerald-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>
-                </button>
-              )
-            })}
+            {data.topDebtors.length === 0 ? <p className="text-sm text-muted-foreground py-4 text-center">No outstanding receivables 🎉</p> : (
+              <>
+                {data.topDebtors.slice(0, topExpanded ? 10 : 4).map((d) => {
+                  const meta = GRADE_META[d.grade]
+                  return (
+                    <button key={d.id} onClick={() => { setReturnToView('dashboard'); saveScrollAndOpenParty(d.id); setActiveView('khata') }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
+                      <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-xs font-bold">{d.name.charAt(0)}</div>
+                      <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
+                      <div className="text-right"><p className="text-sm font-semibold tabular text-emerald-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>
+                    </button>
+                  )
+                })}
+                {data.topDebtors.length > 4 && (
+                  <button onClick={() => setTopExpanded(!topExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
+                    {topExpanded ? '▲ Show Less' : `▼ Show More (${data.topDebtors.length - 4} more)`}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {topTab === 'buyers' && (
+          <div className="space-y-2">
+            {data.topProductsBySales && data.topProductsBySales.length > 0 ? (
+              <>
+                {data.topProductsBySales.slice(0, topExpanded ? 10 : 4).map((p, i) => (
+                  <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
+                    <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-xs font-bold text-emerald-600">#{i + 1}</div>
+                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.name}</p><p className="text-[11px] text-muted-foreground">Top selling product</p></div>
+                    <p className="text-sm font-semibold tabular">{formatCurrency(p.value, currency)}</p>
+                  </div>
+                ))}
+                {data.topProductsBySales.length > 4 && (
+                  <button onClick={() => setTopExpanded(!topExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
+                    {topExpanded ? '▲ Show Less' : `▼ Show More (${data.topProductsBySales.length - 4} more)`}
+                  </button>
+                )}
+              </>
+            ) : <p className="text-sm text-muted-foreground py-4 text-center">No sales data yet</p>}
+          </div>
+        )}
+
+        {topTab === 'payments' && (
+          <div className="space-y-2">
+            {data.recentTransactions.filter(t => t.type === 'credit').slice(0, topExpanded ? 10 : 4).map((tx) => (
+              <div key={tx.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
+                <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center"><ArrowDownRight className="w-4 h-4 text-emerald-600" /></div>
+                <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || 'Payment'}</p><p className="text-[11px] text-muted-foreground">{timeAgo(tx.createdAt)}</p></div>
+                <p className="text-sm font-semibold tabular text-emerald-600">+{formatCurrency(tx.amount, currency)}</p>
+              </div>
+            ))}
+            {data.recentTransactions.filter(t => t.type === 'credit').length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">No payments yet</p>}
+          </div>
+        )}
+
+        {topTab === 'products' && (
+          <div className="space-y-2">
+            {data.topCategories && data.topCategories.length > 0 ? (
+              <>
+                {data.topCategories.slice(0, topExpanded ? 10 : 4).map((c, i) => (
+                  <div key={c.name} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: PIE_COLORS[i % PIE_COLORS.length] + '20', color: PIE_COLORS[i % PIE_COLORS.length] }}>#{i + 1}</div>
+                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{c.name}</p><p className="text-[11px] text-muted-foreground">Category</p></div>
+                    <p className="text-sm font-semibold tabular">{formatCurrency(c.value, currency)}</p>
+                  </div>
+                ))}
+                {data.topCategories.length > 4 && (
+                  <button onClick={() => setTopExpanded(!topExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
+                    {topExpanded ? '▲ Show Less' : `▼ Show More (${data.topCategories.length - 4} more)`}
+                  </button>
+                )}
+              </>
+            ) : <p className="text-sm text-muted-foreground py-4 text-center">No category data yet</p>}
+          </div>
+        )}
+
+        {topTab === 'defaulters' && (
+          <div className="space-y-2">
+            {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').length > 0 ? (
+              <>
+                {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').slice(0, topExpanded ? 10 : 4).map((d) => {
+                  const meta = GRADE_META[d.grade]
+                  return (
+                    <button key={d.id} onClick={() => { setReturnToView('dashboard'); saveScrollAndOpenParty(d.id); setActiveView('khata') }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted text-left">
+                      <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-xs font-bold text-red-600">!</div>
+                      <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
+                      <div className="text-right"><p className="text-sm font-semibold tabular text-red-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>
+                    </button>
+                  )
+                })}
+                {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').length > 4 && (
+                  <button onClick={() => setTopExpanded(!topExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
+                    {topExpanded ? '▲ Show Less' : `▼ Show More`}
+                  </button>
+                )}
+              </>
+            ) : <p className="text-sm text-muted-foreground py-4 text-center">No defaulters 🎉</p>}
           </div>
         )}
       </Card>
 
-      {/* Recent transactions */}
+      {/* PRD Part 38: Multi-Tab Dynamic Hub (Recent Transactions / Low Stock / Online Orders) */}
       <Card className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold">{t('dash.recent')}</h3>
-          <button onClick={() => { saveScroll(); setActiveView('billing') }} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
-        </div>
-        {data.recentTransactions.length === 0 ? <p className="text-sm text-muted-foreground py-4 text-center">No transactions yet</p> : (
-          <div className="space-y-1">
-            {data.recentTransactions.slice(0, 5).map((tx) => {
-              const isCredit = tx.type === 'credit'
-              return (
-                <button key={tx.id} onClick={() => { saveScroll(); if (tx.invoiceId) { setSelectedInvoiceId(tx.invoiceId) } else if (tx.partyId) { setReturnToView('dashboard'); setSelectedPartyId(tx.partyId); setActiveView('khata') } }} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left">
-                  <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isCredit ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>{isCredit ? <ArrowDownRight className="w-4 h-4 text-emerald-600" /> : <ArrowUpRight className="w-4 h-4 text-red-600" />}</span>
-                  <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || tx.type}</p><p className="text-[11px] text-muted-foreground">{(tx as any)?.party?.name || "—"} · {timeAgo(tx.createdAt)}</p></div>
-                  <span className={`text-sm font-semibold tabular ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>{isCredit ? '+' : '-'}{formatCurrency(tx.amount, currency)}</span>
-                </button>
-              )
-            })}
+        {/* Tab buttons */}
+        <div className="flex items-center gap-1 mb-3 overflow-x-auto no-scrollbar -mx-1 px-1">
+          {([
+            { id: 'transactions', label: 'Transactions' },
+            { id: 'lowstock', label: 'Low Stock' },
+            { id: 'orders', label: 'Online Orders' },
+          ] as const).map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setHubTab(tab.id)}
+              className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                hubTab === tab.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+          <div className="ml-auto shrink-0">
+            <button onClick={() => { saveScrollPos('dashboard'); setKhataFilter('all'); setActiveView('khata') }} className="text-xs text-primary font-medium flex items-center">
+              View All <ChevronRight className="w-3 h-3" />
+            </button>
           </div>
+        </div>
+
+        {/* Time filter sync indicator */}
+        <p className="text-[10px] text-muted-foreground mb-2">
+          📅 Showing data for: {TIME_RANGES.find((r) => r.id === timeRange)?.label || '7 Days'}
+        </p>
+
+        {/* Tab 1: Recent Transactions with Cash Flow Summary */}
+        {hubTab === 'transactions' && (
+          <div>
+            {/* Cash Flow Summary indicators */}
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+                <p className="text-[9px] text-muted-foreground">Total In</p>
+                <p className="text-sm font-bold tabular text-emerald-600">
+                  +{formatCurrency(data.recentTransactions.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0), currency)}
+                </p>
+              </div>
+              <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
+                <p className="text-[9px] text-muted-foreground">Total Out</p>
+                <p className="text-sm font-bold tabular text-red-600">
+                  -{formatCurrency(data.recentTransactions.filter(t => t.type !== 'credit').reduce((s, t) => s + t.amount, 0), currency)}
+                </p>
+              </div>
+            </div>
+            {/* Transaction list */}
+            {data.recentTransactions.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No transactions in this period</p>
+            ) : (
+              <div className="space-y-1">
+                {data.recentTransactions.slice(0, hubExpanded ? 10 : 5).map((tx) => {
+                  const isCredit = tx.type === 'credit'
+                  return (
+                    <button key={tx.id} onClick={() => { saveScrollPos('dashboard'); saveScroll(); if (tx.invoiceId) { setSelectedInvoiceId(tx.invoiceId) } else if (tx.partyId) { setReturnToView('dashboard'); setSelectedPartyId(tx.partyId); setActiveView('khata') } }} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left">
+                      <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isCredit ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>{isCredit ? <ArrowDownRight className="w-4 h-4 text-emerald-600" /> : <ArrowUpRight className="w-4 h-4 text-red-600" />}</span>
+                      <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || tx.type}</p><p className="text-[11px] text-muted-foreground">{(tx as any)?.party?.name || "—"} · {timeAgo(tx.createdAt)}</p></div>
+                      <span className={`text-sm font-semibold tabular shrink-0 ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>{isCredit ? '+' : '-'}{formatCurrency(tx.amount, currency)}</span>
+                    </button>
+                  )
+                })}
+                {data.recentTransactions.length > 5 && (
+                  <button onClick={() => setHubExpanded(!hubExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
+                    {hubExpanded ? '▲ Show Less' : `▼ Show More (${data.recentTransactions.length - 5} more)`}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 2: Low Stock Alert */}
+        {hubTab === 'lowstock' && (
+          <div>
+            {data.lowStockCount === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">All products well stocked ✅</p>
+            ) : (
+              <LowStockList currency={currency} onNavigate={() => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') }} />
+            )}
+          </div>
+        )}
+
+        {/* Tab 3: Online Orders */}
+        {hubTab === 'orders' && (
+          <OnlineOrdersList currency={currency} onNavigate={() => { saveScrollPos('dashboard'); setActiveView('khata') }} />
         )}
       </Card>
 
@@ -389,6 +654,112 @@ export function DashboardView() {
           })}
         </div>
       </Card>
+    </div>
+  )
+}
+
+// PRD Part 38 §4: TradingView-style custom tooltip with full date display
+function CustomTooltip({ active, payload, label, currency }: any) {
+  if (!active || !payload || payload.length === 0) return null
+  // Use fullDate from payload if available, otherwise try label
+  const fullDate = payload[0]?.payload?.fullDate
+  const formatFullDate = (d: string) => {
+    try {
+      const date = new Date(d)
+      if (isNaN(date.getTime())) return label || ''
+      return date.toLocaleDateString('en-US', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+    } catch {
+      return label || ''
+    }
+  }
+  return (
+    <div style={{
+      background: 'rgba(20,20,20,0.95)',
+      border: '1px solid rgba(99,102,241,0.4)',
+      borderRadius: 10,
+      padding: '10px 14px',
+      fontSize: 12,
+      boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+      maxWidth: 220,
+      color: '#f3f4f6',
+    }}>
+      <p style={{ fontWeight: 700, marginBottom: 6, fontSize: 10, color: '#9ca3af', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 4 }}>
+        {fullDate ? formatFullDate(fullDate) : label}
+      </p>
+      {payload.map((entry: any, i: number) => (
+        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 3 }}>
+          <span style={{ color: entry.color, fontWeight: 600, fontSize: 11 }}>{entry.name}:</span>
+          <span style={{ fontWeight: 700, fontSize: 12, color: '#f3f4f6' }}>
+            {currency ? formatCurrency(entry.value, currency) : `₹${entry.value}`}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// PRD Part 38: Low Stock List component for Multi-Tab Hub
+function LowStockList({ currency, onNavigate }: { currency: string; onNavigate: () => void }) {
+  const { data: products } = useFetch<Product[]>('/api/products', [])
+  if (!products) return <p className="text-sm text-muted-foreground py-4 text-center">Loading...</p>
+  const lowStock = products.filter(p => p.stock <= p.lowStockThreshold)
+  if (lowStock.length === 0) return <p className="text-sm text-muted-foreground py-4 text-center">All products well stocked ✅</p>
+  return (
+    <div className="space-y-1">
+      {lowStock.slice(0, 6).map((p) => (
+        <button key={p.id} onClick={onNavigate} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left">
+          <span className="w-8 h-8 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-4 h-4 text-orange-600" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">{p.name}</p>
+            <p className="text-[11px] text-muted-foreground">{p.category || 'Uncategorized'}</p>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-sm font-bold tabular text-orange-600">{p.stock} {p.unit}</p>
+            <p className="text-[10px] text-muted-foreground">Min: {p.lowStockThreshold}</p>
+          </div>
+        </button>
+      ))}
+      <button onClick={onNavigate} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
+        View All in Inventory →
+      </button>
+    </div>
+  )
+}
+
+// PRD Part 38: Online Orders List component for Multi-Tab Hub
+function OnlineOrdersList({ currency, onNavigate }: { currency: string; onNavigate: () => void }) {
+  const { data: orders } = useFetch<any[]>('/api/customer-orders', [])
+  if (!orders) return <p className="text-sm text-muted-foreground py-4 text-center">Loading...</p>
+  if (orders.length === 0) return <p className="text-sm text-muted-foreground py-4 text-center">No online orders yet 🛒</p>
+  return (
+    <div className="space-y-1">
+      {orders.slice(0, 5).map((order) => (
+        <div key={order.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted">
+          <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+            order.status === 'pending' ? 'bg-amber-100 dark:bg-amber-900/30' :
+            order.status === 'confirmed' ? 'bg-blue-100 dark:bg-blue-900/30' :
+            order.status === 'delivered' ? 'bg-emerald-100 dark:bg-emerald-900/30' :
+            'bg-red-100 dark:bg-red-900/30'
+          }`}>
+            <Package className={`w-4 h-4 ${
+              order.status === 'pending' ? 'text-amber-600' :
+              order.status === 'confirmed' ? 'text-blue-600' :
+              order.status === 'delivered' ? 'text-emerald-600' :
+              'text-red-600'
+            }`} />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">{order.customerName || 'Customer'}</p>
+            <p className="text-[11px] text-muted-foreground">{order.status} · {timeAgo(order.createdAt)}</p>
+          </div>
+          <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(order.grandTotal, currency)}</span>
+        </div>
+      ))}
+      <button onClick={onNavigate} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
+        View All Orders →
+      </button>
     </div>
   )
 }

@@ -28,6 +28,7 @@ export function KhataView() {
   } = useAppStore()
   const { t } = useI18n()
   const [search, setSearch] = useState('')
+  const [gradeFilter, setGradeFilter] = useState<string>('all')
 
   const { data: parties, loading } = useFetch<Party[]>('/api/parties', [])
 
@@ -62,12 +63,14 @@ export function KhataView() {
     let list = parties
     if (khataFilter === 'receivable') list = list.filter((p) => p.balance > 0)
     if (khataFilter === 'payable') list = list.filter((p) => p.balance < 0)
+    // PRD Part 38 §3.2: Grade filter bar
+    if (gradeFilter !== 'all') list = list.filter((p) => p.qualityGrade === gradeFilter)
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter((p) => p.name.toLowerCase().includes(q) || (p.phone || '').includes(search))
     }
     return list.sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance))
-  }, [parties, khataFilter, search])
+  }, [parties, khataFilter, search, gradeFilter])
 
   const totals = useMemo(() => {
     if (!parties) return { receivable: 0, payable: 0 }
@@ -136,6 +139,28 @@ export function KhataView() {
         <div className="ml-auto text-xs text-muted-foreground shrink-0 pr-1">
           {filtered.length} {filtered.length === 1 ? 'party' : 'parties'}
         </div>
+      </div>
+
+      {/* PRD Part 38 §3.2: Horizontal Grade Filter Bar */}
+      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
+        {['all', 'A', 'B', 'C', 'D', 'E'].map((g) => (
+          <button
+            key={g}
+            onClick={() => setGradeFilter(g)}
+            className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all min-h-[30px] ${
+              gradeFilter === g
+                ? g === 'A' ? 'bg-emerald-500 text-white'
+                  : g === 'B' ? 'bg-teal-500 text-white'
+                  : g === 'C' ? 'bg-amber-500 text-white'
+                  : g === 'D' ? 'bg-orange-500 text-white'
+                  : g === 'E' ? 'bg-red-500 text-white'
+                  : 'bg-primary text-primary-foreground'
+                : 'bg-muted text-muted-foreground'
+            }`}
+          >
+            {g === 'all' ? 'All Grades' : `${g} Quality`}
+          </button>
+        ))}
       </div>
 
       {/* Party list */}

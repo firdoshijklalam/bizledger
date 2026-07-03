@@ -69,6 +69,19 @@ export function AppShell() {
   // Android back button navigation with history back-stack (PRD Part 3 §4)
   useBackButton()
 
+  // PRD Part 38 §4.2: Manual scroll restoration — prevent browser from jumping to top
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual'
+    }
+    return () => {
+      if ('scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'auto'
+      }
+    }
+  }, [])
+
   // PRD Part 34 Threat 1: Anti-tamper & root detection (runs on mount + every 5min)
   useAntiTamper()
 
@@ -85,27 +98,38 @@ export function AppShell() {
   }, [])
 
   // Bootstrap: ensure seeded + load business + load language setting
+  // Includes retry logic for sandbox environment where server may be temporarily unavailable
   useEffect(() => {
     let mounted = true
-    ;(async () => {
+    let retryCount = 0
+
+    const bootstrap = async () => {
       try {
-        // Ensure DB has a business; seed if missing
-        let biz = await fetch('/api/business').then((r) => r.json())
+        let biz = await fetch('/api/business').then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`)
+          return r.json()
+        })
         if (!biz) {
           await fetch('/api/seed', { method: 'POST' })
           biz = await fetch('/api/business').then((r) => r.json())
         }
         if (!mounted) return
         setBusiness(biz)
-        // load language pref
         const settings = await fetch('/api/app-settings').then((r) => r.json())
         if (settings?.language) setLanguage(settings.language)
+        if (mounted) setBusinessLoaded(true)
       } catch (e) {
-        console.error('Bootstrap error', e)
-      } finally {
+        console.error('Bootstrap error (attempt ' + (retryCount + 1) + ')', e)
+        if (retryCount < 5 && mounted) {
+          retryCount++
+          setTimeout(bootstrap, 1000 * Math.pow(2, retryCount - 1))
+          return
+        }
         if (mounted) setBusinessLoaded(true)
       }
-    })()
+    }
+
+    bootstrap()
     return () => {
       mounted = false
     }

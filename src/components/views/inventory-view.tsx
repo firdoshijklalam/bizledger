@@ -46,6 +46,7 @@ export function InventoryView() {
   const [search, setSearch] = useState('')
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [activeCategory, setActiveCategory] = useState<string>('All')
+  const [productTypeTab, setProductTypeTab] = useState<'all' | 'retail' | 'full' | 'wholesale'>('all')
 
   const { data: products, loading, refetch } = useFetch<Product[]>('/api/products', [])
 
@@ -67,6 +68,17 @@ export function InventoryView() {
   const filtered = useMemo(() => {
     if (!products) return []
     let list = products
+    // PRD Part 38: Strict Product Type Isolation — zero mixing of loose and sealed
+    if (productTypeTab === 'retail') {
+      // ONLY products where Retail/Loose toggle is enabled
+      list = list.filter((p) => (p as any).retailEnabled === true)
+    } else if (productTypeTab === 'full') {
+      // ONLY products that are NOT retail (sealed/full packs)
+      list = list.filter((p) => !(p as any).retailEnabled)
+    } else if (productTypeTab === 'wholesale') {
+      // ONLY products with explicit wholesale price set
+      list = list.filter((p) => p.wholesalePrice != null && p.wholesalePrice > 0)
+    }
     if (inventoryFilter === 'low-stock') {
       list = list.filter((p) => p.stock <= p.lowStockThreshold)
     }
@@ -97,7 +109,7 @@ export function InventoryView() {
       })
     }
     return list
-  }, [products, inventoryFilter, search, activeCategory])
+  }, [products, inventoryFilter, search, activeCategory, productTypeTab])
 
   const stats = useMemo(() => {
     if (!products) return { total: 0, lowStock: 0, value: 0 }
@@ -164,6 +176,28 @@ export function InventoryView() {
         placeholder={t('common.search') + ' products…'}
         className="h-11"
       />
+
+      {/* PRD Part 38: Product Type Tabs — Retail / Full / Wholesale (Strict Isolation) */}
+      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
+        {([
+          { id: 'all', label: 'All Products', icon: '📦' },
+          { id: 'retail', label: 'খুচরো (Loose)', icon: '⚖️' },
+          { id: 'full', label: 'আস্ত (Sealed)', icon: '📦' },
+          { id: 'wholesale', label: 'হোলসেল', icon: '🏭' },
+        ] as const).map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setProductTypeTab(tab.id)}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all min-h-[36px] flex items-center gap-1 ${
+              productTypeTab === tab.id
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'bg-muted text-muted-foreground'
+            }`}
+          >
+            <span>{tab.icon}</span> {tab.label}
+          </button>
+        ))}
+      </div>
 
       {/* Filter pills */}
       <div className="flex items-center gap-2">
@@ -248,6 +282,13 @@ export function InventoryView() {
                               </span>
                             )}
                             {p.sku && <span className="text-[10px] text-muted-foreground">{p.sku}</span>}
+                            {/* PRD Part 38: Product type badge */}
+                            {productTypeTab === 'retail' && (p as any).retailEnabled && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 font-medium">খুচরো</span>
+                            )}
+                            {productTypeTab === 'wholesale' && p.wholesalePrice && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium">হোলসেল</span>
+                            )}
                           </div>
                           <div className="flex items-center justify-between mt-2">
                             <div className="flex items-center gap-3 text-xs">
@@ -255,8 +296,19 @@ export function InventoryView() {
                                 {p.stock} {p.unit}
                               </span>
                               <span className="text-muted-foreground">·</span>
-                              <span className="font-semibold tabular">{formatCurrency(p.salePrice, currency)}</span>
-                              {p.mrp && p.mrp > p.salePrice && (
+                              {/* PRD Part 38: Strict price display per product type tab */}
+                              {productTypeTab === 'retail' && (p as any).retailEnabled && (p as any).retailSalePrice ? (
+                                <span className="font-semibold tabular text-violet-600">
+                                  {formatCurrency((p as any).retailSalePrice, currency)}/{(p as any).retailUnit || 'kg'}
+                                </span>
+                              ) : productTypeTab === 'wholesale' && p.wholesalePrice ? (
+                                <span className="font-semibold tabular text-blue-600">
+                                  {formatCurrency(p.wholesalePrice, currency)}
+                                </span>
+                              ) : (
+                                <span className="font-semibold tabular">{formatCurrency(p.salePrice, currency)}</span>
+                              )}
+                              {p.mrp && p.mrp > p.salePrice && productTypeTab !== 'retail' && (
                                 <span className="text-[10px] text-muted-foreground line-through">{formatCurrency(p.mrp, currency)}</span>
                               )}
                             </div>

@@ -3,10 +3,11 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Search, X, User, Package, Receipt, ArrowLeftRight } from 'lucide-react'
+import { Search, X, User, Package, Receipt, ArrowLeftRight, Mic } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { Party, Product, Invoice, Transaction } from '@/lib/types'
 import { formatCurrency, formatDate, GRADE_META } from '@/lib/utils'
+import { toast } from 'sonner'
 
 export function SearchOverlay() {
   const { showSearch, setShowSearch, setActiveView, setSelectedPartyId, setSelectedProductId, setSelectedInvoiceId } = useAppStore()
@@ -111,6 +112,33 @@ export function SearchOverlay() {
                 placeholder={t('header.search')}
                 className="flex-1 bg-transparent outline-none text-sm placeholder:text-muted-foreground"
               />
+              {/* PRD Part 38 §3: Voice search mic icon inside search bar */}
+              <button
+                onClick={() => {
+                  // Use Web Speech API for voice input
+                  const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+                  if (!SpeechRecognition) {
+                    toast.error('ভয়েস সার্চ এই ব্রাউজারে সাপোর্ট করে না')
+                    return
+                  }
+                  const recognition = new SpeechRecognition()
+                  recognition.lang = 'en-IN'
+                  recognition.continuous = false
+                  recognition.interimResults = false
+                  recognition.onresult = (event: any) => {
+                    const transcript = event.results[0][0].transcript
+                    setQ(transcript)
+                    toast.success(`ভয়েস: "${transcript}"`)
+                  }
+                  recognition.onerror = () => toast.error('ভয়েস সার্চ ব্যর্থ')
+                  recognition.start()
+                  toast.info('বলুন...')
+                }}
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-background text-emerald-600 shrink-0"
+                aria-label="Voice search"
+              >
+                <Mic className="w-4 h-4" />
+              </button>
             </div>
             <button onClick={close} className="h-11 w-11 flex items-center justify-center rounded-xl hover:bg-muted" aria-label="Close">
               <X className="w-5 h-5" />

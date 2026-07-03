@@ -1,59 +1,47 @@
-// BizLedger Service Worker — PWA offline support (PRD Part 33 §2.1)
-// Caches app shell for offline access + enables Add to Home Screen
+// BizLedger Service Worker — PWA with stale-while-revalidate (PRD Part 38 §6.1)
+const CACHE_NAME = 'bizledger-v38'
+const APP_SHELL = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png']
 
-const CACHE_NAME = 'bizledger-v33'
-const APP_SHELL = [
-  '/',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png',
-]
-
-// Install: pre-cache app shell
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).catch(() => {})
-  )
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).catch(() => {}))
   self.skipWaiting()
 })
 
-// Activate: clean old caches
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
-  )
+  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))))
   self.clients.claim()
 })
 
-// Fetch: network-first for API, cache-first for static assets
+// PRD Part 38 §6.1: stale-while-revalidate
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
-  
-  // Skip non-GET requests
   if (event.request.method !== 'GET') return
-  
-  // API requests: network-first (always fresh data)
+
+  // API: network-first with stale fallback
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
-    )
-    return
-  }
-  
-  // Static assets & pages: cache-first, fall back to network
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached
-      return fetch(event.request).then((response) => {
-        // Cache successful responses
+      fetch(event.request).then((response) => {
         if (response.status === 200) {
           const clone = response.clone()
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
         }
         return response
-      }).catch(() => caches.match('/'))
+      }).catch(() => caches.match(event.request))
+    )
+    return
+  }
+
+  // Static assets: stale-while-revalidate
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      const fetchPromise = fetch(event.request).then((response) => {
+        if (response.status === 200) {
+          const clone = response.clone()
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
+        }
+        return response
+      }).catch(() => cached)
+      return cached || fetchPromise
     })
   )
 })

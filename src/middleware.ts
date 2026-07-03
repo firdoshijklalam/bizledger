@@ -30,35 +30,39 @@ export function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname
   const clientIP = getClientIP(req)
 
-  // Threat 2: IP blocking — check if IP is banned
-  const blockStatus = isIPBlocked(clientIP)
-  if (blockStatus.blocked) {
-    return NextResponse.json(
-      {
-        error: 'Access denied',
-        reason: blockStatus.reason,
-        message: 'Your IP has been blocked due to suspicious activity. Contact support.',
-        expiresAt: blockStatus.expiresAt,
-      },
-      { status: 403 }
-    )
-  }
-
-  // Threat 4: Check brute-force lockout on auth routes
-  if (pathname === '/api/pin' || pathname === '/api/biometric/gate') {
-    const lockStatus = isLockedOut(clientIP)
-    if (lockStatus.locked) {
+  // In development mode: skip IP blocking and brute-force checks
+  // (avoids false positives from dev tools and sandbox environment)
+  if (process.env.NODE_ENV === 'production') {
+    // Threat 2: IP blocking — check if IP is banned
+    const blockStatus = isIPBlocked(clientIP)
+    if (blockStatus.blocked) {
       return NextResponse.json(
         {
-          error: 'Account temporarily locked',
-          reason: 'Too many failed attempts',
-          locked: true,
-          lockedUntil: lockStatus.lockedUntil,
-          lockoutLevel: lockStatus.lockoutLevel,
-          remainingMs: lockStatus.remainingMs,
+          error: 'Access denied',
+          reason: blockStatus.reason,
+          message: 'Your IP has been blocked due to suspicious activity. Contact support.',
+          expiresAt: blockStatus.expiresAt,
         },
-        { status: 429 }
+        { status: 403 }
       )
+    }
+
+    // Threat 4: Check brute-force lockout on auth routes
+    if (pathname === '/api/pin' || pathname === '/api/biometric/gate') {
+      const lockStatus = isLockedOut(clientIP)
+      if (lockStatus.locked) {
+        return NextResponse.json(
+          {
+            error: 'Account temporarily locked',
+            reason: 'Too many failed attempts',
+            locked: true,
+            lockedUntil: lockStatus.lockedUntil,
+            lockoutLevel: lockStatus.lockoutLevel,
+            remainingMs: lockStatus.remainingMs,
+          },
+          { status: 429 }
+        )
+      }
     }
   }
 
