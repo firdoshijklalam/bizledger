@@ -1709,3 +1709,47 @@ Stage Summary:
 - Cart tab labels dynamically bound to customer names
 - No more duplicate cart rows — quantity increments reactively on repeat clicks
 - Strict mode isolation via cartKey suffix (_loose / _sealed / _wholesale) — zero cross-mode data pollution
+
+---
+Task ID: POS-UI-REDESIGN-UPI-QR
+Agent: main
+Task: CRITICAL UI REDESIGN — POS Card Look & Dynamic UPI Intent Engine
+
+Work Log:
+§1 Grid Click Multiplier Fix:
+- Changed addToCart() increment step from 0.5 to 1 (whole integer).
+- Changed updateQty() stepper step from 0.5 to 1.
+- Fractional inputs (0.5, 1.5, etc.) are now only permitted via manual text input in the qty field.
+- Verified: 3 clicks on product → qty 3 (was 2 with old 0.5 step).
+
+§2 Professional Cart Line Overhaul:
+- Removed the heavy-bordered horizontal inputs with raw cross and equal signs.
+- Implemented a compact 3-column grid POS row layout with distinct grey sub-labels:
+  * Column 1: "প্রতি {unit} দর" (base rate, editable underline input)
+  * Column 2: "কত {unit} নেবে" (qty in tight minus/plus stepper, editable)
+  * Column 3: "মোট দাম" (final sum, bold, editable)
+- Grey sub-labels use text-[9px] text-muted-foreground/70 uppercase tracking-wide.
+- Card uses bg-muted/40 border-border/50 for clean density.
+- Verified: 3 sub-labels present ("প্রতি kg দর", "কত kg নেবে", "মোট দাম"), no = or cross signs.
+
+§3 Dynamic UPI Intent QR Code Generation:
+- Added qrcode library import (already in package.json).
+- When PAYMENT MODE 'UPI' is clicked, a QR code renders automatically.
+- The UPI deep-link payload embeds the live Grand Total:
+  upi://pay?pa=sharmatrading@upi&pn=Sharma%20Trading%20Co.&am=165.00&cu=INR
+- This bypasses manual amount typing on the customer's phone during scanning.
+- QR is 240px, white background, displayed in a violet-themed card.
+- Shows "স্ক্যান করে পরিশোধ করুন" + ₹amount + VPA below the QR.
+- QR updates dynamically when cart changes (verified: ₹165 → ₹220 after adding product).
+- Fallback messages: "কার্টে পণ্য যোগ করুন" (empty cart), "UPI ID সেট করা নেই" (no VPA).
+
+Browser Verification:
+✅ §1: 3 clicks = qty 3 (integer increment, not 0.5 step)
+✅ §2: 3 grey sub-labels present (প্রতি kg দর / কত kg নেবে / মোট দাম), no = cross signs
+✅ §3: UPI click → QR renders with ₹165 embedded → updates to ₹220 after adding product
+✅ Lint: 0 errors
+
+Stage Summary:
+- Grid click increments by whole integers (1), fractional via manual input only
+- Professional POS row with grey sub-labels replaces heavy-bordered layout
+- Dynamic UPI QR with live grand total embedded in deep-link payload

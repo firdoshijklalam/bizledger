@@ -18,7 +18,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { EmptyState } from '@/components/shared/states'
 import { toast } from 'sonner'
-import { useMemo, useState, useCallback, useRef } from 'react'
+import { useMemo, useState, useCallback, useRef, useEffect } from 'react'
+import QRCode from 'qrcode'
 import { FullScreenPicker } from '@/components/shared/full-screen-picker'
 import { useGateTrigger } from '@/store/biometric-gate-store'
 import { PartyForm } from './khata/party-form'
@@ -152,15 +153,16 @@ export function SalePadView() {
 
   // §2: Avoid Duplicate Cart Rows — increment quantity if item exists, else append.
   // Uses cartKey (mode-suffixed) so the same product in different modes is a separate row.
+  // §1 FIX: Grid click always increments by whole integer (1). Fractional inputs
+  // (0.5, 1.5, etc.) are only permitted via manual text input in the qty field.
   const addToCart = (p: Product) => {
     const price = getPrice(p)
     const unit = getPriceUnit(p)
     const key = getCartKey(p.id, mode)
     const existing = cart.find((i) => i.cartKey === key)
     if (existing) {
-      // Increment quantity reactively — do NOT append a new row
-      const step = mode === 'retail' ? 0.5 : 1
-      const newQty = Number((existing.quantity + step).toFixed(3))
+      // Increment by whole integer (1) — NOT 0.5
+      const newQty = Number((existing.quantity + 1).toFixed(3))
       setCart(cart.map((i) =>
         i.cartKey === key
           ? {
@@ -190,8 +192,8 @@ export function SalePadView() {
     setCart(cart
       .map((i) => {
         if (i.cartKey !== cartKey) return i
-        const step = mode === 'retail' ? 0.5 : 1
-        const newQty = Math.max(0, Number((i.quantity + delta * step).toFixed(3)))
+        // §1: stepper always increments by 1 (whole integer). Fractional via manual input only.
+        const newQty = Math.max(0, Number((i.quantity + delta).toFixed(3)))
         // Sync qtyStr with the new numeric quantity
         if (i.manualOverride) return { ...i, quantity: newQty, qtyStr: String(newQty) }
         return { ...i, quantity: newQty, qtyStr: String(newQty), total: newQty * i.price }
@@ -299,6 +301,27 @@ export function SalePadView() {
   // Cash exchange calculator
   const cashReceivedNum = Number(cashReceived) || 0
   const changeDue = Math.max(0, cashReceivedNum - grandTotal)
+
+  // §3: Dynamic UPI Intent QR Code Generation
+  // When PAYMENT MODE 'UPI' is clicked, generate a QR code embedding the live Grand Total
+  // into the UPI deep-link payload: upi://pay?pa=VPA&pn=MERCHANT&am=GRAND_TOTAL&cu=INR
+  // This bypasses manual amount typing on the customer's phone during scanning.
+  const upiId = business?.upiId || ''
+  const merchantName = business?.name || 'Merchant'
+  const [upiQrDataUrl, setUpiQrDataUrl] = useState<string>('')
+  useEffect(() => {
+    let cancelled = false
+    if (paymentMode !== 'upi' || grandTotal <= 0 || !upiId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setUpiQrDataUrl('')
+      return
+    }
+    const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchantName)}&am=${grandTotal.toFixed(2)}&cu=INR`
+    QRCode.toDataURL(upiUrl, { width: 240, margin: 1, color: { dark: '#0a0a0a', light: '#ffffff' } })
+      .then((url) => { if (!cancelled) setUpiQrDataUrl(url) })
+      .catch(() => { if (!cancelled) setUpiQrDataUrl('') })
+    return () => { cancelled = true }
+  }, [paymentMode, grandTotal, upiId, merchantName])
 
   // ---- §3: Multi-Cart Hold Protocol ----
   const addNewCart = () => {
@@ -881,16 +904,15 @@ export function SalePadView() {
             </div>
             <div className="space-y-2 max-h-64 overflow-y-auto scroll-area">
               {cart.map((item) => (
-                <div key={item.cartKey} className="p-2 rounded-xl bg-muted/50">
+                <div key={item.cartKey} className="p-2.5 rounded-xl bg-muted/40 border border-border/50">
                   {/* Row 1 — product name + trash icon FAR RIGHT */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 mb-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{item.name}</p>
+                      <p className="text-sm font-semibold truncate">{item.name}</p>
                       {item.manualOverride && (
                         <span className="text-[10px] text-amber-600 font-medium">মোট ম্যানুয়াল</span>
                       )}
                     </div>
-                    {/* Trash icon at the absolute far right of the name row */}
                     <button
                       onClick={() => removeFromCart(item.cartKey)}
                       className="shrink-0 w-7 h-7 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center hover:bg-red-500/20 transition-colors"
@@ -899,52 +921,57 @@ export function SalePadView() {
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  {/* §4: Row 2 — Slim compact rate + qty + total with bottom underlines.
-                      Bulky rounded inputs replaced with borderless underline fields. */}
-                  <div className="flex items-end gap-3 mt-1.5">
-                    {/* Rate — slim underline input */}
-                    <div className="flex items-baseline gap-0.5 shrink-0">
-                      <span className="text-[10px] text-muted-foreground">₹</span>
-                      <input
-                        value={item.price}
-                        onChange={(e) => setUnitPrice(item.cartKey, Number(e.target.value) || 0)}
-                        className="w-12 text-sm font-semibold tabular bg-transparent border-0 border-b border-muted-foreground/30 focus:border-primary outline-none px-0 py-0 leading-tight"
-                        inputMode="decimal"
-                        title="দর (দর × পরিমাণ = মোট)"
-                      />
-                      <span className="text-[9px] text-muted-foreground">/{item.unit}</span>
+                  {/* §2: Professional POS row — 3 distinct columns with grey sub-labels */}
+                  <div className="grid grid-cols-3 gap-2 items-end">
+                    {/* Column 1: প্রতি কেজি দর (base rate) */}
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">প্রতি {item.unit} দর</label>
+                      <div className="flex items-baseline gap-0.5">
+                        <span className="text-[10px] text-muted-foreground">₹</span>
+                        <input
+                          value={item.price}
+                          onChange={(e) => setUnitPrice(item.cartKey, Number(e.target.value) || 0)}
+                          className="w-full text-sm font-semibold tabular bg-transparent border-0 border-b border-border focus:border-primary outline-none px-0 py-0.5 leading-tight"
+                          inputMode="decimal"
+                          title="প্রতি ইউনিট দর এডিট করুন"
+                        />
+                      </div>
                     </div>
-                    {/* Qty stepper — slim */}
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <button onClick={() => updateQty(item.cartKey, -1)} className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted" aria-label="Decrease">
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <input
-                        value={item.qtyStr}
-                        onChange={(e) => setQty(item.cartKey, e.target.value)}
-                        onBlur={() => commitQty(item.cartKey)}
-                        className="w-12 text-center text-sm tabular bg-transparent border-0 border-b border-muted-foreground/30 focus:border-primary outline-none px-0 py-0 leading-tight"
-                        inputMode="decimal"
-                        step="any"
-                        title="পরিমাণ (দশমিক সমর্থিত)"
-                      />
-                      <button onClick={() => updateQty(item.cartKey, 1)} className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted" aria-label="Increase">
-                        <Plus className="w-3 h-3" />
-                      </button>
+                    {/* Column 2: কত কেজি নেবে (qty stepper) */}
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">কত {item.unit} নেবে</label>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => updateQty(item.cartKey, -1)} className="w-6 h-6 rounded bg-card border border-border flex items-center justify-center text-muted-foreground hover:bg-muted shrink-0" aria-label="Decrease">
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <input
+                          value={item.qtyStr}
+                          onChange={(e) => setQty(item.cartKey, e.target.value)}
+                          onBlur={() => commitQty(item.cartKey)}
+                          className="flex-1 min-w-0 text-center text-sm tabular bg-transparent border-0 border-b border-border focus:border-primary outline-none px-0 py-0.5 leading-tight"
+                          inputMode="decimal"
+                          step="any"
+                          title="পরিমাণ (দশমিক সমর্থিত)"
+                        />
+                        <button onClick={() => updateQty(item.cartKey, 1)} className="w-6 h-6 rounded bg-card border border-border flex items-center justify-center text-muted-foreground hover:bg-muted shrink-0" aria-label="Increase">
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
-                    {/* = sign */}
-                    <span className="text-[10px] text-muted-foreground shrink-0 pb-0.5">=</span>
-                    {/* Total — slim underline input (editable) */}
-                    <div className="flex items-baseline gap-0.5 flex-1 justify-end">
-                      <span className="text-[10px] text-muted-foreground">₹</span>
-                      <input
-                        value={item.total}
-                        onChange={(e) => setManualTotal(item.cartKey, Number(e.target.value) || 0)}
-                        onDoubleClick={() => resetManualTotal(item.cartKey)}
-                        className="w-20 text-right text-sm font-bold tabular bg-transparent border-0 border-b border-amber-400/50 focus:border-amber-500 outline-none px-0 py-0 leading-tight"
-                        inputMode="numeric"
-                        title="মোট দাম (ডাবল-ক্লিকে রিসেট)"
-                      />
+                    {/* Column 3: মোট দাম (final sum, bold) */}
+                    <div className="space-y-0.5">
+                      <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block text-right">মোট দাম</label>
+                      <div className="flex items-baseline gap-0.5 justify-end">
+                        <span className="text-[10px] text-muted-foreground">₹</span>
+                        <input
+                          value={item.total}
+                          onChange={(e) => setManualTotal(item.cartKey, Number(e.target.value) || 0)}
+                          onDoubleClick={() => resetManualTotal(item.cartKey)}
+                          className="w-full text-right text-sm font-bold tabular bg-transparent border-0 border-b border-amber-400/40 focus:border-amber-500 outline-none px-0 py-0.5 leading-tight"
+                          inputMode="numeric"
+                          title="মোট দাম (ডাবল-ক্লিকে রিসেট)"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1069,6 +1096,39 @@ export function SalePadView() {
                         </div>
                       </div>
                     </div>
+                  </div>
+                </motion.div>
+              )}
+              {paymentMode === 'upi' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-3 mt-2 rounded-xl bg-violet-50 dark:bg-violet-950/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <QrCode className="w-4 h-4 text-violet-600" />
+                      <p className="text-xs font-medium text-violet-700 dark:text-violet-300">UPI পেমেন্ট QR</p>
+                    </div>
+                    {upiQrDataUrl ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <img src={upiQrDataUrl} alt="UPI QR Code" className="w-44 h-44 rounded-lg bg-white p-1" />
+                        <div className="text-center w-full">
+                          <p className="text-[10px] text-muted-foreground">স্ক্যান করে পরিশোধ করুন</p>
+                          <p className="text-sm font-bold tabular text-violet-700 dark:text-violet-300">
+                            {formatCurrency(grandTotal, currency)}
+                          </p>
+                          <p className="text-[9px] text-muted-foreground mt-0.5">{upiId}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-4">
+                        <p className="text-[11px] text-muted-foreground">
+                          {grandTotal <= 0 ? 'কার্টে পণ্য যোগ করুন' : !upiId ? 'UPI ID সেট করা নেই (Settings)' : 'QR তৈরি হচ্ছে…'}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
