@@ -1532,3 +1532,51 @@ Stage Summary:
 - Original 2-column layout restored (Purchase|Sale, MRP|Wholesale)
 - Wholesale ₹ is a normal input in the grid, no special wrapping
 - Verified in browser, lint clean
+
+---
+Task ID: UX-AMENDMENT-4
+Agent: main
+Task: CRITICAL UX AMENDMENT — Decimals, Stealth Wholesale & Tab Deletion
+
+Work Log:
+§1 Multi-Cart Tab Closure:
+- Added X close button to EVERY active Person tab (not just non-active ones).
+- Tapping X opens a prompt modal with 2 options: [হোল্ড কিউ-তে পাঠান] (Send to Held Queue — recoverable) or [সম্পূর্ণ মুছে ফেলুন] (Wipe/Delete).
+- Implemented heldQueue state + Held Queue modal (amber Layers icon badge shows count).
+- Restore from Held Queue brings the cart back to active viewport. Delete permanently removes.
+- Empty carts close immediately without prompt.
+
+§2 Cloaked Wholesale Slide Grid:
+- REMOVED the পাইকারি (Wholesale) card from the default screen — only খুচরো + আস্ত visible out of the box.
+- Added swipe detection container with touch + mouse handlers: left-swipe starting from right 20% of screen reveals the wholesale card.
+- Wholesale card animates in (width 0 → auto) via framer-motion AnimatePresence.
+- Animated "সোয়াইপ" hint at right edge when wholesale is cloaked.
+- "Hide wholesale" chevron button appears when revealed to re-cloak.
+- Verified: mouse-based swipe dispatch reveals পাইকারি card + Hide button; after hiding, swipe hint returns.
+
+§3 Float/Decimal Quantity Validation Fix:
+- Changed setQty to accept raw string (not Number) — allows '0', '.', '0.5', '.5' states during typing.
+- Removed the `.filter((i) => i.quantity > 0)` from setQty — item stays in cart even when qty is 0 or empty.
+- Added commitQty(productId) — called onBlur: removes the item ONLY if quantity is still 0 after the owner finishes typing.
+- Verified: typing 0.5 keeps item with total 27.5; typing 0 keeps item (not deleted); only blur with 0 removes.
+
+§4 Trash Icon Relocation:
+- Restructured cart item into 2 rows:
+  Row 1: product name + price/unit + TRASH icon (far right, w-8 h-8, red bg)
+  Row 2: qty stepper (- input +) + manual total input
+- Trash icon is now on the name row, completely separated from qty/price inputs.
+- Added red bg-red-500/10 hover:bg-red-500/20 styling + aria-label="Remove {product name}" for clarity.
+- Verified: "Remove উৎসব" button on Row 1, qty stepper + manual total on Row 2.
+
+Browser Verification:
+✅ Multi-cart: X close button on every cart tab → prompt with Wipe/Hold Queue options
+✅ Held Queue: amber badge button → modal with Restore/Delete per cart
+✅ Cloaked wholesale: only খুচরো + আস্ত visible by default, পাইকারি reveals via left-swipe from right edge
+✅ Decimal qty: 0.5 works (total 27.5), 0 doesn't delete during typing, only removes on blur
+✅ Trash icon: on name row far right, separated from qty/price inputs
+✅ Lint: 0 errors
+
+Stage Summary:
+- 4 UX amendments all implemented and verified in browser
+- sale-pad-view.tsx is the sole file modified
+- Multi-cart closure with Wipe/Hold Queue, cloaked wholesale via swipe, decimal qty validation, trash relocation

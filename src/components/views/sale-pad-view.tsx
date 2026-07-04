@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShoppingBag, Package, Plus, Minus, Trash2, UserPlus, Receipt,
   Store, Boxes, CheckCircle2, X, Wallet, QrCode, CreditCard, FileCheck,
-  ChevronDown, ChevronUp, Calculator, Lock, Eye, EyeOff, ShieldCheck,
+  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Calculator, Lock, Eye, EyeOff, ShieldCheck,
   Users, BadgePercent, Settings2, Layers,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -17,7 +17,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { EmptyState } from '@/components/shared/states'
 import { toast } from 'sonner'
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useRef } from 'react'
 import { FullScreenPicker } from '@/components/shared/full-screen-picker'
 import { useGateTrigger } from '@/store/biometric-gate-store'
 
@@ -60,6 +60,15 @@ export function SalePadView() {
   const [mode, setMode] = useState<SaleMode>('retail')
   const [wholesaleUnlocked, setWholesaleUnlocked] = useState(false)
   const triggerGate = useGateTrigger()
+  // §2 Cloaked Wholesale: only reveal via explicit left-swipe from right edge
+  const [wholesaleRevealed, setWholesaleRevealed] = useState(false)
+  const swipeStartX = useRef<number | null>(null)
+  const swipeStartY = useRef<number | null>(null)
+  // §1 Multi-Cart Tab Closure: prompt to wipe or hold
+  const [closePromptCartId, setClosePromptCartId] = useState<number | null>(null)
+  // §1 Held Queue: carts sent here free up active slots but stay recoverable
+  const [heldQueue, setHeldQueue] = useState<HeldCart[]>([])
+  const [showHeldQueue, setShowHeldQueue] = useState(false)
 
   const [activeCategory, setActiveCategory] = useState<string>('All')
   const [showCustPicker, setShowCustPicker] = useState(false)
@@ -143,19 +152,38 @@ export function SalePadView() {
         if (i.manualOverride) return { ...i, quantity: newQty }
         return { ...i, quantity: newQty, total: newQty * i.price }
       })
+      // §3: only remove if qty is genuinely 0 (not while typing decimals like 0.5)
       .filter((i) => i.quantity > 0)
     )
   }
 
-  const setQty = (productId: string, qty: number) => {
+  // §3: Float/Decimal Quantity Validation Fix
+  // Allow '0' or '.' states during input without triggering item deletion.
+  // We only remove an item when the FINAL value parses to 0 (on blur).
+  const setQty = (productId: string, raw: string) => {
     setCart(cart
       .map((i) => {
         if (i.productId !== productId) return i
+        // Allow empty string, '0', '0.', '.5', '0.5' etc. during typing
+        // Parse the value; if it's a valid float use it, otherwise keep 0
+        let qty: number
+        if (raw === '' || raw === '.') {
+          qty = 0
+        } else {
+          qty = parseFloat(raw)
+          if (isNaN(qty)) qty = 0
+        }
         if (i.manualOverride) return { ...i, quantity: qty }
         return { ...i, quantity: qty, total: qty * i.price }
       })
-      .filter((i) => i.quantity > 0)
+      // DO NOT filter here — keep the item even if qty is 0 so the owner
+      // can continue typing (e.g. "0" then ".5"). Removal handled on blur.
     )
+  }
+
+  // §3: On blur, if quantity is still 0, remove the item
+  const commitQty = (productId: string) => {
+    setCart(cart.filter((i) => !(i.productId === productId && i.quantity <= 0)))
   }
 
   // §4: Manual Price Override — editable total field in cart
@@ -221,7 +249,19 @@ export function SalePadView() {
     toast(`কার্ট সুইচ হলো`, { description: carts.find((c) => c.id === id)?.label })
   }
 
-  const removeCart = (id: number) => {
+  // §1: Multi-Cart Tab Closure — prompt to Wipe or Send to Held Queue
+  const requestCartClose = (id: number) => {
+    const target = carts.find((c) => c.id === id)
+    if (!target) return
+    if (target.items.length === 0) {
+      // Empty cart — just delete
+      doRemoveCart(id)
+      return
+    }
+    setClosePromptCartId(id)
+  }
+
+  const doRemoveCart = (id: number) => {
     if (carts.length <= 1) {
       toast('কমপক্ষে ১টি কার্ট থাকতে হবে')
       return
@@ -229,6 +269,43 @@ export function SalePadView() {
     const newCarts = carts.filter((c) => c.id !== id)
     setCarts(newCarts)
     if (activeCartId === id) setActiveCartId(newCarts[0].id)
+    setClosePromptCartId(null)
+  }
+
+  // Keep removeCart as an alias for backward compat (used by old remove button)
+  const removeCart = doRemoveCart
+
+  // §1: Wipe — permanently delete the cart and its items
+  const wipeCart = (id: number) => {
+    doRemoveCart(id)
+    toast.success('কার্ট মুছে ফেলা হয়েছে')
+  }
+
+  // §1: Send to Held Queue — remove from active viewport but keep recoverable
+  const sendToHeldQueue = (id: number) => {
+    const target = carts.find((c) => c.id === id)
+    if (!target) return
+    setHeldQueue([...heldQueue, target])
+    doRemoveCart(id)
+    toast.success(`${target.label} হোল্ড কিউ-তে পাঠানো হয়েছে`, {
+      description: 'পুনরুদ্ধার করতে হোল্ড কিউ বাটনে ট্যাপ করুন',
+    })
+  }
+
+  // §1: Restore from Held Queue back to active
+  const restoreFromHeldQueue = (id: number) => {
+    const target = heldQueue.find((c) => c.id === id)
+    if (!target) return
+    setCarts([...carts, target])
+    setHeldQueue(heldQueue.filter((c) => c.id !== id))
+    setActiveCartId(id)
+    setShowHeldQueue(false)
+    toast.success(`${target.label} পুনরুদ্ধার করা হয়েছে`)
+  }
+
+  const deleteFromHeldQueue = (id: number) => {
+    setHeldQueue(heldQueue.filter((c) => c.id !== id))
+    toast.success('হোল্ড কিউ থেকে মুছে ফেলা হয়েছে')
   }
 
   // §2: Wholesale mode is eye-locked — PIN gate required
@@ -385,14 +462,14 @@ export function SalePadView() {
             const itemCount = c.items.length
             const cartTotal = c.items.reduce((s, i) => s + i.total, 0)
             return (
-              <button
+              <div
                 key={c.id}
-                onClick={() => switchCart(c.id)}
-                className={`shrink-0 relative px-4 py-2.5 rounded-xl border-2 transition-all min-w-[100px] ${
+                className={`shrink-0 relative px-4 py-2.5 rounded-xl border-2 transition-all min-w-[100px] cursor-pointer ${
                   active
                     ? 'border-blue-500 bg-blue-500 text-white shadow-md'
                     : 'border-border bg-card text-muted-foreground'
                 }`}
+                onClick={() => switchCart(c.id)}
               >
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs font-bold">{c.label}</span>
@@ -407,21 +484,20 @@ export function SalePadView() {
                     {formatCurrency(cartTotal, currency)}
                   </p>
                 )}
-                {!active && itemCount > 0 && carts.length > 1 && (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => { e.stopPropagation(); removeCart(c.id) }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); removeCart(c.id) } }}
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center"
+                {/* §1: X close button on EVERY cart (active + non-active) when >1 cart */}
+                {carts.length > 1 && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); requestCartClose(c.id) }}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors shadow-sm"
+                    aria-label={`Close ${c.label}`}
                   >
                     <X className="w-3 h-3" />
-                  </span>
+                  </button>
                 )}
                 {active && itemCount > 0 && (
                   <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 )}
-              </button>
+              </div>
             )
           })}
           {/* + button to add new cart */}
@@ -432,54 +508,174 @@ export function SalePadView() {
           >
             <Plus className="w-5 h-5" />
           </button>
+          {/* §1: Held Queue button — shows count of held carts */}
+          {heldQueue.length > 0 && (
+            <button
+              onClick={() => setShowHeldQueue(true)}
+              className="shrink-0 px-3 h-11 rounded-xl border-2 border-amber-400/50 bg-amber-500/10 flex items-center gap-1.5 text-amber-600 hover:bg-amber-500/20 transition-colors"
+              aria-label="Held queue"
+            >
+              <Layers className="w-4 h-4" />
+              <span className="text-[10px] font-bold">{heldQueue.length}</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* §2: Mode selector — 3 cards (খুচরো / আস্ত / পাইকারি) */}
-      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
-        {(['retail', 'full', 'wholesale'] as const).map((m) => {
-          const meta = modeMeta[m]
-          const Icon = meta.icon
-          const active = mode === m
-          const locked = m === 'wholesale' && !wholesaleUnlocked
-          return (
-            <button
-              key={m}
-              onClick={() => handleModeSwitch(m)}
-              className={`shrink-0 px-4 py-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-1 min-w-[120px] min-h-[80px] justify-center relative ${
-                active
-                  ? meta.color === 'emerald' ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
-                  : meta.color === 'teal' ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/30'
-                  : 'border-amber-500 bg-amber-50 dark:bg-amber-950/30'
-                  : 'border-border bg-muted/30'
-              }`}
+      {/* §2: Mode selector — default shows only খুচরো + আস্ত. পাইকারি is cloaked,
+          revealed only via explicit left-swipe from the right edge. */}
+      <div
+        className="relative overflow-hidden -mx-1 px-1"
+        onTouchStart={(e) => {
+          const t = e.touches[0]
+          // §2: only trigger reveal if swipe starts near right edge (last 20% of screen)
+          if (t.clientX > window.innerWidth * 0.8) {
+            swipeStartX.current = t.clientX
+            swipeStartY.current = t.clientY
+          }
+        }}
+        onTouchMove={(e) => {
+          if (swipeStartX.current === null) return
+          const t = e.touches[0]
+          const dx = swipeStartX.current - t.clientX
+          const dy = Math.abs(swipeStartY.current! - t.clientY)
+          // Left-swipe: dx > 60 and horizontal-dominant
+          if (dx > 60 && dy < 40 && !wholesaleRevealed) {
+            setWholesaleRevealed(true)
+          }
+        }}
+        onTouchEnd={() => {
+          swipeStartX.current = null
+          swipeStartY.current = null
+        }}
+        onMouseDown={(e) => {
+          // Desktop: right-edge click-drag
+          if (e.clientX > window.innerWidth * 0.8) {
+            swipeStartX.current = e.clientX
+            swipeStartY.current = e.clientY
+          }
+        }}
+        onMouseMove={(e) => {
+          if (swipeStartX.current === null) return
+          const dx = swipeStartX.current - e.clientX
+          const dy = Math.abs(swipeStartY.current! - e.clientY)
+          if (dx > 60 && dy < 40 && !wholesaleRevealed) {
+            setWholesaleRevealed(true)
+          }
+        }}
+        onMouseUp={() => {
+          swipeStartX.current = null
+          swipeStartY.current = null
+        }}
+        onMouseLeave={() => {
+          swipeStartX.current = null
+          swipeStartY.current = null
+        }}
+      >
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+          {/* Default visible cards: retail + full */}
+          {(['retail', 'full'] as const).map((m) => {
+            const meta = modeMeta[m]
+            const Icon = meta.icon
+            const active = mode === m
+            return (
+              <button
+                key={m}
+                onClick={() => handleModeSwitch(m)}
+                className={`shrink-0 px-4 py-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-1 min-w-[120px] min-h-[80px] justify-center relative ${
+                  active
+                    ? meta.color === 'emerald' ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
+                    : 'border-teal-500 bg-teal-50 dark:bg-teal-950/30'
+                    : 'border-border bg-muted/30'
+                }`}
+              >
+                <Icon className={`w-5 h-5 ${
+                  active
+                    ? meta.color === 'emerald' ? 'text-emerald-600' : 'text-teal-600'
+                    : 'text-muted-foreground'
+                }`} />
+                <span className={`text-xs font-bold ${
+                  active
+                    ? meta.color === 'emerald' ? 'text-emerald-600' : 'text-teal-600'
+                    : 'text-muted-foreground'
+                }`}>{meta.label}</span>
+                <span className="text-[9px] text-muted-foreground">{meta.sub}</span>
+              </button>
+            )
+          })}
+
+          {/* §2: Cloaked wholesale card — animates in only after left-swipe reveal */}
+          <AnimatePresence>
+            {wholesaleRevealed && (
+              <motion.button
+                initial={{ width: 0, opacity: 0, marginRight: 0 }}
+                animate={{ width: 'auto', opacity: 1, marginRight: 8 }}
+                exit={{ width: 0, opacity: 0, marginRight: 0 }}
+                transition={{ duration: 0.3 }}
+                onClick={() => handleModeSwitch('wholesale')}
+                className={`shrink-0 px-4 py-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-1 min-w-[120px] min-h-[80px] justify-center relative overflow-hidden ${
+                  mode === 'wholesale'
+                    ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30'
+                    : 'border-amber-400/40 bg-amber-500/5'
+                }`}
+              >
+                {(() => {
+                  const m = 'wholesale' as const
+                  const meta = modeMeta[m]
+                  const Icon = meta.icon
+                  const active = mode === m
+                  const locked = !wholesaleUnlocked
+                  return (
+                    <>
+                      <Icon className={`w-5 h-5 ${active ? 'text-amber-600' : 'text-amber-500/70'}`} />
+                      <span className={`text-xs font-bold ${active ? 'text-amber-600' : 'text-amber-600/80'}`}>{meta.label}</span>
+                      <span className="text-[9px] text-muted-foreground">{meta.sub}</span>
+                      {locked && (
+                        <span className="absolute top-1.5 right-1.5">
+                          <Lock className="w-3 h-3 text-amber-500" />
+                        </span>
+                      )}
+                      {wholesaleUnlocked && !active && (
+                        <ShieldCheck className="absolute top-1.5 right-1.5 w-3 h-3 text-emerald-500" />
+                      )}
+                    </>
+                  )
+                })()}
+              </motion.button>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* §2: Swipe hint — visible when wholesale is NOT yet revealed */}
+        {!wholesaleRevealed && (
+          <div className="absolute right-0 top-0 bottom-0 flex items-center pointer-events-none">
+            <motion.div
+              animate={{ x: [0, -6, 0] }}
+              transition={{ repeat: Infinity, duration: 1.5 }}
+              className="flex items-center gap-1 px-2 py-1 rounded-l-xl bg-amber-500/20 text-amber-600 text-[9px] font-medium"
             >
-              <Icon className={`w-5 h-5 ${
-                active
-                  ? meta.color === 'emerald' ? 'text-emerald-600'
-                  : meta.color === 'teal' ? 'text-teal-600'
-                  : 'text-amber-600'
-                  : 'text-muted-foreground'
-              }`} />
-              <span className={`text-xs font-bold ${
-                active
-                  ? meta.color === 'emerald' ? 'text-emerald-600'
-                  : meta.color === 'teal' ? 'text-teal-600'
-                  : 'text-amber-600'
-                  : 'text-muted-foreground'
-              }`}>{meta.label}</span>
-              <span className="text-[9px] text-muted-foreground">{meta.sub}</span>
-              {locked && (
-                <span className="absolute top-1.5 right-1.5 flex items-center gap-0.5">
-                  <Lock className="w-3 h-3 text-amber-500" />
-                </span>
-              )}
-              {m === 'wholesale' && wholesaleUnlocked && !active && (
-                <ShieldCheck className="absolute top-1.5 right-1.5 w-3 h-3 text-emerald-500" />
-              )}
-            </button>
-          )
-        })}
+              <ChevronLeft className="w-3 h-3" />
+              <span>সোয়াইপ</span>
+            </motion.div>
+          </div>
+        )}
+
+        {/* §2: Re-hide button when wholesale is revealed */}
+        {wholesaleRevealed && (
+          <button
+            onClick={() => {
+              setWholesaleRevealed(false)
+              if (mode === 'wholesale') {
+                setMode('retail')
+                setWholesaleUnlocked(false)
+              }
+            }}
+            className="absolute right-0 top-0 bottom-0 px-2 flex items-center text-amber-600 hover:bg-amber-500/10"
+            aria-label="Hide wholesale"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Category slider */}
@@ -570,6 +766,7 @@ export function SalePadView() {
             <div className="space-y-2 max-h-64 overflow-y-auto scroll-area">
               {cart.map((item) => (
                 <div key={item.productId} className="p-2 rounded-xl bg-muted/50">
+                  {/* §4: Row 1 — product name + price/unit + trash icon FAR RIGHT */}
                   <div className="flex items-center gap-2">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{item.name}</p>
@@ -580,14 +777,29 @@ export function SalePadView() {
                         )}
                       </p>
                     </div>
+                    {/* §4: Trash icon at the absolute far right of the name row,
+                        away from qty/price inputs to avoid accidental triggers */}
+                    <button
+                      onClick={() => removeFromCart(item.productId)}
+                      className="shrink-0 w-8 h-8 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center hover:bg-red-500/20 transition-colors"
+                      aria-label={`Remove ${item.name}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {/* §4: Row 2 — qty stepper + manual total (separate from trash) */}
+                  <div className="flex items-center gap-2 mt-2">
                     <div className="flex items-center gap-1">
                       <button onClick={() => updateQty(item.productId, -1)} className="w-7 h-7 rounded-lg bg-card flex items-center justify-center" aria-label="Decrease">
                         <Minus className="w-3 h-3" />
                       </button>
+                      {/* §3: Float/Decimal qty input — keeps item during typing,
+                                          removes only on blur if qty is 0 */}
                       <input
                         value={item.quantity}
-                        onChange={(e) => setQty(item.productId, Number(e.target.value) || 0)}
-                        className="w-14 h-7 text-center text-sm tabular bg-card rounded-lg border-0 outline-none"
+                        onChange={(e) => setQty(item.productId, e.target.value)}
+                        onBlur={() => commitQty(item.productId)}
+                        className="w-16 h-7 text-center text-sm tabular bg-card rounded-lg border-0 outline-none focus:ring-1 focus:ring-primary"
                         inputMode="decimal"
                         step="any"
                       />
@@ -600,13 +812,10 @@ export function SalePadView() {
                       value={item.total}
                       onChange={(e) => setManualTotal(item.productId, Number(e.target.value) || 0)}
                       onDoubleClick={() => resetManualTotal(item.productId)}
-                      className="w-20 h-7 text-right text-sm font-bold tabular bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-300/50 outline-none focus:border-amber-500 px-1"
+                      className="flex-1 h-7 text-right text-sm font-bold tabular bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-300/50 outline-none focus:border-amber-500 px-2"
                       inputMode="numeric"
                       title="মোট দাম ম্যানুয়ালি এডিট করুন (ডাবল-ক্লিকে রিসেট)"
                     />
-                    <button onClick={() => removeFromCart(item.productId)} className="text-red-500" aria-label="Remove">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
                   </div>
                 </div>
               ))}
@@ -854,6 +1063,127 @@ export function SalePadView() {
         placeholder="কাস্টমার খুঁজুন…"
         emptyText="কোনো কাস্টমার পাওয়া যায়নি"
       />
+
+      {/* §1: Cart Close Prompt — Wipe or Send to Held Queue */}
+      <AnimatePresence>
+        {closePromptCartId !== null && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+            onClick={() => setClosePromptCartId(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card rounded-2xl p-5 max-w-sm w-full space-y-4 shadow-2xl"
+            >
+              <div className="text-center">
+                <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-3">
+                  <Trash2 className="w-6 h-6 text-red-500" />
+                </div>
+                <h3 className="text-base font-bold">কার্ট বন্ধ করুন</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {carts.find((c) => c.id === closePromptCartId)?.label} এর কার্টে{' '}
+                  {carts.find((c) => c.id === closePromptCartId)?.items.length || 0} টি আইটেম আছে। কী করবেন?
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  className="w-full h-11 border-amber-400 text-amber-600 hover:bg-amber-500/10"
+                  onClick={() => sendToHeldQueue(closePromptCartId)}
+                >
+                  <Layers className="w-4 h-4 mr-2" /> হোল্ড কিউ-তে পাঠান
+                  <span className="text-[10px] text-muted-foreground ml-1">(পুনরুদ্ধারযোগ্য)</span>
+                </Button>
+                <Button
+                  variant="destructive"
+                  className="w-full h-11"
+                  onClick={() => wipeCart(closePromptCartId)}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" /> সম্পূর্ণ মুছে ফেলুন
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="w-full h-10"
+                  onClick={() => setClosePromptCartId(null)}
+                >
+                  বাতিল
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* §1: Held Queue Modal — restore or delete held carts */}
+      <AnimatePresence>
+        {showHeldQueue && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+            onClick={() => setShowHeldQueue(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card rounded-2xl p-5 max-w-sm w-full space-y-3 shadow-2xl"
+            >
+              <div className="flex items-center gap-2 pb-2 border-b border-border">
+                <Layers className="w-5 h-5 text-amber-500" />
+                <h3 className="text-base font-bold">হোল্ড কিউ ({heldQueue.length})</h3>
+              </div>
+              {heldQueue.length === 0 ? (
+                <p className="text-center text-sm text-muted-foreground py-4">হোল্ড কিউ খালি</p>
+              ) : (
+                <div className="space-y-2 max-h-72 overflow-y-auto">
+                  {heldQueue.map((c) => {
+                    const cartTotal = c.items.reduce((s, i) => s + i.total, 0)
+                    return (
+                      <div key={c.id} className="p-3 rounded-xl bg-amber-500/5 border border-amber-400/30">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-bold">{c.label}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {c.items.length} আইটেম · {formatCurrency(cartTotal, currency)}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => restoreFromHeldQueue(c.id)}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-500 text-white text-[11px] font-medium hover:bg-emerald-600"
+                            >
+                              পুনরুদ্ধার
+                            </button>
+                            <button
+                              onClick={() => deleteFromHeldQueue(c.id)}
+                              className="w-7 h-7 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center"
+                              aria-label="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              <Button variant="ghost" className="w-full h-10" onClick={() => setShowHeldQueue(false)}>
+                বন্ধ করুন
+              </Button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
