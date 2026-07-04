@@ -1506,3 +1506,29 @@ Stage Summary:
 - Multi-cart hold protocol (পার্সন ১/২/৩/+) works — carts held in memory
 - Manual price override in cart, Advanced Options dropdown, ₹/% discount toggle with live sync, Done button bottom-right
 - All 4 sections verified in browser, lint clean, server stable
+
+---
+Task ID: ROLLBACK-PRODUCT-FORM
+Agent: main
+Task: CRITICAL CORE AMENDMENT — Rollback inventory form to original 2-column layout
+
+Work Log:
+- Removed the custom "3-Tier Pricing" section (violet-bordered panel with "৩-টিয়ার প্রাইসিং" heading) from product-form.tsx.
+- Restored the original clean dual-column structure for Core Pricing Fields:
+  * Row 1: [Purchase ₹] | [Sale ₹]
+  * Row 2: [MRP ₹] | [Wholesale ₹]
+- Wholesale ₹ input positioned cleanly in the standard grid (next to MRP), not wrapped in any complex sub-panel or tab.
+- Removed unused `DollarSign` import to keep lint clean.
+- Lint: 0 errors.
+
+Browser Verification:
+✅ Product form shows 4 standard inputs in 2x2 grid: Purchase ₹, Sale ₹, MRP ₹, Wholesale ₹
+✅ No "3-Tier Pricing" block present
+✅ No violet border panel, no cluttered layout shifts
+✅ Clean normal input rows restored
+
+Stage Summary:
+- 3-Tier Pricing block completely removed
+- Original 2-column layout restored (Purchase|Sale, MRP|Wholesale)
+- Wholesale ₹ is a normal input in the grid, no special wrapping
+- Verified in browser, lint clean

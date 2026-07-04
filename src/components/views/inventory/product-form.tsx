@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
 import { useGateTrigger } from '@/store/biometric-gate-store'
-import { Package, Tag, DollarSign, Boxes, AlertTriangle, X, Plus, Upload, Camera, Sparkles, Loader2, ChevronRight, Globe, CheckCircle2 } from 'lucide-react'
+import { Package, Tag, Boxes, AlertTriangle, X, Plus, Upload, Camera, Sparkles, Loader2, ChevronRight, Globe, CheckCircle2 } from 'lucide-react'
 import { BadgePercent } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -560,30 +560,26 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
             </div>
           </div>
 
-          {/* 3-Tier Pricing: Retail / Bulk / Wholesale */}
-          <div className="p-3 rounded-xl border border-violet-500/20 bg-violet-500/5 space-y-3">
-            <p className="text-xs font-semibold text-violet-700 dark:text-violet-300 flex items-center gap-1.5">
-              <DollarSign className="w-3.5 h-3.5" /> ৩-টিয়ার প্রাইসিং (3-Tier Pricing)
-            </p>
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="pp" className="text-xs">Purchase Price ₹ (ক্রয় মূল্য)</Label>
-              <Input id="pp" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} className="h-11" inputMode="numeric" placeholder="0" />
+              <Label htmlFor="pp" className="text-xs">Purchase ₹</Label>
+              <Input id="pp" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} className="h-11" inputMode="numeric" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="sp" className="text-xs">Bulk Price (আস্ত দাম) ₹ per {unit} — আস্ত ১ বস্তা/বক্স</Label>
-              <Input id="sp" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} className="h-11" inputMode="numeric" placeholder="0" />
+              <Label htmlFor="sp" className="text-xs">Sale ₹</Label>
+              <Input id="sp" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} className="h-11" inputMode="numeric" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="mrp" className="text-xs">MRP ₹</Label>
+              <Input id="mrp" value={mrp} onChange={(e) => setMrp(e.target.value)} className="h-11" inputMode="numeric" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="wp" className="text-xs">Wholesale Price (পাইকারি দাম) ₹ — বিশেষ পাইকারি রেট</Label>
-              <Input id="wp" value={wholesalePrice} onChange={(e) => setWholesalePrice(e.target.value)} className="h-11" inputMode="numeric" placeholder="0 (leave 0 to disable)" />
+              <Label htmlFor="wp" className="text-xs">Wholesale ₹</Label>
+              <Input id="wp" value={wholesalePrice} onChange={(e) => setWholesalePrice(e.target.value)} className="h-11" inputMode="numeric" />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="mrp" className="text-xs">MRP ₹ (মুদ্রিত মূল্য)</Label>
-              <Input id="mrp" value={mrp} onChange={(e) => setMrp(e.target.value)} className="h-11" inputMode="numeric" placeholder="0" />
-            </div>
-            <p className="text-[10px] text-muted-foreground">
-              খুচরো দাম (Retail Price) উপরের "খুচরো / লুজ প্রোডাক্ট" সেকশনে সেট করুন।
-            </p>
           </div>
 
           {/* Auto discount display */}
