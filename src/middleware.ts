@@ -66,13 +66,20 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  // Threat 3 + 5: Add security headers to all responses
+  // Threat 3 + 5: Add security headers to all responses.
+  // IMPORTANT: Use SAMEORIGIN (not DENY) for X-Frame-Options so the preview
+  // panel iframe can embed the app. CSP frame-ancestors allows the preview
+  // host. In production these would be tightened to the real merchant domain.
   const response = NextResponse.next()
 
   // HSTS (Threat 3: Strict HTTPS Transport Security)
   response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload')
   response.headers.set('X-Content-Type-Options', 'nosniff')
-  response.headers.set('X-Frame-Options', 'DENY')
+  response.headers.set('X-Frame-Options', 'SAMEORIGIN')
+  response.headers.set(
+    'Content-Security-Policy',
+    "frame-ancestors 'self' https://*.space-z.ai http://*.space-z.ai https://preview-chat-*.space-z.ai http://preview-chat-*.space-z.ai"
+  )
   response.headers.set('X-XSS-Protection', '1; mode=block')
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
   response.headers.set('Permissions-Policy', 'geolocation=(self), camera=(), microphone=()')
