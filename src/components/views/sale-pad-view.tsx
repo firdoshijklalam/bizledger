@@ -24,7 +24,8 @@ import { useGateTrigger } from '@/store/biometric-gate-store'
 import { PartyForm } from './khata/party-form'
 
 interface CartItem {
-  productId: string
+  cartKey: string // mode-suffixed key for cart isolation: `${productId}_${mode}` (e.g. 'abc_loose', 'abc_sealed')
+  productId: string // real product ID for API calls
   name: string
   unit: string
   price: number
@@ -141,25 +142,54 @@ export function SalePadView() {
     return p.unit
   }
 
+  // §3: Mode-suffixed cart key — ensures strict isolation between Loose/Sealed/Wholesale.
+  // Same product in Retail mode (abc_loose) is a DIFFERENT cart item from Full mode (abc_sealed).
+  // Changing qty of a Sealed item NEVER mutates the corresponding Loose item.
+  const getCartKey = (productId: string, saleMode: SaleMode): string => {
+    const suffix = saleMode === 'retail' ? 'loose' : saleMode === 'full' ? 'sealed' : 'wholesale'
+    return `${productId}_${suffix}`
+  }
+
+  // §2: Avoid Duplicate Cart Rows — increment quantity if item exists, else append.
+  // Uses cartKey (mode-suffixed) so the same product in different modes is a separate row.
   const addToCart = (p: Product) => {
     const price = getPrice(p)
     const unit = getPriceUnit(p)
-    setCart([...cart, {
-      productId: p.id,
-      name: p.name,
-      unit,
-      price,
-      quantity: 1,
-      qtyStr: '1', // §2: raw string synced with quantity
-      total: price,
-      manualOverride: false,
-    }])
+    const key = getCartKey(p.id, mode)
+    const existing = cart.find((i) => i.cartKey === key)
+    if (existing) {
+      // Increment quantity reactively — do NOT append a new row
+      const step = mode === 'retail' ? 0.5 : 1
+      const newQty = Number((existing.quantity + step).toFixed(3))
+      setCart(cart.map((i) =>
+        i.cartKey === key
+          ? {
+              ...i,
+              quantity: newQty,
+              qtyStr: String(newQty),
+              total: i.manualOverride ? i.total : newQty * i.price,
+            }
+          : i
+      ))
+    } else {
+      setCart([...cart, {
+        cartKey: key,
+        productId: p.id,
+        name: p.name,
+        unit,
+        price,
+        quantity: 1,
+        qtyStr: '1',
+        total: price,
+        manualOverride: false,
+      }])
+    }
   }
 
-  const updateQty = (productId: string, delta: number) => {
+  const updateQty = (cartKey: string, delta: number) => {
     setCart(cart
       .map((i) => {
-        if (i.productId !== productId) return i
+        if (i.cartKey !== cartKey) return i
         const step = mode === 'retail' ? 0.5 : 1
         const newQty = Math.max(0, Number((i.quantity + delta * step).toFixed(3)))
         // Sync qtyStr with the new numeric quantity
@@ -176,7 +206,7 @@ export function SalePadView() {
   // This allows the merchant to type '0', '.', '0.', '.5', '0.5', '1.25', '0.250'
   // without the UI breaking or clearing the entry.
   // quantity (number) is derived from qtyStr for calculations.
-  const setQty = (productId: string, raw: string) => {
+  const setQty = (cartKey: string, raw: string) => {
     // Sanitize: allow only digits and a single dot
     let sanitized = raw.replace(/[^\d.]/g, '')
     // Allow only one dot
@@ -186,7 +216,7 @@ export function SalePadView() {
     }
     setCart(cart
       .map((i) => {
-        if (i.productId !== productId) return i
+        if (i.cartKey !== cartKey) return i
         // Parse the sanitized string to a float
         let qty: number
         if (sanitized === '' || sanitized === '.') {
@@ -206,10 +236,10 @@ export function SalePadView() {
   }
 
   // §2: On blur, if quantity is still 0, remove the item
-  const commitQty = (productId: string) => {
+  const commitQty = (cartKey: string) => {
     setCart(prev => prev
       .map((i) => {
-        if (i.productId !== productId) return i
+        if (i.cartKey !== cartKey) return i
         // Normalize qtyStr on commit — trim leading/trailing dots
         let normalized = i.qtyStr
         if (normalized.endsWith('.')) normalized = normalized.slice(0, -1)
@@ -217,40 +247,40 @@ export function SalePadView() {
         const qty = parseFloat(normalized) || 0
         return { ...i, quantity: qty, qtyStr: normalized }
       })
-      .filter((i) => !(i.productId === productId && i.quantity <= 0))
+      .filter((i) => !(i.cartKey === cartKey && i.quantity <= 0))
     )
   }
 
   // §1: Editable Per-Unit Price — update the base rate and re-run calculation
   // New Per-KG Rate × Quantity = Total Item Price
-  const setUnitPrice = (productId: string, newPrice: number) => {
+  const setUnitPrice = (cartKey: string, newPrice: number) => {
     setCart(cart.map((i) => {
-      if (i.productId !== productId) return i
+      if (i.cartKey !== cartKey) return i
       // Always recalculate total from new price × quantity (clears manual override)
       return { ...i, price: newPrice, total: newPrice * i.quantity, manualOverride: false }
     }))
   }
 
   // §4: Manual Price Override — editable total field in cart
-  const setManualTotal = (productId: string, total: number) => {
+  const setManualTotal = (cartKey: string, total: number) => {
     setCart(cart.map((i) =>
-      i.productId === productId
+      i.cartKey === cartKey
         ? { ...i, total, manualOverride: true }
         : i
     ))
   }
 
   // Reset a manually overridden item back to auto-calc
-  const resetManualTotal = (productId: string) => {
+  const resetManualTotal = (cartKey: string) => {
     setCart(cart.map((i) =>
-      i.productId === productId
+      i.cartKey === cartKey
         ? { ...i, total: i.quantity * i.price, manualOverride: false }
         : i
     ))
   }
 
-  const removeFromCart = (productId: string) => {
-    setCart(cart.filter((i) => i.productId !== productId))
+  const removeFromCart = (cartKey: string) => {
+    setCart(cart.filter((i) => i.cartKey !== cartKey))
   }
 
   // §4: Grand Total with live discount sync
@@ -337,7 +367,7 @@ export function SalePadView() {
     if (!target) return
     setHeldQueue([...heldQueue, target])
     doRemoveCart(id)
-    toast.success(`${target.label} হোল্ড কিউ-তে পাঠানো হয়েছে`, {
+    toast.success(`${target.customer?.name || target.label} হোল্ড কিউ-তে পাঠানো হয়েছে`, {
       description: 'পুনরুদ্ধার করতে হোল্ড কিউ বাটনে ট্যাপ করুন',
     })
   }
@@ -350,7 +380,7 @@ export function SalePadView() {
     setHeldQueue(heldQueue.filter((c) => c.id !== id))
     setActiveCartId(id)
     setShowHeldQueue(false)
-    toast.success(`${target.label} পুনরুদ্ধার করা হয়েছে`)
+    toast.success(`${target.customer?.name || target.label} পুনরুদ্ধার করা হয়েছে`)
   }
 
   const deleteFromHeldQueue = (id: number) => {
@@ -541,6 +571,9 @@ export function SalePadView() {
             const active = c.id === activeCartId
             const itemCount = c.items.length
             const cartTotal = c.items.reduce((s, i) => s + i.total, 0)
+            // §1: Dynamic Tab Name — bind to selected customer. If a customer is selected,
+            // show their name instead of the fallback 'পার্সন N' label.
+            const tabLabel = c.customer?.name || c.label
             return (
               <div
                 key={c.id}
@@ -552,9 +585,9 @@ export function SalePadView() {
                 onClick={() => switchCart(c.id)}
               >
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold">{c.label}</span>
+                  <span className="text-xs font-bold truncate max-w-[90px]">{tabLabel}</span>
                   {itemCount > 0 && (
-                    <span className={`text-[10px] px-1.5 rounded-full ${active ? 'bg-white/25' : 'bg-muted'}`}>
+                    <span className={`text-[10px] px-1.5 rounded-full shrink-0 ${active ? 'bg-white/25' : 'bg-muted'}`}>
                       {itemCount}
                     </span>
                   )}
@@ -793,7 +826,10 @@ export function SalePadView() {
             {filteredProducts.map((p) => {
               const price = getPrice(p)
               const unit = getPriceUnit(p)
-              const inCart = cart.find((i) => i.productId === p.id)
+              // §3: Use mode-suffixed cartKey so highlight only shows for the CURRENT mode.
+              // Switching from Retail to Full will NOT show the product as "in cart" if it
+              // was only added in Retail mode.
+              const inCart = cart.find((i) => i.cartKey === getCartKey(p.id, mode))
               return (
                 <motion.button
                   key={p.id}
@@ -839,13 +875,13 @@ export function SalePadView() {
           >
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                <ShoppingBag className="w-4 h-4" /> {activeCart.label} · কার্ট ({cart.length})
+                <ShoppingBag className="w-4 h-4" /> {activeCart.customer?.name || activeCart.label} · কার্ট ({cart.length})
               </h3>
               <button onClick={() => setCart([])} className="text-xs text-red-600 font-medium">মুছুন</button>
             </div>
             <div className="space-y-2 max-h-64 overflow-y-auto scroll-area">
               {cart.map((item) => (
-                <div key={item.productId} className="p-2 rounded-xl bg-muted/50">
+                <div key={item.cartKey} className="p-2 rounded-xl bg-muted/50">
                   {/* Row 1 — product name + trash icon FAR RIGHT */}
                   <div className="flex items-center gap-2">
                     <div className="flex-1 min-w-0">
@@ -856,7 +892,7 @@ export function SalePadView() {
                     </div>
                     {/* Trash icon at the absolute far right of the name row */}
                     <button
-                      onClick={() => removeFromCart(item.productId)}
+                      onClick={() => removeFromCart(item.cartKey)}
                       className="shrink-0 w-7 h-7 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center hover:bg-red-500/20 transition-colors"
                       aria-label={`Remove ${item.name}`}
                     >
@@ -871,7 +907,7 @@ export function SalePadView() {
                       <span className="text-[10px] text-muted-foreground">₹</span>
                       <input
                         value={item.price}
-                        onChange={(e) => setUnitPrice(item.productId, Number(e.target.value) || 0)}
+                        onChange={(e) => setUnitPrice(item.cartKey, Number(e.target.value) || 0)}
                         className="w-12 text-sm font-semibold tabular bg-transparent border-0 border-b border-muted-foreground/30 focus:border-primary outline-none px-0 py-0 leading-tight"
                         inputMode="decimal"
                         title="দর (দর × পরিমাণ = মোট)"
@@ -880,19 +916,19 @@ export function SalePadView() {
                     </div>
                     {/* Qty stepper — slim */}
                     <div className="flex items-center gap-0.5 shrink-0">
-                      <button onClick={() => updateQty(item.productId, -1)} className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted" aria-label="Decrease">
+                      <button onClick={() => updateQty(item.cartKey, -1)} className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted" aria-label="Decrease">
                         <Minus className="w-3 h-3" />
                       </button>
                       <input
                         value={item.qtyStr}
-                        onChange={(e) => setQty(item.productId, e.target.value)}
-                        onBlur={() => commitQty(item.productId)}
+                        onChange={(e) => setQty(item.cartKey, e.target.value)}
+                        onBlur={() => commitQty(item.cartKey)}
                         className="w-12 text-center text-sm tabular bg-transparent border-0 border-b border-muted-foreground/30 focus:border-primary outline-none px-0 py-0 leading-tight"
                         inputMode="decimal"
                         step="any"
                         title="পরিমাণ (দশমিক সমর্থিত)"
                       />
-                      <button onClick={() => updateQty(item.productId, 1)} className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted" aria-label="Increase">
+                      <button onClick={() => updateQty(item.cartKey, 1)} className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted" aria-label="Increase">
                         <Plus className="w-3 h-3" />
                       </button>
                     </div>
@@ -903,8 +939,8 @@ export function SalePadView() {
                       <span className="text-[10px] text-muted-foreground">₹</span>
                       <input
                         value={item.total}
-                        onChange={(e) => setManualTotal(item.productId, Number(e.target.value) || 0)}
-                        onDoubleClick={() => resetManualTotal(item.productId)}
+                        onChange={(e) => setManualTotal(item.cartKey, Number(e.target.value) || 0)}
+                        onDoubleClick={() => resetManualTotal(item.cartKey)}
                         className="w-20 text-right text-sm font-bold tabular bg-transparent border-0 border-b border-amber-400/50 focus:border-amber-500 outline-none px-0 py-0 leading-tight"
                         inputMode="numeric"
                         title="মোট দাম (ডাবল-ক্লিকে রিসেট)"
@@ -1198,7 +1234,7 @@ export function SalePadView() {
                 </div>
                 <h3 className="text-base font-bold">কার্ট বন্ধ করুন</h3>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {carts.find((c) => c.id === closePromptCartId)?.label} এর কার্টে{' '}
+                  {carts.find((c) => c.id === closePromptCartId)?.customer?.name || carts.find((c) => c.id === closePromptCartId)?.label} এর কার্টে{' '}
                   {carts.find((c) => c.id === closePromptCartId)?.items.length || 0} টি আইটেম আছে। কী করবেন?
                 </p>
               </div>
@@ -1262,7 +1298,7 @@ export function SalePadView() {
                       <div key={c.id} className="p-3 rounded-xl bg-amber-500/5 border border-amber-400/30">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm font-bold">{c.label}</p>
+                            <p className="text-sm font-bold">{c.customer?.name || c.label}</p>
                             <p className="text-[11px] text-muted-foreground">
                               {c.items.length} আইটেম · {formatCurrency(cartTotal, currency)}
                             </p>

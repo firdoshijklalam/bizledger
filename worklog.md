@@ -1671,3 +1671,41 @@ Stage Summary:
 - Payment Mode un-nested and persistently visible
 - Advanced Options cleaned to GST + Invoice only
 - Slim compact underline inputs replace bulky rounded boxes for high-density POS
+
+---
+Task ID: POS-ENGINE-FIX-MULTICART-ISOLATION
+Agent: main
+Task: CRITICAL POS ENGINE FIX — Multi-Cart State & Mode Quantity Isolation
+
+Work Log:
+§1 Dynamic Tab Name Mapping:
+- Bound the Multi-Cart Tab Header label directly to the Selected Customer state.
+- Added `const tabLabel = c.customer?.name || c.label` — if a customer is selected (e.g., 'Amit Trading'), the tab shows their name instead of the fallback 'পার্সন N'.
+- Updated all label references: cart tab button, cart header, close prompt, held queue modal, toast messages.
+- Verified: selected "Amit Trading" → tab label shows "Amit Trading", cart header shows "Amit Trading · কার্ট (2)".
+
+§2 Avoid Duplicate Cart Rows (Quantity Increment Stack):
+- Re-wrote addToCart() to check if an item with the same cartKey already exists.
+- If existing: increment quantity reactively (step 0.5 for retail, 1 for full/wholesale), update qtyStr + total. Do NOT append a new row.
+- If new: append a single new row with quantity 1.
+- Verified: clicked উৎসব 3 times → cart shows "কার্ট (1)" with 1 row, qty 2 (1→1.5→2), total ₹110. No duplicate rows.
+
+§3 Complete Separation of Section States (Loose vs Sealed ID Fix):
+- Added `cartKey` field to CartItem interface: `${productId}_${suffix}` where suffix is 'loose' (retail), 'sealed' (full), or 'wholesale'.
+- Added getCartKey(productId, mode) helper function.
+- Updated ALL cart operations (addToCart, updateQty, setQty, commitQty, setUnitPrice, setManualTotal, resetManualTotal, removeFromCart) to use cartKey instead of productId for item lookup.
+- Updated product grid `inCart` lookup to use getCartKey(p.id, mode) — switching from Retail to Full mode NO LONGER shows the product as "in cart" if it was only added in Retail.
+- Updated React key to use item.cartKey.
+- productId (real ID) is preserved separately for API calls (invoice generation).
+- Verified: added উৎসব in Retail (₹55/kg, qty 2, ₹110) then switched to Full mode and added উৎসব again (₹1,250/bag, qty 1, ₹1,250) → cart shows 2 SEPARATE rows with completely independent prices and quantities. Changing one never mutates the other.
+
+Browser Verification:
+✅ §1: Selected "Amit Trading" → tab label + cart header show "Amit Trading" (not পার্সন ১)
+✅ §2: 3 clicks on same product → 1 row, qty 2 (incremented), no duplicate rows
+✅ §3: Same product in Retail (₹55/kg) + Full (₹1,250/bag) → 2 separate cart rows, independent quantities
+✅ Lint: 0 errors
+
+Stage Summary:
+- Cart tab labels dynamically bound to customer names
+- No more duplicate cart rows — quantity increments reactively on repeat clicks
+- Strict mode isolation via cartKey suffix (_loose / _sealed / _wholesale) — zero cross-mode data pollution
