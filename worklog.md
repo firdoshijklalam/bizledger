@@ -1580,3 +1580,45 @@ Stage Summary:
 - 4 UX amendments all implemented and verified in browser
 - sale-pad-view.tsx is the sole file modified
 - Multi-cart closure with Wipe/Hold Queue, cloaked wholesale via swipe, decimal qty validation, trash relocation
+
+---
+Task ID: QUICK-SALE-EDITABLE-RATE-DECIMAL
+Agent: main
+Task: CRITICAL QUICK SALE UPDATE — Editable Per-KG Rate & Float Input Sync
+
+Work Log:
+§1 Editable Per-Unit Price Field:
+- Converted the static "₹55 / kg" text under the product name into an active editable input field.
+- New Row 2 in cart item: "দর:" label + ₹ symbol + editable rate input (emerald background) + "/ {unit}" suffix.
+- inputMode="decimal" triggers numeric keyboard on mobile for manual per-kg price overrides at the counter.
+- Added setUnitPrice(productId, newPrice) function: updates item.price AND recalculates total = newPrice × quantity, clears manualOverride.
+- The calculation pipeline re-runs immediately on every rate change: New Per-KG Rate × Quantity = Total Item Price.
+- Verified: rate 55 → 60, qty 1 → total updates 55 → 60. Rate 60 → 100, qty 2.5 → total = 250.
+
+§2 Float/Decimal Quantity Input Fix:
+- Added qtyStr field to CartItem interface — stores the RAW STRING from the qty input (not the parsed number).
+- The qty input is now bound to item.qtyStr (string) instead of item.quantity (number). This was the core bug: binding to a number caused React to reject '0', '.', '0.' intermediate states.
+- Re-architected setQty() with strict float parsing:
+  * Sanitizes input to allow only digits and a SINGLE dot (strips invalid chars, extra dots).
+  * Preserves intermediate states: '0', '.', '0.', '.5', '0.5', '1.25', '0.250' all work.
+  * Derives quantity (number) from qtyStr via parseFloat for calculations.
+  * Recalculates total = price × quantity on every keystroke.
+- commitQty() on blur: normalizes qtyStr (trims trailing dot), removes item only if quantity is still 0.
+- Verified edge cases: '0' typed → item stays; '.' typed → item stays; '0.5' → total 30; '.25' → total 15; '1.25' → total 75; blur with 0 → item removed.
+
+Cart Item Layout (3 rows):
+- Row 1: product name + "মোট দাম ম্যানুয়ালি সেট" badge (if override) + trash icon (far right)
+- Row 2 (NEW): "দর:" + editable ₹ rate input (emerald) + "/ {unit}"
+- Row 3: qty stepper (- input +) + editable total input (amber)
+
+Browser Verification:
+✅ Editable rate: 55 → 60 → 100, total recalculates (60×1=60, 100×2.5=250)
+✅ Decimal qty: 0.5, .25, 1.25, 0.250 all work seamlessly
+✅ Edge cases: '0' and '.' do NOT break UI or clear the entry
+✅ Blur with 0: item removed (commitQty fires)
+✅ Lint: 0 errors
+
+Stage Summary:
+- Per-unit price is now an editable input that triggers numeric keyboard and recalculates total live
+- Decimal/float quantity input fully fixed via qtyStr raw string binding — no more broken states on 0/dot
+- Calculation pipeline: rate × qty = total, re-runs on both rate and qty changes

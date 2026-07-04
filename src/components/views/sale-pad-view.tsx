@@ -27,6 +27,7 @@ interface CartItem {
   unit: string
   price: number
   quantity: number
+  qtyStr: string // raw string for the qty input — allows '0', '.', '0.5' during typing
   total: number
   manualOverride: boolean // true when owner manually edited the total
 }
@@ -139,7 +140,16 @@ export function SalePadView() {
   const addToCart = (p: Product) => {
     const price = getPrice(p)
     const unit = getPriceUnit(p)
-    setCart([...cart, { productId: p.id, name: p.name, unit, price, quantity: 1, total: price, manualOverride: false }])
+    setCart([...cart, {
+      productId: p.id,
+      name: p.name,
+      unit,
+      price,
+      quantity: 1,
+      qtyStr: '1', // §2: raw string synced with quantity
+      total: price,
+      manualOverride: false,
+    }])
   }
 
   const updateQty = (productId: string, delta: number) => {
@@ -148,42 +158,73 @@ export function SalePadView() {
         if (i.productId !== productId) return i
         const step = mode === 'retail' ? 0.5 : 1
         const newQty = Math.max(0, Number((i.quantity + delta * step).toFixed(3)))
-        // If manual override, keep total as-is (don't recompute from price)
-        if (i.manualOverride) return { ...i, quantity: newQty }
-        return { ...i, quantity: newQty, total: newQty * i.price }
+        // Sync qtyStr with the new numeric quantity
+        if (i.manualOverride) return { ...i, quantity: newQty, qtyStr: String(newQty) }
+        return { ...i, quantity: newQty, qtyStr: String(newQty), total: newQty * i.price }
       })
       // §3: only remove if qty is genuinely 0 (not while typing decimals like 0.5)
       .filter((i) => i.quantity > 0)
     )
   }
 
-  // §3: Float/Decimal Quantity Validation Fix
-  // Allow '0' or '.' states during input without triggering item deletion.
-  // We only remove an item when the FINAL value parses to 0 (on blur).
+  // §2: Float/Decimal Quantity Validation Fix — strict float parsing
+  // The qty input is bound to qtyStr (raw string), NOT quantity (number).
+  // This allows the merchant to type '0', '.', '0.', '.5', '0.5', '1.25', '0.250'
+  // without the UI breaking or clearing the entry.
+  // quantity (number) is derived from qtyStr for calculations.
   const setQty = (productId: string, raw: string) => {
+    // Sanitize: allow only digits and a single dot
+    let sanitized = raw.replace(/[^\d.]/g, '')
+    // Allow only one dot
+    const dotIndex = sanitized.indexOf('.')
+    if (dotIndex !== -1) {
+      sanitized = sanitized.substring(0, dotIndex + 1) + sanitized.substring(dotIndex + 1).replace(/\./g, '')
+    }
     setCart(cart
       .map((i) => {
         if (i.productId !== productId) return i
-        // Allow empty string, '0', '0.', '.5', '0.5' etc. during typing
-        // Parse the value; if it's a valid float use it, otherwise keep 0
+        // Parse the sanitized string to a float
         let qty: number
-        if (raw === '' || raw === '.') {
+        if (sanitized === '' || sanitized === '.') {
           qty = 0
         } else {
-          qty = parseFloat(raw)
+          qty = parseFloat(sanitized)
           if (isNaN(qty)) qty = 0
         }
-        if (i.manualOverride) return { ...i, quantity: qty }
-        return { ...i, quantity: qty, total: qty * i.price }
+        // Keep qtyStr as the raw sanitized string (preserves '0.', '.5', etc.)
+        // Recalculate total = price × quantity (unless manual override on total)
+        if (i.manualOverride) return { ...i, quantity: qty, qtyStr: sanitized }
+        return { ...i, quantity: qty, qtyStr: sanitized, total: qty * i.price }
       })
       // DO NOT filter here — keep the item even if qty is 0 so the owner
       // can continue typing (e.g. "0" then ".5"). Removal handled on blur.
     )
   }
 
-  // §3: On blur, if quantity is still 0, remove the item
+  // §2: On blur, if quantity is still 0, remove the item
   const commitQty = (productId: string) => {
-    setCart(cart.filter((i) => !(i.productId === productId && i.quantity <= 0)))
+    setCart(prev => prev
+      .map((i) => {
+        if (i.productId !== productId) return i
+        // Normalize qtyStr on commit — trim leading/trailing dots
+        let normalized = i.qtyStr
+        if (normalized.endsWith('.')) normalized = normalized.slice(0, -1)
+        if (normalized === '' || normalized === '.') normalized = '0'
+        const qty = parseFloat(normalized) || 0
+        return { ...i, quantity: qty, qtyStr: normalized }
+      })
+      .filter((i) => !(i.productId === productId && i.quantity <= 0))
+    )
+  }
+
+  // §1: Editable Per-Unit Price — update the base rate and re-run calculation
+  // New Per-KG Rate × Quantity = Total Item Price
+  const setUnitPrice = (productId: string, newPrice: number) => {
+    setCart(cart.map((i) => {
+      if (i.productId !== productId) return i
+      // Always recalculate total from new price × quantity (clears manual override)
+      return { ...i, price: newPrice, total: newPrice * i.quantity, manualOverride: false }
+    }))
   }
 
   // §4: Manual Price Override — editable total field in cart
@@ -766,19 +807,15 @@ export function SalePadView() {
             <div className="space-y-2 max-h-64 overflow-y-auto scroll-area">
               {cart.map((item) => (
                 <div key={item.productId} className="p-2 rounded-xl bg-muted/50">
-                  {/* §4: Row 1 — product name + price/unit + trash icon FAR RIGHT */}
+                  {/* Row 1 — product name + trash icon FAR RIGHT */}
                   <div className="flex items-center gap-2">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{item.name}</p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {formatCurrency(item.price, currency)} / {item.unit}
-                        {item.manualOverride && (
-                          <span className="ml-1 text-amber-600 font-medium">· ম্যানুয়াল</span>
-                        )}
-                      </p>
+                      {item.manualOverride && (
+                        <span className="text-[10px] text-amber-600 font-medium">মোট দাম ম্যানুয়ালি সেট</span>
+                      )}
                     </div>
-                    {/* §4: Trash icon at the absolute far right of the name row,
-                        away from qty/price inputs to avoid accidental triggers */}
+                    {/* Trash icon at the absolute far right of the name row */}
                     <button
                       onClick={() => removeFromCart(item.productId)}
                       className="shrink-0 w-8 h-8 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center hover:bg-red-500/20 transition-colors"
@@ -787,27 +824,44 @@ export function SalePadView() {
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
-                  {/* §4: Row 2 — qty stepper + manual total (separate from trash) */}
+                  {/* §1: Row 2 — Editable per-unit rate field (triggers numeric keyboard) */}
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-[11px] text-muted-foreground shrink-0">দর:</span>
+                    <div className="flex items-center gap-1 flex-1">
+                      <span className="text-xs font-semibold text-muted-foreground">₹</span>
+                      <input
+                        value={item.price}
+                        onChange={(e) => setUnitPrice(item.productId, Number(e.target.value) || 0)}
+                        className="flex-1 h-8 text-sm font-bold tabular bg-emerald-50 dark:bg-emerald-950/30 rounded-lg border border-emerald-400/40 outline-none focus:border-emerald-500 px-2"
+                        inputMode="decimal"
+                        title="প্রতি ইউনিট দর এডিট করুন (দর × পরিমাণ = মোট)"
+                      />
+                      <span className="text-[11px] text-muted-foreground shrink-0">/ {item.unit}</span>
+                    </div>
+                  </div>
+                  {/* Row 3 — qty stepper + total (separate from trash) */}
                   <div className="flex items-center gap-2 mt-2">
                     <div className="flex items-center gap-1">
                       <button onClick={() => updateQty(item.productId, -1)} className="w-7 h-7 rounded-lg bg-card flex items-center justify-center" aria-label="Decrease">
                         <Minus className="w-3 h-3" />
                       </button>
-                      {/* §3: Float/Decimal qty input — keeps item during typing,
-                                          removes only on blur if qty is 0 */}
+                      {/* §2: Float/Decimal qty input — bound to qtyStr (raw string).
+                          Allows '0', '.', '0.5', '1.25', '0.250' without breaking.
+                          Item removed only on blur if qty is still 0. */}
                       <input
-                        value={item.quantity}
+                        value={item.qtyStr}
                         onChange={(e) => setQty(item.productId, e.target.value)}
                         onBlur={() => commitQty(item.productId)}
                         className="w-16 h-7 text-center text-sm tabular bg-card rounded-lg border-0 outline-none focus:ring-1 focus:ring-primary"
                         inputMode="decimal"
                         step="any"
+                        title="পরিমাণ (দশমিক সমর্থিত)"
                       />
                       <button onClick={() => updateQty(item.productId, 1)} className="w-7 h-7 rounded-lg bg-card flex items-center justify-center" aria-label="Increase">
                         <Plus className="w-3 h-3" />
                       </button>
                     </div>
-                    {/* §4: Manual Price Override — editable total */}
+                    {/* Manual Price Override — editable total */}
                     <input
                       value={item.total}
                       onChange={(e) => setManualTotal(item.productId, Number(e.target.value) || 0)}
