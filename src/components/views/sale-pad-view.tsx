@@ -15,11 +15,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { EmptyState } from '@/components/shared/states'
 import { toast } from 'sonner'
 import { useMemo, useState, useCallback, useRef } from 'react'
 import { FullScreenPicker } from '@/components/shared/full-screen-picker'
 import { useGateTrigger } from '@/store/biometric-gate-store'
+import { PartyForm } from './khata/party-form'
 
 interface CartItem {
   productId: string
@@ -45,7 +47,7 @@ interface HeldCart {
 }
 
 export function SalePadView() {
-  const { business, setActiveView, setSelectedInvoiceId, triggerRefresh } = useAppStore()
+  const { business, setActiveView, setSelectedInvoiceId, triggerRefresh, showPartyForm, setShowPartyForm } = useAppStore()
   const { t } = useI18n()
   const { data: products } = useFetch<Product[]>('/api/products', [])
   const { data: parties } = useFetch<Party[]>('/api/parties?type=customer', [])
@@ -79,6 +81,8 @@ export function SalePadView() {
   // §4: Discount with % / ₹ toggle + live Grand Total
   const [discountMode, setDiscountMode] = useState<'flat' | 'percent'>('flat')
   const [discountValue, setDiscountValue] = useState('')
+  // §3: Global GST override (Advanced Options) — individual product GSTs apply behind the scenes
+  const [globalGstRate, setGlobalGstRate] = useState('')
 
   const currency = business?.currency || 'INR'
 
@@ -255,7 +259,12 @@ export function SalePadView() {
   const discountAmount = discountMode === 'percent'
     ? (subtotal * discountNum) / 100
     : Math.min(discountNum, subtotal)
-  const grandTotal = Math.max(0, subtotal - discountAmount)
+  const taxableAmount = Math.max(0, subtotal - discountAmount)
+  // §3: Global GST override (if set). Individual product GSTs apply automatically
+  // when globalGstRate is empty — the backend calculates per-item GST.
+  const globalGstNum = Number(globalGstRate) || 0
+  const gstAmount = globalGstNum > 0 ? (taxableAmount * globalGstNum) / 100 : 0
+  const grandTotal = taxableAmount + gstAmount
 
   // Cash exchange calculator
   const cashReceivedNum = Number(cashReceived) || 0
@@ -491,6 +500,36 @@ export function SalePadView() {
 
   return (
     <div className="space-y-4 pb-4">
+      {/* §1: Customer Input Bar — at the absolute top, optional field */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setShowCustPicker(true)}
+          className="flex-1 h-11 px-3 rounded-xl border border-dashed border-border bg-card flex items-center gap-2 text-sm hover:bg-muted transition-colors"
+        >
+          {customer ? (
+            <>
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span className="font-medium text-foreground truncate">{customer.name}</span>
+              {customer.phone && <span className="text-[11px] text-muted-foreground">· {customer.phone}</span>}
+            </>
+          ) : (
+            <>
+              <UserPlus className="w-4 h-4 text-muted-foreground" />
+              <span className="text-muted-foreground">কাস্টমার যোগ করুন (ঐচ্ছিক)</span>
+            </>
+          )}
+        </button>
+        {/* §1: [+] icon — fixed to trigger customer registration via PartyForm */}
+        <button
+          onClick={() => setShowPartyForm(true)}
+          className="w-11 h-11 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:bg-primary/90 transition-colors"
+          aria-label="নতুন কাস্টমার যোগ করুন"
+          title="নতুন কাস্টমার রেজিস্ট্রেশন"
+        >
+          <Plus className="w-5 h-5" />
+        </button>
+      </div>
+
       {/* §3: Multi-Cart Hold Protocol — পার্সন ১, ২, ৩, + */}
       <div className="p-3 rounded-2xl bg-gradient-to-r from-blue-500/5 to-emerald-500/5 border border-blue-500/20">
         <div className="flex items-center gap-2 mb-2">
@@ -812,64 +851,65 @@ export function SalePadView() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{item.name}</p>
                       {item.manualOverride && (
-                        <span className="text-[10px] text-amber-600 font-medium">মোট দাম ম্যানুয়ালি সেট</span>
+                        <span className="text-[10px] text-amber-600 font-medium">মোট ম্যানুয়াল</span>
                       )}
                     </div>
                     {/* Trash icon at the absolute far right of the name row */}
                     <button
                       onClick={() => removeFromCart(item.productId)}
-                      className="shrink-0 w-8 h-8 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center hover:bg-red-500/20 transition-colors"
+                      className="shrink-0 w-7 h-7 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center hover:bg-red-500/20 transition-colors"
                       aria-label={`Remove ${item.name}`}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  {/* §1: Row 2 — Editable per-unit rate field (triggers numeric keyboard) */}
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className="text-[11px] text-muted-foreground shrink-0">দর:</span>
-                    <div className="flex items-center gap-1 flex-1">
-                      <span className="text-xs font-semibold text-muted-foreground">₹</span>
+                  {/* §4: Row 2 — Slim compact rate + qty + total with bottom underlines.
+                      Bulky rounded inputs replaced with borderless underline fields. */}
+                  <div className="flex items-end gap-3 mt-1.5">
+                    {/* Rate — slim underline input */}
+                    <div className="flex items-baseline gap-0.5 shrink-0">
+                      <span className="text-[10px] text-muted-foreground">₹</span>
                       <input
                         value={item.price}
                         onChange={(e) => setUnitPrice(item.productId, Number(e.target.value) || 0)}
-                        className="flex-1 h-8 text-sm font-bold tabular bg-emerald-50 dark:bg-emerald-950/30 rounded-lg border border-emerald-400/40 outline-none focus:border-emerald-500 px-2"
+                        className="w-12 text-sm font-semibold tabular bg-transparent border-0 border-b border-muted-foreground/30 focus:border-primary outline-none px-0 py-0 leading-tight"
                         inputMode="decimal"
-                        title="প্রতি ইউনিট দর এডিট করুন (দর × পরিমাণ = মোট)"
+                        title="দর (দর × পরিমাণ = মোট)"
                       />
-                      <span className="text-[11px] text-muted-foreground shrink-0">/ {item.unit}</span>
+                      <span className="text-[9px] text-muted-foreground">/{item.unit}</span>
                     </div>
-                  </div>
-                  {/* Row 3 — qty stepper + total (separate from trash) */}
-                  <div className="flex items-center gap-2 mt-2">
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => updateQty(item.productId, -1)} className="w-7 h-7 rounded-lg bg-card flex items-center justify-center" aria-label="Decrease">
+                    {/* Qty stepper — slim */}
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button onClick={() => updateQty(item.productId, -1)} className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted" aria-label="Decrease">
                         <Minus className="w-3 h-3" />
                       </button>
-                      {/* §2: Float/Decimal qty input — bound to qtyStr (raw string).
-                          Allows '0', '.', '0.5', '1.25', '0.250' without breaking.
-                          Item removed only on blur if qty is still 0. */}
                       <input
                         value={item.qtyStr}
                         onChange={(e) => setQty(item.productId, e.target.value)}
                         onBlur={() => commitQty(item.productId)}
-                        className="w-16 h-7 text-center text-sm tabular bg-card rounded-lg border-0 outline-none focus:ring-1 focus:ring-primary"
+                        className="w-12 text-center text-sm tabular bg-transparent border-0 border-b border-muted-foreground/30 focus:border-primary outline-none px-0 py-0 leading-tight"
                         inputMode="decimal"
                         step="any"
                         title="পরিমাণ (দশমিক সমর্থিত)"
                       />
-                      <button onClick={() => updateQty(item.productId, 1)} className="w-7 h-7 rounded-lg bg-card flex items-center justify-center" aria-label="Increase">
+                      <button onClick={() => updateQty(item.productId, 1)} className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:bg-muted" aria-label="Increase">
                         <Plus className="w-3 h-3" />
                       </button>
                     </div>
-                    {/* Manual Price Override — editable total */}
-                    <input
-                      value={item.total}
-                      onChange={(e) => setManualTotal(item.productId, Number(e.target.value) || 0)}
-                      onDoubleClick={() => resetManualTotal(item.productId)}
-                      className="flex-1 h-7 text-right text-sm font-bold tabular bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-300/50 outline-none focus:border-amber-500 px-2"
-                      inputMode="numeric"
-                      title="মোট দাম ম্যানুয়ালি এডিট করুন (ডাবল-ক্লিকে রিসেট)"
-                    />
+                    {/* = sign */}
+                    <span className="text-[10px] text-muted-foreground shrink-0 pb-0.5">=</span>
+                    {/* Total — slim underline input (editable) */}
+                    <div className="flex items-baseline gap-0.5 flex-1 justify-end">
+                      <span className="text-[10px] text-muted-foreground">₹</span>
+                      <input
+                        value={item.total}
+                        onChange={(e) => setManualTotal(item.productId, Number(e.target.value) || 0)}
+                        onDoubleClick={() => resetManualTotal(item.productId)}
+                        className="w-20 text-right text-sm font-bold tabular bg-transparent border-0 border-b border-amber-400/50 focus:border-amber-500 outline-none px-0 py-0 leading-tight"
+                        inputMode="numeric"
+                        title="মোট দাম (ডাবল-ক্লিকে রিসেট)"
+                      />
+                    </div>
                   </div>
                 </div>
               ))}
@@ -915,6 +955,14 @@ export function SalePadView() {
                 </div>
               </div>
 
+              {/* GST line — shows if global GST override is set */}
+              {gstAmount > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">GST ({globalGstNum}%)</span>
+                  <span className="tabular font-medium text-blue-600">+{formatCurrency(gstAmount, currency)}</span>
+                </div>
+              )}
+
               {/* Grand Total — live updates */}
               <div className="flex justify-between items-center pt-1">
                 <span className="font-semibold">{t('bill.grandTotal')}</span>
@@ -930,7 +978,104 @@ export function SalePadView() {
               </div>
             </div>
 
-            {/* §4: Advanced Options dropdown — Customer + Invoice moved here */}
+            {/* §2: Payment Mode — PERSISTENTLY visible below totals (un-nested from Advanced) */}
+            <div className="mt-3">
+              <p className="text-[10px] text-muted-foreground uppercase mb-1.5">Payment Mode</p>
+              <div className="grid grid-cols-4 gap-1.5">
+                {([
+                  { m: 'cash', icon: Wallet, label: 'Cash' },
+                  { m: 'upi', icon: QrCode, label: 'UPI' },
+                  { m: 'credit', icon: CreditCard, label: 'Credit' },
+                  { m: 'cheque', icon: FileCheck, label: 'Cheque' },
+                ] as const).map(({ m, icon: Icon, label }) => (
+                  <button
+                    key={m}
+                    onClick={() => setPaymentMode(m)}
+                    className={`flex flex-col items-center gap-1 py-2 rounded-lg text-[10px] font-medium transition-all ${
+                      paymentMode === m ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" /> {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Payment mode-specific inputs — persistent below mode grid */}
+            <AnimatePresence>
+              {paymentMode === 'cash' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-3 mt-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Calculator className="w-4 h-4 text-emerald-600" />
+                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">খুচরা ক্যালকুলেটর</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">গ্রহণ করা নগদ</label>
+                        <Input
+                          value={cashReceived}
+                          onChange={(e) => setCashReceived(e.target.value)}
+                          className="h-9 text-sm"
+                          inputMode="numeric"
+                          placeholder="0"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">বাকি</label>
+                        <div className="h-9 rounded-lg bg-card flex items-center justify-center text-sm font-bold tabular text-emerald-600">
+                          {formatCurrency(changeDue, currency)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+              {paymentMode === 'credit' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-3 mt-2 rounded-xl bg-amber-50 dark:bg-amber-950/30">
+                    <label className="text-[10px] text-muted-foreground">আংশিক পেমেন্ট (বাকি: {formatCurrency(grandTotal, currency)})</label>
+                    <Input
+                      value={partialPaid}
+                      onChange={(e) => setPartialPaid(e.target.value)}
+                      className="h-9 text-sm"
+                      inputMode="numeric"
+                      placeholder="0"
+                    />
+                  </div>
+                </motion.div>
+              )}
+              {paymentMode === 'cheque' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-3 mt-2 rounded-xl bg-blue-50 dark:bg-blue-950/30">
+                    <label className="text-[10px] text-muted-foreground">চেক নম্বর</label>
+                    <Input
+                      value={chequeNo}
+                      onChange={(e) => setChequeNo(e.target.value)}
+                      className="h-9 text-sm"
+                      placeholder="CHQ-001234"
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* §3: Advanced Options — holds ONLY GST Section + Invoice button */}
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
               className="w-full mt-3 flex items-center justify-between p-2.5 rounded-xl bg-muted/50 text-xs font-medium hover:bg-muted"
@@ -949,131 +1094,36 @@ export function SalePadView() {
                   className="overflow-hidden"
                 >
                   <div className="p-3 mt-1 rounded-xl bg-muted/30 space-y-3">
-                    {/* Add Customer (with + icon for new user) */}
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setShowCustPicker(true)}
-                        className="flex-1 p-2.5 rounded-xl border border-dashed border-border flex items-center justify-center gap-2 text-sm text-muted-foreground hover:bg-muted"
-                      >
-                        {customer ? (
-                          <>
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                            <span className="font-medium text-foreground">{customer.name}</span>
-                          </>
-                        ) : (
-                          <>
-                            <UserPlus className="w-4 h-4" /> কাস্টমার যোগ করুন
-                          </>
-                        )}
-                      </button>
-                      <button
-                        onClick={() => { setActiveView('khata'); toast('নতুন কাস্টমার যোগ করতে খাতা পেজে যান') }}
-                        className="w-10 h-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0"
-                        aria-label="New customer"
-                        title="নতুন কাস্টমার"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    {/* Payment Mode selector */}
-                    <div>
-                      <p className="text-[10px] text-muted-foreground uppercase mb-1.5">Payment Mode</p>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {([
-                          { m: 'cash', icon: Wallet, label: 'Cash' },
-                          { m: 'upi', icon: QrCode, label: 'UPI' },
-                          { m: 'credit', icon: CreditCard, label: 'Credit' },
-                          { m: 'cheque', icon: FileCheck, label: 'Cheque' },
-                        ] as const).map(({ m, icon: Icon, label }) => (
-                          <button
-                            key={m}
-                            onClick={() => setPaymentMode(m)}
-                            className={`flex flex-col items-center gap-1 py-2 rounded-lg text-[10px] font-medium ${
-                              paymentMode === m ? 'bg-primary text-primary-foreground' : 'bg-card'
-                            }`}
-                          >
-                            <Icon className="w-3.5 h-3.5" /> {label}
-                          </button>
-                        ))}
+                    {/* §3: GST Section — global manual override.
+                        Individual product GSTs apply behind the scenes automatically. */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs">GST Section (গ্লোবাল ওভাররাইড)</Label>
+                        <span className="text-[9px] text-muted-foreground">প্রোডাক্ট GST স্বয়ংক্রিয়ভাবে প্রযোজ্য</span>
                       </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={globalGstRate}
+                          onChange={(e) => setGlobalGstRate(e.target.value)}
+                          className="h-9 text-sm w-24"
+                          inputMode="numeric"
+                          placeholder="0"
+                        />
+                        <span className="text-xs text-muted-foreground">%</span>
+                        {gstAmount > 0 && (
+                          <span className="text-xs text-blue-600 font-medium ml-auto tabular">
+                            +{formatCurrency(gstAmount, currency)}
+                          </span>
+                        )}
+                      </div>
+                      {gstAmount > 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          ট্যাক্সেবল: {formatCurrency(taxableAmount, currency)} + GST {globalGstNum}% = {formatCurrency(grandTotal, currency)}
+                        </p>
+                      )}
                     </div>
 
-                    {/* Payment mode-specific inputs */}
-                    <AnimatePresence>
-                      {paymentMode === 'cash' && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Calculator className="w-4 h-4 text-emerald-600" />
-                              <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">খুচরা ক্যালকুলেটর</p>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <label className="text-[10px] text-muted-foreground">গ্রহণ করা নগদ</label>
-                                <Input
-                                  value={cashReceived}
-                                  onChange={(e) => setCashReceived(e.target.value)}
-                                  className="h-9 text-sm"
-                                  inputMode="numeric"
-                                  placeholder="0"
-                                />
-                              </div>
-                              <div>
-                                <label className="text-[10px] text-muted-foreground">বাকি</label>
-                                <div className="h-9 rounded-lg bg-card flex items-center justify-center text-sm font-bold tabular text-emerald-600">
-                                  {formatCurrency(changeDue, currency)}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-                      {paymentMode === 'credit' && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30">
-                            <label className="text-[10px] text-muted-foreground">আংশিক পেমেন্ট (বাকি: {formatCurrency(grandTotal, currency)})</label>
-                            <Input
-                              value={partialPaid}
-                              onChange={(e) => setPartialPaid(e.target.value)}
-                              className="h-9 text-sm"
-                              inputMode="numeric"
-                              placeholder="0"
-                            />
-                          </div>
-                        </motion.div>
-                      )}
-                      {paymentMode === 'cheque' && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30">
-                            <label className="text-[10px] text-muted-foreground">চেক নম্বর</label>
-                            <Input
-                              value={chequeNo}
-                              onChange={(e) => setChequeNo(e.target.value)}
-                              className="h-9 text-sm"
-                              placeholder="CHQ-001234"
-                            />
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-
-                    {/* Invoice button inside Advanced Options */}
+                    {/* §3: Invoice generation button */}
                     <Button
                       variant="outline"
                       onClick={handleGenerateInvoice}
@@ -1116,6 +1166,13 @@ export function SalePadView() {
         items={partyItems}
         placeholder="কাস্টমার খুঁজুন…"
         emptyText="কোনো কাস্টমার পাওয়া যায়নি"
+      />
+
+      {/* §1: PartyForm — rendered here so [+] icon can trigger customer registration
+          directly from Quick Sale without navigating away. */}
+      <PartyForm
+        open={showPartyForm}
+        onOpenChange={(o) => setShowPartyForm(o)}
       />
 
       {/* §1: Cart Close Prompt — Wipe or Send to Held Queue */}

@@ -1622,3 +1622,52 @@ Stage Summary:
 - Per-unit price is now an editable input that triggers numeric keyboard and recalculates total live
 - Decimal/float quantity input fully fixed via qtyStr raw string binding — no more broken states on 0/dot
 - Calculation pipeline: rate × qty = total, re-runs on both rate and qty changes
+
+---
+Task ID: POS-LAYOUT-REENGINEERING
+Agent: main
+Task: CRITICAL POS LAYOUT RE-ENGINEERING — Compact Fields & Routing Fix
+
+Work Log:
+§1 Relocate Customer Input to Top:
+- Extracted Add Customer bar from Advanced Options container.
+- Placed it at the ABSOLUTE TOP of Quick Sale as an optional field (h-11, dashed border).
+- Shows customer name + phone when selected, or "কাস্টমার যোগ করুন (ঐচ্ছিক)" placeholder.
+- FIXED the [+] icon: now calls setShowPartyForm(true) which opens the PartyForm dialog directly in SalePadView (imported PartyForm from khata/party-form and rendered it with open={showPartyForm}).
+- Verified: [+] click opens "Add Party" dialog with Name/Phone/Save fields.
+
+§2 Un-nest Payment Mode:
+- Moved the entire Payment Mode grid (Cash/UPI/Credit/Cheque) OUT of the Advanced Options drawer.
+- It is now PERSISTENTLY visible on the main screen, positioned right below the Grand Total calculations.
+- Payment mode-specific inputs (cash calculator, credit partial, cheque number) also moved out and show persistently below the mode grid.
+- Verified: Cash/UPI/Credit/Cheque buttons visible on main screen without expanding Advanced.
+
+§3 Restructure Advanced Options Container:
+- Cleaned out the container — removed Customer bar and Payment Mode from inside it.
+- Advanced Options now strictly holds ONLY two modules:
+  1. GST Section — global manual override input (%) with live calculation display. Note: "প্রোডাক্ট GST স্বয়ংক্রিয়ভাবে প্রযোজ্য" (individual product GSTs apply behind the scenes automatically).
+  2. Invoice / ইনভয়েস তৈরি করুন generation button.
+- Added globalGstRate state + gstAmount calculation. Grand Total now includes GST when set: taxableAmount + gstAmount.
+- Verified: Advanced expanded shows only GST input + Invoice button. Typing 18% → "ট্যাক্সেবল: ₹55 + GST 18% = ₹64.9".
+
+§4 UI Overhaul — Slim Compact Rate & Total Inputs:
+- Completely removed the bulky high-height rounded outline inputs for Rate (দর) and Item Total Price.
+- Replaced with ultra-slim, compact borderless fields using simple bottom underlines (border-b).
+- All 3 fields (Rate + Qty + Total) now fit on ONE row with "=" sign separator.
+- Height reduced ~50%: inputs use py-0 leading-tight, no rounded boxes, no backgrounds.
+- Rate: ₹[55]/kg underline | Qty: [-][1][+] underline | = | ₹[55] underline (amber for total)
+- Verified: cart item shows compact single-row layout with underlines.
+
+Browser Verification:
+✅ Customer bar at top with [+] icon opening PartyForm dialog
+✅ Payment Mode (Cash/UPI/Credit/Cheque) persistent below totals — not in Advanced
+✅ Advanced Options holds only GST Section + Invoice button
+✅ Slim compact underline inputs for Rate + Qty + Total (50% height reduction)
+✅ GST 18% calculation works: ₹55 + ₹9.90 = ₹64.90
+✅ Lint: 0 errors
+
+Stage Summary:
+- Customer input relocated to top with working [+] registration trigger
+- Payment Mode un-nested and persistently visible
+- Advanced Options cleaned to GST + Invoice only
+- Slim compact underline inputs replace bulky rounded boxes for high-density POS
