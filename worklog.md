@@ -1374,3 +1374,34 @@ Stage Summary:
 - 1 file modified: src/components/views/inventory-view.tsx
 - Server stability fix: .next cache corruption was blocking /api/products compilation — cleared and verified
 - All PRD Parts 1-39 now complete
+
+---
+Task ID: FIX-PREVIEW-CRASH
+Agent: main
+Task: Fix "Application error: a client-side exception has occurred" in preview iframe
+
+Work Log:
+- User reported: "Application error: a client-side exception has occurred while loading preview-chat-*.space-z.ai"
+- Investigated dev.log and found the ROOT CAUSE:
+  ⚠ "Blocked cross-origin request from preview-chat-8b271bb8-92f6-4f25-bdde-249558776171.space-z.ai to /_next/* resource. To allow this, configure 'allowedDevOrigins' in next.config"
+- The existing config had `allowedDevOrigins: ["*"]` but Next.js 16 does NOT treat "*" as a catch-all wildcard. It requires explicit domain patterns.
+- Without the fix, the preview iframe (at preview-chat-*.space-z.ai) could not load /_next/static/chunks/*.js files. React couldn't hydrate → "client-side exception" error.
+- Fix: Updated next.config.ts allowedDevOrigins to explicit patterns:
+  ["*.space-z.ai", "preview-chat-*.space-z.ai", "localhost", "127.0.0.1", "21.0.14.243"]
+- Cleared .next cache and restarted server.
+- Set up two-layer watchdog for server stability:
+  1. persistent-dev.sh (while loop — restarts `bun run dev` if it exits)
+  2. keep-alive.sh (restarts persistent-dev.sh if it dies)
+
+Verification:
+- Server: LISTENING on port 3000
+- home: HTTP 200, products: HTTP 200
+- Cross-origin warnings: GONE (were present before fix)
+- Browser: page renders "Namaste, Rajesh 👋" + "Sharma Trading Co." + dashboard data
+- No hydration warnings, no page errors, no console errors
+- Data flowing: Receivable ₹1,36,900 | Payable ₹28,500 | Health 79 | Products 9
+
+Stage Summary:
+- ROOT CAUSE: allowedDevOrigins:["*"] doesn't work in Next.js 16 — preview iframe couldn't load JS chunks
+- FIX: Explicit domain patterns in allowedDevOrigins + .next cache clear + 2-layer watchdog
+- Preview should now load without "client-side exception" error
