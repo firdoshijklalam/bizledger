@@ -1445,3 +1445,64 @@ Stage Summary:
 - Double-fork daemon pattern solved server survival across sandbox command boundaries
 - Preview should now load cleanly without "client-side exception" error
 - All fixes verified in browser with 0 errors
+
+---
+Task ID: PRD-PART-39-V2
+Agent: main
+Task: IMMEDIATE REVERSION & CORRECT IMPLEMENTATION ORDER — Remove Inventory Tabs, implement logic ONLY in Quick Sale Screen
+
+Work Log:
+§1 REVERSION — Inventory Page:
+- Completely rewrote inventory-view.tsx to remove the খুচরো/আস্ত/হোলসেল product type tabs that were wrongly placed there.
+- Removed: productTypeTab state, wholesaleUnlocked state, useGateTrigger, handleTabSwitch function, product type tab UI, wholesale unlock header banner, per-tab price display logic, per-tab badges.
+- Inventory page is now standard and single: Stats + Add Product + Search + filter pills (All/Low Stock) + category chips + product list with single salePrice display.
+- Verified in browser: 9 products show with standard ₹XXX pricing, NO type tabs present.
+
+§1 PRODUCT FORM — 3 Price Fields:
+- Updated product-form.tsx pricing section into a clear "৩-টিয়ার প্রাইসিং" (3-Tier Pricing) card with violet border.
+- 3 price fields clearly labeled:
+  1. Bulk Price (আস্ত দাম) ₹ per {unit} — আস্ত ১ বস্তা/বক্স
+  2. Wholesale Price (পাইকারি দাম) ₹ — বিশেষ পাইকারি রেট
+  3. Retail Price (খুচরো দাম) — set in the "খুচরো / লুজ প্রোডাক্ট" section above
+- All 3 prices stored in the same Product model (salePrice, wholesalePrice, retailSalePrice).
+
+§2 QUICK SALE SCREEN — 3 Mode Tabs with strict isolation:
+- Rewrote sale-pad-view.tsx with 3 mode tabs as horizontal slide cards:
+  • খুচরো প্রোডাক্ট (Retail · per kg/pcs) — emerald, shows ONLY products with retailEnabled + retailSalePrice > 0
+  • আস্ত প্রোডাক্ট (Full · per bag/box) — teal, shows ONLY products with salePrice > 0 (sealed full bag/box)
+  • পাইকারি প্রোডাক্ট (Wholesale · bulk rate) — amber, shows ONLY products with wholesalePrice > 0
+- পাইকারি tab is eye-locked: tapping it triggers inventory_price biometric gate (fingerprint + PIN). On success → wholesaleUnlocked=true + mode switches. Switching away re-locks.
+- Price display per mode is STRICT — no mixing: retail shows retailSalePrice/kg, full shows salePrice/unit, wholesale shows wholesalePrice.
+- Verified in browser: retail mode shows 2 products (₹55/kg), full mode shows 9 products (₹420/bag etc.), wholesale triggers PIN gate modal.
+
+§3 MULTI-CART HOLD PROTOCOL:
+- Added HeldCart interface with id, label (পার্সন N), items, customer, paymentMode.
+- Multi-cart UI at the very top of Quick Sale (above mode tabs): horizontal scrollable strip of [পার্সন ১], [পার্সন ২], ... + [+] button.
+- Each cart button shows: label + item count badge + total amount. Active cart has blue bg + emerald pulse dot. Non-active carts with items show red X to remove.
+- Clicking [+] creates a new empty cart (পার্সন N+1) and switches to it. Previous cart's items/customer/paymentMode are HELD in memory.
+- Clicking an existing cart switches to it, restoring its held items. Toast confirms switch.
+- Verified in browser: added 2 items to পার্সন ১ (₹110), clicked + to create পার্সন 2 (empty), clicked পার্সন ১ → cart restored with "পার্সন ১ · কার্ট (2)" + both items.
+
+§4 CART SETTINGS & DISCOUNT REAL-TIME SYNC:
+- Manual Price Override: each cart item's total field is now an editable input (amber background) with title "মোট দাম ম্যানুয়ালি এডিট করুন (ডাবল-ক্লিকে রিসেট)". Double-click resets to auto-calc. manualOverride flag prevents auto-recalc on qty change.
+- Advanced Options dropdown: "Add Customer" button (+ icon for new user → navigates to Khata) and "Invoice" button moved INSIDE the Advanced Options container (toggle with chevron). Payment Mode selector (Cash/UPI/Credit/Cheque) also inside.
+- Discount with ₹/% toggle: two-button toggle group (₹ flat / % percent) + numeric input. Discount amount displays live (−₹X). Grand Total uses motion.span with key={grandTotal} for instant scale animation on every change.
+- Grand Total = subtotal - discountAmount. Updates in real-time (1ms) as discount is typed.
+- "সম্পন্ন হয়েছে" (Done) button placed at bottom-right corner (flex justify-end), large h-12 px-8, with CheckCircle2 icon.
+
+Browser Verification:
+✅ Multi-cart: পার্সন ১ (2 items ₹110) + পার্সন 2 (empty) + [+] button
+✅ Mode tabs: খুচরো (2 retail products ₹55/kg), আস্ত (9 sealed products), পাইকারি (PIN gate modal)
+✅ Cart: manual price override inputs (amber), qty steppers, remove buttons
+✅ Discount: ₹/% toggle + 10% input → grand total updates live
+✅ Advanced Options: dropdown with Add Customer (+), Payment Mode, Invoice button
+✅ Done button: bottom-right, "সম্পন্ন হয়েছে"
+✅ Inventory reverted: no type tabs, standard product list
+
+Stage Summary:
+- Inventory page REVERTED to standard single view (no tabs)
+- Product form has clear 3-tier pricing section (Retail + Bulk + Wholesale)
+- Quick Sale screen is the SOLE location for mode splitting with 3 tabs
+- Multi-cart hold protocol (পার্সন ১/২/৩/+) works — carts held in memory
+- Manual price override in cart, Advanced Options dropdown, ₹/% discount toggle with live sync, Done button bottom-right
+- All 4 sections verified in browser, lint clean, server stable

@@ -6,7 +6,7 @@ import { useFetch, apiDelete } from '@/hooks/use-fetch'
 import type { Product } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Package, Plus, Boxes, AlertTriangle, Search, FileEdit, Trash2, Tag, Lock, EyeOff, Eye, ShieldCheck } from 'lucide-react'
+import { Package, Plus, AlertTriangle, Search, Trash2, Tag } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState, LoadingState } from '@/components/shared/states'
@@ -19,7 +19,6 @@ import {
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { ProductProfile } from './inventory/product-profile'
-import { useGateTrigger } from '@/store/biometric-gate-store'
 
 // PRD Part 26 §4: Simple Levenshtein distance for phonetic matching
 function levenshtein(a: string, b: string): number {
@@ -47,11 +46,6 @@ export function InventoryView() {
   const [search, setSearch] = useState('')
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [activeCategory, setActiveCategory] = useState<string>('All')
-  const [productTypeTab, setProductTypeTab] = useState<'all' | 'retail' | 'full' | 'wholesale'>('all')
-  // PRD Part 39 §3: Wholesale section is eye-locked until PIN/biometric passes.
-  // Session-level unlock — re-locks when user switches away or taps re-lock.
-  const [wholesaleUnlocked, setWholesaleUnlocked] = useState(false)
-  const triggerGate = useGateTrigger()
 
   const { data: products, loading, refetch } = useFetch<Product[]>('/api/products', [])
 
@@ -73,17 +67,6 @@ export function InventoryView() {
   const filtered = useMemo(() => {
     if (!products) return []
     let list = products
-    // PRD Part 38: Strict Product Type Isolation — zero mixing of loose and sealed
-    if (productTypeTab === 'retail') {
-      // ONLY products where Retail/Loose toggle is enabled
-      list = list.filter((p) => (p as any).retailEnabled === true)
-    } else if (productTypeTab === 'full') {
-      // ONLY products that are NOT retail (sealed/full packs)
-      list = list.filter((p) => !(p as any).retailEnabled)
-    } else if (productTypeTab === 'wholesale') {
-      // ONLY products with explicit wholesale price set
-      list = list.filter((p) => p.wholesalePrice != null && p.wholesalePrice > 0)
-    }
     if (inventoryFilter === 'low-stock') {
       list = list.filter((p) => p.stock <= p.lowStockThreshold)
     }
@@ -114,7 +97,7 @@ export function InventoryView() {
       })
     }
     return list
-  }, [products, inventoryFilter, search, activeCategory, productTypeTab])
+  }, [products, inventoryFilter, search, activeCategory])
 
   const stats = useMemo(() => {
     if (!products) return { total: 0, lowStock: 0, value: 0 }
@@ -137,36 +120,6 @@ export function InventoryView() {
         />
       </>
     )
-  }
-
-  // PRD Part 39 §3: Wholesale tab is eye-locked. Tapping it triggers the
-  // biometric/PIN gate (inventory_price). On success we unlock + switch.
-  // Switching to any other tab re-locks wholesale for safety.
-  const handleTabSwitch = (tab: 'all' | 'retail' | 'full' | 'wholesale') => {
-    if (tab === 'wholesale') {
-      if (wholesaleUnlocked) {
-        setProductTypeTab('wholesale')
-        return
-      }
-      triggerGate(
-        'inventory_price',
-        'Unlock wholesale pricing — verify identity to view exclusive bulk rates',
-        () => {
-          setWholesaleUnlocked(true)
-          setProductTypeTab('wholesale')
-          toast.success('Wholesale section unlocked', {
-            description: 'Exclusive bulk pricing now visible',
-          })
-        },
-        () => {
-          toast('Wholesale section stays locked', { description: 'PIN required to view bulk rates' })
-        }
-      )
-      return
-    }
-    // leaving wholesale — re-lock
-    if (productTypeTab === 'wholesale') setWholesaleUnlocked(false)
-    setProductTypeTab(tab)
   }
 
   const confirmDelete = async () => {
@@ -212,34 +165,6 @@ export function InventoryView() {
         className="h-11"
       />
 
-      {/* PRD Part 39: Product Type Tabs — Retail / Full / Wholesale (Strict Isolation, PIN-gated Wholesale) */}
-      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
-        {([
-          { id: 'all', label: 'All Products', icon: '📦' },
-          { id: 'retail', label: 'খুচরো (Loose)', icon: '⚖️' },
-          { id: 'full', label: 'আস্ত (Sealed)', icon: '📦' },
-          { id: 'wholesale', label: 'হোলসেল', icon: '🏭' },
-        ] as const).map((tab) => {
-          const active = productTypeTab === tab.id
-          const locked = tab.id === 'wholesale' && !wholesaleUnlocked
-          return (
-            <button
-              key={tab.id}
-              onClick={() => handleTabSwitch(tab.id)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all min-h-[36px] flex items-center gap-1 ${
-                active
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'bg-muted text-muted-foreground'
-              } ${locked ? 'ring-1 ring-amber-400/60' : ''}`}
-            >
-              <span>{tab.icon}</span> {tab.label}
-              {locked && <Lock className="w-3 h-3 ml-0.5 text-amber-500" />}
-              {tab.id === 'wholesale' && wholesaleUnlocked && <ShieldCheck className="w-3 h-3 ml-0.5 text-emerald-400" />}
-            </button>
-          )
-        })}
-      </div>
-
       {/* Filter pills */}
       <div className="flex items-center gap-2">
         {(['all', 'low-stock'] as const).map((f) => (
@@ -270,35 +195,6 @@ export function InventoryView() {
             </button>
           ))}
         </div>
-      )}
-
-      {/* PRD Part 39 §3: Wholesale section header with re-lock when unlocked */}
-      {productTypeTab === 'wholesale' && wholesaleUnlocked && (
-        <motion.div
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-400/30"
-        >
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            <div>
-              <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Wholesale rates unlocked</p>
-              <p className="text-[10px] text-muted-foreground">Exclusive bulk pricing visible · session-only</p>
-            </div>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 text-xs gap-1"
-            onClick={() => {
-              setWholesaleUnlocked(false)
-              setProductTypeTab('all')
-              toast('Wholesale section re-locked')
-            }}
-          >
-            <EyeOff className="w-3.5 h-3.5" /> Re-lock
-          </Button>
-        </motion.div>
       )}
 
       {/* Product list */}
@@ -352,16 +248,6 @@ export function InventoryView() {
                               </span>
                             )}
                             {p.sku && <span className="text-[10px] text-muted-foreground">{p.sku}</span>}
-                            {/* PRD Part 39: Product type badge — strict per-section labeling */}
-                            {productTypeTab === 'retail' && (p as any).retailEnabled && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 font-medium">খুচরো · Loose</span>
-                            )}
-                            {productTypeTab === 'full' && !(p as any).retailEnabled && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 font-medium">আস্ত · Sealed</span>
-                            )}
-                            {productTypeTab === 'wholesale' && p.wholesalePrice && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium">হোলসেল · Bulk</span>
-                            )}
                           </div>
                           <div className="flex items-center justify-between mt-2">
                             <div className="flex items-center gap-3 text-xs">
@@ -369,25 +255,8 @@ export function InventoryView() {
                                 {p.stock} {p.unit}
                               </span>
                               <span className="text-muted-foreground">·</span>
-                              {/* PRD Part 39: Strict price display per product type tab — zero mixing */}
-                              {productTypeTab === 'retail' && (p as any).retailEnabled && (p as any).retailSalePrice ? (
-                                <span className="font-semibold tabular text-violet-600">
-                                  {formatCurrency((p as any).retailSalePrice, currency)}/{(p as any).retailUnit || 'kg'}
-                                </span>
-                              ) : productTypeTab === 'wholesale' && p.wholesalePrice ? (
-                                <span className="font-semibold tabular text-amber-600">
-                                  {formatCurrency(p.wholesalePrice, currency)}
-                                  <span className="text-[9px] text-muted-foreground ml-0.5">/bulk</span>
-                                </span>
-                              ) : productTypeTab === 'full' ? (
-                                <span className="font-semibold tabular text-teal-600">
-                                  {formatCurrency(p.salePrice, currency)}
-                                  <span className="text-[9px] text-muted-foreground ml-0.5">/sealed</span>
-                                </span>
-                              ) : (
-                                <span className="font-semibold tabular">{formatCurrency(p.salePrice, currency)}</span>
-                              )}
-                              {p.mrp && p.mrp > p.salePrice && productTypeTab !== 'retail' && (
+                              <span className="font-semibold tabular">{formatCurrency(p.salePrice, currency)}</span>
+                              {p.mrp && p.mrp > p.salePrice && (
                                 <span className="text-[10px] text-muted-foreground line-through">{formatCurrency(p.mrp, currency)}</span>
                               )}
                             </div>
