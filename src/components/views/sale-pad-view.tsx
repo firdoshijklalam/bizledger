@@ -1300,7 +1300,7 @@ export function SalePadView() {
               )}
             </AnimatePresence>
 
-            {/* Cash exchange calculator */}
+            {/* Cash exchange calculator — real-time change calculation */}
             <AnimatePresence>
               {splitCashNum > 0 && (
                 <motion.div
@@ -1312,7 +1312,7 @@ export function SalePadView() {
                   <div className="p-3 mt-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/30">
                     <div className="flex items-center gap-2 mb-2">
                       <Calculator className="w-4 h-4 text-emerald-600" />
-                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">নগদ খুচরা</p>
+                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">নগদ খুচরা ক্যালকুলেটর</p>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
@@ -1326,11 +1326,50 @@ export function SalePadView() {
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] text-muted-foreground">বাকি</label>
-                        <div className="h-9 rounded-lg bg-card flex items-center justify-center text-sm font-bold tabular text-emerald-600">
-                          {formatCurrency(Math.max(0, (Number(cashReceived) || splitCashNum) - splitCashNum), currency)}
+                        <label className="text-[10px] text-muted-foreground">
+                          {(() => {
+                            const received = Number(cashReceived) || 0
+                            if (received > grandTotal) return 'ফেরত দিতে হবে (খুচরা)'
+                            if (received < grandTotal && received > 0) return 'কম দিয়েছে'
+                            return 'বাকি'
+                          })()}
+                        </label>
+                        <div className={`h-9 rounded-lg flex items-center justify-center text-sm font-bold tabular ${
+                          (Number(cashReceived) || 0) > grandTotal
+                            ? 'bg-emerald-500 text-white'
+                            : (Number(cashReceived) || 0) < grandTotal && (Number(cashReceived) || 0) > 0
+                            ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                            : 'bg-card text-emerald-600'
+                        }`}>
+                          {(() => {
+                            const received = Number(cashReceived) || 0
+                            if (received > grandTotal) {
+                              return `−${formatCurrency(received - grandTotal, currency)}`
+                            }
+                            if (received < grandTotal && received > 0) {
+                              return `${formatCurrency(grandTotal - received, currency)}`
+                            }
+                            return formatCurrency(grandTotal, currency)
+                          })()}
                         </div>
                       </div>
+                    </div>
+                    {/* Real-time breakdown */}
+                    <div className="mt-2 pt-2 border-t border-emerald-200 dark:border-emerald-800 space-y-1 text-[10px]">
+                      <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
+                        <span>Actual Price (মোট দেয়)</span>
+                        <span className="tabular font-medium">{formatCurrency(grandTotal, currency)}</span>
+                      </div>
+                      <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
+                        <span>গ্রহণ করা নগদ</span>
+                        <span className="tabular font-medium">{formatCurrency((Number(cashReceived) || 0), currency)}</span>
+                      </div>
+                      {(Number(cashReceived) || 0) > grandTotal && (
+                        <div className="flex justify-between font-bold text-emerald-700 dark:text-emerald-300">
+                          <span>কাস্টমারকে ফেরত দিতে হবে</span>
+                          <span className="tabular">{formatCurrency((Number(cashReceived) || 0) - grandTotal, currency)}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </motion.div>
