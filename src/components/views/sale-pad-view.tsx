@@ -104,6 +104,11 @@ export function SalePadView() {
   const [cashReceived, setCashReceived] = useState('')
   const [partialPaid, setPartialPaid] = useState('')
   const [chequeNo, setChequeNo] = useState('')
+  // §1: Multi-mode split payment — simultaneous inputs across modes
+  const [splitCash, setSplitCash] = useState('')
+  const [splitUpi, setSplitUpi] = useState('')
+  const [splitCredit, setSplitCredit] = useState('')
+  const [splitChequeNo, setSplitChequeNo] = useState('')
 
   const categories = useMemo(() => {
     if (!products) return ['All']
@@ -302,26 +307,43 @@ export function SalePadView() {
   const cashReceivedNum = Number(cashReceived) || 0
   const changeDue = Math.max(0, cashReceivedNum - grandTotal)
 
+  // §1: Multi-mode split payment calculations
+  const splitCashNum = Number(splitCash) || 0
+  const splitUpiNum = Number(splitUpi) || 0
+  const splitCreditNum = Number(splitCredit) || 0
+  // §2: UPI dynamic amount — if split UPI is set, QR requests that amount.
+  // Otherwise (no split), QR requests the full grand total.
+  const upiQrAmount = splitUpiNum > 0 ? splitUpiNum : grandTotal
+  // Total paid across all split modes
+  const totalSplitPaid = splitCashNum + splitUpiNum + splitCreditNum
+  // §2: Credit ledger due = Grand Total - (cash + upi + credit entered).
+  // The remainder auto-routes to customer's debt ledger.
+  const ledgerDue = Math.max(0, grandTotal - totalSplitPaid)
+  // Overpaid (if total exceeds grand total — shows as change)
+  const overpaid = Math.max(0, totalSplitPaid - grandTotal)
+  // Check if any split field is active
+  const hasSplitPayment = splitCashNum > 0 || splitUpiNum > 0 || splitCreditNum > 0
+
   // §3: Dynamic UPI Intent QR Code Generation
-  // When PAYMENT MODE 'UPI' is clicked, generate a QR code embedding the live Grand Total
-  // into the UPI deep-link payload: upi://pay?pa=VPA&pn=MERCHANT&am=GRAND_TOTAL&cu=INR
-  // This bypasses manual amount typing on the customer's phone during scanning.
+  // When PAYMENT MODE 'UPI' is clicked, generate a QR code embedding the UPI amount
+  // into the UPI deep-link payload: upi://pay?pa=VPA&pn=MERCHANT&am=AMOUNT&cu=INR
+  // §2: If split UPI amount is set, QR requests THAT amount. Otherwise full grand total.
   const upiId = business?.upiId || ''
   const merchantName = business?.name || 'Merchant'
   const [upiQrDataUrl, setUpiQrDataUrl] = useState<string>('')
   useEffect(() => {
     let cancelled = false
-    if (paymentMode !== 'upi' || grandTotal <= 0 || !upiId) {
+    if (paymentMode !== 'upi' || upiQrAmount <= 0 || !upiId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setUpiQrDataUrl('')
       return
     }
-    const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchantName)}&am=${grandTotal.toFixed(2)}&cu=INR`
+    const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchantName)}&am=${upiQrAmount.toFixed(2)}&cu=INR`
     QRCode.toDataURL(upiUrl, { width: 240, margin: 1, color: { dark: '#0a0a0a', light: '#ffffff' } })
       .then((url) => { if (!cancelled) setUpiQrDataUrl(url) })
       .catch(() => { if (!cancelled) setUpiQrDataUrl('') })
     return () => { cancelled = true }
-  }, [paymentMode, grandTotal, upiId, merchantName])
+  }, [paymentMode, upiQrAmount, upiId, merchantName])
 
   // ---- §3: Multi-Cart Hold Protocol ----
   const addNewCart = () => {
@@ -443,11 +465,9 @@ export function SalePadView() {
     }
     setConfirming(true)
     try {
-      const amountPaid = paymentMode === 'cash'
-        ? grandTotal
-        : paymentMode === 'credit'
-        ? (Number(partialPaid) || 0)
-        : grandTotal
+      // §1: Split payment — amountPaid is the sum of all split modes.
+      // If no split, fall back to full grand total.
+      const amountPaid = hasSplitPayment ? totalSplitPaid : grandTotal
       const invoice = await apiPost('/api/invoices', {
         partyId: customer?.id,
         items: cart.map((i) => ({
@@ -466,14 +486,28 @@ export function SalePadView() {
         type: 'retail',
         amountPaid,
       })
-      toast.success('ইনভয়েস তৈরি হয়েছে')
+      // §2: If ledger due > 0 and customer is selected, auto-route remainder to debt ledger
+      if (ledgerDue > 0 && customer) {
+        await apiPost('/api/transactions', {
+          partyId: customer.id,
+          type: 'debit',
+          amount: ledgerDue,
+          description: `Ledger due (split payment) — Invoice ${invoice.invoiceNumber || invoice.id}`,
+          category: 'Credit Sale',
+        })
+        toast.success(`ইনভয়েস তৈরি · খাতায় বাকি ₹${ledgerDue.toFixed(2)} যুক্ত হয়েছে`)
+      } else {
+        toast.success('ইনভয়েস তৈরি হয়েছে')
+      }
       triggerRefresh()
-      // Clear active cart
+      // Clear active cart + split payment fields
       setCart([])
       setCustomer(null)
       setCashReceived('')
-      setPartialPaid('')
-      setChequeNo('')
+      setSplitCash('')
+      setSplitUpi('')
+      setSplitCredit('')
+      setSplitChequeNo('')
       setDiscountValue('')
       setConfirming(false)
       setSelectedInvoiceId(invoice.id)
@@ -491,20 +525,22 @@ export function SalePadView() {
     }
     setConfirming(true)
     try {
+      // §1: Split payment — amountPaid is sum of all split modes (or grand total if no split)
+      const amountPaid = hasSplitPayment ? totalSplitPaid : grandTotal
       if (customer) {
         await apiPost('/api/transactions', {
           partyId: customer.id,
           type: 'credit',
-          amount: grandTotal,
-          description: `Cash sale (${mode})`,
+          amount: amountPaid,
+          description: `Sale (${mode}) — split payment`,
           category: 'Cash Sale',
         })
       } else {
         await apiPost('/api/transactions', {
           partyId: null,
           type: 'credit',
-          amount: grandTotal,
-          description: `Walk-in cash sale (${mode})`,
+          amount: amountPaid,
+          description: `Walk-in sale (${mode}) — split payment`,
           category: 'Cash Sale',
         })
       }
@@ -522,15 +558,31 @@ export function SalePadView() {
         discountMode,
         discountValue: discountNum,
         isGst: false,
-        paymentMode: 'cash',
+        paymentMode,
         type: 'retail',
-        amountPaid: grandTotal,
+        amountPaid,
       })
-      toast.success('সম্পন্ন হয়েছে — স্টক আপডেট হয়েছে')
+      // §2: Auto-route ledger due to customer's debt account
+      if (ledgerDue > 0 && customer) {
+        await apiPost('/api/transactions', {
+          partyId: customer.id,
+          type: 'debit',
+          amount: ledgerDue,
+          description: `Ledger due (split payment)`,
+          category: 'Credit Sale',
+        })
+        toast.success(`সম্পন্ন · খাতায় বাকি ₹${ledgerDue.toFixed(2)} যুক্ত হয়েছে`)
+      } else {
+        toast.success('সম্পন্ন হয়েছে — স্টক আপডেট হয়েছে')
+      }
       triggerRefresh()
       setCart([])
       setCustomer(null)
       setCashReceived('')
+      setSplitCash('')
+      setSplitUpi('')
+      setSplitCredit('')
+      setSplitChequeNo('')
       setDiscountValue('')
       setConfirming(false)
     } catch (e) {
@@ -1041,64 +1093,98 @@ export function SalePadView() {
               </div>
             </div>
 
-            {/* §2: Payment Mode — PERSISTENTLY visible below totals (un-nested from Advanced) */}
-            <div className="mt-3">
-              <p className="text-[10px] text-muted-foreground uppercase mb-1.5">Payment Mode</p>
-              <div className="grid grid-cols-4 gap-1.5">
-                {([
-                  { m: 'cash', icon: Wallet, label: 'Cash' },
-                  { m: 'upi', icon: QrCode, label: 'UPI' },
-                  { m: 'credit', icon: CreditCard, label: 'Credit' },
-                  { m: 'cheque', icon: FileCheck, label: 'Cheque' },
-                ] as const).map(({ m, icon: Icon, label }) => (
+            {/* §1: Multi-Mode Split Payment Matrix — simultaneous inputs across modes.
+                No single-select radio. Each mode gets its own amount input. */}
+            <div className="mt-3 p-3 rounded-xl bg-muted/30 border border-border/50">
+              <p className="text-[10px] text-muted-foreground uppercase mb-2 font-medium">Split Payment (একসাথে একাধিক মোড)</p>
+              <div className="grid grid-cols-2 gap-2">
+                {/* Cash split */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <Wallet className="w-3 h-3" /> Cash ₹
+                  </label>
+                  <Input
+                    value={splitCash}
+                    onChange={(e) => setSplitCash(e.target.value)}
+                    className="h-9 text-sm"
+                    inputMode="numeric"
+                    placeholder="0"
+                  />
+                </div>
+                {/* UPI split — clicking this also triggers QR render */}
+                <div className="space-y-1">
                   <button
-                    key={m}
-                    onClick={() => setPaymentMode(m)}
-                    className={`flex flex-col items-center gap-1 py-2 rounded-lg text-[10px] font-medium transition-all ${
-                      paymentMode === m ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted text-muted-foreground'
-                    }`}
+                    onClick={() => setPaymentMode(paymentMode === 'upi' ? 'cash' : 'upi')}
+                    className="text-[10px] text-muted-foreground flex items-center gap-1 w-full"
                   >
-                    <Icon className="w-3.5 h-3.5" /> {label}
+                    <QrCode className={`w-3 h-3 ${paymentMode === 'upi' ? 'text-violet-600' : ''}`} />
+                    UPI ₹
+                    {paymentMode === 'upi' && <span className="ml-auto text-[9px] text-violet-600">QR চালু</span>}
                   </button>
-                ))}
+                  <Input
+                    value={splitUpi}
+                    onChange={(e) => { setSplitUpi(e.target.value); setPaymentMode('upi') }}
+                    className={`h-9 text-sm ${paymentMode === 'upi' ? 'border-violet-400' : ''}`}
+                    inputMode="numeric"
+                    placeholder="0"
+                  />
+                </div>
+                {/* Credit split — §2 label simplification */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <CreditCard className="w-3 h-3" /> কাস্টমার নগদে কত দিল? ₹
+                  </label>
+                  <Input
+                    value={splitCredit}
+                    onChange={(e) => setSplitCredit(e.target.value)}
+                    className="h-9 text-sm"
+                    inputMode="numeric"
+                    placeholder="0"
+                  />
+                </div>
+                {/* Cheque — number only */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <FileCheck className="w-3 h-3" /> Cheque No
+                  </label>
+                  <Input
+                    value={splitChequeNo}
+                    onChange={(e) => setSplitChequeNo(e.target.value)}
+                    className="h-9 text-sm"
+                    placeholder="CHQ-001234"
+                  />
+                </div>
               </div>
+
+              {/* Split payment summary — live calculation */}
+              {hasSplitPayment && (
+                <div className="mt-2 pt-2 border-t border-border/50 space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">মোট পরিশোধিত</span>
+                    <span className="tabular font-medium text-emerald-600">₹{totalSplitPaid.toFixed(2)}</span>
+                  </div>
+                  {overpaid > 0 ? (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">বাকি (খুচরা)</span>
+                      <span className="tabular font-medium text-emerald-600">₹{overpaid.toFixed(2)}</span>
+                    </div>
+                  ) : ledgerDue > 0 ? (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">খাতায় বাকি (Ledger Due)</span>
+                      <span className="tabular font-medium text-amber-600">₹{ledgerDue.toFixed(2)}</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">স্ট্যাটাস</span>
+                      <span className="tabular font-medium text-emerald-600">সম্পূর্ণ পরিশোধিত ✓</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Payment mode-specific inputs — persistent below mode grid */}
+            {/* UPI QR — shows when UPI mode is active (via split UPI input or mode toggle) */}
             <AnimatePresence>
-              {paymentMode === 'cash' && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="p-3 mt-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/30">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Calculator className="w-4 h-4 text-emerald-600" />
-                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">খুচরা ক্যালকুলেটর</p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-muted-foreground">গ্রহণ করা নগদ</label>
-                        <Input
-                          value={cashReceived}
-                          onChange={(e) => setCashReceived(e.target.value)}
-                          className="h-9 text-sm"
-                          inputMode="numeric"
-                          placeholder="0"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground">বাকি</label>
-                        <div className="h-9 rounded-lg bg-card flex items-center justify-center text-sm font-bold tabular text-emerald-600">
-                          {formatCurrency(changeDue, currency)}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
               {paymentMode === 'upi' && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
@@ -1109,7 +1195,9 @@ export function SalePadView() {
                   <div className="p-3 mt-2 rounded-xl bg-violet-50 dark:bg-violet-950/30">
                     <div className="flex items-center gap-2 mb-2">
                       <QrCode className="w-4 h-4 text-violet-600" />
-                      <p className="text-xs font-medium text-violet-700 dark:text-violet-300">UPI পেমেন্ট QR</p>
+                      <p className="text-xs font-medium text-violet-700 dark:text-violet-300">
+                        UPI পেমেন্ট QR {splitUpiNum > 0 && <span className="text-[10px]">(স্প্লিট: ₹{splitUpiNum.toFixed(2)})</span>}
+                      </p>
                     </div>
                     {upiQrDataUrl ? (
                       <div className="flex flex-col items-center gap-2">
@@ -1117,7 +1205,7 @@ export function SalePadView() {
                         <div className="text-center w-full">
                           <p className="text-[10px] text-muted-foreground">স্ক্যান করে পরিশোধ করুন</p>
                           <p className="text-sm font-bold tabular text-violet-700 dark:text-violet-300">
-                            {formatCurrency(grandTotal, currency)}
+                            {formatCurrency(upiQrAmount, currency)}
                           </p>
                           <p className="text-[9px] text-muted-foreground mt-0.5">{upiId}</p>
                         </div>
@@ -1125,47 +1213,47 @@ export function SalePadView() {
                     ) : (
                       <div className="text-center py-4">
                         <p className="text-[11px] text-muted-foreground">
-                          {grandTotal <= 0 ? 'কার্টে পণ্য যোগ করুন' : !upiId ? 'UPI ID সেট করা নেই (Settings)' : 'QR তৈরি হচ্ছে…'}
+                          {upiQrAmount <= 0 ? 'কার্টে পণ্য যোগ করুন বা UPI পরিমাণ লিখুন' : !upiId ? 'UPI ID সেট করা নেই (Settings)' : 'QR তৈরি হচ্ছে…'}
                         </p>
                       </div>
                     )}
                   </div>
                 </motion.div>
               )}
-              {paymentMode === 'credit' && (
+            </AnimatePresence>
+
+            {/* Cash exchange calculator — shows when cash split is active */}
+            <AnimatePresence>
+              {splitCashNum > 0 && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="p-3 mt-2 rounded-xl bg-amber-50 dark:bg-amber-950/30">
-                    <label className="text-[10px] text-muted-foreground">আংশিক পেমেন্ট (বাকি: {formatCurrency(grandTotal, currency)})</label>
-                    <Input
-                      value={partialPaid}
-                      onChange={(e) => setPartialPaid(e.target.value)}
-                      className="h-9 text-sm"
-                      inputMode="numeric"
-                      placeholder="0"
-                    />
-                  </div>
-                </motion.div>
-              )}
-              {paymentMode === 'cheque' && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="p-3 mt-2 rounded-xl bg-blue-50 dark:bg-blue-950/30">
-                    <label className="text-[10px] text-muted-foreground">চেক নম্বর</label>
-                    <Input
-                      value={chequeNo}
-                      onChange={(e) => setChequeNo(e.target.value)}
-                      className="h-9 text-sm"
-                      placeholder="CHQ-001234"
-                    />
+                  <div className="p-3 mt-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Calculator className="w-4 h-4 text-emerald-600" />
+                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">নগদ খুচরা</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">গ্রহণ করা নগদ</label>
+                        <Input
+                          value={cashReceived}
+                          onChange={(e) => setCashReceived(e.target.value)}
+                          className="h-9 text-sm"
+                          inputMode="numeric"
+                          placeholder={String(splitCashNum)}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">বাকি</label>
+                        <div className="h-9 rounded-lg bg-card flex items-center justify-center text-sm font-bold tabular text-emerald-600">
+                          {formatCurrency(Math.max(0, (Number(cashReceived) || splitCashNum) - splitCashNum), currency)}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </motion.div>
               )}

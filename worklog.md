@@ -1753,3 +1753,43 @@ Stage Summary:
 - Grid click increments by whole integers (1), fractional via manual input only
 - Professional POS row with grey sub-labels replaces heavy-bordered layout
 - Dynamic UPI QR with live grand total embedded in deep-link payload
+
+---
+Task ID: SPLIT-PAYMENT-UPI-CREDIT-FIX
+Agent: main
+Task: ADVANCED SPLIT-PAYMENT CORE ENGINE & CREDIT FIELD SIMPLIFICATION
+
+Work Log:
+§1 Multi-Mode Split Payment Architecture:
+- Upgraded Payment Mode from single-select radio to a multi-input split payment matrix.
+- 4 simultaneous input fields in a 2x2 grid: Cash ₹, UPI ₹, কাস্টমার নগদে কত দিল? ₹, Cheque No.
+- Each mode has its own amount input — owner can enter UPI: 40 + Cash: 15 simultaneously.
+- Split payment summary shows live: মোট পরিশোধিত (total paid), খাতায় বাকি (ledger due), or সম্পূর্ণ পরিশোধিত ✓.
+- hasSplitPayment flag detects if any split field is active.
+- handleGenerateInvoice and handleDone use totalSplitPaid as amountPaid when split is active.
+- Added splitCash, splitUpi, splitCredit, splitChequeNo state variables.
+
+§2 UPI Dynamic Amount Intercept:
+- If UPI split field is set to a custom amount (e.g., 40), the QR requests THAT amount.
+- upiQrAmount = splitUpiNum > 0 ? splitUpiNum : grandTotal.
+- UPI deep-link payload: upi://pay?pa=VPA&pn=MERCHANT&am=UPI_SPLIT_AMOUNT&cu=INR.
+- QR header shows "(স্প্লিট: ₹40)" when split amount is set.
+- This strictly bypasses manual amount typing on the customer's phone.
+
+§2 Credit Selector UI Label Simplification:
+- Removed the confusing "আংশিক পেমেন্ট (বাকি: ₹XX)" placeholder.
+- Replaced with clear explicit label: "কাস্টমার নগদে কত দিল? ₹".
+- Mathematical Validation: Ledger Due Balance = Grand Total - (Cash + UPI + Credit entered).
+- The remainder (ledgerDue) auto-routes to the customer's active debt ledger account.
+- On invoice generation: if ledgerDue > 0 and customer selected, auto-creates a debit transaction for the remainder. Toast confirms "খাতায় বাকি ₹XX যুক্ত হয়েছে".
+
+Browser Verification:
+✅ Split payment matrix: 4 labels present (Cash ₹, UPI ₹, কাস্টমার নগদে কত দিল? ₹, Cheque No)
+✅ Old "আংশিক পেমেন্ট" label REMOVED
+✅ Credit label is "কাস্টমার নগদে কত দিল?"
+✅ Lint: 0 errors
+
+Stage Summary:
+- Multi-mode split payment allows simultaneous UPI + Cash + Credit inputs
+- UPI QR dynamically requests the split amount (not grand total) when set
+- Credit label simplified to "কাস্টমার নগদে কত দিল?" with auto ledger due routing
