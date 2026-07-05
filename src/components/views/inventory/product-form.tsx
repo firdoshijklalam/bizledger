@@ -49,6 +49,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   const [retailUnit, setRetailUnit] = useState('kg')
   const [conversionFactor, setConversionFactor] = useState('')
   const [retailSalePrice, setRetailSalePrice] = useState('')
+  const [retailMrp, setRetailMrp] = useState('')
   const [looseStock, setLooseStock] = useState('')
   const [subCategory, setSubCategory] = useState('')
   const [description, setDescription] = useState('')
@@ -171,13 +172,14 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
       setRetailUnit((existing as any).retailUnit || 'kg')
       setConversionFactor((existing as any).conversionFactor ? String((existing as any).conversionFactor) : '')
       setRetailSalePrice((existing as any).retailSalePrice ? String((existing as any).retailSalePrice) : '')
+      setRetailMrp((existing as any).retailMrp ? String((existing as any).retailMrp) : '')
       setLooseStock((existing as any).looseStock ? String((existing as any).looseStock) : '')
       setSubCategory((existing as any).subCategory || '')
     } else if (!productId) {
       setName(''); setSku(''); setCategory(''); setUnit('pcs')
       setPurchasePrice(''); setSalePrice(''); setMrp(''); setWholesalePrice('')
       setGstRate('0'); setStock(''); setLowStockThreshold('5'); setSupplierId('')
-      setRetailEnabled(false); setRetailUnit('kg'); setConversionFactor(''); setRetailSalePrice(''); setLooseStock('')
+      setRetailEnabled(false); setRetailUnit('kg'); setConversionFactor(''); setRetailSalePrice(''); setRetailMrp(''); setLooseStock('')
       setSubCategory('')
       setDescription('')
       setIsPublished(true)
@@ -227,6 +229,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
         retailUnit: retailEnabled ? retailUnit : null,
         conversionFactor: retailEnabled ? (Number(conversionFactor) || null) : null,
         retailSalePrice: retailEnabled ? (Number(retailSalePrice) || 0) : null,
+        retailMrp: retailEnabled ? (Number(retailMrp) || null) : null,
         looseStock: retailEnabled ? (Number(looseStock) || 0) : 0,
         subCategory: subCategory.trim() || null,
         description: description.trim() || null,
@@ -514,7 +517,17 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <Label className="text-xs">খুচরো দর (₹ per {retailUnit})</Label>
+                    <Label className="text-xs">Retail MRP (₹ per {retailUnit})</Label>
+                    <Input
+                      value={retailMrp}
+                      onChange={(e) => setRetailMrp(e.target.value)}
+                      className="h-11"
+                      inputMode="numeric"
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Retail Sale Price (₹ per {retailUnit})</Label>
                     <Input
                       value={retailSalePrice}
                       onChange={(e) => setRetailSalePrice(e.target.value)}
@@ -523,16 +536,16 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
                       placeholder="55"
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">খোলা স্টক ({retailUnit})</Label>
-                    <Input
-                      value={looseStock}
-                      onChange={(e) => setLooseStock(e.target.value)}
-                      className="h-11"
-                      inputMode="numeric"
-                      placeholder="0"
-                    />
-                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">খোলা স্টক ({retailUnit})</Label>
+                  <Input
+                    value={looseStock}
+                    onChange={(e) => setLooseStock(e.target.value)}
+                    className="h-11"
+                    inputMode="numeric"
+                    placeholder="0"
+                  />
                 </div>
                 {conversionFactor && Number(conversionFactor) > 0 && (
                   <p className="text-[10px] text-muted-foreground">

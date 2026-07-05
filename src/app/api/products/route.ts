@@ -64,6 +64,7 @@ export async function POST(req: NextRequest) {
         retailUnit: body.retailEnabled ? (body.retailUnit || null) : null,
         conversionFactor: body.retailEnabled ? (Number(body.conversionFactor) || null) : null,
         retailSalePrice: body.retailEnabled ? (Number(body.retailSalePrice) || 0) : null,
+        retailMrp: body.retailEnabled ? (body.retailMrp ? Number(body.retailMrp) : null) : null,
         looseStock: body.retailEnabled ? (Number(body.looseStock) || 0) : 0,
         subCategory: body.subCategory || null,
         // PRD Part 35: AI auto-fill + nested category + publishing

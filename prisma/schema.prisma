@@ -113,6 +113,7 @@ model Product {
   retailUnit         String?  // sub-unit: kg, pcs, ltr, gm
   conversionFactor   Float?   // 1 bag = 25 kg
   retailSalePrice    Float?   // price per sub-unit (₹55 per kg)
+  retailMrp          Float?   // MRP per sub-unit for auto-discount calc
   looseStock         Float    @default(0) // loose/fractional stock (kg)
   subCategory        String?  // PRD Part 13: sub-category (e.g. Rice → Miniket)
   // PRD Part 35 §1.2: AI auto-filled description

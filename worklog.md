@@ -1843,3 +1843,50 @@ Stage Summary:
 - Product-level GST labels + auto-discount from MRP vs Sale Price
 - Master GST toggle on main screen, pipeline: Subtotal+GST → Discount → Grand Total
 - Advanced Options wiped, Invoice + Done buttons in footer
+
+---
+Task ID: POS-REENGINEERING-STEP-BY-STEP
+Agent: main
+Task: CRITICAL POS RE-ENGINEERING — Step-by-Step Calculation Pipeline
+
+Work Log:
+§1 Inventory Form Update (Retail Block):
+- Added Retail MRP (per unit) input field in the Retail/Loose configuration block.
+- Renamed existing field to "Retail Sale Price (per unit)".
+- Added retailMrp to CartItem interface, Prisma schema, POST/PUT product APIs.
+- Ran db:push to sync schema.
+- Verified: Retail MRP + Retail Sale Price inputs present when retail toggle enabled.
+
+§2 Cart Item Row Update:
+- Added per-unit discount savings text rendered right below the product name.
+- Uses effectiveMrp = retailMrp > 0 ? retailMrp : mrp (falls back to bulk MRP).
+- Displays "ছাড় ₹X.XX per {unit}" in emerald text when MRP > price.
+- Verified: "ছাড়" savings text present in cart.
+
+§3 Redesign Billing Sequence & Alignment (5 rows):
+- Row 1 (GST Toggle): Left = [No GST]/[Include GST] active button, Right = total GST amount.
+- Row 2 (Total after GST): "GST সহ মোট" = subtotal + GST, displayed in muted row.
+- Row 3 (Discount Block): Left = ₹/% toggle + discount input, Right = flat cash value subtracted.
+- Row 4 (Total after Discount): "ছাড় পরবর্তী মোট" = grandTotal after discount.
+- Row 5 (Final Payable): "Actual Price" — final bottom-line total in large bold primary text.
+- All rows use Left Button | Right Value alignment.
+- Verified: Actual Price, GST সহ মোট, ছাড় পরবর্তী মোট, GST toggle all present.
+
+§4 Footer Positioning:
+- Payment Mode split matrix placed cleanly underneath the [Actual Price] display.
+- Split Payment grid (Cash/UPI/Credit/Cheque) comes after Row 5.
+- UPI QR, cash exchange, and action footer (Invoice + Done) follow.
+- Verified: Split Payment present after Actual Price.
+
+Browser Verification:
+✅ §1: Retail MRP + Retail Sale Price inputs in inventory form
+✅ §2: Per-unit discount savings "ছাড় ₹X.XX per kg" below product name
+✅ §3: 5-row billing sequence (GST toggle → Total+GST → Discount → Total-Discount → Actual Price)
+✅ §4: Payment Mode split matrix under Actual Price
+✅ Lint: 0 errors
+
+Stage Summary:
+- Inventory form has Retail MRP + Retail Sale Price explicit inputs
+- Cart shows per-unit discount savings text
+- 5-row billing pipeline with Left Button | Right Value alignment
+- Payment Mode positioned under Actual Price

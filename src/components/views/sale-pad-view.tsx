@@ -35,6 +35,7 @@ interface CartItem {
   manualOverride: boolean // true when owner manually edited the total
   gstRate: number // product-level GST rate (0, 5, 12, 18, 28)
   mrp: number // MRP from inventory for auto-discount calculation
+  retailMrp: number // retail per-unit MRP for per-unit discount display
 }
 
 type PaymentMode = 'cash' | 'upi' | 'credit' | 'cheque'
@@ -193,6 +194,7 @@ export function SalePadView() {
         manualOverride: false,
         gstRate: (p as any).gstRate || 0,
         mrp: (p as any).mrp || 0,
+        retailMrp: (p as any).retailMrp || 0,
       }])
     }
   }
@@ -983,12 +985,25 @@ export function SalePadView() {
             <div className="space-y-2 max-h-64 overflow-y-auto scroll-area">
               {cart.map((item) => (
                 <div key={item.cartKey} className="p-2.5 rounded-xl bg-muted/40 border border-border/50">
-                  {/* Row 1 — product name + trash icon FAR RIGHT */}
+                  {/* Row 1 — product name + per-unit discount savings + trash icon */}
                   <div className="flex items-center gap-2 mb-2">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold truncate">{item.name}</p>
+                      {/* §2: Per-unit discount savings text below product name */}
+                      {(() => {
+                        const effectiveMrp = item.retailMrp > 0 ? item.retailMrp : item.mrp
+                        if (effectiveMrp > 0 && effectiveMrp > item.price) {
+                          const savings = effectiveMrp - item.price
+                          return (
+                            <span className="text-[10px] text-emerald-600 font-medium">
+                              ছাড় ₹{savings.toFixed(2)} per {item.unit}
+                            </span>
+                          )
+                        }
+                        return null
+                      })()}
                       {item.manualOverride && (
-                        <span className="text-[10px] text-amber-600 font-medium">মোট ম্যানুয়াল</span>
+                        <span className="text-[10px] text-amber-600 font-medium ml-1">· মোট ম্যানুয়াল</span>
                       )}
                     </div>
                     <button
@@ -1073,34 +1088,34 @@ export function SalePadView() {
               ))}
             </div>
 
-            {/* Subtotal + GST + Discount + Grand Total (§3 pipeline) */}
+            {/* §3: Billing Sequence — 5 rows with Left Buttons | Right Values alignment */}
             <div className="pt-3 mt-2 border-t border-border space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">সাবটোটাল</span>
-                <span className="tabular font-medium">{formatCurrency(subtotal, currency)}</span>
+              {/* Row 1: GST Toggle — Left: [No GST]/[Include GST] button, Right: GST amount */}
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setMasterGstOn(!masterGstOn)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    masterGstOn
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {masterGstOn ? 'Include GST' : 'No GST'}
+                </button>
+                <span className="tabular text-sm font-medium text-blue-600">
+                  {masterGstOn && gstAmount > 0 ? `+${formatCurrency(gstAmount, currency)}` : '₹0.00'}
+                </span>
               </div>
 
-              {/* §2: Auto-discount from MRP vs Sale Price (reactive display) */}
-              {autoDiscountTotal > 0 && (
-                <div className="flex justify-between text-xs">
-                  <span className="text-emerald-600">স্বয়ংক্রিয় ছাড় (MRP vs দর)</span>
-                  <span className="tabular text-emerald-600 font-medium">−{formatCurrency(autoDiscountTotal, currency)}</span>
-                </div>
-              )}
+              {/* Row 2: Total after GST (subtotal + GST) */}
+              <div className="flex justify-between items-center text-sm bg-muted/30 rounded-lg px-3 py-1.5">
+                <span className="text-muted-foreground">GST সহ মোট</span>
+                <span className="tabular font-semibold">{formatCurrency(subtotalWithGst, currency)}</span>
+              </div>
 
-              {/* §3: GST line — shows product-level or global GST amount */}
-              {gstAmount > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">
-                    GST {globalGstNum > 0 ? `(${globalGstNum}%)` : '(প্রোডাক্ট রেট)'}
-                  </span>
-                  <span className="tabular font-medium text-blue-600">+{formatCurrency(gstAmount, currency)}</span>
-                </div>
-              )}
-
-              {/* §4: Discount with % / ₹ toggle — applied AFTER GST */}
+              {/* Row 3: Discount Block — Left: discount input/button, Right: cash value subtracted */}
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted">
+                <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted shrink-0">
                   <button
                     onClick={() => setDiscountMode('flat')}
                     className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
@@ -1123,67 +1138,43 @@ export function SalePadView() {
                   onChange={(e) => setDiscountValue(e.target.value)}
                   className="h-8 text-sm flex-1"
                   inputMode="numeric"
-                  placeholder={discountMode === 'flat' ? '০' : '০'}
+                  placeholder="0"
                 />
-                <div className="flex items-center gap-1 text-xs text-amber-600 min-w-[80px] justify-end">
-                  <BadgePercent className="w-3.5 h-3.5" />
-                  <span className="tabular font-medium">−{formatCurrency(discountAmount, currency)}</span>
-                </div>
+                <span className="tabular text-sm font-medium text-amber-600 min-w-[80px] text-right">
+                  −{formatCurrency(discountAmount, currency)}
+                </span>
               </div>
 
-              {/* Grand Total — live updates (Subtotal + GST − Discount) */}
-              <div className="flex justify-between items-center pt-1">
-                <span className="font-semibold">{t('bill.grandTotal')}</span>
+              {/* Row 4: Total after Discount */}
+              <div className="flex justify-between items-center text-sm bg-muted/30 rounded-lg px-3 py-1.5">
+                <span className="text-muted-foreground">ছাড় পরবর্তী মোট</span>
+                <span className="tabular font-semibold">{formatCurrency(grandTotal, currency)}</span>
+              </div>
+
+              {/* §2: Auto-discount info from MRP vs Sale Price */}
+              {autoDiscountTotal > 0 && (
+                <div className="flex justify-between text-[10px] text-emerald-600 px-1">
+                  <span>স্বয়ংক্রিয় ছাড় (MRP vs দর)</span>
+                  <span className="tabular font-medium">−{formatCurrency(autoDiscountTotal, currency)}</span>
+                </div>
+              )}
+
+              {/* Row 5: Final Payable — [Actual Price] */}
+              <div className="flex justify-between items-center pt-2 border-t border-border">
+                <span className="font-bold text-base">Actual Price</span>
                 <motion.span
                   key={grandTotal.toFixed(2)}
                   initial={{ scale: 1.05 }}
                   animate={{ scale: 1 }}
                   transition={{ duration: 0.15 }}
-                  className="font-bold tabular text-primary text-lg"
+                  className="font-bold tabular text-primary text-xl"
                 >
                   {formatCurrency(grandTotal, currency)}
                 </motion.span>
               </div>
             </div>
 
-            {/* §3: Master GST module — UN-NESTED to main screen with On/Off toggle */}
-            <div className="mt-3 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-400/30">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-1.5">
-                  <BadgePercent className="w-4 h-4 text-blue-600" />
-                  <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">মাস্টার GST</span>
-                </div>
-                {/* Master GST On/Off Toggle */}
-                <button
-                  onClick={() => setMasterGstOn(!masterGstOn)}
-                  className={`relative w-11 h-6 rounded-full transition-colors ${masterGstOn ? 'bg-blue-500' : 'bg-muted'}`}
-                  aria-label="Master GST toggle"
-                >
-                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${masterGstOn ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                </button>
-              </div>
-              {masterGstOn ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-muted-foreground shrink-0">গ্লোবাল ওভাররাইড:</span>
-                  <Input
-                    value={globalGstRate}
-                    onChange={(e) => setGlobalGstRate(e.target.value)}
-                    className="h-8 text-sm w-20"
-                    inputMode="numeric"
-                    placeholder="0"
-                  />
-                  <span className="text-[10px] text-muted-foreground">%</span>
-                  <span className="text-[10px] text-muted-foreground ml-auto">
-                    {globalGstNum > 0 ? `+₹${gstAmount.toFixed(2)}` : 'প্রোডাক্ট রেট স্বয়ংক্রিয়'}
-                  </span>
-                </div>
-              ) : (
-                <p className="text-[10px] text-muted-foreground">সমস্ত GST বাইপাস করা হয়েছে</p>
-              )}
-            </div>
-
-            {/* §1: Multi-Mode Split Payment Matrix — simultaneous inputs across modes.
-                No single-select radio. Each mode gets its own amount input. */}
+            {/* §4: Payment Mode split matrix — underneath Actual Price */}
             <div className="mt-3 p-3 rounded-xl bg-muted/30 border border-border/50">
               <p className="text-[10px] text-muted-foreground uppercase mb-2 font-medium">Split Payment (একসাথে একাধিক মোড)</p>
               <div className="grid grid-cols-2 gap-2">
@@ -1200,7 +1191,7 @@ export function SalePadView() {
                     placeholder="0"
                   />
                 </div>
-                {/* UPI split — clicking this also triggers QR render */}
+                {/* UPI split */}
                 <div className="space-y-1">
                   <button
                     onClick={() => setPaymentMode(paymentMode === 'upi' ? 'cash' : 'upi')}
@@ -1218,7 +1209,7 @@ export function SalePadView() {
                     placeholder="0"
                   />
                 </div>
-                {/* Credit split — §2 label simplification */}
+                {/* Credit split */}
                 <div className="space-y-1">
                   <label className="text-[10px] text-muted-foreground flex items-center gap-1">
                     <CreditCard className="w-3 h-3" /> কাস্টমার নগদে কত দিল? ₹
@@ -1231,7 +1222,7 @@ export function SalePadView() {
                     placeholder="0"
                   />
                 </div>
-                {/* Cheque — number only */}
+                {/* Cheque */}
                 <div className="space-y-1">
                   <label className="text-[10px] text-muted-foreground flex items-center gap-1">
                     <FileCheck className="w-3 h-3" /> Cheque No
@@ -1245,7 +1236,7 @@ export function SalePadView() {
                 </div>
               </div>
 
-              {/* Split payment summary — live calculation */}
+              {/* Split payment summary */}
               {hasSplitPayment && (
                 <div className="mt-2 pt-2 border-t border-border/50 space-y-1 text-xs">
                   <div className="flex justify-between">
@@ -1272,8 +1263,7 @@ export function SalePadView() {
               )}
             </div>
 
-            {/* §1: UPI QR — strict conditional visibility.
-                Only mounts when UPI amount > 0. Unmounts instantly when 0 or empty. */}
+            {/* UPI QR — conditional on amount > 0 */}
             <AnimatePresence>
               {paymentMode === 'upi' && upiQrAmount > 0 && (
                 <motion.div
@@ -1302,9 +1292,7 @@ export function SalePadView() {
                       </div>
                     ) : (
                       <div className="text-center py-4">
-                        <p className="text-[11px] text-muted-foreground">
-                          {upiQrAmount <= 0 ? 'কার্টে পণ্য যোগ করুন বা UPI পরিমাণ লিখুন' : !upiId ? 'UPI ID সেট করা নেই (Settings)' : 'QR তৈরি হচ্ছে…'}
-                        </p>
+                        <p className="text-[11px] text-muted-foreground">QR তৈরি হচ্ছে…</p>
                       </div>
                     )}
                   </div>
@@ -1312,7 +1300,7 @@ export function SalePadView() {
               )}
             </AnimatePresence>
 
-            {/* Cash exchange calculator — shows when cash split is active */}
+            {/* Cash exchange calculator */}
             <AnimatePresence>
               {splitCashNum > 0 && (
                 <motion.div
@@ -1349,9 +1337,8 @@ export function SalePadView() {
               )}
             </AnimatePresence>
 
-            {/* §4: Action Footer — Invoice (left) + Done (right), no Advanced Options dropdown */}
+            {/* §4: Action Footer — Invoice (left) + Done (right) */}
             <div className="flex items-center gap-2 mt-3">
-              {/* Invoice button — left side */}
               <Button
                 variant="outline"
                 onClick={handleGenerateInvoice}
@@ -1360,7 +1347,6 @@ export function SalePadView() {
               >
                 <Receipt className="w-4 h-4 mr-1.5" /> {confirming ? '…' : 'ইনভয়েস'}
               </Button>
-              {/* Done button — right side */}
               <Button
                 onClick={handleDone}
                 disabled={confirming}
