@@ -1793,3 +1793,53 @@ Stage Summary:
 - Multi-mode split payment allows simultaneous UPI + Cash + Credit inputs
 - UPI QR dynamically requests the split amount (not grand total) when set
 - Credit label simplified to "কাস্টমার নগদে কত দিল?" with auto ledger due routing
+
+---
+Task ID: QR-CONDITIONAL-GST-PIPELINE-FOOTER
+Agent: main
+Task: CRITICAL ENGINE FIX — QR Conditional Render & Main UI Billing Pipeline
+
+Work Log:
+§1 UPI QR Code Conditional Visibility:
+- Implemented strict input validator: upiQrAmount = splitUpiNum > 0 ? splitUpiNum : 0.
+- If UPI amount == 0 or empty, upiQrAmount = 0 → entire UPI QR block unmounts instantly.
+- QR module only initializes and renders when upiQrAmount > 0 AND paymentMode === 'upi'.
+- Verified: QR hidden when amount=0 ✓, QR visible when amount=40 ✓, QR unmounted when cleared to 0 ✓.
+
+§2 Product-Level GST Labels & Auto-Discount:
+- Added gstRate and mrp fields to CartItem interface.
+- addToCart now populates gstRate (from product.gstRate) and mrp (from product.mrp).
+- Per-item GST label rendered under each cart row: "X% GST" or "No GST" (if 0%).
+- If Master GST is OFF, shows "GST বন্ধ" instead.
+- Auto-discount: MRP vs Sale Price difference calculated per item: (MRP - price) × qty.
+- Displayed reactively in cart: "ছাড় ₹X (MRP ₹Y)" in emerald text.
+- Auto-discount total shown in totals section: "স্বয়ংক্রিয় ছাড় (MRP vs দর)".
+
+§3 Un-nest GST to Main Screen & Order of Operations:
+- Extracted Global GST module OUT of Advanced Options — now on main viewport.
+- Added [Master GST On/Off Toggle] — blue switch. If ON, apply database-defined product taxes. If OFF, bypass all (gstAmount = 0).
+- When ON + global override set: uses global rate. When ON + no override: uses per-product GST sum.
+- Calculation Pipeline: (Subtotal + Applied GST) → Then apply [Discount Box] → Final Grand Total.
+  Step 1: subtotalWithGst = subtotal + gstAmount
+  Step 2: grandTotal = subtotalWithGst - discountAmount
+- Discount now applies AFTER GST (on subtotalWithGst, not subtotal).
+
+§4 Action Footer Layout Realignment:
+- Completely wiped out the "Advanced Options" dropdown tag from the bottom footer.
+- Removed showAdvanced state, Settings2/ChevronUp/ChevronDown imports, Label import.
+- Placed [Invoice / ইনভয়েস] button directly in the left space (flex-1, outline variant).
+- [Done / সম্পন্ন হয়েছে] button right-aligned adjacent to it.
+- Both buttons in a flex row with gap-2, h-12, rounded-2xl.
+
+Browser Verification:
+✅ §1: UPI QR hidden when amount=0, visible when amount>0
+✅ §2: GST label present (No GST / X% GST), auto-discount MRP present
+✅ §3: Master GST toggle present on main screen, GST pipeline correct
+✅ §4: Advanced Options REMOVED, Invoice + Done buttons side by side
+✅ Lint: 0 errors
+
+Stage Summary:
+- UPI QR strictly conditional on amount > 0
+- Product-level GST labels + auto-discount from MRP vs Sale Price
+- Master GST toggle on main screen, pipeline: Subtotal+GST → Discount → Grand Total
+- Advanced Options wiped, Invoice + Done buttons in footer

@@ -9,13 +9,12 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShoppingBag, Package, Plus, Minus, Trash2, UserPlus, Receipt,
   Store, Boxes, CheckCircle2, X, Wallet, QrCode, CreditCard, FileCheck,
-  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Calculator, Lock, Eye, EyeOff, ShieldCheck,
-  Users, BadgePercent, Settings2, Layers,
+  ChevronLeft, ChevronRight, Calculator, Lock, Eye, EyeOff, ShieldCheck,
+  Users, BadgePercent, Layers,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { EmptyState } from '@/components/shared/states'
 import { toast } from 'sonner'
 import { useMemo, useState, useCallback, useRef, useEffect } from 'react'
@@ -34,6 +33,8 @@ interface CartItem {
   qtyStr: string // raw string for the qty input — allows '0', '.', '0.5' during typing
   total: number
   manualOverride: boolean // true when owner manually edited the total
+  gstRate: number // product-level GST rate (0, 5, 12, 18, 28)
+  mrp: number // MRP from inventory for auto-discount calculation
 }
 
 type PaymentMode = 'cash' | 'upi' | 'credit' | 'cheque'
@@ -78,13 +79,14 @@ export function SalePadView() {
   const [activeCategory, setActiveCategory] = useState<string>('All')
   const [showCustPicker, setShowCustPicker] = useState(false)
   const [confirming, setConfirming] = useState(false)
-  const [showAdvanced, setShowAdvanced] = useState(false)
 
   // §4: Discount with % / ₹ toggle + live Grand Total
   const [discountMode, setDiscountMode] = useState<'flat' | 'percent'>('flat')
   const [discountValue, setDiscountValue] = useState('')
   // §3: Global GST override (Advanced Options) — individual product GSTs apply behind the scenes
   const [globalGstRate, setGlobalGstRate] = useState('')
+  // §3: Master GST On/Off toggle — if ON, apply database-defined product taxes. If OFF, bypass all.
+  const [masterGstOn, setMasterGstOn] = useState(true)
 
   const currency = business?.currency || 'INR'
 
@@ -189,6 +191,8 @@ export function SalePadView() {
         qtyStr: '1',
         total: price,
         manualOverride: false,
+        gstRate: (p as any).gstRate || 0,
+        mrp: (p as any).mrp || 0,
       }])
     }
   }
@@ -290,18 +294,40 @@ export function SalePadView() {
     setCart(cart.filter((i) => i.cartKey !== cartKey))
   }
 
-  // §4: Grand Total with live discount sync
+  // §3: Calculation Pipeline Sequence:
+  // (Subtotal + Applied GST) → Then apply [Discount Box] → Final Grand Total
   const subtotal = cart.reduce((s, i) => s + i.total, 0)
+
+  // §3: Master GST toggle — if ON, apply product-level GSTs (or global override).
+  // If OFF, bypass all GST (gstAmount = 0).
+  const globalGstNum = Number(globalGstRate) || 0
+  // Calculate product-level GST: sum of (item total × item gstRate / 100)
+  const productGstAmount = masterGstOn
+    ? cart.reduce((s, i) => s + (i.total * (i.gstRate || 0)) / 100, 0)
+    : 0
+  // Global override takes precedence if set; otherwise use product-level sum
+  const gstAmount = !masterGstOn
+    ? 0
+    : globalGstNum > 0
+    ? (subtotal * globalGstNum) / 100
+    : productGstAmount
+  // Step 1: Subtotal + GST
+  const subtotalWithGst = subtotal + gstAmount
+
+  // Step 2: Apply discount on (subtotal + GST)
   const discountNum = Number(discountValue) || 0
   const discountAmount = discountMode === 'percent'
-    ? (subtotal * discountNum) / 100
-    : Math.min(discountNum, subtotal)
-  const taxableAmount = Math.max(0, subtotal - discountAmount)
-  // §3: Global GST override (if set). Individual product GSTs apply automatically
-  // when globalGstRate is empty — the backend calculates per-item GST.
-  const globalGstNum = Number(globalGstRate) || 0
-  const gstAmount = globalGstNum > 0 ? (taxableAmount * globalGstNum) / 100 : 0
-  const grandTotal = taxableAmount + gstAmount
+    ? (subtotalWithGst * discountNum) / 100
+    : Math.min(discountNum, subtotalWithGst)
+  const grandTotal = Math.max(0, subtotalWithGst - discountAmount)
+
+  // §2: Auto-discount from MRP vs Sale Price (per item, shown in cart)
+  const autoDiscountTotal = cart.reduce((s, i) => {
+    if (i.mrp > 0 && i.mrp > i.price) {
+      return s + (i.mrp - i.price) * i.quantity
+    }
+    return s
+  }, 0)
 
   // Cash exchange calculator
   const cashReceivedNum = Number(cashReceived) || 0
@@ -311,9 +337,9 @@ export function SalePadView() {
   const splitCashNum = Number(splitCash) || 0
   const splitUpiNum = Number(splitUpi) || 0
   const splitCreditNum = Number(splitCredit) || 0
-  // §2: UPI dynamic amount — if split UPI is set, QR requests that amount.
-  // Otherwise (no split), QR requests the full grand total.
-  const upiQrAmount = splitUpiNum > 0 ? splitUpiNum : grandTotal
+  // §1: UPI dynamic amount — if split UPI is set to a custom amount (>0), QR requests that amount.
+  // If UPI field is 0 or empty, upiQrAmount = 0 → QR block unmounts entirely (strict conditional).
+  const upiQrAmount = splitUpiNum > 0 ? splitUpiNum : 0
   // Total paid across all split modes
   const totalSplitPaid = splitCashNum + splitUpiNum + splitCreditNum
   // §2: Credit ledger due = Grand Total - (cash + upi + credit entered).
@@ -1026,18 +1052,53 @@ export function SalePadView() {
                       </div>
                     </div>
                   </div>
+                  {/* §2: Product-level GST label + auto-discount from MRP vs Sale Price */}
+                  <div className="flex items-center justify-between mt-1.5 text-[10px]">
+                    {/* GST label — "0% GST" / "No GST" if 0%, else "X% GST" */}
+                    {masterGstOn ? (
+                      <span className={item.gstRate > 0 ? 'text-blue-600 font-medium' : 'text-muted-foreground/60'}>
+                        {item.gstRate > 0 ? `${item.gstRate}% GST` : 'No GST'}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/60">GST বন্ধ</span>
+                    )}
+                    {/* Auto-discount: MRP vs Sale Price difference */}
+                    {item.mrp > 0 && item.mrp > item.price && (
+                      <span className="text-emerald-600 font-medium">
+                        ছাড় ₹{((item.mrp - item.price) * item.quantity).toFixed(2)} (MRP ₹{item.mrp})
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
 
-            {/* Subtotal + Discount + Grand Total */}
+            {/* Subtotal + GST + Discount + Grand Total (§3 pipeline) */}
             <div className="pt-3 mt-2 border-t border-border space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">সাবটোটাল</span>
                 <span className="tabular font-medium">{formatCurrency(subtotal, currency)}</span>
               </div>
 
-              {/* §4: Discount with % / ₹ toggle */}
+              {/* §2: Auto-discount from MRP vs Sale Price (reactive display) */}
+              {autoDiscountTotal > 0 && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-emerald-600">স্বয়ংক্রিয় ছাড় (MRP vs দর)</span>
+                  <span className="tabular text-emerald-600 font-medium">−{formatCurrency(autoDiscountTotal, currency)}</span>
+                </div>
+              )}
+
+              {/* §3: GST line — shows product-level or global GST amount */}
+              {gstAmount > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    GST {globalGstNum > 0 ? `(${globalGstNum}%)` : '(প্রোডাক্ট রেট)'}
+                  </span>
+                  <span className="tabular font-medium text-blue-600">+{formatCurrency(gstAmount, currency)}</span>
+                </div>
+              )}
+
+              {/* §4: Discount with % / ₹ toggle — applied AFTER GST */}
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted">
                   <button
@@ -1070,15 +1131,7 @@ export function SalePadView() {
                 </div>
               </div>
 
-              {/* GST line — shows if global GST override is set */}
-              {gstAmount > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">GST ({globalGstNum}%)</span>
-                  <span className="tabular font-medium text-blue-600">+{formatCurrency(gstAmount, currency)}</span>
-                </div>
-              )}
-
-              {/* Grand Total — live updates */}
+              {/* Grand Total — live updates (Subtotal + GST − Discount) */}
               <div className="flex justify-between items-center pt-1">
                 <span className="font-semibold">{t('bill.grandTotal')}</span>
                 <motion.span
@@ -1091,6 +1144,42 @@ export function SalePadView() {
                   {formatCurrency(grandTotal, currency)}
                 </motion.span>
               </div>
+            </div>
+
+            {/* §3: Master GST module — UN-NESTED to main screen with On/Off toggle */}
+            <div className="mt-3 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-400/30">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <BadgePercent className="w-4 h-4 text-blue-600" />
+                  <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">মাস্টার GST</span>
+                </div>
+                {/* Master GST On/Off Toggle */}
+                <button
+                  onClick={() => setMasterGstOn(!masterGstOn)}
+                  className={`relative w-11 h-6 rounded-full transition-colors ${masterGstOn ? 'bg-blue-500' : 'bg-muted'}`}
+                  aria-label="Master GST toggle"
+                >
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${masterGstOn ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              {masterGstOn ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-muted-foreground shrink-0">গ্লোবাল ওভাররাইড:</span>
+                  <Input
+                    value={globalGstRate}
+                    onChange={(e) => setGlobalGstRate(e.target.value)}
+                    className="h-8 text-sm w-20"
+                    inputMode="numeric"
+                    placeholder="0"
+                  />
+                  <span className="text-[10px] text-muted-foreground">%</span>
+                  <span className="text-[10px] text-muted-foreground ml-auto">
+                    {globalGstNum > 0 ? `+₹${gstAmount.toFixed(2)}` : 'প্রোডাক্ট রেট স্বয়ংক্রিয়'}
+                  </span>
+                </div>
+              ) : (
+                <p className="text-[10px] text-muted-foreground">সমস্ত GST বাইপাস করা হয়েছে</p>
+              )}
             </div>
 
             {/* §1: Multi-Mode Split Payment Matrix — simultaneous inputs across modes.
@@ -1183,9 +1272,10 @@ export function SalePadView() {
               )}
             </div>
 
-            {/* UPI QR — shows when UPI mode is active (via split UPI input or mode toggle) */}
+            {/* §1: UPI QR — strict conditional visibility.
+                Only mounts when UPI amount > 0. Unmounts instantly when 0 or empty. */}
             <AnimatePresence>
-              {paymentMode === 'upi' && (
+              {paymentMode === 'upi' && upiQrAmount > 0 && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
@@ -1259,70 +1349,18 @@ export function SalePadView() {
               )}
             </AnimatePresence>
 
-            {/* §3: Advanced Options — holds ONLY GST Section + Invoice button */}
-            <button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="w-full mt-3 flex items-center justify-between p-2.5 rounded-xl bg-muted/50 text-xs font-medium hover:bg-muted"
-            >
-              <span className="flex items-center gap-1.5">
-                <Settings2 className="w-3.5 h-3.5" /> অ্যাডভান্সড অপশন (Advanced Options)
-              </span>
-              {showAdvanced ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            </button>
-            <AnimatePresence>
-              {showAdvanced && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="p-3 mt-1 rounded-xl bg-muted/30 space-y-3">
-                    {/* §3: GST Section — global manual override.
-                        Individual product GSTs apply behind the scenes automatically. */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs">GST Section (গ্লোবাল ওভাররাইড)</Label>
-                        <span className="text-[9px] text-muted-foreground">প্রোডাক্ট GST স্বয়ংক্রিয়ভাবে প্রযোজ্য</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={globalGstRate}
-                          onChange={(e) => setGlobalGstRate(e.target.value)}
-                          className="h-9 text-sm w-24"
-                          inputMode="numeric"
-                          placeholder="0"
-                        />
-                        <span className="text-xs text-muted-foreground">%</span>
-                        {gstAmount > 0 && (
-                          <span className="text-xs text-blue-600 font-medium ml-auto tabular">
-                            +{formatCurrency(gstAmount, currency)}
-                          </span>
-                        )}
-                      </div>
-                      {gstAmount > 0 && (
-                        <p className="text-[10px] text-muted-foreground">
-                          ট্যাক্সেবল: {formatCurrency(taxableAmount, currency)} + GST {globalGstNum}% = {formatCurrency(grandTotal, currency)}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* §3: Invoice generation button */}
-                    <Button
-                      variant="outline"
-                      onClick={handleGenerateInvoice}
-                      disabled={confirming}
-                      className="w-full h-10"
-                    >
-                      <Receipt className="w-4 h-4 mr-1.5" /> {confirming ? '…' : 'ইনভয়েস তৈরি করুন'}
-                    </Button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* §4: Done button — bottom-right corner */}
-            <div className="flex justify-end mt-3">
+            {/* §4: Action Footer — Invoice (left) + Done (right), no Advanced Options dropdown */}
+            <div className="flex items-center gap-2 mt-3">
+              {/* Invoice button — left side */}
+              <Button
+                variant="outline"
+                onClick={handleGenerateInvoice}
+                disabled={confirming}
+                className="h-12 px-6 text-sm font-semibold rounded-2xl flex-1"
+              >
+                <Receipt className="w-4 h-4 mr-1.5" /> {confirming ? '…' : 'ইনভয়েস'}
+              </Button>
+              {/* Done button — right side */}
               <Button
                 onClick={handleDone}
                 disabled={confirming}
