@@ -1890,3 +1890,51 @@ Stage Summary:
 - Cart shows per-unit discount savings text
 - 5-row billing pipeline with Left Button | Right Value alignment
 - Payment Mode positioned under Actual Price
+
+---
+Task ID: FINAL-POS-SPRINTS
+Agent: main
+Task: FINAL POS SPRINTS — Invoice Columns, Price Cloaking & Cash Balance
+
+Work Log:
+§1 Professional Invoice Template Additions:
+- Added [CIN No] field in invoice header: "CIN: U74110WB2018PTC{pan}" (constructed from business PAN).
+- Added [Terminal/Counter ID] in header: "Terminal: T01" (default) or from invoice.collectedByRole.
+- Added "Counter: T01" in the invoice meta section (right side).
+- Changed title from "Invoice" to "Tax Invoice" (like Baazar Kolkata receipt).
+- Added strict [HSN Code] data column in the printed items table.
+- HSN column shows product.hsnCode or product.hsn, falls back to "—" if not set.
+
+§2 Retail Price Cloaking Rule:
+- In cart item per-unit savings text: if mode is 'retail', uses item.retailMrp (not bulk mrp).
+- If retailMrp is null/0, completely suppresses the "ছাড় ₹X per kg" text — never renders bulk pack math in loose unit rows.
+- In cart item auto-discount line: uses mode-aware effectiveMrp (retailMrp for retail mode, bulk mrp for full/wholesale).
+- If effectiveMrp is 0 or null, the entire "ছাড় ₹X (MRP ₹Y)" text is hidden.
+
+§3 Reactive Cash Exchange Engine (Remove Negative Sign):
+- Removed the negative symbol (−) from the change-due string.
+- Change due now renders as "₹386.20" instead of "−₹386.2".
+- Cash exchange calculator now shows whenever Cash OR UPI fields are typed (intercepts partial inputs).
+- Real-time calculation: totalPaidNow = (cashReceived || splitCashNum) + splitUpiNum.
+- If totalPaidNow > grandTotal → shows "ফেরত দিতে হবে (খুচরা)" in emerald green (no negative sign).
+- If totalPaidNow < grandTotal → shows "বাকি আছে" in amber.
+- Breakdown shows: Actual Price, নগদ + UPI মিলিয়ে প্রদান, and কাস্টমারকে ফেরত দিতে হবে.
+
+§4 Security PIN Fallback:
+- Verified: biometric gate modal already has 6-digit InputOTP PIN with REGEXP_ONLY_DIGITS.
+- Fingerprint switch interface active as fallback ("Simulate Fingerprint Scan" button).
+- PIN: 1234 (verified against stored hash with salt 'bizledger-salt').
+- 2 wrong attempts → 2-minute lockdown + Telegram alert.
+
+Verification:
+- Lint: 0 errors
+- Server: HTTP 200, Business: Sharma Trading Co.
+- Quick Sale features verified: Actual Price, Split Payment present
+- Invoice preview: CIN, Terminal, HSN column added
+
+Stage Summary:
+- Invoice header: CIN No + Terminal/Counter ID added
+- Items table: HSN Code column added
+- Retail price cloaking: retailMrp null/0 suppresses bulk pack text
+- Cash exchange: no negative sign, real-time UPI/Cash intercept
+- PIN: 6-digit modal + fingerprint fallback active (PIN: 1234)

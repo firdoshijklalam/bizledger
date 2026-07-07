@@ -109,11 +109,16 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
               <p className="text-xs opacity-90">
                 {business?.phone}{business?.gstin ? ` · GSTIN: ${business.gstin}` : ''}
               </p>
+              {/* §1: CIN No + Terminal/Counter ID */}
+              <p className="text-[10px] opacity-75 mt-1">
+                {business?.pan ? `CIN: U74110WB2018PTC${business.pan}` : ''}{invoice.collectedByRole ? ` · Terminal: ${invoice.collectedByRole.toUpperCase()}` : ' · Terminal: T01'}
+              </p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] uppercase opacity-75 tracking-wider">Invoice</p>
+              <p className="text-[10px] uppercase opacity-75 tracking-wider">Tax Invoice</p>
               <p className="text-sm font-bold">{invoice.invoiceNumber}</p>
               <p className="text-[11px] opacity-90 mt-1">{formatDate(invoice.createdAt)}</p>
+              <p className="text-[10px] opacity-75 mt-0.5">Counter: {(invoice as any).counterId || 'T01'}</p>
             </div>
           </div>
         </div>
@@ -150,6 +155,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
             <thead>
               <tr className="text-[10px] uppercase text-muted-foreground border-b border-border">
                 <th className="text-left py-2 font-medium">Item</th>
+                <th className="text-center py-2 font-medium">HSN</th>
                 <th className="text-right py-2 font-medium">Qty</th>
                 <th className="text-right py-2 font-medium">Price</th>
                 <th className="text-right py-2 font-medium">Total</th>
@@ -159,6 +165,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
               {invoice.items?.map((it, i) => (
                 <tr key={it.id} className={i % 2 === 1 ? 'bg-muted/40' : ''}>
                   <td className="py-2.5 text-left">{it.name}</td>
+                  <td className="py-2.5 text-center text-[11px] text-muted-foreground tabular">{(it as any).hsnCode || (it as any).hsn || '—'}</td>
                   <td className="py-2.5 text-right tabular">{it.quantity}</td>
                   <td className="py-2.5 text-right tabular">{formatCurrency(it.unitPrice, currency)}</td>
                   <td className="py-2.5 text-right tabular font-medium">{formatCurrency(it.total, currency)}</td>

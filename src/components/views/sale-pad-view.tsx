@@ -989,9 +989,10 @@ export function SalePadView() {
                   <div className="flex items-center gap-2 mb-2">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold truncate">{item.name}</p>
-                      {/* §2: Per-unit discount savings text below product name */}
+                      {/* §2: Per-unit discount savings text below product name.
+                          Retail price cloaking: if retailMrp is null/0, suppress entirely. */}
                       {(() => {
-                        const effectiveMrp = item.retailMrp > 0 ? item.retailMrp : item.mrp
+                        const effectiveMrp = mode === 'retail' ? item.retailMrp : (item.retailMrp > 0 ? item.retailMrp : item.mrp)
                         if (effectiveMrp > 0 && effectiveMrp > item.price) {
                           const savings = effectiveMrp - item.price
                           return (
@@ -1077,12 +1078,22 @@ export function SalePadView() {
                     ) : (
                       <span className="text-muted-foreground/60">GST বন্ধ</span>
                     )}
-                    {/* Auto-discount: MRP vs Sale Price difference */}
-                    {item.mrp > 0 && item.mrp > item.price && (
-                      <span className="text-emerald-600 font-medium">
-                        ছাড় ₹{((item.mrp - item.price) * item.quantity).toFixed(2)} (MRP ₹{item.mrp})
-                      </span>
-                    )}
+                    {/* §2: Auto-discount: MRP vs Sale Price difference.
+                        Retail price cloaking rule: if retailMrp is null/0, suppress
+                        the full-pack text string entirely. Never render bulk pack math
+                        inside loose unit rows. */}
+                    {(() => {
+                      // For retail mode, use retailMrp; for full/wholesale, use bulk mrp
+                      const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
+                      if (effectiveMrp > 0 && effectiveMrp > item.price) {
+                        return (
+                          <span className="text-emerald-600 font-medium">
+                            ছাড় ₹{((effectiveMrp - item.price) * item.quantity).toFixed(2)} (MRP ₹{effectiveMrp})
+                          </span>
+                        )
+                      }
+                      return null
+                    })()}
                   </div>
                 </div>
               ))}
@@ -1300,9 +1311,10 @@ export function SalePadView() {
               )}
             </AnimatePresence>
 
-            {/* Cash exchange calculator — real-time change calculation */}
+            {/* §3: Cash exchange calculator — real-time, no negative sign.
+                Shows whenever Cash or UPI fields are typed (intercepts partial inputs). */}
             <AnimatePresence>
-              {splitCashNum > 0 && (
+              {(splitCashNum > 0 || splitUpiNum > 0 || (Number(cashReceived) || 0) > 0) && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
@@ -1322,52 +1334,55 @@ export function SalePadView() {
                           onChange={(e) => setCashReceived(e.target.value)}
                           className="h-9 text-sm"
                           inputMode="numeric"
-                          placeholder={String(splitCashNum)}
+                          placeholder={String(splitCashNum || grandTotal)}
                         />
                       </div>
                       <div>
                         <label className="text-[10px] text-muted-foreground">
                           {(() => {
-                            const received = Number(cashReceived) || 0
-                            if (received > grandTotal) return 'ফেরত দিতে হবে (খুচরা)'
-                            if (received < grandTotal && received > 0) return 'কম দিয়েছে'
+                            const received = Number(cashReceived) || splitCashNum
+                            const totalPaidNow = received + splitUpiNum
+                            if (totalPaidNow > grandTotal) return 'ফেরত দিতে হবে (খুচরা)'
+                            if (totalPaidNow < grandTotal && totalPaidNow > 0) return 'বাকি আছে'
                             return 'বাকি'
                           })()}
                         </label>
                         <div className={`h-9 rounded-lg flex items-center justify-center text-sm font-bold tabular ${
-                          (Number(cashReceived) || 0) > grandTotal
+                          ((Number(cashReceived) || splitCashNum) + splitUpiNum) > grandTotal
                             ? 'bg-emerald-500 text-white'
-                            : (Number(cashReceived) || 0) < grandTotal && (Number(cashReceived) || 0) > 0
+                            : ((Number(cashReceived) || splitCashNum) + splitUpiNum) < grandTotal && ((Number(cashReceived) || splitCashNum) + splitUpiNum) > 0
                             ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
                             : 'bg-card text-emerald-600'
                         }`}>
                           {(() => {
-                            const received = Number(cashReceived) || 0
-                            if (received > grandTotal) {
-                              return `−${formatCurrency(received - grandTotal, currency)}`
+                            const received = Number(cashReceived) || splitCashNum
+                            const totalPaidNow = received + splitUpiNum
+                            if (totalPaidNow > grandTotal) {
+                              // §3: NO negative sign — show as positive
+                              return formatCurrency(totalPaidNow - grandTotal, currency)
                             }
-                            if (received < grandTotal && received > 0) {
-                              return `${formatCurrency(grandTotal - received, currency)}`
+                            if (totalPaidNow < grandTotal && totalPaidNow > 0) {
+                              return formatCurrency(grandTotal - totalPaidNow, currency)
                             }
                             return formatCurrency(grandTotal, currency)
                           })()}
                         </div>
                       </div>
                     </div>
-                    {/* Real-time breakdown */}
+                    {/* Real-time breakdown — updates instantly on any input */}
                     <div className="mt-2 pt-2 border-t border-emerald-200 dark:border-emerald-800 space-y-1 text-[10px]">
                       <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
                         <span>Actual Price (মোট দেয়)</span>
                         <span className="tabular font-medium">{formatCurrency(grandTotal, currency)}</span>
                       </div>
                       <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
-                        <span>গ্রহণ করা নগদ</span>
-                        <span className="tabular font-medium">{formatCurrency((Number(cashReceived) || 0), currency)}</span>
+                        <span>নগদ + UPI মিলিয়ে প্রদান</span>
+                        <span className="tabular font-medium">{formatCurrency((Number(cashReceived) || splitCashNum) + splitUpiNum, currency)}</span>
                       </div>
-                      {(Number(cashReceived) || 0) > grandTotal && (
-                        <div className="flex justify-between font-bold text-emerald-700 dark:text-emerald-300">
+                      {((Number(cashReceived) || splitCashNum) + splitUpiNum) > grandTotal && (
+                        <div className="flex justify-between font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40 rounded px-2 py-1">
                           <span>কাস্টমারকে ফেরত দিতে হবে</span>
-                          <span className="tabular">{formatCurrency((Number(cashReceived) || 0) - grandTotal, currency)}</span>
+                          <span className="tabular">{formatCurrency(((Number(cashReceived) || splitCashNum) + splitUpiNum) - grandTotal, currency)}</span>
                         </div>
                       )}
                     </div>
