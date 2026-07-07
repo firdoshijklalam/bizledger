@@ -21,6 +21,7 @@ import { useMemo, useState, useCallback, useRef, useEffect } from 'react'
 import QRCode from 'qrcode'
 import { FullScreenPicker } from '@/components/shared/full-screen-picker'
 import { useGateTrigger } from '@/store/biometric-gate-store'
+import { useSoundBox } from '@/hooks/use-sound-box'
 import { PartyForm } from './khata/party-form'
 
 interface CartItem {
@@ -53,6 +54,7 @@ interface HeldCart {
 export function SalePadView() {
   const { business, setActiveView, setSelectedInvoiceId, triggerRefresh, showPartyForm, setShowPartyForm } = useAppStore()
   const { t } = useI18n()
+  const { speak: soundBoxSpeak } = useSoundBox()
   const { data: products } = useFetch<Product[]>('/api/products', [])
   const { data: parties } = useFetch<Party[]>('/api/parties?type=customer', [])
 
@@ -527,6 +529,8 @@ export function SalePadView() {
       } else {
         toast.success('ইনভয়েস তৈরি হয়েছে')
       }
+      // Sound Box: announce payment received
+      soundBoxSpeak({ amount: amountPaid, customerName: customer?.name })
       triggerRefresh()
       // Clear active cart + split payment fields
       setCart([])
@@ -603,6 +607,8 @@ export function SalePadView() {
       } else {
         toast.success('সম্পন্ন হয়েছে — স্টক আপডেট হয়েছে')
       }
+      // Sound Box: announce payment received
+      soundBoxSpeak({ amount: amountPaid, customerName: customer?.name })
       triggerRefresh()
       setCart([])
       setCustomer(null)
