@@ -54,3 +54,11 @@ server.log
 /skills/*.db
 *.db
 upload/
+worklog.md
+*.log
+watchdog*
+keep-alive*
+recovery*
+super-watchdog*
+persistent-dev*
+start-server*
