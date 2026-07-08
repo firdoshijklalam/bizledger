@@ -1,14 +1,28 @@
 import { PrismaClient } from '@prisma/client'
+import { PrismaNeon } from '@prisma/adapter-neon'
+import { neon } from '@neondatabase/serverless'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-export const db =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: ['query'],
+function createPrismaClient() {
+  const databaseUrl = process.env.DATABASE_URL || ''
+
+  // If using Neon (postgresql connection string with neon.tech or pooler)
+  if (databaseUrl.includes('neon.tech') || databaseUrl.includes('pooler')) {
+    const sql = neon(databaseUrl)
+    const adapter = new PrismaNeon(sql)
+    return new PrismaClient({ adapter } as any)
+  }
+
+  // Fallback: standard PrismaClient (for local SQLite or regular PG)
+  return new PrismaClient({
+    log: process.env.NODE_ENV !== 'production' ? ['query'] : ['error'],
   })
+}
+
+export const db = globalForPrisma.prisma ?? createPrismaClient()
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
 

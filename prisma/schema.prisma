@@ -1,12 +1,12 @@
-// BizLedger — Prisma Schema (Phase 1 MVP)
-// SQLite for dev; Neon PG in Phase 3.
+// BizLedger — Prisma Schema
+// Supports both SQLite (dev) and PostgreSQL (Vercel/Neon)
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = postgresql
   url      = env("DATABASE_URL")
 }
 
