@@ -9,16 +9,20 @@ const globalForPrisma = globalThis as unknown as {
 function createPrismaClient() {
   const databaseUrl = process.env.DATABASE_URL || ''
 
-  // If using Neon (postgresql connection string with neon.tech or pooler)
-  if (databaseUrl.includes('neon.tech') || databaseUrl.includes('pooler')) {
-    const sql = neon(databaseUrl)
-    const adapter = new PrismaNeon(sql)
-    return new PrismaClient({ adapter } as any)
+  // If using Neon (postgresql connection string)
+  if (databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://')) {
+    try {
+      const sql = neon(databaseUrl)
+      const adapter = new PrismaNeon(sql)
+      return new PrismaClient({ adapter } as any)
+    } catch (e) {
+      console.error('Neon adapter failed, falling back:', e)
+    }
   }
 
   // Fallback: standard PrismaClient (for local SQLite or regular PG)
   return new PrismaClient({
-    log: process.env.NODE_ENV !== 'production' ? ['query'] : ['error'],
+    log: process.env.NODE_ENV !== 'production' ? ['error'] : ['error'],
   })
 }
 
