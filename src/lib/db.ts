@@ -5,10 +5,21 @@ const globalForPrisma = globalThis as unknown as {
 }
 
 function createPrismaClient() {
-  const databaseUrl = process.env.DATABASE_URL || ''
+  let databaseUrl = process.env.DATABASE_URL || ''
 
-  // Standard PrismaClient — works with Neon pooled connection string
-  // The pooled connection (with -pooler in hostname) supports serverless
+  // Strip channel_binding parameter — Prisma doesn't support it
+  // and it causes "No database host" errors on Neon
+  if (databaseUrl.includes('channel_binding=')) {
+    databaseUrl = databaseUrl.replace(/&?channel_binding=require/, '')
+    // Clean up trailing ? or &
+    databaseUrl = databaseUrl.replace(/[?&]$/, '')
+  }
+
+  // Also ensure sslmode=require is present for Neon
+  if (databaseUrl.includes('neon.tech') && !databaseUrl.includes('sslmode=')) {
+    databaseUrl += (databaseUrl.includes('?') ? '&' : '?') + 'sslmode=require'
+  }
+
   return new PrismaClient({
     log: ['error'],
     datasources: {
@@ -24,12 +35,8 @@ export const db = globalForPrisma.prisma ?? createPrismaClient()
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
 
 /**
- * Multi-tenant isolation helper (PRD Part 34 Audit §4).
+ * Multi-tenant isolation helper.
  * Returns the CURRENT business — always prefers "Sharma Trading Co."
- * (the owner's business) over demo shops (Maa Lakshmi Grocers, Style Bazaar).
- *
- * Usage: `const business = await getCurrentBusiness()`
- * Returns null if no business exists.
  */
 export async function getCurrentBusiness() {
   let business = await db.business.findFirst({
