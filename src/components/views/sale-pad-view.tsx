@@ -87,6 +87,14 @@ export function SalePadView() {
   // §2: Animated credit gate — slide-in customer prompt above footer
   const [showCreditGate, setShowCreditGate] = useState(false)
 
+  // §2: Reactive dismissal — auto-hide red warning when customer is selected
+  useEffect(() => {
+    if (customer && showCreditGate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShowCreditGate(false)
+    }
+  }, [customer, showCreditGate])
+
   // §4: Discount with % / ₹ toggle + live Grand Total
   const [discountMode, setDiscountMode] = useState<'flat' | 'percent'>('flat')
   const [discountValue, setDiscountValue] = useState('')
@@ -1285,35 +1293,6 @@ export function SalePadView() {
                   {formatCurrency(roundedTotal, currency)}
                 </motion.span>
               </div>
-
-              {/* §2: Credit Gate — "Add to Ledger" button when total paid < actual price */}
-              {needsCredit && (
-                <div className="mt-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-400/40">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
-                      খাতায় বাকি: ₹{ledgerDue.toFixed(2)}
-                    </span>
-                    <button
-                      onClick={() => {
-                        if (!customer) {
-                          // §2: Block transaction if no customer — force-trigger Add Customer modal
-                          toast.error('কাস্টমার নির্বাচন করুন!', { description: 'খাতায় যোগ করতে কাস্টমার প্রয়োজন' })
-                          setShowPartyForm(true)
-                          return
-                        }
-                        // Customer exists — proceed with credit
-                        toast.success('খাতায় যোগ হয়েছে', { description: `${customer.name} এর খাতায় ₹${ledgerDue.toFixed(2)}` })
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition-colors"
-                    >
-                      Add to Ledger
-                    </button>
-                  </div>
-                  {!customer && (
-                    <p className="text-[10px] text-amber-600">⚠ কাস্টমার নির্বাচন করা বাধ্যতামূলক</p>
-                  )}
-                </div>
-              )}
             </div>
 
             {/* §1: Customer bar removed from mid-screen — now at TOP only */}
