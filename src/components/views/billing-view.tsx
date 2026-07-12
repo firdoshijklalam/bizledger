@@ -92,8 +92,8 @@ export function BillingView() {
     }
   }, [invoices])
 
-  // Floating Invoice modal mode (PRD Part 7 §2)
-  if (selectedInvoiceId && floatingInvoiceOpen) {
+  // §1: Direct navigation to Full Invoice screen — no bottom sheet intermediary
+  if (selectedInvoiceId) {
     return <InvoicePreview invoiceId={selectedInvoiceId} />
   }
 
@@ -207,8 +207,7 @@ export function BillingView() {
                     <Card className="p-3.5 hover:shadow-md transition-shadow">
                       <button
                         onClick={() => {
-                          // Open as floating modal (PRD Part 7 §2)
-                          setFloatingInvoiceOpen(true)
+                          // §1: Direct navigation to Full Invoice screen — no bottom sheet
                           useAppStore.getState().setSelectedInvoiceId(inv.id)
                         }}
                         className="w-full flex items-center gap-3 text-left"

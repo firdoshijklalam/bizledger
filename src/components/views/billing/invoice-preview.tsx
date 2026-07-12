@@ -218,17 +218,26 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
         </div>
       </div>
 
-      {/* Action buttons (no-print) */}
-      <div className="grid grid-cols-3 gap-2 action-buttons">
-        <Button variant="outline" onClick={handleWhatsAppShare} className="h-11 text-emerald-600 border-emerald-300 dark:border-emerald-800">
-          <MessageCircle className="w-4 h-4 mr-1" /> WhatsApp
-        </Button>
-        <Button variant="outline" onClick={handleSMSShare} className="h-11">
-          <Share2 className="w-4 h-4 mr-1" /> SMS
-        </Button>
-        <Button onClick={handlePrint} className="h-11">
-          <Printer className="w-4 h-4 mr-1.5" /> PDF
-        </Button>
+      {/* §3: Sticky bottom action footer — 1-click access */}
+      <div className="sticky bottom-0 z-20 bg-card border-t border-border p-3 action-buttons shadow-lg">
+        <div className="grid grid-cols-4 gap-2 max-w-2xl mx-auto">
+          <Button variant="outline" onClick={handleWhatsAppShare} className="h-11 flex-col gap-0.5 text-emerald-600 border-emerald-300 dark:border-emerald-800">
+            <MessageCircle className="w-4 h-4" />
+            <span className="text-[9px]">WhatsApp</span>
+          </Button>
+          <Button variant="outline" onClick={handleSMSShare} className="h-11 flex-col gap-0.5">
+            <Share2 className="w-4 h-4" />
+            <span className="text-[9px]">Share</span>
+          </Button>
+          <Button variant="outline" onClick={handlePrint} className="h-11 flex-col gap-0.5">
+            <Printer className="w-4 h-4" />
+            <span className="text-[9px]">Print</span>
+          </Button>
+          <Button variant="outline" onClick={handlePrint} className="h-11 flex-col gap-0.5">
+            <Download className="w-4 h-4" />
+            <span className="text-[9px]">PDF</span>
+          </Button>
+        </div>
       </div>
     </motion.div>
   )
