@@ -24,4 +24,5 @@ See [HANDOVER.md](./HANDOVER.md) for complete project handover document.
 - z-ai-web-dev-sdk (AI/OCR)
 - 3 languages: English, বাংলা, हिन्दी
 # BizLedger Production Build
- 
+  Triggering new build for Vercel
+   
