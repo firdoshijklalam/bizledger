@@ -25,18 +25,20 @@ import { useSoundBox } from '@/hooks/use-sound-box'
 import { PartyForm } from './khata/party-form'
 
 interface CartItem {
-  cartKey: string // mode-suffixed key for cart isolation: `${productId}_${mode}` (e.g. 'abc_loose', 'abc_sealed')
-  productId: string // real product ID for API calls
+  cartKey: string
+  productId: string
   name: string
   unit: string
   price: number
   quantity: number
-  qtyStr: string // raw string for the qty input — allows '0', '.', '0.5' during typing
+  qtyStr: string
   total: number
-  manualOverride: boolean // true when owner manually edited the total
+  manualOverride: boolean
   gstRate: number // product-level GST rate (0, 5, 12, 18, 28)
   mrp: number // MRP from inventory for auto-discount calculation
   retailMrp: number // retail per-unit MRP for per-unit discount display
+  itemGstEnabled: boolean // §2: per-item GST toggle
+  itemGstRate: number // §2: per-item custom GST %
 }
 
 type PaymentMode = 'cash' | 'upi' | 'credit' | 'cheque'
@@ -197,6 +199,8 @@ export function SalePadView() {
         gstRate: (p as any).gstRate || 0,
         mrp: (p as any).mrp || 0,
         retailMrp: (p as any).retailMrp || 0,
+        itemGstEnabled: false,
+        itemGstRate: 0,
       }])
     }
   }
@@ -298,18 +302,35 @@ export function SalePadView() {
     setCart(cart.filter((i) => i.cartKey !== cartKey))
   }
 
+  // §2: Per-item GST toggle + custom rate
+  const toggleItemGst = (cartKey: string) => {
+    setCart(cart.map((i) =>
+      i.cartKey === cartKey
+        ? { ...i, itemGstEnabled: !i.itemGstEnabled, itemGstRate: !i.itemGstEnabled ? (i.gstRate || 5) : 0 }
+        : i
+    ))
+  }
+  const setItemGstRate = (cartKey: string, rate: number) => {
+    setCart(cart.map((i) =>
+      i.cartKey === cartKey ? { ...i, itemGstRate: rate } : i
+    ))
+  }
+
   // §3: Calculation Pipeline Sequence:
   // (Subtotal + Applied GST) → Then apply [Discount Box] → Final Grand Total
   const subtotal = cart.reduce((s, i) => s + i.total, 0)
 
   // §3: Master GST toggle — if ON, apply product-level GSTs (or global override).
   // If OFF, bypass all GST (gstAmount = 0).
+  // §2: Per-item GST override takes precedence when itemGstEnabled is true.
   const globalGstNum = Number(globalGstRate) || 0
-  // Calculate product-level GST: sum of (item total × item gstRate / 100)
   const productGstAmount = masterGstOn
-    ? cart.reduce((s, i) => s + (i.total * (i.gstRate || 0)) / 100, 0)
+    ? cart.reduce((s, i) => {
+        // §2: If item-level GST is enabled, use itemGstRate; otherwise use product gstRate
+        const effectiveRate = i.itemGstEnabled ? i.itemGstRate : (i.gstRate || 0)
+        return s + (i.total * effectiveRate) / 100
+      }, 0)
     : 0
-  // Global override takes precedence if set; otherwise use product-level sum
   const gstAmount = !masterGstOn
     ? 0
     : globalGstNum > 0
@@ -356,9 +377,8 @@ export function SalePadView() {
   const needsCredit = hasSplitPayment && ledgerDue > 0
 
   // §4: Exchange Calculator contextual states
-  // Total cash received (from exchange input + split cash)
-  const exchangeInputNum = Number(cashReceived) || 0
-  const totalPaidForExchange = (exchangeInputNum > 0 ? exchangeInputNum : splitCashNum) + splitUpiNum
+  // §5: Uses splitCash directly (read-only mirror — no separate cashReceived input)
+  const totalPaidForExchange = splitCashNum + splitUpiNum
   const exchangeDifference = totalPaidForExchange - roundedTotal
   const isShortAmount = totalPaidForExchange < roundedTotal && totalPaidForExchange > 0
   const isChangeDue = totalPaidForExchange > roundedTotal
@@ -502,6 +522,14 @@ export function SalePadView() {
       toast.error('কার্ট খালি')
       return
     }
+    // §4: Hard-stop — block if Ledger Due > 0 AND Customer == null
+    if (ledgerDue > 0 && !customer) {
+      toast.error('কাস্টমার নির্বাচন করুন!', {
+        description: `খাতায় বাকি ₹${ledgerDue.toFixed(2)} — কাস্টমার ছাড়া ক্রেডিট ট্রানজেকশন নিষিদ্ধ`,
+      })
+      setShowCustPicker(true)
+      return
+    }
     setConfirming(true)
     try {
       // §1: Split payment — amountPaid is the sum of all split modes.
@@ -562,6 +590,14 @@ export function SalePadView() {
   const handleDone = async () => {
     if (cart.length === 0) {
       toast.error('কার্ট খালি')
+      return
+    }
+    // §4: Hard-stop — block if Ledger Due > 0 AND Customer == null
+    if (ledgerDue > 0 && !customer) {
+      toast.error('কাস্টমার নির্বাচন করুন!', {
+        description: `খাতায় বাকি ₹${ledgerDue.toFixed(2)} — কাস্টমার ছাড়া ক্রেডিট ট্রানজেকশন নিষিদ্ধ`,
+      })
+      setShowCustPicker(true)
       return
     }
     setConfirming(true)
@@ -648,35 +684,7 @@ export function SalePadView() {
 
   return (
     <div className="space-y-4 pb-4">
-      {/* §1: Customer Input Bar — at the absolute top, optional field */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => setShowCustPicker(true)}
-          className="flex-1 h-11 px-3 rounded-xl border border-dashed border-border bg-card flex items-center gap-2 text-sm hover:bg-muted transition-colors"
-        >
-          {customer ? (
-            <>
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              <span className="font-medium text-foreground truncate">{customer.name}</span>
-              {customer.phone && <span className="text-[11px] text-muted-foreground">· {customer.phone}</span>}
-            </>
-          ) : (
-            <>
-              <UserPlus className="w-4 h-4 text-muted-foreground" />
-              <span className="text-muted-foreground">কাস্টমার যোগ করুন (ঐচ্ছিক)</span>
-            </>
-          )}
-        </button>
-        {/* §1: [+] icon — fixed to trigger customer registration via PartyForm */}
-        <button
-          onClick={() => setShowPartyForm(true)}
-          className="w-11 h-11 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:bg-primary/90 transition-colors"
-          aria-label="নতুন কাস্টমার যোগ করুন"
-          title="নতুন কাস্টমার রেজিস্ট্রেশন"
-        >
-          <Plus className="w-5 h-5" />
-        </button>
-      </div>
+      {/* §3: Customer bar removed from top — relocated to Payment Mode section */}
 
       {/* §3: Multi-Cart Hold Protocol — পার্সন ১, ২, ৩, + */}
       <div className="p-3 rounded-2xl bg-gradient-to-r from-blue-500/5 to-emerald-500/5 border border-blue-500/20">
@@ -1000,15 +1008,29 @@ export function SalePadView() {
             <div className="space-y-2 max-h-64 overflow-y-auto scroll-area">
               {cart.map((item) => (
                 <div key={item.cartKey} className="p-2.5 rounded-xl bg-muted/40 border border-border/50">
-                  {/* Row 1 — product name + per-unit discount savings + trash icon */}
+                  {/* Row 1 — product name + MRP strikethrough + trash icon */}
                   <div className="flex items-center gap-2 mb-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate">{item.name}</p>
-                      {/* §3: Per-unit discount savings text below product name.
-                          STRICT MRP isolation: Retail tab binds to retail_mrp ONLY.
-                          Never fallback to bulk_mrp in Retail view. */}
+                      <p className="text-sm font-semibold truncate">
+                        {item.name}
+                        {/* §1: MRP strikethrough next to sale price — strict mapping */}
+                        {(() => {
+                          const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
+                          if (effectiveMrp > 0 && effectiveMrp > item.price) {
+                            return (
+                              <>
+                                {' '}
+                                <del className="text-[10px] text-muted-foreground/60 font-normal">MRP ₹{effectiveMrp}</del>
+                                {' '}
+                                <b className="text-[10px] text-primary font-semibold">₹{item.price}</b>
+                              </>
+                            )
+                          }
+                          return null
+                        })()}
+                      </p>
+                      {/* Per-unit savings text */}
                       {(() => {
-                        // §3: In retail mode, ONLY use retailMrp. No fallback to bulk mrp.
                         const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
                         if (effectiveMrp > 0 && effectiveMrp > item.price) {
                           const savings = effectiveMrp - item.price
@@ -1085,16 +1107,37 @@ export function SalePadView() {
                       </div>
                     </div>
                   </div>
-                  {/* §2: Product-level GST label + auto-discount from MRP vs Sale Price */}
-                  <div className="flex items-center justify-between mt-1.5 text-[10px]">
-                    {/* GST label — "0% GST" / "No GST" if 0%, else "X% GST" */}
-                    {masterGstOn ? (
-                      <span className={item.gstRate > 0 ? 'text-blue-600 font-medium' : 'text-muted-foreground/60'}>
-                        {item.gstRate > 0 ? `${item.gstRate}% GST` : 'No GST'}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground/60">GST বন্ধ</span>
-                    )}
+                  {/* §2: Per-item GST toggle + auto-discount from MRP */}
+                  <div className="flex items-center justify-between mt-1.5 text-[10px] gap-2">
+                    {/* §2: Inline GST switch per cart item */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => toggleItemGst(item.cartKey)}
+                        className={`relative w-8 h-4 rounded-full transition-colors ${item.itemGstEnabled ? 'bg-blue-500' : 'bg-muted'}`}
+                        aria-label="Toggle item GST"
+                      >
+                        <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${item.itemGstEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      </button>
+                      {item.itemGstEnabled ? (
+                        <div className="flex items-center gap-0.5">
+                          <input
+                            type="number"
+                            value={item.itemGstRate}
+                            onChange={(e) => setItemGstRate(item.cartKey, Number(e.target.value) || 0)}
+                            className="w-8 h-5 text-[10px] text-center bg-transparent border-0 border-b border-blue-400 focus:border-blue-500 outline-none tabular"
+                            inputMode="numeric"
+                          />
+                          <span className="text-blue-600 font-medium">% GST</span>
+                          <span className="text-blue-600 tabular ml-1">+₹{(item.total * item.itemGstRate / 100).toFixed(2)}</span>
+                        </div>
+                      ) : masterGstOn ? (
+                        <span className={item.gstRate > 0 ? 'text-blue-600 font-medium' : 'text-muted-foreground/60'}>
+                          {item.gstRate > 0 ? `${item.gstRate}% GST` : 'No GST'}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/60">GST বন্ধ</span>
+                      )}
+                    </div>
                     {/* §3: Auto-discount: MRP vs Sale Price difference.
                         STRICT MRP isolation: Retail tab uses retail_mrp ONLY.
                         If retail_mrp is null/0, render nothing. Never show bulk_mrp. */}
@@ -1236,6 +1279,35 @@ export function SalePadView() {
                   )}
                 </div>
               )}
+            </div>
+
+            {/* §3: Customer Selection — relocated to Payment Mode section */}
+            <div className="flex items-center gap-2 mt-3">
+              <button
+                onClick={() => setShowCustPicker(true)}
+                className="flex-1 h-11 px-3 rounded-xl border border-dashed border-border bg-card flex items-center gap-2 text-sm hover:bg-muted transition-colors"
+              >
+                {customer ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span className="font-medium text-foreground truncate">{customer.name}</span>
+                    {customer.phone && <span className="text-[11px] text-muted-foreground">· {customer.phone}</span>}
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">কাস্টমার যোগ করুন (ঐচ্ছিক)</span>
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => setShowPartyForm(true)}
+                className="w-11 h-11 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:bg-primary/90 transition-colors"
+                aria-label="নতুন কাস্টমার যোগ করুন"
+                title="নতুন কাস্টমার রেজিস্ট্রেশন"
+              >
+                <Plus className="w-5 h-5" />
+              </button>
             </div>
 
             {/* §4: Payment Mode split matrix — underneath Actual Price */}
@@ -1380,13 +1452,14 @@ export function SalePadView() {
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-[10px] text-muted-foreground">গ্রহণ করা নগদ</label>
+                        <label className="text-[10px] text-muted-foreground">গ্রহণ করা নগদ (read-only)</label>
+                        {/* §5: Read-only — mirrors Split Cash input, rejects direct keyboard input */}
                         <Input
-                          value={cashReceived}
-                          onChange={(e) => setCashReceived(e.target.value)}
-                          className="h-9 text-sm"
-                          inputMode="numeric"
-                          placeholder={String(splitCashNum || roundedTotal)}
+                          value={splitCash ? splitCash : (splitUpiNum > 0 ? String(splitUpiNum) : '')}
+                          readOnly
+                          tabIndex={-1}
+                          className="h-9 text-sm bg-muted/50 cursor-not-allowed opacity-70"
+                          placeholder="Split Cash থেকে মিরর হবে"
                         />
                       </div>
                       <div>
