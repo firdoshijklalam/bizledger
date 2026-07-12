@@ -9,13 +9,15 @@ import { motion } from 'framer-motion'
 import { ArrowLeft, Download, Share2, Printer, X, MessageCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { useEffect, useRef } from 'react'
+import { useRef, useState } from 'react'
+import { toPng } from 'html-to-image'
 
 export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   const { setSelectedInvoiceId, business } = useAppStore()
   const { t } = useI18n()
   const { data: invoice } = useFetch<Invoice>(`/api/invoices/${invoiceId}`, [invoiceId])
   const printRef = useRef<HTMLDivElement>(null)
+  const [capturing, setCapturing] = useState(false)
 
   if (!invoice) return null
   const currency = business?.currency || 'INR'
@@ -25,41 +27,93 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
     window.print()
   }
 
-  const handleShare = async () => {
-    const text = `Bill from ${business?.name}\nInvoice: ${invoice.invoiceNumber}\nTotal: ${formatCurrency(invoice.grandTotal, currency)}\nDue: ${formatCurrency(invoice.amountDue, currency)}`
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: `Invoice ${invoice.invoiceNumber}`, text })
-      } catch {}
-    } else {
-      await navigator.clipboard.writeText(text)
-      toast.success('Invoice details copied')
+  // §1: Capture invoice as image and share
+  const captureInvoiceImage = async (): Promise<string | null> => {
+    if (!printRef.current) return null
+    setCapturing(true)
+    try {
+      const dataUrl = await toPng(printRef.current, {
+        quality: 0.95,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff',
+      })
+      return dataUrl
+    } catch (e) {
+      console.error('Image capture failed:', e)
+      toast.error('Image capture failed')
+      return null
+    } finally {
+      setCapturing(false)
     }
   }
 
-  const handleWhatsAppShare = () => {
-    // PRD v2 §10.4 — clean text format with Pay Now link (no QR in share)
-    const payUrl = `${window.location.origin}/payment/${invoice.paymentLandingToken || invoice.id}`
-    const phone = invoice.party?.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
-    const lines = [
-      `প্রিয় কাস্টমার,`,
-      ``,
-      `${business?.name}-এর বিল জেনারেট হয়েছে।`,
-      ``,
-      `🧾 Invoice: ${invoice.invoiceNumber}`,
-      `📅 Date: ${formatDate(invoice.createdAt)}`,
-      `💰 Total: ${formatCurrency(invoice.grandTotal, currency)}`,
-    ]
-    if (invoice.amountDue > 0) {
-      lines.push(`⚠️ Due: ${formatCurrency(invoice.amountDue, currency)}`)
+  // Convert dataURL to File for native sharing
+  const dataUrlToFile = async (dataUrl: string, filename: string): Promise<File> => {
+    const res = await fetch(dataUrl)
+    const blob = await res.blob()
+    return new File([blob], filename, { type: 'image/png' })
+  }
+
+  const handleShare = async () => {
+    const dataUrl = await captureInvoiceImage()
+    if (!dataUrl) return
+    try {
+      const file = await dataUrlToFile(dataUrl, `invoice-${invoice.invoiceNumber}.png`)
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title: `Invoice ${invoice.invoiceNumber}`,
+          files: [file],
+        })
+        toast.success('Invoice shared as image!')
+      } else {
+        // Fallback: download the image
+        const link = document.createElement('a')
+        link.download = `invoice-${invoice.invoiceNumber}.png`
+        link.href = dataUrl
+        link.click()
+        toast.success('Invoice image downloaded')
+      }
+    } catch (e) {
+      toast.error('Share failed')
     }
-    lines.push(``, `💳 Pay Now: ${payUrl}`, ``, `Thank you! 🙏`)
-    const text = encodeURIComponent(lines.join('\n'))
-    const waUrl = phone
-      ? `https://wa.me/${phone}?text=${text}`
-      : `https://wa.me/?text=${text}`
-    window.open(waUrl, '_blank')
-    toast.success('Opening WhatsApp…')
+  }
+
+  const handleWhatsAppShare = async () => {
+    const dataUrl = await captureInvoiceImage()
+    if (!dataUrl) return
+    try {
+      const file = await dataUrlToFile(dataUrl, `invoice-${invoice.invoiceNumber}.png`)
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title: `Invoice ${invoice.invoiceNumber}`,
+          text: `Bill from ${business?.name}`,
+          files: [file],
+        })
+        toast.success('Invoice image shared!')
+      } else {
+        // Fallback: open WhatsApp with text + download image
+        const phone = invoice.party?.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
+        const text = encodeURIComponent(`Bill from ${business?.name}\nInvoice: ${invoice.invoiceNumber}\nTotal: ${formatCurrency(invoice.grandTotal, currency)}`)
+        window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank')
+        const link = document.createElement('a')
+        link.download = `invoice-${invoice.invoiceNumber}.png`
+        link.href = dataUrl
+        link.click()
+        toast.success('Image downloaded — attach in WhatsApp')
+      }
+    } catch (e) {
+      toast.error('Share failed')
+    }
+  }
+
+  const handleDownloadImage = async () => {
+    const dataUrl = await captureInvoiceImage()
+    if (!dataUrl) return
+    const link = document.createElement('a')
+    link.download = `invoice-${invoice.invoiceNumber}.png`
+    link.href = dataUrl
+    link.click()
+    toast.success('Invoice image downloaded')
   }
 
   const handleSMSShare = () => {
@@ -70,6 +124,10 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
     )
     window.location.href = phone ? `sms:${phone}?body=${text}` : `sms:?body=${text}`
   }
+
+  // §2: GST breakdown — CGST = SGST = gstAmount / 2
+  const cgstAmount = invoice.gstAmount / 2
+  const sgstAmount = invoice.gstAmount / 2
 
   return (
     <motion.div
@@ -175,8 +233,8 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           </table>
         </div>
 
-        {/* Totals */}
-        <div className="px-5 py-4 border-t border-border bg-muted/30 space-y-1.5 text-sm">
+        {/* Totals — §2: Premium thermal-receipt feel with dashed dividers */}
+        <div className="px-5 py-4 border-t-2 border-dashed border-gray-400 bg-muted/30 space-y-1.5 text-sm">
           <div className="flex justify-between">
             <span className="text-muted-foreground">{t('bill.subtotal')}</span>
             <span className="tabular">{formatCurrency(invoice.subtotal, currency)}</span>
@@ -188,22 +246,30 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
             </div>
           )}
           {invoice.gstAmount > 0 && (
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">{t('bill.gst')}</span>
-              <span className="tabular">{formatCurrency(invoice.gstAmount, currency)}</span>
-            </div>
+            <>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">CGST</span>
+                <span className="tabular">{formatCurrency(cgstAmount, currency)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">SGST</span>
+                <span className="tabular">{formatCurrency(sgstAmount, currency)}</span>
+              </div>
+            </>
           )}
-          <div className="flex justify-between pt-2 border-t border-border">
+          <div className="flex justify-between pt-2 border-t border-dashed border-gray-300">
             <span className="font-bold">{t('bill.grandTotal')}</span>
             <span className="font-bold tabular text-primary text-lg">{formatCurrency(invoice.grandTotal, currency)}</span>
           </div>
+          {/* §2: Payment Mode label */}
           <div className="flex justify-between pt-1">
-            <span className="text-muted-foreground">Paid</span>
+            <span className="text-muted-foreground">Paid {invoice.paymentMode ? `via ${invoice.paymentMode.toUpperCase()}` : ''}</span>
             <span className="tabular text-emerald-600">{formatCurrency(invoice.amountPaid, currency)}</span>
           </div>
+          {/* §2: Due row in red — explicitly below Paid */}
           {invoice.amountDue > 0 && (
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Balance Due</span>
+              <span className="font-bold text-red-600">Due</span>
               <span className="tabular font-bold text-red-600">{formatCurrency(invoice.amountDue, currency)}</span>
             </div>
           )}
@@ -218,14 +284,14 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
         </div>
       </div>
 
-      {/* §3: Sticky bottom action footer — 1-click access */}
+      {/* §3: Sticky bottom action footer — image-based sharing */}
       <div className="sticky bottom-0 z-20 bg-card border-t border-border p-3 action-buttons shadow-lg">
         <div className="grid grid-cols-4 gap-2 max-w-2xl mx-auto">
-          <Button variant="outline" onClick={handleWhatsAppShare} className="h-11 flex-col gap-0.5 text-emerald-600 border-emerald-300 dark:border-emerald-800">
+          <Button variant="outline" onClick={handleWhatsAppShare} disabled={capturing} className="h-11 flex-col gap-0.5 text-emerald-600 border-emerald-300 dark:border-emerald-800">
             <MessageCircle className="w-4 h-4" />
-            <span className="text-[9px]">WhatsApp</span>
+            <span className="text-[9px]">{capturing ? 'Capturing…' : 'WhatsApp'}</span>
           </Button>
-          <Button variant="outline" onClick={handleSMSShare} className="h-11 flex-col gap-0.5">
+          <Button variant="outline" onClick={handleShare} disabled={capturing} className="h-11 flex-col gap-0.5">
             <Share2 className="w-4 h-4" />
             <span className="text-[9px]">Share</span>
           </Button>
@@ -233,9 +299,9 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
             <Printer className="w-4 h-4" />
             <span className="text-[9px]">Print</span>
           </Button>
-          <Button variant="outline" onClick={handlePrint} className="h-11 flex-col gap-0.5">
+          <Button variant="outline" onClick={handleDownloadImage} disabled={capturing} className="h-11 flex-col gap-0.5">
             <Download className="w-4 h-4" />
-            <span className="text-[9px]">PDF</span>
+            <span className="text-[9px]">{capturing ? '…' : 'Image'}</span>
           </Button>
         </div>
       </div>
