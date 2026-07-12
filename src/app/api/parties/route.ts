@@ -24,28 +24,9 @@ export async function GET(req: NextRequest) {
     ]
   }
 
-  const select = {
-    id: true,
-    name: true,
-    phone: true,
-    type: true,
-    balance: true,
-    qualityGrade: true,
-    creditLimit: true,
-    openingBalance: true,
-    address: true,
-    gstin: true,
-    avgPaymentDays: true,
-    avgDiscountPct: true,
-    creditTrustScore: true,
-    createdAt: true,
-    updatedAt: true,
-  }
-
   const [parties, totalCount] = await Promise.all([
     db.party.findMany({
       where,
-      select,
       orderBy: { updatedAt: 'desc' },
       take: limit,
       skip: offset,

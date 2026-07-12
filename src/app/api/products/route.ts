@@ -14,12 +14,8 @@ export async function GET(req: NextRequest) {
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ items: [], total: 0, hasMore: false })
 
-  // Build optimized where clause — push filtering to DB instead of app-level
+  // Build optimized where clause
   const where: any = { businessId: business.id }
-  if (lowStock) {
-    // Use raw comparison — Prisma doesn't support field-to-field comparison in where
-    // So we fetch with a small overhead but limit fields
-  }
   if (q && !usePhonetic) {
     where.OR = [
       { name: { contains: q, mode: 'insensitive' } },
@@ -27,36 +23,9 @@ export async function GET(req: NextRequest) {
     ]
   }
 
-  // Select only needed fields — drastically reduce payload
-  const select = {
-    id: true,
-    name: true,
-    sku: true,
-    category: true,
-    subCategory: true,
-    unit: true,
-    purchasePrice: true,
-    salePrice: true,
-    mrp: true,
-    wholesalePrice: true,
-    gstRate: true,
-    stock: true,
-    lowStockThreshold: true,
-    retailEnabled: true,
-    retailUnit: true,
-    retailSalePrice: true,
-    retailMrp: true,
-    looseStock: true,
-    conversionFactor: true,
-    isPublished: true,
-    categoryPath: true,
-    description: true,
-  }
-
   const [products, totalCount] = await Promise.all([
     db.product.findMany({
       where,
-      select,
       orderBy: { updatedAt: 'desc' },
       take: limit,
       skip: offset,
