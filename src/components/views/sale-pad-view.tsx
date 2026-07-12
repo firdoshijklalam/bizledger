@@ -352,10 +352,14 @@ export function SalePadView() {
   const roundedTotal = Math.round(grandTotal)
   const roundOffAmount = roundedTotal - grandTotal
 
-  // §2: Auto-discount from MRP vs Sale Price (per item, shown in cart)
+  // §3 FIX: Auto-discount from MRP vs Sale Price — STRICT state isolation.
+  // Retail mode: ONLY use retailMrp. Bulk mrp is explicitly nulled/ignored.
+  // Full/Wholesale mode: ONLY use bulk mrp. Retail mrp is nulled/ignored.
   const autoDiscountTotal = cart.reduce((s, i) => {
-    if (i.mrp > 0 && i.mrp > i.price) {
-      return s + (i.mrp - i.price) * i.quantity
+    // §3: Mode-specific MRP — no cross-contamination
+    const effectiveMrp = mode === 'retail' ? i.retailMrp : i.mrp
+    if (effectiveMrp > 0 && effectiveMrp > i.price) {
+      return s + (effectiveMrp - i.price) * i.quantity
     }
     return s
   }, 0)
@@ -1040,28 +1044,11 @@ export function SalePadView() {
             <div className="space-y-2 max-h-64 overflow-y-auto scroll-area">
               {cart.map((item) => (
                 <div key={item.cartKey} className="p-2.5 rounded-xl bg-muted/40 border border-border/50">
-                  {/* Row 1 — product name + MRP strikethrough + trash icon */}
+                  {/* Row 1 — product name ONLY (no price strings) + trash icon */}
                   <div className="flex items-center gap-2 mb-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate">
-                        {item.name}
-                        {/* §1: MRP strikethrough next to sale price — strict mapping */}
-                        {(() => {
-                          const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
-                          if (effectiveMrp > 0 && effectiveMrp > item.price) {
-                            return (
-                              <>
-                                {' '}
-                                <del className="text-[10px] text-muted-foreground/60 font-normal">MRP ₹{effectiveMrp}</del>
-                                {' '}
-                                <b className="text-[10px] text-primary font-semibold">₹{item.price}</b>
-                              </>
-                            )
-                          }
-                          return null
-                        })()}
-                      </p>
-                      {/* Per-unit savings text */}
+                      <p className="text-sm font-semibold truncate">{item.name}</p>
+                      {/* Per-unit savings text (no MRP shown here — moved to Total column) */}
                       {(() => {
                         const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
                         if (effectiveMrp > 0 && effectiveMrp > item.price) {
@@ -1086,7 +1073,7 @@ export function SalePadView() {
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  {/* §2: Professional POS row — 3 distinct columns with grey sub-labels */}
+                  {/* 3-column POS row */}
                   <div className="grid grid-cols-3 gap-2 items-end">
                     {/* Column 1: প্রতি কেজি দর (base rate) */}
                     <div className="space-y-0.5">
@@ -1123,63 +1110,79 @@ export function SalePadView() {
                         </button>
                       </div>
                     </div>
-                    {/* Column 3: মোট দাম (final sum, bold) */}
+                    {/* Column 3: মোট দাম — §1: MRP strikethrough MOVED here */}
                     <div className="space-y-0.5">
                       <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block text-right">মোট দাম</label>
-                      <div className="flex items-baseline gap-0.5 justify-end">
-                        <span className="text-[10px] text-muted-foreground">₹</span>
-                        <input
-                          value={item.total}
-                          onChange={(e) => setManualTotal(item.cartKey, Number(e.target.value) || 0)}
-                          onDoubleClick={() => resetManualTotal(item.cartKey)}
-                          className="w-full text-right text-sm font-bold tabular bg-transparent border-0 border-b border-amber-400/40 focus:border-amber-500 outline-none px-0 py-0.5 leading-tight"
-                          inputMode="numeric"
-                          title="মোট দাম (ডাবল-ক্লিকে রিসেট)"
-                        />
+                      <div className="flex flex-col items-end">
+                        {/* §1: Strikethrough MRP above total — strict retail/bulk mapping */}
+                        {(() => {
+                          const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
+                          if (effectiveMrp > 0 && effectiveMrp > item.price) {
+                            const mrpTotal = effectiveMrp * item.quantity
+                            return (
+                              <del className="text-[9px] text-muted-foreground/50 tabular leading-none">
+                                MRP ₹{mrpTotal.toFixed(0)}
+                              </del>
+                            )
+                          }
+                          return null
+                        })()}
+                        <div className="flex items-baseline gap-0.5 justify-end">
+                          <span className="text-[10px] text-muted-foreground">₹</span>
+                          <input
+                            value={item.total}
+                            onChange={(e) => setManualTotal(item.cartKey, Number(e.target.value) || 0)}
+                            onDoubleClick={() => resetManualTotal(item.cartKey)}
+                            className="w-full text-right text-sm font-bold tabular bg-transparent border-0 border-b border-amber-400/40 focus:border-amber-500 outline-none px-0 py-0.5 leading-tight"
+                            inputMode="numeric"
+                            title="মোট দাম (ডাবল-ক্লিকে রিসেট)"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
-                  {/* §2: Per-item GST toggle + auto-discount from MRP */}
+                  {/* §2: Sleek Tax Chip + auto-discount (minimalist pill design) */}
                   <div className="flex items-center justify-between mt-1.5 text-[10px] gap-2">
-                    {/* §2: Inline GST switch per cart item */}
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => toggleItemGst(item.cartKey)}
-                        className={`relative w-8 h-4 rounded-full transition-colors ${item.itemGstEnabled ? 'bg-blue-500' : 'bg-muted'}`}
-                        aria-label="Toggle item GST"
-                      >
-                        <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${item.itemGstEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                      </button>
+                    {/* §2: Tax Chip — outlined rounded pill */}
+                    <button
+                      onClick={() => toggleItemGst(item.cartKey)}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[9px] font-medium transition-all ${
+                        item.itemGstEnabled
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600'
+                          : 'border-border bg-card text-muted-foreground hover:border-blue-400'
+                      }`}
+                    >
                       {item.itemGstEnabled ? (
-                        <div className="flex items-center gap-0.5">
+                        <>
                           <input
                             type="number"
                             value={item.itemGstRate}
                             onChange={(e) => setItemGstRate(item.cartKey, Number(e.target.value) || 0)}
-                            className="w-8 h-5 text-[10px] text-center bg-transparent border-0 border-b border-blue-400 focus:border-blue-500 outline-none tabular"
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-6 h-4 text-[9px] text-center bg-transparent border-0 outline-none tabular p-0"
                             inputMode="numeric"
                           />
-                          <span className="text-blue-600 font-medium">% GST</span>
-                          <span className="text-blue-600 tabular ml-1">+₹{(item.total * item.itemGstRate / 100).toFixed(2)}</span>
-                        </div>
-                      ) : masterGstOn ? (
-                        <span className={item.gstRate > 0 ? 'text-blue-600 font-medium' : 'text-muted-foreground/60'}>
-                          {item.gstRate > 0 ? `${item.gstRate}% GST` : 'No GST'}
-                        </span>
+                          <span>% GST</span>
+                          <span className="tabular">+₹{(item.total * item.itemGstRate / 100).toFixed(2)}</span>
+                        </>
                       ) : (
-                        <span className="text-muted-foreground/60">GST বন্ধ</span>
+                        <>
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>Add GST</span>
+                          {masterGstOn && item.gstRate > 0 && (
+                            <span className="text-blue-500 ml-0.5">({item.gstRate}%)</span>
+                          )}
+                        </>
                       )}
-                    </div>
-                    {/* §3: Auto-discount: MRP vs Sale Price difference.
-                        STRICT MRP isolation: Retail tab uses retail_mrp ONLY.
-                        If retail_mrp is null/0, render nothing. Never show bulk_mrp. */}
+                    </button>
+                    {/* §3: Auto-discount — strict retail/bulk MRP isolation */}
                     {(() => {
-                      // §3: In retail mode, ONLY use retailMrp. No fallback.
+                      // §3 FIX: In retail mode, ONLY use retailMrp. Bulk mrp is nulled.
                       const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
                       if (effectiveMrp > 0 && effectiveMrp > item.price) {
                         return (
                           <span className="text-emerald-600 font-medium">
-                            ছাড় ₹{((effectiveMrp - item.price) * item.quantity).toFixed(2)} (MRP ₹{effectiveMrp})
+                            ছাড় ₹{((effectiveMrp - item.price) * item.quantity).toFixed(2)}
                           </span>
                         )
                       }
