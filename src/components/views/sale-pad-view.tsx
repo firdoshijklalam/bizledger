@@ -35,10 +35,12 @@ interface CartItem {
   total: number
   manualOverride: boolean
   gstRate: number // product-level GST rate (0, 5, 12, 18, 28)
-  mrp: number // MRP from inventory for auto-discount calculation
-  retailMrp: number // retail per-unit MRP for per-unit discount display
-  itemGstEnabled: boolean // §2: per-item GST toggle
+  mrp: number // bulk MRP from inventory
+  retailMrp: number // retail per-unit MRP
+  itemGstEnabled: boolean // §2: per-item GST toggle (ON)
   itemGstRate: number // §2: per-item custom GST %
+  itemGstManuallyDisabled: boolean // §2: user explicitly turned GST OFF for this item
+  itemMode: SaleMode // §1: mode locked at cart-item creation time — prevents MRP leakage
 }
 
 type PaymentMode = 'cash' | 'upi' | 'credit' | 'cheque'
@@ -212,6 +214,8 @@ export function SalePadView() {
         retailMrp: (p as any).retailMrp || 0,
         itemGstEnabled: false,
         itemGstRate: 0,
+        itemGstManuallyDisabled: false,
+        itemMode: mode, // §1: lock mode at creation — prevents MRP leakage on re-render
       }])
     }
   }
@@ -314,12 +318,19 @@ export function SalePadView() {
   }
 
   // §2: Per-item GST toggle + custom rate
+  // When user toggles OFF, set itemGstManuallyDisabled = true to override Global Master GST
   const toggleItemGst = (cartKey: string) => {
-    setCart(cart.map((i) =>
-      i.cartKey === cartKey
-        ? { ...i, itemGstEnabled: !i.itemGstEnabled, itemGstRate: !i.itemGstEnabled ? (i.gstRate || 5) : 0 }
-        : i
-    ))
+    setCart(cart.map((i) => {
+      if (i.cartKey !== cartKey) return i
+      const newEnabled = !i.itemGstEnabled
+      return {
+        ...i,
+        itemGstEnabled: newEnabled,
+        itemGstRate: newEnabled ? (i.gstRate || 5) : 0,
+        // §2: If user explicitly turns OFF, mark as manually disabled — overrides Global Master
+        itemGstManuallyDisabled: !newEnabled && i.itemGstEnabled ? true : (newEnabled ? false : i.itemGstManuallyDisabled),
+      }
+    }))
   }
   const setItemGstRate = (cartKey: string, rate: number) => {
     setCart(cart.map((i) =>
@@ -331,21 +342,31 @@ export function SalePadView() {
   // (Subtotal + Applied GST) → Then apply [Discount Box] → Final Grand Total
   const subtotal = cart.reduce((s, i) => s + i.total, 0)
 
-  // §3: Master GST toggle — if ON, apply product-level GSTs (or global override).
-  // If OFF, bypass all GST (gstAmount = 0).
-  // §2: Per-item GST override takes precedence when itemGstEnabled is true.
+  // §2+§3: GST calculation with strict precedence hierarchy:
+  // 1. If item.itemGstEnabled → use item.itemGstRate (user turned ON custom GST)
+  // 2. If item.itemGstManuallyDisabled → SKIP this item entirely (user turned OFF, overrides Global)
+  // 3. If masterGstOn && globalGstNum > 0 → apply global rate to remaining items
+  // 4. If masterGstOn → apply product gstRate to remaining items
+  // 5. If !masterGstOn → 0 GST
   const globalGstNum = Number(globalGstRate) || 0
-  const productGstAmount = masterGstOn
+  const productGstAmount = cart.reduce((s, i) => {
+    // §2: Item-level OFF overrides Global Master — skip this item
+    if (i.itemGstManuallyDisabled) return s
+    // §2: Item-level ON with custom rate — use that rate
+    if (i.itemGstEnabled) return s + (i.total * i.itemGstRate) / 100
+    // §3: Global Master controls remaining items
+    if (!masterGstOn) return s
+    if (globalGstNum > 0) return s + (i.total * globalGstNum) / 100
+    return s + (i.total * (i.gstRate || 0)) / 100
+  }, 0)
+  // When global override is set, recalculate using the precedence logic above
+  const gstAmount = globalGstNum > 0
     ? cart.reduce((s, i) => {
-        // §2: If item-level GST is enabled, use itemGstRate; otherwise use product gstRate
-        const effectiveRate = i.itemGstEnabled ? i.itemGstRate : (i.gstRate || 0)
-        return s + (i.total * effectiveRate) / 100
+        if (i.itemGstManuallyDisabled) return s
+        if (i.itemGstEnabled) return s + (i.total * i.itemGstRate) / 100
+        if (!masterGstOn) return s
+        return s + (i.total * globalGstNum) / 100
       }, 0)
-    : 0
-  const gstAmount = !masterGstOn
-    ? 0
-    : globalGstNum > 0
-    ? (subtotal * globalGstNum) / 100
     : productGstAmount
   // Step 1: Subtotal + GST
   const subtotalWithGst = subtotal + gstAmount
@@ -365,8 +386,9 @@ export function SalePadView() {
   // Retail mode: ONLY use retailMrp. Bulk mrp is explicitly nulled/ignored.
   // Full/Wholesale mode: ONLY use bulk mrp. Retail mrp is nulled/ignored.
   const autoDiscountTotal = cart.reduce((s, i) => {
-    // §3: Mode-specific MRP — no cross-contamination
-    const effectiveMrp = mode === 'retail' ? i.retailMrp : i.mrp
+    // §1 FIX: Use item.itemMode (locked at creation) — NOT global mode
+    // Prevents MRP leakage when 2nd item is added
+    const effectiveMrp = i.itemMode === 'retail' ? i.retailMrp : i.mrp
     if (effectiveMrp > 0 && effectiveMrp > i.price) {
       return s + (effectiveMrp - i.price) * i.quantity
     }
@@ -1059,7 +1081,7 @@ export function SalePadView() {
                       <p className="text-sm font-semibold truncate">{item.name}</p>
                       {/* Per-unit savings text (no MRP shown here — moved to Total column) */}
                       {(() => {
-                        const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
+                        const effectiveMrp = item.itemMode === 'retail' ? item.retailMrp : item.mrp
                         if (effectiveMrp > 0 && effectiveMrp > item.price) {
                           const savings = effectiveMrp - item.price
                           return (
@@ -1125,7 +1147,7 @@ export function SalePadView() {
                       <div className="flex flex-col items-end">
                         {/* §1: Strikethrough MRP above total — strict retail/bulk mapping */}
                         {(() => {
-                          const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
+                          const effectiveMrp = item.itemMode === 'retail' ? item.retailMrp : item.mrp
                           if (effectiveMrp > 0 && effectiveMrp > item.price) {
                             const mrpTotal = effectiveMrp * item.quantity
                             return (
@@ -1174,6 +1196,10 @@ export function SalePadView() {
                           <span>% GST</span>
                           <span className="tabular">+₹{(item.total * item.itemGstRate / 100).toFixed(2)}</span>
                         </>
+                      ) : item.itemGstManuallyDisabled ? (
+                        <>
+                          <span className="text-red-500">GST OFF</span>
+                        </>
                       ) : (
                         <>
                           <Plus className="w-2.5 h-2.5" />
@@ -1187,7 +1213,7 @@ export function SalePadView() {
                     {/* §3: Auto-discount — strict retail/bulk MRP isolation */}
                     {(() => {
                       // §3 FIX: In retail mode, ONLY use retailMrp. Bulk mrp is nulled.
-                      const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
+                      const effectiveMrp = item.itemMode === 'retail' ? item.retailMrp : item.mrp
                       if (effectiveMrp > 0 && effectiveMrp > item.price) {
                         return (
                           <span className="text-emerald-600 font-medium">
