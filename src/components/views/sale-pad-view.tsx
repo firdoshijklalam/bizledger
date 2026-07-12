@@ -87,14 +87,6 @@ export function SalePadView() {
   // §2: Animated credit gate — slide-in customer prompt above footer
   const [showCreditGate, setShowCreditGate] = useState(false)
 
-  // §2: Reactive dismissal — auto-hide red warning when customer is selected
-  useEffect(() => {
-    if (customer && showCreditGate) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setShowCreditGate(false)
-    }
-  }, [customer, showCreditGate])
-
   // §4: Discount with % / ₹ toggle + live Grand Total
   const [discountMode, setDiscountMode] = useState<'flat' | 'percent'>('flat')
   const [discountValue, setDiscountValue] = useState('')
@@ -113,6 +105,15 @@ export function SalePadView() {
   const cart = activeCart.items
   const customer = activeCart.customer
   const paymentMode = activeCart.paymentMode
+
+  // §2: Reactive dismissal — auto-hide red warning when customer is selected
+  // Placed AFTER customer is defined to avoid TDZ issues
+  useEffect(() => {
+    if (customer && showCreditGate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShowCreditGate(false)
+    }
+  }, [customer, showCreditGate])
 
   const setCart = (items: CartItem[]) => updateActiveCart((c) => ({ ...c, items }))
   const setCustomer = (p: Party | null) => updateActiveCart((c) => ({ ...c, customer: p }))
