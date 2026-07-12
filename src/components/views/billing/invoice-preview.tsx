@@ -129,6 +129,54 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   const cgstAmount = invoice.gstAmount / 2
   const sgstAmount = invoice.gstAmount / 2
 
+  // §1: Total Quantity (sum of all item quantities)
+  const totalQty = invoice.items?.reduce((s, it) => s + Number(it.quantity), 0) || 0
+
+  // §2: Amount in Words
+  function numberToWords(num: number): string {
+    if (num === 0) return 'Zero'
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
+    function two(n: number): string {
+      if (n < 20) return ones[n]
+      return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '')
+    }
+    function three(n: number): string {
+      const h = Math.floor(n / 100), r = n % 100
+      let s = ''
+      if (h > 0) s += ones[h] + ' Hundred'
+      if (r > 0) s += (h > 0 ? ' ' : '') + two(r)
+      return s
+    }
+    let n = Math.floor(num), w = ''
+    const cr = Math.floor(n / 10000000); n %= 10000000
+    const lk = Math.floor(n / 100000); n %= 100000
+    const th = Math.floor(n / 1000); n %= 1000
+    const rem = n
+    if (cr > 0) w += three(cr) + ' Crore '
+    if (lk > 0) w += three(lk) + ' Lakh '
+    if (th > 0) w += three(th) + ' Thousand '
+    if (rem > 0) w += three(rem)
+    return w.trim()
+  }
+  const amountInWords = `Rupees ${numberToWords(Math.round(invoice.grandTotal))} Only`
+
+  // §3: MOP breakdown — parse from collectedByName/Role or paymentMode
+  const mopLabel = invoice.paymentMode ? invoice.paymentMode.toUpperCase() : 'CASH'
+
+  // §4: Cashier name
+  const cashierName = invoice.collectedByName || business?.ownerName || 'Staff'
+
+  // §5: GST Summary — group by GST rate
+  const gstGroups: Record<number, { taxable: number; cgst: number; sgst: number }> = {}
+  invoice.items?.forEach((it: any) => {
+    const rate = Number(it.gstRate) || 0
+    if (!gstGroups[rate]) gstGroups[rate] = { taxable: 0, cgst: 0, sgst: 0 }
+    gstGroups[rate].taxable += it.total
+    gstGroups[rate].cgst += (it.total * rate) / 200
+    gstGroups[rate].sgst += (it.total * rate) / 200
+  })
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 20 }}
@@ -207,11 +255,12 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           )}
         </div>
 
-        {/* Items table */}
+        {/* Items table — §1: S.No column added */}
         <div className="px-5 py-3">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-[10px] uppercase text-muted-foreground border-b border-border">
+                <th className="text-center py-2 font-medium w-8">S.No</th>
                 <th className="text-left py-2 font-medium">Item</th>
                 <th className="text-center py-2 font-medium">HSN</th>
                 <th className="text-right py-2 font-medium">Qty</th>
@@ -222,6 +271,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
             <tbody>
               {invoice.items?.map((it, i) => (
                 <tr key={it.id} className={i % 2 === 1 ? 'bg-muted/40' : ''}>
+                  <td className="py-2.5 text-center text-[11px] text-muted-foreground tabular">{i + 1}</td>
                   <td className="py-2.5 text-left">{it.name}</td>
                   <td className="py-2.5 text-center text-[11px] text-muted-foreground tabular">{(it as any).hsnCode || (it as any).hsn || '—'}</td>
                   <td className="py-2.5 text-right tabular">{it.quantity}</td>
@@ -230,6 +280,14 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
                 </tr>
               ))}
             </tbody>
+            {/* §1: Total Qty row */}
+            <tfoot>
+              <tr className="border-t border-border">
+                <td colSpan={3} className="py-2 text-right text-[11px] text-muted-foreground font-medium">Total Qty:</td>
+                <td className="py-2 text-right text-[11px] font-bold tabular">{totalQty}</td>
+                <td colSpan={2}></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
 
@@ -273,7 +331,66 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
               <span className="tabular font-bold text-red-600">{formatCurrency(invoice.amountDue, currency)}</span>
             </div>
           )}
+          {/* §2: Amount in Words */}
+          <p className="text-[10px] italic text-muted-foreground pt-1 border-t border-dashed border-gray-200">
+            {amountInWords}
+          </p>
         </div>
+
+        {/* §3: Mode of Payment (MOP) Breakdown */}
+        <div className="px-5 py-3 border-t border-border bg-muted/20">
+          <p className="text-[10px] uppercase text-muted-foreground font-medium mb-1.5">Mode of Payment</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">{mopLabel}:</span>
+              <span className="tabular font-medium">{formatCurrency(invoice.amountPaid, currency)}</span>
+            </div>
+            {invoice.amountDue > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Credit:</span>
+                <span className="tabular font-medium text-red-600">{formatCurrency(invoice.amountDue, currency)}</span>
+              </div>
+            )}
+          </div>
+          {/* §4: Cashier/Biller Identification */}
+          <p className="text-[10px] text-muted-foreground mt-2">
+            Billed By: <span className="font-medium text-foreground">{cashierName}</span>
+          </p>
+        </div>
+
+        {/* §5: GST Summary Table — grouped by rate */}
+        {invoice.gstAmount > 0 && Object.keys(gstGroups).length > 0 && (
+          <div className="px-5 py-3 border-t border-border">
+            <p className="text-[10px] uppercase text-muted-foreground font-medium mb-2">GST Summary</p>
+            <table className="w-full text-[10px]">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className="text-left py-1 font-medium">Description</th>
+                  <th className="text-right py-1 font-medium">Taxable</th>
+                  <th className="text-right py-1 font-medium">CGST</th>
+                  <th className="text-right py-1 font-medium">SGST</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(gstGroups).map(([rate, data]) => (
+                  <tr key={rate} className="border-b border-border/50">
+                    <td className="py-1 text-left">GST {rate}%</td>
+                    <td className="py-1 text-right tabular">{formatCurrency(data.taxable, currency)}</td>
+                    <td className="py-1 text-right tabular">{formatCurrency(data.cgst, currency)}</td>
+                    <td className="py-1 text-right tabular">{formatCurrency(data.sgst, currency)}</td>
+                  </tr>
+                ))}
+                {/* Total row */}
+                <tr className="font-bold">
+                  <td className="py-1 text-left">Total</td>
+                  <td className="py-1 text-right tabular">{formatCurrency(invoice.subtotal, currency)}</td>
+                  <td className="py-1 text-right tabular">{formatCurrency(cgstAmount, currency)}</td>
+                  <td className="py-1 text-right tabular">{formatCurrency(sgstAmount, currency)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="px-5 py-4 text-center border-t border-border">
