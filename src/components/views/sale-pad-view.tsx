@@ -340,94 +340,63 @@ export function SalePadView() {
     ))
   }
 
-  // §3: Calculation Pipeline Sequence:
-  // (Subtotal + Applied GST) → Then apply [Discount Box] → Final Grand Total
-  const subtotal = cart.reduce((s, i) => s + i.total, 0)
+  // §3: Calculation Pipeline — ALL wrapped in useMemo for performance
+  // Prevents expensive re-calculations on every keystroke/render cycle
+  const subtotal = useMemo(() => cart.reduce((s, i) => s + i.total, 0), [cart])
 
-  // §2+§3: GST calculation with strict precedence hierarchy:
-  // 1. If item.itemGstEnabled → use item.itemGstRate (user turned ON custom GST)
-  // 2. If item.itemGstManuallyDisabled → SKIP this item entirely (user turned OFF, overrides Global)
-  // 3. If masterGstOn && globalGstNum > 0 → apply global rate to remaining items
-  // 4. If masterGstOn → apply product gstRate to remaining items
-  // 5. If !masterGstOn → 0 GST
   const globalGstNum = Number(globalGstRate) || 0
-  const productGstAmount = cart.reduce((s, i) => {
-    // §2: Item-level OFF overrides Global Master — skip this item
-    if (i.itemGstManuallyDisabled) return s
-    // §2: Item-level ON with custom rate — use that rate
-    if (i.itemGstEnabled) return s + (i.total * i.itemGstRate) / 100
-    // §3: Global Master controls remaining items
-    if (!masterGstOn) return s
-    if (globalGstNum > 0) return s + (i.total * globalGstNum) / 100
-    return s + (i.total * (i.gstRate || 0)) / 100
-  }, 0)
-  // When global override is set, recalculate using the precedence logic above
-  const gstAmount = globalGstNum > 0
-    ? cart.reduce((s, i) => {
+  const gstAmount = useMemo(() => {
+    if (globalGstNum > 0) {
+      return cart.reduce((s, i) => {
         if (i.itemGstManuallyDisabled) return s
         if (i.itemGstEnabled) return s + (i.total * i.itemGstRate) / 100
         if (!masterGstOn) return s
         return s + (i.total * globalGstNum) / 100
       }, 0)
-    : productGstAmount
-  // Step 1: Subtotal + GST
-  const subtotalWithGst = subtotal + gstAmount
-
-  // Step 2: Apply discount on (subtotal + GST)
-  const discountNum = Number(discountValue) || 0
-  const discountAmount = discountMode === 'percent'
-    ? (subtotalWithGst * discountNum) / 100
-    : Math.min(discountNum, subtotalWithGst)
-  const grandTotal = Math.max(0, subtotalWithGst - discountAmount)
-
-  // §1: Auto Round-Off — Math.round() on final amount after GST & Discount
-  const preDeliveryTotal = Math.round(grandTotal)
-  const roundOffAmount = preDeliveryTotal - grandTotal
-
-  // §1: Delivery Charge — added AFTER round off, before final Actual Price
-  // Formula: (Subtotal + GST - Discount + RoundOff) + DeliveryCharge = Actual Price
-  const deliveryChargeNum = Number(deliveryCharge) || 0
-  const roundedTotal = preDeliveryTotal + deliveryChargeNum
-
-  // §3 FIX: Auto-discount from MRP vs Sale Price — STRICT state isolation.
-  // Retail mode: ONLY use retailMrp. Bulk mrp is explicitly nulled/ignored.
-  // Full/Wholesale mode: ONLY use bulk mrp. Retail mrp is nulled/ignored.
-  const autoDiscountTotal = cart.reduce((s, i) => {
-    // §1 FIX: Use item.itemMode (locked at creation) — NOT global mode
-    // Prevents MRP leakage when 2nd item is added
-    const effectiveMrp = i.itemMode === 'retail' ? i.retailMrp : i.mrp
-    if (effectiveMrp > 0 && effectiveMrp > i.price) {
-      return s + (effectiveMrp - i.price) * i.quantity
     }
+    return cart.reduce((s, i) => {
+      if (i.itemGstManuallyDisabled) return s
+      if (i.itemGstEnabled) return s + (i.total * i.itemGstRate) / 100
+      if (!masterGstOn) return s
+      return s + (i.total * (i.gstRate || 0)) / 100
+    }, 0)
+  }, [cart, globalGstNum, masterGstOn])
+
+  const subtotalWithGst = useMemo(() => subtotal + gstAmount, [subtotal, gstAmount])
+
+  const discountNum = Number(discountValue) || 0
+  const discountAmount = useMemo(() => discountMode === 'percent'
+    ? (subtotalWithGst * discountNum) / 100
+    : Math.min(discountNum, subtotalWithGst), [subtotalWithGst, discountNum, discountMode])
+
+  const grandTotal = useMemo(() => Math.max(0, subtotalWithGst - discountAmount), [subtotalWithGst, discountAmount])
+
+  const preDeliveryTotal = useMemo(() => Math.round(grandTotal), [grandTotal])
+  const roundOffAmount = useMemo(() => preDeliveryTotal - grandTotal, [preDeliveryTotal, grandTotal])
+
+  const deliveryChargeNum = Number(deliveryCharge) || 0
+  const roundedTotal = useMemo(() => preDeliveryTotal + deliveryChargeNum, [preDeliveryTotal, deliveryChargeNum])
+
+  const autoDiscountTotal = useMemo(() => cart.reduce((s, i) => {
+    const effectiveMrp = i.itemMode === 'retail' ? i.retailMrp : i.mrp
+    if (effectiveMrp > 0 && effectiveMrp > i.price) return s + (effectiveMrp - i.price) * i.quantity
     return s
-  }, 0)
+  }, 0), [cart])
 
-  // Cash exchange calculator
-  const cashReceivedNum = Number(cashReceived) || 0
-  const changeDue = Math.max(0, cashReceivedNum - roundedTotal)
-
-  // §1: Multi-mode split payment — ONLY Cash + UPI (Credit input removed)
   const splitCashNum = Number(splitCash) || 0
   const splitUpiNum = Number(splitUpi) || 0
   const upiQrAmount = splitUpiNum > 0 ? splitUpiNum : 0
-  // §2: Total paid = Cash + UPI only (no credit input)
   const totalSplitPaid = splitCashNum + splitUpiNum
-  // §2: Ledger Due = Actual Price - Total Input (when input < bill)
-  const ledgerDue = Math.max(0, roundedTotal - totalSplitPaid)
-  // §3: Overpaid = Total Input - Actual Price (when input > bill → exchange calculator)
-  const overpaid = Math.max(0, totalSplitPaid - roundedTotal)
+  const ledgerDue = useMemo(() => Math.max(0, roundedTotal - totalSplitPaid), [roundedTotal, totalSplitPaid])
+  const overpaid = useMemo(() => Math.max(0, totalSplitPaid - roundedTotal), [totalSplitPaid, roundedTotal])
   const hasSplitPayment = splitCashNum > 0 || splitUpiNum > 0
-
-  // §2: Credit Gate — if total paid < actual price, show "Add to Ledger" button
   const needsCredit = hasSplitPayment && ledgerDue > 0
-
-  // §3: Exchange Calculator — ONLY relevant when Total Input > Actual Price
-  const totalPaidForExchange = splitCashNum + splitUpiNum
-  const exchangeDifference = totalPaidForExchange - roundedTotal
+  const totalPaidForExchange = totalSplitPaid
+  const exchangeDifference = useMemo(() => totalPaidForExchange - roundedTotal, [totalPaidForExchange, roundedTotal])
   const isShortAmount = totalPaidForExchange < roundedTotal && totalPaidForExchange > 0
   const isChangeDue = totalPaidForExchange > roundedTotal
 
-  // §3: Dynamic UPI Intent QR Code Generation
+    // §3: Dynamic UPI Intent QR Code Generation
   // When PAYMENT MODE 'UPI' is clicked, generate a QR code embedding the UPI amount
   // into the UPI deep-link payload: upi://pay?pa=VPA&pn=MERCHANT&am=AMOUNT&cu=INR
   // §2: If split UPI amount is set, QR requests THAT amount. Otherwise full grand total.
