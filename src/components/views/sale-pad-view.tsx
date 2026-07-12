@@ -325,6 +325,10 @@ export function SalePadView() {
     : Math.min(discountNum, subtotalWithGst)
   const grandTotal = Math.max(0, subtotalWithGst - discountAmount)
 
+  // §1: Auto Round-Off — Math.round() on final amount after GST & Discount
+  const roundedTotal = Math.round(grandTotal)
+  const roundOffAmount = roundedTotal - grandTotal
+
   // §2: Auto-discount from MRP vs Sale Price (per item, shown in cart)
   const autoDiscountTotal = cart.reduce((s, i) => {
     if (i.mrp > 0 && i.mrp > i.price) {
@@ -335,24 +339,29 @@ export function SalePadView() {
 
   // Cash exchange calculator
   const cashReceivedNum = Number(cashReceived) || 0
-  const changeDue = Math.max(0, cashReceivedNum - grandTotal)
+  const changeDue = Math.max(0, cashReceivedNum - roundedTotal)
 
   // §1: Multi-mode split payment calculations
   const splitCashNum = Number(splitCash) || 0
   const splitUpiNum = Number(splitUpi) || 0
   const splitCreditNum = Number(splitCredit) || 0
-  // §1: UPI dynamic amount — if split UPI is set to a custom amount (>0), QR requests that amount.
-  // If UPI field is 0 or empty, upiQrAmount = 0 → QR block unmounts entirely (strict conditional).
   const upiQrAmount = splitUpiNum > 0 ? splitUpiNum : 0
-  // Total paid across all split modes
   const totalSplitPaid = splitCashNum + splitUpiNum + splitCreditNum
-  // §2: Credit ledger due = Grand Total - (cash + upi + credit entered).
-  // The remainder auto-routes to customer's debt ledger.
-  const ledgerDue = Math.max(0, grandTotal - totalSplitPaid)
-  // Overpaid (if total exceeds grand total — shows as change)
-  const overpaid = Math.max(0, totalSplitPaid - grandTotal)
-  // Check if any split field is active
+  // §2: Credit ledger due = roundedTotal - total paid
+  const ledgerDue = Math.max(0, roundedTotal - totalSplitPaid)
+  const overpaid = Math.max(0, totalSplitPaid - roundedTotal)
   const hasSplitPayment = splitCashNum > 0 || splitUpiNum > 0 || splitCreditNum > 0
+
+  // §2: Credit Gate — if total paid < actual price, show "Add to Ledger" button
+  const needsCredit = hasSplitPayment && ledgerDue > 0
+
+  // §4: Exchange Calculator contextual states
+  // Total cash received (from exchange input + split cash)
+  const exchangeInputNum = Number(cashReceived) || 0
+  const totalPaidForExchange = (exchangeInputNum > 0 ? exchangeInputNum : splitCashNum) + splitUpiNum
+  const exchangeDifference = totalPaidForExchange - roundedTotal
+  const isShortAmount = totalPaidForExchange < roundedTotal && totalPaidForExchange > 0
+  const isChangeDue = totalPaidForExchange > roundedTotal
 
   // §3: Dynamic UPI Intent QR Code Generation
   // When PAYMENT MODE 'UPI' is clicked, generate a QR code embedding the UPI amount
@@ -995,10 +1004,12 @@ export function SalePadView() {
                   <div className="flex items-center gap-2 mb-2">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold truncate">{item.name}</p>
-                      {/* §2: Per-unit discount savings text below product name.
-                          Retail price cloaking: if retailMrp is null/0, suppress entirely. */}
+                      {/* §3: Per-unit discount savings text below product name.
+                          STRICT MRP isolation: Retail tab binds to retail_mrp ONLY.
+                          Never fallback to bulk_mrp in Retail view. */}
                       {(() => {
-                        const effectiveMrp = mode === 'retail' ? item.retailMrp : (item.retailMrp > 0 ? item.retailMrp : item.mrp)
+                        // §3: In retail mode, ONLY use retailMrp. No fallback to bulk mrp.
+                        const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
                         if (effectiveMrp > 0 && effectiveMrp > item.price) {
                           const savings = effectiveMrp - item.price
                           return (
@@ -1084,12 +1095,11 @@ export function SalePadView() {
                     ) : (
                       <span className="text-muted-foreground/60">GST বন্ধ</span>
                     )}
-                    {/* §2: Auto-discount: MRP vs Sale Price difference.
-                        Retail price cloaking rule: if retailMrp is null/0, suppress
-                        the full-pack text string entirely. Never render bulk pack math
-                        inside loose unit rows. */}
+                    {/* §3: Auto-discount: MRP vs Sale Price difference.
+                        STRICT MRP isolation: Retail tab uses retail_mrp ONLY.
+                        If retail_mrp is null/0, render nothing. Never show bulk_mrp. */}
                     {(() => {
-                      // For retail mode, use retailMrp; for full/wholesale, use bulk mrp
+                      // §3: In retail mode, ONLY use retailMrp. No fallback.
                       const effectiveMrp = mode === 'retail' ? item.retailMrp : item.mrp
                       if (effectiveMrp > 0 && effectiveMrp > item.price) {
                         return (
@@ -1176,19 +1186,56 @@ export function SalePadView() {
                 </div>
               )}
 
-              {/* Row 5: Final Payable — [Actual Price] */}
+              {/* §1: Round Off — displayed right above Actual Price */}
+              {Math.abs(roundOffAmount) > 0.001 && (
+                <div className="flex justify-between text-xs text-muted-foreground px-1">
+                  <span>Round Off ({roundOffAmount > 0 ? '+' : '−'}₹{Math.abs(roundOffAmount).toFixed(2)})</span>
+                  <span className="tabular">{formatCurrency(roundOffAmount, currency)}</span>
+                </div>
+              )}
+
+              {/* Row 5: Final Payable — [Actual Price] (rounded) */}
               <div className="flex justify-between items-center pt-2 border-t border-border">
                 <span className="font-bold text-base">Actual Price</span>
                 <motion.span
-                  key={grandTotal.toFixed(2)}
+                  key={roundedTotal}
                   initial={{ scale: 1.05 }}
                   animate={{ scale: 1 }}
                   transition={{ duration: 0.15 }}
                   className="font-bold tabular text-primary text-xl"
                 >
-                  {formatCurrency(grandTotal, currency)}
+                  {formatCurrency(roundedTotal, currency)}
                 </motion.span>
               </div>
+
+              {/* §2: Credit Gate — "Add to Ledger" button when total paid < actual price */}
+              {needsCredit && (
+                <div className="mt-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-400/40">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                      খাতায় বাকি: ₹{ledgerDue.toFixed(2)}
+                    </span>
+                    <button
+                      onClick={() => {
+                        if (!customer) {
+                          // §2: Block transaction if no customer — force-trigger Add Customer modal
+                          toast.error('কাস্টমার নির্বাচন করুন!', { description: 'খাতায় যোগ করতে কাস্টমার প্রয়োজন' })
+                          setShowPartyForm(true)
+                          return
+                        }
+                        // Customer exists — proceed with credit
+                        toast.success('খাতায় যোগ হয়েছে', { description: `${customer.name} এর খাতায় ₹${ledgerDue.toFixed(2)}` })
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition-colors"
+                    >
+                      Add to Ledger
+                    </button>
+                  </div>
+                  {!customer && (
+                    <p className="text-[10px] text-amber-600">⚠ কাস্টমার নির্বাচন করা বাধ্যতামূলক</p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* §4: Payment Mode split matrix — underneath Actual Price */}
@@ -1317,8 +1364,7 @@ export function SalePadView() {
               )}
             </AnimatePresence>
 
-            {/* §3: Cash exchange calculator — real-time, no negative sign.
-                Shows whenever Cash or UPI fields are typed (intercepts partial inputs). */}
+            {/* §4: Exchange Calculator — contextual states (orange short / green change due) */}
             <AnimatePresence>
               {(splitCashNum > 0 || splitUpiNum > 0 || (Number(cashReceived) || 0) > 0) && (
                 <motion.div
@@ -1327,10 +1373,10 @@ export function SalePadView() {
                   exit={{ opacity: 0, height: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="p-3 mt-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/30">
+                  <div className="p-3 mt-2 rounded-xl bg-muted/30 border border-border/50">
                     <div className="flex items-center gap-2 mb-2">
-                      <Calculator className="w-4 h-4 text-emerald-600" />
-                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">নগদ খুচরা ক্যালকুলেটর</p>
+                      <Calculator className="w-4 h-4 text-muted-foreground" />
+                      <p className="text-xs font-medium">এক্সচেঞ্জ ক্যালকুলেটর</p>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
@@ -1340,55 +1386,52 @@ export function SalePadView() {
                           onChange={(e) => setCashReceived(e.target.value)}
                           className="h-9 text-sm"
                           inputMode="numeric"
-                          placeholder={String(splitCashNum || grandTotal)}
+                          placeholder={String(splitCashNum || roundedTotal)}
                         />
                       </div>
                       <div>
+                        {/* §4: Contextual label based on input vs bill */}
                         <label className="text-[10px] text-muted-foreground">
-                          {(() => {
-                            const received = Number(cashReceived) || splitCashNum
-                            const totalPaidNow = received + splitUpiNum
-                            if (totalPaidNow > grandTotal) return 'ফেরত দিতে হবে (খুচরা)'
-                            if (totalPaidNow < grandTotal && totalPaidNow > 0) return 'বাকি আছে'
-                            return 'বাকি'
-                          })()}
+                          {isChangeDue ? 'ফেরত দিতে হবে' : isShortAmount ? 'আরও দিতে হবে' : 'বাকি'}
                         </label>
+                        {/* §4: Orange if short, Green if change due */}
                         <div className={`h-9 rounded-lg flex items-center justify-center text-sm font-bold tabular ${
-                          ((Number(cashReceived) || splitCashNum) + splitUpiNum) > grandTotal
+                          isChangeDue
                             ? 'bg-emerald-500 text-white'
-                            : ((Number(cashReceived) || splitCashNum) + splitUpiNum) < grandTotal && ((Number(cashReceived) || splitCashNum) + splitUpiNum) > 0
-                            ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
-                            : 'bg-card text-emerald-600'
+                            : isShortAmount
+                            ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
+                            : 'bg-card text-muted-foreground'
                         }`}>
-                          {(() => {
-                            const received = Number(cashReceived) || splitCashNum
-                            const totalPaidNow = received + splitUpiNum
-                            if (totalPaidNow > grandTotal) {
-                              // §3: NO negative sign — show as positive
-                              return formatCurrency(totalPaidNow - grandTotal, currency)
-                            }
-                            if (totalPaidNow < grandTotal && totalPaidNow > 0) {
-                              return formatCurrency(grandTotal - totalPaidNow, currency)
-                            }
-                            return formatCurrency(grandTotal, currency)
-                          })()}
+                          {isChangeDue
+                            ? formatCurrency(Math.abs(exchangeDifference), currency)
+                            : isShortAmount
+                            ? formatCurrency(Math.abs(exchangeDifference), currency)
+                            : formatCurrency(roundedTotal, currency)}
                         </div>
                       </div>
                     </div>
-                    {/* Real-time breakdown — updates instantly on any input */}
-                    <div className="mt-2 pt-2 border-t border-emerald-200 dark:border-emerald-800 space-y-1 text-[10px]">
-                      <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
+                    {/* Real-time breakdown */}
+                    <div className="mt-2 pt-2 border-t border-border/50 space-y-1 text-[10px]">
+                      <div className="flex justify-between text-muted-foreground">
                         <span>Actual Price (মোট দেয়)</span>
-                        <span className="tabular font-medium">{formatCurrency(grandTotal, currency)}</span>
+                        <span className="tabular font-medium">{formatCurrency(roundedTotal, currency)}</span>
                       </div>
-                      <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
+                      <div className="flex justify-between text-muted-foreground">
                         <span>নগদ + UPI মিলিয়ে প্রদান</span>
-                        <span className="tabular font-medium">{formatCurrency((Number(cashReceived) || splitCashNum) + splitUpiNum, currency)}</span>
+                        <span className="tabular font-medium">{formatCurrency(totalPaidForExchange, currency)}</span>
                       </div>
-                      {((Number(cashReceived) || splitCashNum) + splitUpiNum) > grandTotal && (
-                        <div className="flex justify-between font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/40 rounded px-2 py-1">
-                          <span>কাস্টমারকে ফেরত দিতে হবে</span>
-                          <span className="tabular">{formatCurrency(((Number(cashReceived) || splitCashNum) + splitUpiNum) - grandTotal, currency)}</span>
+                      {/* §4: Orange — Short Amount */}
+                      {isShortAmount && (
+                        <div className="flex justify-between font-bold text-orange-600 bg-orange-50 dark:bg-orange-950/30 rounded px-2 py-1">
+                          <span>আরও দিতে হবে</span>
+                          <span className="tabular">{formatCurrency(Math.abs(exchangeDifference), currency)}</span>
+                        </div>
+                      )}
+                      {/* §4: Green — Change Due */}
+                      {isChangeDue && (
+                        <div className="flex justify-between font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 rounded px-2 py-1">
+                          <span>ফেরত দিতে হবে</span>
+                          <span className="tabular">{formatCurrency(Math.abs(exchangeDifference), currency)}</span>
                         </div>
                       )}
                     </div>
