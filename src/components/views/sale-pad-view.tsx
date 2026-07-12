@@ -17,7 +17,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { EmptyState } from '@/components/shared/states'
 import { toast } from 'sonner'
-import { useMemo, useState, useCallback, useRef, useEffect } from 'react'
+import { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react'
 import QRCode from 'qrcode'
 import { FullScreenPicker } from '@/components/shared/full-screen-picker'
 import { useGateTrigger } from '@/store/biometric-gate-store'
@@ -54,6 +54,157 @@ interface HeldCart {
   customer: Party | null
   paymentMode: PaymentMode
 }
+
+// §1: Memoized CartRow — prevents full-list re-render when single item changes
+interface CartRowProps {
+  item: CartItem
+  mode: SaleMode
+  masterGstOn: boolean
+  currency: string
+  onSetUnitPrice: (cartKey: string, price: number) => void
+  onSetQty: (cartKey: string, raw: string) => void
+  onCommitQty: (cartKey: string) => void
+  onUpdateQty: (cartKey: string, delta: number) => void
+  onSetManualTotal: (cartKey: string, total: number) => void
+  onResetManualTotal: (cartKey: string) => void
+  onRemoveFromCart: (cartKey: string) => void
+  onToggleItemGst: (cartKey: string) => void
+  onSetItemGstRate: (cartKey: string, rate: number) => void
+}
+
+const CartRow = memo(function CartRow({
+  item, mode, masterGstOn, currency,
+  onSetUnitPrice, onSetQty, onCommitQty, onUpdateQty,
+  onSetManualTotal, onResetManualTotal, onRemoveFromCart,
+  onToggleItemGst, onSetItemGstRate,
+}: CartRowProps) {
+  const effectiveMrp = item.itemMode === 'retail' ? item.retailMrp : item.mrp
+  const hasMrpDiscount = effectiveMrp > 0 && effectiveMrp > item.price
+
+  return (
+    <div className="p-2.5 rounded-xl bg-muted/40 border border-border/50">
+      {/* Row 1 — product name ONLY + trash icon */}
+      <div className="flex items-center gap-2 mb-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold truncate">{item.name}</p>
+          {hasMrpDiscount && (
+            <span className="text-[10px] text-emerald-600 font-medium">
+              ছাড় ₹{(effectiveMrp - item.price).toFixed(2)} per {item.unit}
+            </span>
+          )}
+          {item.manualOverride && (
+            <span className="text-[10px] text-amber-600 font-medium ml-1">· মোট ম্যানুয়াল</span>
+          )}
+        </div>
+        <button
+          onClick={() => onRemoveFromCart(item.cartKey)}
+          className="shrink-0 w-7 h-7 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center hover:bg-red-500/20 transition-colors"
+          aria-label={`Remove ${item.name}`}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {/* 3-column POS row */}
+      <div className="grid grid-cols-3 gap-2 items-end">
+        {/* Column 1: rate */}
+        <div className="space-y-0.5">
+          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">প্রতি {item.unit} দর</label>
+          <div className="flex items-baseline gap-0.5">
+            <span className="text-[10px] text-muted-foreground">₹</span>
+            <input
+              value={item.price}
+              onChange={(e) => onSetUnitPrice(item.cartKey, Number(e.target.value) || 0)}
+              className="w-full text-sm font-semibold tabular bg-transparent border-0 border-b border-border focus:border-primary outline-none px-0 py-0.5 leading-tight"
+              inputMode="decimal"
+            />
+          </div>
+        </div>
+        {/* Column 2: qty */}
+        <div className="space-y-0.5">
+          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">কত {item.unit} নেবে</label>
+          <div className="flex items-center gap-1">
+            <button onClick={() => onUpdateQty(item.cartKey, -1)} className="w-6 h-6 rounded bg-card border border-border flex items-center justify-center text-muted-foreground hover:bg-muted shrink-0" aria-label="Decrease">
+              <Minus className="w-3 h-3" />
+            </button>
+            <input
+              value={item.qtyStr}
+              onChange={(e) => onSetQty(item.cartKey, e.target.value)}
+              onBlur={() => onCommitQty(item.cartKey)}
+              className="flex-1 min-w-0 text-center text-sm tabular bg-transparent border-0 border-b border-border focus:border-primary outline-none px-0 py-0.5 leading-tight"
+              inputMode="decimal"
+              step="any"
+            />
+            <button onClick={() => onUpdateQty(item.cartKey, 1)} className="w-6 h-6 rounded bg-card border border-border flex items-center justify-center text-muted-foreground hover:bg-muted shrink-0" aria-label="Increase">
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+        {/* Column 3: total with MRP strikethrough */}
+        <div className="space-y-0.5">
+          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block text-right">মোট দাম</label>
+          <div className="flex flex-col items-end">
+            {hasMrpDiscount && (
+              <del className="text-[9px] text-muted-foreground/50 tabular leading-none">
+                MRP ₹{(effectiveMrp * item.quantity).toFixed(0)}
+              </del>
+            )}
+            <div className="flex items-baseline gap-0.5 justify-end">
+              <span className="text-[10px] text-muted-foreground">₹</span>
+              <input
+                value={item.total}
+                onChange={(e) => onSetManualTotal(item.cartKey, Number(e.target.value) || 0)}
+                onDoubleClick={() => onResetManualTotal(item.cartKey)}
+                className="w-full text-right text-sm font-bold tabular bg-transparent border-0 border-b border-amber-400/40 focus:border-amber-500 outline-none px-0 py-0.5 leading-tight"
+                inputMode="numeric"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+      {/* Tax Chip + auto-discount */}
+      <div className="flex items-center justify-between mt-1.5 text-[10px] gap-2">
+        <button
+          onClick={() => onToggleItemGst(item.cartKey)}
+          className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[9px] font-medium transition-all ${
+            item.itemGstEnabled
+              ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600'
+              : 'border-border bg-card text-muted-foreground hover:border-blue-400'
+          }`}
+        >
+          {item.itemGstEnabled ? (
+            <>
+              <input
+                type="number"
+                value={item.itemGstRate}
+                onChange={(e) => onSetItemGstRate(item.cartKey, Number(e.target.value) || 0)}
+                onClick={(e) => e.stopPropagation()}
+                className="w-6 h-4 text-[9px] text-center bg-transparent border-0 outline-none tabular p-0"
+                inputMode="numeric"
+              />
+              <span>% GST</span>
+              <span className="tabular">+₹{(item.total * item.itemGstRate / 100).toFixed(2)}</span>
+            </>
+          ) : item.itemGstManuallyDisabled ? (
+            <span className="text-red-500">GST OFF</span>
+          ) : (
+            <>
+              <Plus className="w-2.5 h-2.5" />
+              <span>Add GST</span>
+              {masterGstOn && item.gstRate > 0 && (
+                <span className="text-blue-500 ml-0.5">({item.gstRate}%)</span>
+              )}
+            </>
+          )}
+        </button>
+        {hasMrpDiscount && (
+          <span className="text-emerald-600 font-medium">
+            ছাড় ₹{((effectiveMrp - item.price) * item.quantity).toFixed(2)}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+})
 
 export function SalePadView() {
   const { business, setActiveView, setSelectedInvoiceId, triggerRefresh, showPartyForm, setShowPartyForm } = useAppStore()
@@ -1050,157 +1201,22 @@ export function SalePadView() {
             </div>
             <div className="space-y-2 max-h-64 overflow-y-auto scroll-area">
               {cart.map((item) => (
-                <div key={item.cartKey} className="p-2.5 rounded-xl bg-muted/40 border border-border/50">
-                  {/* Row 1 — product name ONLY (no price strings) + trash icon */}
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate">{item.name}</p>
-                      {/* Per-unit savings text (no MRP shown here — moved to Total column) */}
-                      {(() => {
-                        const effectiveMrp = item.itemMode === 'retail' ? item.retailMrp : item.mrp
-                        if (effectiveMrp > 0 && effectiveMrp > item.price) {
-                          const savings = effectiveMrp - item.price
-                          return (
-                            <span className="text-[10px] text-emerald-600 font-medium">
-                              ছাড় ₹{savings.toFixed(2)} per {item.unit}
-                            </span>
-                          )
-                        }
-                        return null
-                      })()}
-                      {item.manualOverride && (
-                        <span className="text-[10px] text-amber-600 font-medium ml-1">· মোট ম্যানুয়াল</span>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => removeFromCart(item.cartKey)}
-                      className="shrink-0 w-7 h-7 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center hover:bg-red-500/20 transition-colors"
-                      aria-label={`Remove ${item.name}`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  {/* 3-column POS row */}
-                  <div className="grid grid-cols-3 gap-2 items-end">
-                    {/* Column 1: প্রতি কেজি দর (base rate) */}
-                    <div className="space-y-0.5">
-                      <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">প্রতি {item.unit} দর</label>
-                      <div className="flex items-baseline gap-0.5">
-                        <span className="text-[10px] text-muted-foreground">₹</span>
-                        <input
-                          value={item.price}
-                          onChange={(e) => setUnitPrice(item.cartKey, Number(e.target.value) || 0)}
-                          className="w-full text-sm font-semibold tabular bg-transparent border-0 border-b border-border focus:border-primary outline-none px-0 py-0.5 leading-tight"
-                          inputMode="decimal"
-                          title="প্রতি ইউনিট দর এডিট করুন"
-                        />
-                      </div>
-                    </div>
-                    {/* Column 2: কত কেজি নেবে (qty stepper) */}
-                    <div className="space-y-0.5">
-                      <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">কত {item.unit} নেবে</label>
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => updateQty(item.cartKey, -1)} className="w-6 h-6 rounded bg-card border border-border flex items-center justify-center text-muted-foreground hover:bg-muted shrink-0" aria-label="Decrease">
-                          <Minus className="w-3 h-3" />
-                        </button>
-                        <input
-                          value={item.qtyStr}
-                          onChange={(e) => setQty(item.cartKey, e.target.value)}
-                          onBlur={() => commitQty(item.cartKey)}
-                          className="flex-1 min-w-0 text-center text-sm tabular bg-transparent border-0 border-b border-border focus:border-primary outline-none px-0 py-0.5 leading-tight"
-                          inputMode="decimal"
-                          step="any"
-                          title="পরিমাণ (দশমিক সমর্থিত)"
-                        />
-                        <button onClick={() => updateQty(item.cartKey, 1)} className="w-6 h-6 rounded bg-card border border-border flex items-center justify-center text-muted-foreground hover:bg-muted shrink-0" aria-label="Increase">
-                          <Plus className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                    {/* Column 3: মোট দাম — §1: MRP strikethrough MOVED here */}
-                    <div className="space-y-0.5">
-                      <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block text-right">মোট দাম</label>
-                      <div className="flex flex-col items-end">
-                        {/* §1: Strikethrough MRP above total — strict retail/bulk mapping */}
-                        {(() => {
-                          const effectiveMrp = item.itemMode === 'retail' ? item.retailMrp : item.mrp
-                          if (effectiveMrp > 0 && effectiveMrp > item.price) {
-                            const mrpTotal = effectiveMrp * item.quantity
-                            return (
-                              <del className="text-[9px] text-muted-foreground/50 tabular leading-none">
-                                MRP ₹{mrpTotal.toFixed(0)}
-                              </del>
-                            )
-                          }
-                          return null
-                        })()}
-                        <div className="flex items-baseline gap-0.5 justify-end">
-                          <span className="text-[10px] text-muted-foreground">₹</span>
-                          <input
-                            value={item.total}
-                            onChange={(e) => setManualTotal(item.cartKey, Number(e.target.value) || 0)}
-                            onDoubleClick={() => resetManualTotal(item.cartKey)}
-                            className="w-full text-right text-sm font-bold tabular bg-transparent border-0 border-b border-amber-400/40 focus:border-amber-500 outline-none px-0 py-0.5 leading-tight"
-                            inputMode="numeric"
-                            title="মোট দাম (ডাবল-ক্লিকে রিসেট)"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  {/* §2: Sleek Tax Chip + auto-discount (minimalist pill design) */}
-                  <div className="flex items-center justify-between mt-1.5 text-[10px] gap-2">
-                    {/* §2: Tax Chip — outlined rounded pill */}
-                    <button
-                      onClick={() => toggleItemGst(item.cartKey)}
-                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[9px] font-medium transition-all ${
-                        item.itemGstEnabled
-                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600'
-                          : 'border-border bg-card text-muted-foreground hover:border-blue-400'
-                      }`}
-                    >
-                      {item.itemGstEnabled ? (
-                        <>
-                          <input
-                            type="number"
-                            value={item.itemGstRate}
-                            onChange={(e) => setItemGstRate(item.cartKey, Number(e.target.value) || 0)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="w-6 h-4 text-[9px] text-center bg-transparent border-0 outline-none tabular p-0"
-                            inputMode="numeric"
-                          />
-                          <span>% GST</span>
-                          <span className="tabular">+₹{(item.total * item.itemGstRate / 100).toFixed(2)}</span>
-                        </>
-                      ) : item.itemGstManuallyDisabled ? (
-                        <>
-                          <span className="text-red-500">GST OFF</span>
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="w-2.5 h-2.5" />
-                          <span>Add GST</span>
-                          {masterGstOn && item.gstRate > 0 && (
-                            <span className="text-blue-500 ml-0.5">({item.gstRate}%)</span>
-                          )}
-                        </>
-                      )}
-                    </button>
-                    {/* §3: Auto-discount — strict retail/bulk MRP isolation */}
-                    {(() => {
-                      // §3 FIX: In retail mode, ONLY use retailMrp. Bulk mrp is nulled.
-                      const effectiveMrp = item.itemMode === 'retail' ? item.retailMrp : item.mrp
-                      if (effectiveMrp > 0 && effectiveMrp > item.price) {
-                        return (
-                          <span className="text-emerald-600 font-medium">
-                            ছাড় ₹{((effectiveMrp - item.price) * item.quantity).toFixed(2)}
-                          </span>
-                        )
-                      }
-                      return null
-                    })()}
-                  </div>
-                </div>
+                <CartRow
+                  key={item.cartKey}
+                  item={item}
+                  mode={mode}
+                  masterGstOn={masterGstOn}
+                  currency={currency}
+                  onSetUnitPrice={setUnitPrice}
+                  onSetQty={setQty}
+                  onCommitQty={commitQty}
+                  onUpdateQty={updateQty}
+                  onSetManualTotal={setManualTotal}
+                  onResetManualTotal={resetManualTotal}
+                  onRemoveFromCart={removeFromCart}
+                  onToggleItemGst={toggleItemGst}
+                  onSetItemGstRate={setItemGstRate}
+                />
               ))}
             </div>
 
