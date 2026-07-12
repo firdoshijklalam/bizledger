@@ -36,7 +36,9 @@ export function SideDrawerFab() {
   }, [fabOpen, setFabOpen])
   const handleAction = (id: string) => {
     if (id === 'quick-sale') { setActiveView('sale-pad'); setFabOpen(false); return }
-    const vm: Record<string,string> = { 'add-party':'khata', 'add-product':'inventory', 'new-invoice':'billing', 'add-transaction':'khata' }
+    // §3: Route "New Invoice" to Quick Sale POS screen (unified billing interface)
+    if (id === 'new-invoice') { setActiveView('sale-pad'); setFabOpen(false); return }
+    const vm: Record<string,string> = { 'add-party':'khata', 'add-product':'inventory', 'add-transaction':'khata' }
     if (vm[id]) setActiveView(vm[id] as any)
     triggerQuickAction({ id: crypto.randomUUID(), type: id as any }); setFabOpen(false)
   }

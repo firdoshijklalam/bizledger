@@ -40,6 +40,7 @@ export function BillingView() {
     floatingInvoiceOpen, setFloatingInvoiceOpen,
     pendingQuickAction, clearQuickAction,
     business,
+    setActiveView,
   } = useAppStore()
   const { t } = useI18n()
   const [search, setSearch] = useState('')
@@ -49,10 +50,11 @@ export function BillingView() {
 
   useEffect(() => {
     if (pendingQuickAction?.type === 'new-invoice') {
-      setShowInvoiceForm(true)
+      // §3: Redirect to Quick Sale POS screen (unified billing interface)
+      setActiveView('sale-pad')
       clearQuickAction()
     }
-  }, [pendingQuickAction, setShowInvoiceForm, clearQuickAction])
+  }, [pendingQuickAction, setActiveView, clearQuickAction])
 
   const currency = business?.currency || 'INR'
 
@@ -115,14 +117,27 @@ export function BillingView() {
           <p className="text-[11px] text-emerald-700 dark:text-emerald-300">Collected</p>
           <p className="text-sm font-bold tabular text-emerald-700 dark:text-emerald-300">{formatCurrency(stats.paid, currency)}</p>
         </div>
-        <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-950/30 border border-transparent text-center">
-          <p className="text-[11px] text-red-700 dark:text-red-300">Outstanding</p>
-          <p className="text-sm font-bold tabular text-red-700 dark:text-red-300">{formatCurrency(stats.due, currency)}</p>
-        </div>
+        {/* §1: Fix negative outstanding — show Advance in green when Collected > Billed */}
+        {stats.due > 0 ? (
+          <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-950/30 border border-transparent text-center">
+            <p className="text-[11px] text-red-700 dark:text-red-300">Outstanding</p>
+            <p className="text-sm font-bold tabular text-red-700 dark:text-red-300">{formatCurrency(stats.due, currency)}</p>
+          </div>
+        ) : stats.due < 0 ? (
+          <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-transparent text-center">
+            <p className="text-[11px] text-emerald-700 dark:text-emerald-300">Advance / Overpaid</p>
+            <p className="text-sm font-bold tabular text-emerald-700 dark:text-emerald-300">{formatCurrency(Math.abs(stats.due), currency)}</p>
+          </div>
+        ) : (
+          <div className="p-3 rounded-2xl bg-card border border-border text-center">
+            <p className="text-[11px] text-muted-foreground">Outstanding</p>
+            <p className="text-sm font-bold tabular text-muted-foreground">₹0</p>
+          </div>
+        )}
       </div>
 
-      {/* New invoice CTA + Hold tabs */}
-      <Button onClick={() => setShowInvoiceForm(true)} className="w-full h-12 text-base">
+      {/* New invoice CTA — §3: routes to Quick Sale POS screen */}
+      <Button onClick={() => setActiveView('sale-pad')} className="w-full h-12 text-base">
         <Plus className="w-5 h-5 mr-2" /> {t('bill.newInvoice')}
       </Button>
 
