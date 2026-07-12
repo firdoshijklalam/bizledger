@@ -7,7 +7,7 @@ import type { Product, Party } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  ShoppingBag, Package, Plus, Minus, Trash2, UserPlus, Receipt,
+  ShoppingBag, Package, Plus, Minus, Trash2, UserPlus, Receipt, AlertTriangle,
   Store, Boxes, CheckCircle2, X, Wallet, QrCode, CreditCard, FileCheck,
   ChevronLeft, ChevronRight, Calculator, Lock, Eye, EyeOff, ShieldCheck,
   Users, BadgePercent, Layers,
@@ -84,6 +84,8 @@ export function SalePadView() {
   const [activeCategory, setActiveCategory] = useState<string>('All')
   const [showCustPicker, setShowCustPicker] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  // §2: Animated credit gate — slide-in customer prompt above footer
+  const [showCreditGate, setShowCreditGate] = useState(false)
 
   // §4: Discount with % / ₹ toggle + live Grand Total
   const [discountMode, setDiscountMode] = useState<'flat' | 'percent'>('flat')
@@ -522,14 +524,16 @@ export function SalePadView() {
       toast.error('কার্ট খালি')
       return
     }
-    // §4: Hard-stop — block if Ledger Due > 0 AND Customer == null
+    // §2: Hard-stop — block if Ledger Due > 0 AND Customer == null
     if (ledgerDue > 0 && !customer) {
-      toast.error('কাস্টমার নির্বাচন করুন!', {
-        description: `খাতায় বাকি ₹${ledgerDue.toFixed(2)} — কাস্টমার ছাড়া ক্রেডিট ট্রানজেকশন নিষিদ্ধ`,
+      // §2: Trigger animated slide-in credit gate above footer
+      setShowCreditGate(true)
+      toast.error('বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক', {
+        description: `খাতায় বাকি ₹${ledgerDue.toFixed(2)} — কাস্টমার ছাড়া ট্রানজেকশন নিষিদ্ধ`,
       })
-      setShowCustPicker(true)
       return
     }
+    setShowCreditGate(false)
     setConfirming(true)
     try {
       // §1: Split payment — amountPaid is the sum of all split modes.
@@ -592,14 +596,15 @@ export function SalePadView() {
       toast.error('কার্ট খালি')
       return
     }
-    // §4: Hard-stop — block if Ledger Due > 0 AND Customer == null
+    // §2: Hard-stop — block if Ledger Due > 0 AND Customer == null
     if (ledgerDue > 0 && !customer) {
-      toast.error('কাস্টমার নির্বাচন করুন!', {
-        description: `খাতায় বাকি ₹${ledgerDue.toFixed(2)} — কাস্টমার ছাড়া ক্রেডিট ট্রানজেকশন নিষিদ্ধ`,
+      setShowCreditGate(true)
+      toast.error('বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক', {
+        description: `খাতায় বাকি ₹${ledgerDue.toFixed(2)} — কাস্টমার ছাড়া ট্রানজেকশন নিষিদ্ধ`,
       })
-      setShowCustPicker(true)
       return
     }
+    setShowCreditGate(false)
     setConfirming(true)
     try {
       // §1: Split payment — amountPaid is sum of all split modes (or grand total if no split)
@@ -684,7 +689,34 @@ export function SalePadView() {
 
   return (
     <div className="space-y-4 pb-4">
-      {/* §3: Customer bar removed from top — relocated to Payment Mode section */}
+      {/* §1: Customer Input Bar — pinned to absolute TOP of Quick Sale */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setShowCustPicker(true)}
+          className="flex-1 h-11 px-3 rounded-xl border border-dashed border-border bg-card flex items-center gap-2 text-sm hover:bg-muted transition-colors"
+        >
+          {customer ? (
+            <>
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span className="font-medium text-foreground truncate">{customer.name}</span>
+              {customer.phone && <span className="text-[11px] text-muted-foreground">· {customer.phone}</span>}
+            </>
+          ) : (
+            <>
+              <UserPlus className="w-4 h-4 text-muted-foreground" />
+              <span className="text-muted-foreground">কাস্টমার যোগ করুন (ঐচ্ছিক)</span>
+            </>
+          )}
+        </button>
+        <button
+          onClick={() => setShowPartyForm(true)}
+          className="w-11 h-11 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:bg-primary/90 transition-colors"
+          aria-label="নতুন কাস্টমার যোগ করুন"
+          title="নতুন কাস্টমার রেজিস্ট্রেশন"
+        >
+          <Plus className="w-5 h-5" />
+        </button>
+      </div>
 
       {/* §3: Multi-Cart Hold Protocol — পার্সন ১, ২, ৩, + */}
       <div className="p-3 rounded-2xl bg-gradient-to-r from-blue-500/5 to-emerald-500/5 border border-blue-500/20">
@@ -1281,34 +1313,7 @@ export function SalePadView() {
               )}
             </div>
 
-            {/* §3: Customer Selection — relocated to Payment Mode section */}
-            <div className="flex items-center gap-2 mt-3">
-              <button
-                onClick={() => setShowCustPicker(true)}
-                className="flex-1 h-11 px-3 rounded-xl border border-dashed border-border bg-card flex items-center gap-2 text-sm hover:bg-muted transition-colors"
-              >
-                {customer ? (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span className="font-medium text-foreground truncate">{customer.name}</span>
-                    {customer.phone && <span className="text-[11px] text-muted-foreground">· {customer.phone}</span>}
-                  </>
-                ) : (
-                  <>
-                    <UserPlus className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">কাস্টমার যোগ করুন (ঐচ্ছিক)</span>
-                  </>
-                )}
-              </button>
-              <button
-                onClick={() => setShowPartyForm(true)}
-                className="w-11 h-11 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:bg-primary/90 transition-colors"
-                aria-label="নতুন কাস্টমার যোগ করুন"
-                title="নতুন কাস্টমার রেজিস্ট্রেশন"
-              >
-                <Plus className="w-5 h-5" />
-              </button>
-            </div>
+            {/* §1: Customer bar removed from mid-screen — now at TOP only */}
 
             {/* §4: Payment Mode split matrix — underneath Actual Price */}
             <div className="mt-3 p-3 rounded-xl bg-muted/30 border border-border/50">
@@ -1509,6 +1514,54 @@ export function SalePadView() {
                       )}
                     </div>
                   </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* §2: Animated Credit Gate — slide-in customer block above footer with shake */}
+            <AnimatePresence>
+              {showCreditGate && (
+                <motion.div
+                  initial={{ opacity: 0, y: 30, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: 'auto' }}
+                  exit={{ opacity: 0, y: 20, height: 0 }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                  className="overflow-hidden"
+                >
+                  <motion.div
+                    animate={{ x: [0, -8, 8, -6, 6, 0] }}
+                    transition={{ duration: 0.4, repeat: 2 }}
+                    className="mt-3 p-3 rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-950/30"
+                  >
+                    {/* Mandatory warning label */}
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                      <p className="text-xs font-bold text-red-700 dark:text-red-300">
+                        বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক
+                      </p>
+                    </div>
+                    {/* Clone of Add Customer input */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setShowCustPicker(true); }}
+                        className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-red-400 bg-card flex items-center gap-2 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                      >
+                        <UserPlus className="w-4 h-4 text-red-600" />
+                        <span className="text-red-700 dark:text-red-300 font-medium">কাস্টমার নির্বাচন করুন</span>
+                      </button>
+                      <button
+                        onClick={() => { setShowPartyForm(true); }}
+                        className="w-11 h-11 rounded-xl bg-red-500 text-white flex items-center justify-center shrink-0 hover:bg-red-600 transition-colors"
+                        aria-label="নতুন কাস্টমার"
+                      >
+                        <Plus className="w-5 h-5" />
+                      </button>
+                    </div>
+                    {/* Ledger due amount */}
+                    <p className="text-[10px] text-red-600 mt-1.5 text-center">
+                      খাতায় বাকি: ₹{ledgerDue.toFixed(2)} · কাস্টমার যুক্ত করলে ট্রানজেকশন সম্পন্ন হবে
+                    </p>
+                  </motion.div>
                 </motion.div>
               )}
             </AnimatePresence>
