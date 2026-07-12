@@ -399,22 +399,22 @@ export function SalePadView() {
   const cashReceivedNum = Number(cashReceived) || 0
   const changeDue = Math.max(0, cashReceivedNum - roundedTotal)
 
-  // §1: Multi-mode split payment calculations
+  // §1: Multi-mode split payment — ONLY Cash + UPI (Credit input removed)
   const splitCashNum = Number(splitCash) || 0
   const splitUpiNum = Number(splitUpi) || 0
-  const splitCreditNum = Number(splitCredit) || 0
   const upiQrAmount = splitUpiNum > 0 ? splitUpiNum : 0
-  const totalSplitPaid = splitCashNum + splitUpiNum + splitCreditNum
-  // §2: Credit ledger due = roundedTotal - total paid
+  // §2: Total paid = Cash + UPI only (no credit input)
+  const totalSplitPaid = splitCashNum + splitUpiNum
+  // §2: Ledger Due = Actual Price - Total Input (when input < bill)
   const ledgerDue = Math.max(0, roundedTotal - totalSplitPaid)
+  // §3: Overpaid = Total Input - Actual Price (when input > bill → exchange calculator)
   const overpaid = Math.max(0, totalSplitPaid - roundedTotal)
-  const hasSplitPayment = splitCashNum > 0 || splitUpiNum > 0 || splitCreditNum > 0
+  const hasSplitPayment = splitCashNum > 0 || splitUpiNum > 0
 
   // §2: Credit Gate — if total paid < actual price, show "Add to Ledger" button
   const needsCredit = hasSplitPayment && ledgerDue > 0
 
-  // §4: Exchange Calculator contextual states
-  // §5: Uses splitCash directly (read-only mirror — no separate cashReceived input)
+  // §3: Exchange Calculator — ONLY relevant when Total Input > Actual Price
   const totalPaidForExchange = splitCashNum + splitUpiNum
   const exchangeDifference = totalPaidForExchange - roundedTotal
   const isShortAmount = totalPaidForExchange < roundedTotal && totalPaidForExchange > 0
@@ -1359,19 +1359,8 @@ export function SalePadView() {
                     placeholder="0"
                   />
                 </div>
-                {/* Credit split */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-muted-foreground flex items-center gap-1">
-                    <CreditCard className="w-3 h-3" /> কাস্টমার নগদে কত দিল? ₹
-                  </label>
-                  <Input
-                    value={splitCredit}
-                    onChange={(e) => setSplitCredit(e.target.value)}
-                    className="h-9 text-sm"
-                    inputMode="numeric"
-                    placeholder="0"
-                  />
-                </div>
+                {/* §1: Credit split input REMOVED — user uses Cash + UPI only.
+                    Ledger Due is calculated automatically when Total Input < Actual Price. */}
                 {/* Cheque */}
                 <div className="space-y-1">
                   <label className="text-[10px] text-muted-foreground flex items-center gap-1">
@@ -1450,77 +1439,64 @@ export function SalePadView() {
               )}
             </AnimatePresence>
 
-            {/* §4: Exchange Calculator — contextual states (orange short / green change due) */}
+            {/* §2: Ledger Due — show when Total Input < Actual Price (red/orange) */}
             <AnimatePresence>
-              {(splitCashNum > 0 || splitUpiNum > 0 || (Number(cashReceived) || 0) > 0) && (
+              {isShortAmount && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="p-3 mt-2 rounded-xl bg-muted/30 border border-border/50">
+                  <div className="p-3 mt-2 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-400/40">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-orange-700 dark:text-orange-300">
+                        খাতায় বাকি (Ledger Due)
+                      </span>
+                      <span className="text-lg font-bold tabular text-orange-600">
+                        ₹{ledgerDue.toFixed(2)}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-orange-600 mt-1">
+                      সম্পন্ন হলে এই পরিমাণ কাস্টমারের খাতায় যুক্ত হবে
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* §3: Exchange Calculator — ONLY when Total Input > Actual Price */}
+            <AnimatePresence>
+              {isChangeDue && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-3 mt-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40">
                     <div className="flex items-center gap-2 mb-2">
-                      <Calculator className="w-4 h-4 text-muted-foreground" />
-                      <p className="text-xs font-medium">এক্সচেঞ্জ ক্যালকুলেটর</p>
+                      <Calculator className="w-4 h-4 text-emerald-600" />
+                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">এক্সচেঞ্জ ক্যালকুলেটর</p>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-muted-foreground">গ্রহণ করা নগদ (read-only)</label>
-                        {/* §5: Read-only — mirrors Split Cash input, rejects direct keyboard input */}
-                        <Input
-                          value={splitCash ? splitCash : (splitUpiNum > 0 ? String(splitUpiNum) : '')}
-                          readOnly
-                          tabIndex={-1}
-                          className="h-9 text-sm bg-muted/50 cursor-not-allowed opacity-70"
-                          placeholder="Split Cash থেকে মিরর হবে"
-                        />
-                      </div>
-                      <div>
-                        {/* §4: Contextual label based on input vs bill */}
-                        <label className="text-[10px] text-muted-foreground">
-                          {isChangeDue ? 'ফেরত দিতে হবে' : isShortAmount ? 'আরও দিতে হবে' : 'বাকি'}
-                        </label>
-                        {/* §4: Orange if short, Green if change due */}
-                        <div className={`h-9 rounded-lg flex items-center justify-center text-sm font-bold tabular ${
-                          isChangeDue
-                            ? 'bg-emerald-500 text-white'
-                            : isShortAmount
-                            ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
-                            : 'bg-card text-muted-foreground'
-                        }`}>
-                          {isChangeDue
-                            ? formatCurrency(Math.abs(exchangeDifference), currency)
-                            : isShortAmount
-                            ? formatCurrency(Math.abs(exchangeDifference), currency)
-                            : formatCurrency(roundedTotal, currency)}
-                        </div>
-                      </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-emerald-700 dark:text-emerald-300">
+                        ফেরত দিতে হবে
+                      </span>
+                      <span className="text-2xl font-bold tabular text-emerald-600">
+                        ₹{overpaid.toFixed(2)}
+                      </span>
                     </div>
-                    {/* Real-time breakdown */}
-                    <div className="mt-2 pt-2 border-t border-border/50 space-y-1 text-[10px]">
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>Actual Price (মোট দেয়)</span>
-                        <span className="tabular font-medium">{formatCurrency(roundedTotal, currency)}</span>
+                    {/* Breakdown */}
+                    <div className="mt-2 pt-2 border-t border-emerald-200 dark:border-emerald-800 space-y-1 text-[10px]">
+                      <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
+                        <span>Actual Price</span>
+                        <span className="tabular">{formatCurrency(roundedTotal, currency)}</span>
                       </div>
-                      <div className="flex justify-between text-muted-foreground">
-                        <span>নগদ + UPI মিলিয়ে প্রদান</span>
-                        <span className="tabular font-medium">{formatCurrency(totalPaidForExchange, currency)}</span>
+                      <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
+                        <span>নগদ + UPI প্রদান</span>
+                        <span className="tabular">{formatCurrency(totalPaidForExchange, currency)}</span>
                       </div>
-                      {/* §4: Orange — Short Amount */}
-                      {isShortAmount && (
-                        <div className="flex justify-between font-bold text-orange-600 bg-orange-50 dark:bg-orange-950/30 rounded px-2 py-1">
-                          <span>আরও দিতে হবে</span>
-                          <span className="tabular">{formatCurrency(Math.abs(exchangeDifference), currency)}</span>
-                        </div>
-                      )}
-                      {/* §4: Green — Change Due */}
-                      {isChangeDue && (
-                        <div className="flex justify-between font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 rounded px-2 py-1">
-                          <span>ফেরত দিতে হবে</span>
-                          <span className="tabular">{formatCurrency(Math.abs(exchangeDifference), currency)}</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </motion.div>
