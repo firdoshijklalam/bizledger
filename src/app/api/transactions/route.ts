@@ -32,8 +32,8 @@ export async function POST(req: NextRequest) {
     const amount = Number(body.amount)
     const partyId = body.partyId
 
-    // Update party balance
-    let balanceAfter: number | null = null
+    // Update party balance — §2 FIX: default to 0 instead of null for walk-in customers
+    let balanceAfter: number = 0
     if (partyId) {
       const party = await db.party.findUnique({ where: { id: partyId } })
       if (party) {

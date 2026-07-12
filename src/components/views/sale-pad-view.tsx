@@ -96,6 +96,8 @@ export function SalePadView() {
   const [globalGstRate, setGlobalGstRate] = useState('')
   // §3: Master GST On/Off toggle — if ON, apply database-defined product taxes. If OFF, bypass all.
   const [masterGstOn, setMasterGstOn] = useState(true)
+  // §1: Delivery/Shipping Charge — added to final Actual Price
+  const [deliveryCharge, setDeliveryCharge] = useState('')
 
   const currency = business?.currency || 'INR'
 
@@ -379,8 +381,13 @@ export function SalePadView() {
   const grandTotal = Math.max(0, subtotalWithGst - discountAmount)
 
   // §1: Auto Round-Off — Math.round() on final amount after GST & Discount
-  const roundedTotal = Math.round(grandTotal)
-  const roundOffAmount = roundedTotal - grandTotal
+  const preDeliveryTotal = Math.round(grandTotal)
+  const roundOffAmount = preDeliveryTotal - grandTotal
+
+  // §1: Delivery Charge — added AFTER round off, before final Actual Price
+  // Formula: (Subtotal + GST - Discount + RoundOff) + DeliveryCharge = Actual Price
+  const deliveryChargeNum = Number(deliveryCharge) || 0
+  const roundedTotal = preDeliveryTotal + deliveryChargeNum
 
   // §3 FIX: Auto-discount from MRP vs Sale Price — STRICT state isolation.
   // Retail mode: ONLY use retailMrp. Bulk mrp is explicitly nulled/ignored.
@@ -455,7 +462,7 @@ export function SalePadView() {
     setActiveCartId(nextId)
     setCashReceived('')
     setPartialPaid('')
-    setDiscountValue('')
+    setDiscountValue(''); setDeliveryCharge('')
     toast.success(`${newCart.label} এর জন্য নতুন কার্ট খোলা হলো`, {
       description: 'আগের কার্ট হোল্ড করা আছে',
     })
@@ -466,7 +473,7 @@ export function SalePadView() {
     setActiveCartId(id)
     setCashReceived('')
     setPartialPaid('')
-    setDiscountValue('')
+    setDiscountValue(''); setDeliveryCharge('')
     toast(`কার্ট সুইচ হলো`, { description: carts.find((c) => c.id === id)?.label })
   }
 
@@ -616,7 +623,7 @@ export function SalePadView() {
       setSplitUpi('')
       setSplitCredit('')
       setSplitChequeNo('')
-      setDiscountValue('')
+      setDiscountValue(''); setDeliveryCharge('')
       setConfirming(false)
       setSelectedInvoiceId(invoice.id)
       setActiveView('billing')
@@ -702,7 +709,7 @@ export function SalePadView() {
       setSplitUpi('')
       setSplitCredit('')
       setSplitChequeNo('')
-      setDiscountValue('')
+      setDiscountValue(''); setDeliveryCharge('')
       setConfirming(false)
     } catch (e) {
       toast.error('ব্যর্থ: ' + String(e))
@@ -1299,7 +1306,7 @@ export function SalePadView() {
                 </div>
               )}
 
-              {/* §1: Round Off — displayed right above Actual Price */}
+              {/* §1: Round Off — displayed right above Delivery Charge */}
               {Math.abs(roundOffAmount) > 0.001 && (
                 <div className="flex justify-between text-xs text-muted-foreground px-1">
                   <span>Round Off ({roundOffAmount > 0 ? '+' : '−'}₹{Math.abs(roundOffAmount).toFixed(2)})</span>
@@ -1307,7 +1314,24 @@ export function SalePadView() {
                 </div>
               )}
 
-              {/* Row 5: Final Payable — [Actual Price] (rounded) */}
+              {/* §1: Delivery/Shipping Charge — between Round Off and Actual Price */}
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-muted-foreground shrink-0">
+                  ডেলিভারি / পরিবহন খরচ
+                </label>
+                <div className="flex items-baseline gap-0.5 flex-1">
+                  <span className="text-[10px] text-muted-foreground">₹</span>
+                  <input
+                    value={deliveryCharge}
+                    onChange={(e) => setDeliveryCharge(e.target.value)}
+                    className="w-full text-sm tabular bg-transparent border-0 border-b border-border focus:border-primary outline-none px-0 py-0.5"
+                    inputMode="numeric"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              {/* Row 5: Final Payable — [Actual Price] (includes delivery) */}
               <div className="flex justify-between items-center pt-2 border-t border-border">
                 <span className="font-bold text-base">Actual Price</span>
                 <motion.span
