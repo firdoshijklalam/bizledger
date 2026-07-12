@@ -2,39 +2,80 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
 
-// GET /api/products — supports ?q=search&phonetic=true for cross-language phonetic search
+// GET /api/products — optimized with pagination + field selection
+// Supports ?q=search&phonetic=true&lowStock=true&limit=50&offset=0
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const lowStock = searchParams.get('lowStock') === 'true'
   const q = searchParams.get('q') || ''
   const usePhonetic = searchParams.get('phonetic') === 'true'
+  const limit = Math.min(Number(searchParams.get('limit')) || 50, 200)
+  const offset = Number(searchParams.get('offset')) || 0
   const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json([])
+  if (!business) return NextResponse.json({ items: [], total: 0, hasMore: false })
 
-  let products = await db.product.findMany({
-    where: { businessId: business.id },
-    orderBy: { updatedAt: 'desc' },
-  })
-
+  // Build optimized where clause — push filtering to DB instead of app-level
+  const where: any = { businessId: business.id }
   if (lowStock) {
-    products = products.filter((p) => p.stock <= p.lowStockThreshold)
+    // Use raw comparison — Prisma doesn't support field-to-field comparison in where
+    // So we fetch with a small overhead but limit fields
+  }
+  if (q && !usePhonetic) {
+    where.OR = [
+      { name: { contains: q, mode: 'insensitive' } },
+      { sku: { contains: q, mode: 'insensitive' } },
+    ]
   }
 
-  // Phonetic search (PRD v2 §12.2) — Bengali ↔ English sound matching
+  // Select only needed fields — drastically reduce payload
+  const select = {
+    id: true,
+    name: true,
+    sku: true,
+    category: true,
+    subCategory: true,
+    unit: true,
+    purchasePrice: true,
+    salePrice: true,
+    mrp: true,
+    wholesalePrice: true,
+    gstRate: true,
+    stock: true,
+    lowStockThreshold: true,
+    retailEnabled: true,
+    retailUnit: true,
+    retailSalePrice: true,
+    retailMrp: true,
+    looseStock: true,
+    conversionFactor: true,
+    isPublished: true,
+    categoryPath: true,
+    description: true,
+  }
+
+  const [products, totalCount] = await Promise.all([
+    db.product.findMany({
+      where,
+      select,
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+      skip: offset,
+    }),
+    db.product.count({ where }),
+  ])
+
+  let result = products
+  if (lowStock) {
+    result = products.filter((p) => p.stock <= p.lowStockThreshold)
+  }
+
+  // Phonetic search (PRD v2 §12.2) — on the fetched chunk only
   if (q && usePhonetic) {
-    const ranked = phoneticSearch(products, q)
-    return NextResponse.json(ranked.map((r) => r.item))
+    const ranked = phoneticSearch(result as any[], q)
+    return NextResponse.json({ items: ranked.map((r) => r.item), total: totalCount, hasMore: offset + limit < totalCount })
   }
 
-  // Regular text search
-  if (q) {
-    const query = q.toLowerCase()
-    products = products.filter(
-      (p) => p.name.toLowerCase().includes(query) || (p.sku || '').toLowerCase().includes(query)
-    )
-  }
-
-  return NextResponse.json(products)
+  return NextResponse.json({ items: result, total: totalCount, hasMore: offset + limit < totalCount })
 }
 
 // POST /api/products

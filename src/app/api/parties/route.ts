@@ -2,38 +2,66 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
 
-// GET /api/parties — list parties, optional ?type=customer|supplier|both&q=search&phonetic=true
+// GET /api/parties — optimized with pagination + field selection
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const type = searchParams.get('type')
   const q = searchParams.get('q') || ''
   const usePhonetic = searchParams.get('phonetic') === 'true'
+  const limit = Math.min(Number(searchParams.get('limit')) || 50, 200)
+  const offset = Number(searchParams.get('offset')) || 0
   const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json([])
+  if (!business) return NextResponse.json({ items: [], total: 0, hasMore: false })
 
-  let parties = await db.party.findMany({
-    where: {
-      businessId: business.id,
-      ...(type ? { type } : {}),
-    },
-    orderBy: { updatedAt: 'desc' },
-  })
+  const where: any = {
+    businessId: business.id,
+    ...(type ? { type } : {}),
+  }
+  if (q && !usePhonetic) {
+    where.OR = [
+      { name: { contains: q, mode: 'insensitive' } },
+      { phone: { contains: q, mode: 'insensitive' } },
+    ]
+  }
+
+  const select = {
+    id: true,
+    name: true,
+    phone: true,
+    type: true,
+    balance: true,
+    qualityGrade: true,
+    creditLimit: true,
+    openingBalance: true,
+    address: true,
+    gstin: true,
+    avgPaymentDays: true,
+    avgDiscountPct: true,
+    creditTrustScore: true,
+    createdAt: true,
+    updatedAt: true,
+  }
+
+  const [parties, totalCount] = await Promise.all([
+    db.party.findMany({
+      where,
+      select,
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+      skip: offset,
+    }),
+    db.party.count({ where }),
+  ])
+
+  let result = parties
 
   // Phonetic search (PRD v2 §12.2) — Bengali ↔ English sound matching
   if (q && usePhonetic) {
     const ranked = phoneticSearch(parties, q)
-    return NextResponse.json(ranked.map((r) => r.item))
+    return NextResponse.json({ items: ranked.map((r) => r.item), total: totalCount, hasMore: offset + limit < totalCount })
   }
 
-  // Regular text search
-  if (q) {
-    const query = q.toLowerCase()
-    parties = parties.filter(
-      (p) => p.name.toLowerCase().includes(query) || (p.phone || '').includes(q)
-    )
-  }
-
-  return NextResponse.json(parties)
+  return NextResponse.json({ items: result, total: totalCount, hasMore: offset + limit < totalCount })
 }
 
 // POST /api/parties — create party

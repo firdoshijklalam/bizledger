@@ -12,14 +12,20 @@ export function useFetch<T>(url: string | null, deps: any[] = []) {
   const refetch = useCallback(async () => {
     if (!url) return
     setLoading(true)
+    setError(null)
     try {
-      const res = await fetch(url)
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 10000)
+      const res = await fetch(url, { signal: controller.signal })
+      clearTimeout(timeout)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const json = await res.json()
-      setData(json)
+      // §4: Backward compat — if API returns { items, total, hasMore }, extract items
+      const data = Array.isArray(json) ? json : (json.items || json)
+      setData(data as T)
       setError(null)
-    } catch (e) {
-      setError(String(e))
+    } catch (e: any) {
+      setError(e.name === 'AbortError' ? 'Request timeout' : String(e))
     } finally {
       setLoading(false)
     }

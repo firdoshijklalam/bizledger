@@ -3,23 +3,51 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { generateToken, generateInvoiceNumber } from '@/lib/utils'
 import { recalculatePartyGrade } from '@/lib/grade-calculator'
 
-// GET /api/invoices
+// GET /api/invoices — optimized with pagination
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const partyId = searchParams.get('partyId')
+  const limit = Math.min(Number(searchParams.get('limit')) || 50, 200)
+  const offset = Number(searchParams.get('offset')) || 0
   const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json([])
+  if (!business) return NextResponse.json({ items: [], total: 0, hasMore: false })
 
-  const invoices = await db.invoice.findMany({
-    where: {
-      businessId: business.id,
-      ...(partyId ? { partyId } : {}),
-    },
-    include: { party: true, items: true },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
-  })
-  return NextResponse.json(invoices)
+  const where = {
+    businessId: business.id,
+    ...(partyId ? { partyId } : {}),
+  }
+
+  const [invoices, totalCount] = await Promise.all([
+    db.invoice.findMany({
+      where,
+      select: {
+        id: true,
+        invoiceNumber: true,
+        partyId: true,
+        type: true,
+        status: true,
+        isGst: true,
+        subtotal: true,
+        discountAmount: true,
+        gstAmount: true,
+        grandTotal: true,
+        amountPaid: true,
+        amountDue: true,
+        paymentMode: true,
+        collectedByName: true,
+        collectedByRole: true,
+        createdAt: true,
+        party: { select: { id: true, name: true, phone: true, qualityGrade: true } },
+        items: { select: { id: true, name: true, quantity: true, unitPrice: true, total: true, gstRate: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
+    }),
+    db.invoice.count({ where }),
+  ])
+
+  return NextResponse.json({ items: invoices, total: totalCount, hasMore: offset + limit < totalCount })
 }
 
 // POST /api/invoices
