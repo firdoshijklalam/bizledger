@@ -1938,3 +1938,32 @@ Stage Summary:
 - Retail price cloaking: retailMrp null/0 suppresses bulk pack text
 - Cash exchange: no negative sign, real-time UPI/Cash intercept
 - PIN: 6-digit modal + fingerprint fallback active (PIN: 1234)
+
+---
+Task ID: FAB-FIX-1
+Agent: main
+Task: Fix FAB menu X-axis anchor bug (left-side menu not opening), smooth spring animation, and missing exit animation per user's CRITICAL REVISION spec.
+
+Work Log:
+- Read existing /home/z/my-project/src/components/layout/side-drawer-fab.tsx and identified 3 issues:
+  1. LEFT-SIDE BUG: `isOnLeft` check had `position.x >= 0` guard. When FAB snaps to the LEFT edge, position.x = EDGE_MARGIN - HIDE_OFFSET = 16 - 36 = -20 (intentionally negative for peek/hide). This FAILED the >= 0 check → isOnLeft became false → menu anchored to the RIGHT edge → rendered entirely off-screen (right = vw + 24).
+  2. Spring config was stiffness:400/damping:25 (stiff). User wanted damping:15, stiffness:100, mass:0.8 for buttery 60fps feel.
+  3. Exit animation existed but used the same spring transition for both enter and exit; user wanted a distinct timed scale-down + fade exit (withTiming equivalent) plus a reverse-spin on the FAB icon.
+- Rewrote side-drawer-fab.tsx:
+  * Removed `position.x >= 0` from isOnLeft — now strictly `fabCenterX < vw / 2`. Added `vw`/`vh` state (updates on resize) so the calc is reactive.
+  * Strict conditional menuStyle: LEFT → `{ left: pos.x + FAB_SIZE + 8, right: 'auto', alignItems: 'flex-start' }`; RIGHT → `{ right: vw - pos.x + 8, left: 'auto', alignItems: 'flex-end' }`. Vertical anchor flips downward when near top, with explicit `bottom:'auto'`/`top:'auto'` counterpart.
+  * Open animation: `transition: { type: 'spring', stiffness: 100, damping: 15, mass: 0.8 }` (exact spec).
+  * Exit animation (per-state transition inside exit prop): `{ opacity: 0, scale: 0.8, x: ±14, y: 8, transition: { duration: 0.2, ease: [0.4,0,1,1] } }` — distinct timed fade+scale before unmount (withTiming equivalent).
+  * FAB icon: `animate={{ rotate: fabOpen ? 45 : 0 }}` with spring `{ stiffness: 200, damping: 15, mass: 0.8 }` → reverse-spins back to 0 on close.
+- NOTE on React Native APIs: user referenced `react-native-reanimated` / `withSpring` / `withTiming`. This is a Next.js (web) project, so used the web-equivalent Framer Motion APIs with the exact damping/stiffness/mass values requested, and per-state `transition` for the timed exit. AnimatePresence handles the unmount-after-exit lifecycle (equivalent to RN's unmount-after-callback pattern).
+- Local verification: local .env had a SQLite `file:` URL but schema was postgresql → bootstrap HTTP 500 → app stuck on "Loading BizLedger…". Temporarily switched schema provider to sqlite, ran `bun run db:push` (DB already in sync), regenerated client, restarted server — app rendered fully with seed data.
+- Agent Browser verification (mobile viewport 390x844) — set FAB position via localStorage to test both sides without fragile dragging:
+  * RIGHT side (pos x=326, center=358): isOnLeft=false ✓. Menu opened at left=94, right=318 (8px gap from FAB left edge=326). visible=true ✓.
+  * LEFT side (pos x=-20, center=12 — the original bug case): isOnLeft=true ✓ (was false before fix). Menu opened at left=52, right=276 (8px gap from FAB right edge=44). visible=true ✓. Menu content confirmed: "QUICK ACTIONS / Quick Sale / লেনদেন যোগ / খাতাদার যোগ / পণ্য যোগ".
+- REVERTED schema.prisma provider back to `postgresql` after verification (critical — Vercel/Neon deployment relies on this). Regenerated Prisma client for postgres. Lint clean.
+
+Stage Summary:
+- Root cause of left-side bug: the `position.x >= 0` guard in isOnLeft conflicted with the intentional negative x value (-20) used for the left-edge peek/hide offset. Fix is to compare FAB *center* to viewport *center*, never the raw x sign.
+- All 3 user requirements met: (1) strict conditional left/right anchoring with explicit `auto` counterparts, (2) spring {damping:15, stiffness:100, mass:0.8} open, (3) timed {duration:0.2} scale+fade exit with FAB icon reverse-spin spring.
+- Files changed: src/components/layout/side-drawer-fab.tsx (rewritten). prisma/schema.prisma temporarily toggled to sqlite for local DB then reverted to postgresql.
+- Both left and right FAB menu opening verified on-screen via Agent Browser.
