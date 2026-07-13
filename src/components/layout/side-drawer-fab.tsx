@@ -1,7 +1,7 @@
 'use client'
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useAnimationControls } from 'framer-motion'
 import { Plus, UserPlus, PackagePlus, ArrowLeftRight, Zap, X } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
 
@@ -20,6 +20,13 @@ const DRAG_THRESH = 6
 const HIDE_OFFSET = 36
 const MENU_HEIGHT = 320
 const MENU_GAP = 8
+
+// §1: Icon rotation tuning — matches user's Reanimated spec
+//   Idle spin:  withRepeat(withTiming(360, { duration: 3000, easing: Easing.linear }), -1, false)
+//   Open:       withSpring(45)  → damping 15, stiffness 200, mass 0.8
+//   Close:      withSpring(0) then resume idle spin
+const IDLE_SPIN_DURATION = 3 // seconds per 360°
+const ICON_SPRING = { type: 'spring' as const, stiffness: 200, damping: 15, mass: 0.8 }
 
 interface FabPos { x: number; y: number }
 const DEFAULT_POS: FabPos = { x: -999, y: -999 }
@@ -61,6 +68,13 @@ export function SideDrawerFab() {
   const [vh, setVh] = useState(() => (typeof window !== 'undefined' ? window.innerHeight : 700))
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false, dragging: false })
 
+  // §1: Icon rotation controller — drives the infinite idle spin + open/close transitions
+  const iconControls = useAnimationControls()
+  // Ref to guard against stale callbacks if user rapidly toggles open/close.
+  // Kept in sync inside an effect (not during render) per react-hooks/refs rule.
+  const fabOpenRef = useRef(fabOpen)
+  useEffect(() => { fabOpenRef.current = fabOpen }, [fabOpen])
+
   useEffect(() => {
     const handleResize = () => {
       setVw(window.innerWidth)
@@ -76,6 +90,37 @@ export function SideDrawerFab() {
     const t1 = setTimeout(() => setPeekMode(false), 1500)
     return () => clearTimeout(t1)
   }, [])
+
+  // §1: Infinite idle rotation engine.
+  //   CLOSED → spring to 0° (if not already), THEN start infinite linear 360° spin (3s/rev).
+  //   OPEN   → cancel the infinite loop, spring to 45° (turns + into ×).
+  //   CLOSE  → spring back to 0°, then RESUME the infinite spin.
+  // The .then() promise guards against rapid toggles via fabOpenRef.
+  useEffect(() => {
+    if (fabOpen) {
+      // OPEN: cancel idle spin → spring to 45°
+      iconControls.start({
+        rotate: 45,
+        transition: ICON_SPRING,
+      })
+    } else {
+      // CLOSE: spring back to 0° first, then resume infinite spin
+      iconControls
+        .start({
+          rotate: 0,
+          transition: ICON_SPRING,
+        })
+        .then(() => {
+          // Guard: only resume spin if still closed (user may have re-opened during the spring)
+          if (!fabOpenRef.current) {
+            iconControls.start({
+              rotate: 360,
+              transition: { duration: IDLE_SPIN_DURATION, repeat: Infinity, ease: 'linear' },
+            })
+          }
+        })
+    }
+  }, [fabOpen, iconControls])
 
   // Outside-click + Escape to close. Deferred by a tick so the opening click doesn't immediately close.
   useEffect(() => {
@@ -121,28 +166,21 @@ export function SideDrawerFab() {
     window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp); window.addEventListener('pointercancel', onUp)
   }, [position, fabOpen, setFabOpen])
 
-  // §1 FIX: Strict dynamic X-axis anchoring.
-  // Compare FAB CENTER to viewport CENTER. Do NOT require position.x >= 0 —
-  // when snapped to the left edge, position.x is intentionally negative (peek/hide offset = -20),
-  // which previously flipped isOnLeft=false and pushed the menu off-screen.
+  // §1: Strict dynamic X-axis anchoring (compare FAB center to viewport center)
   const fabCenterX = position.x + FAB_SIZE / 2
   const isOnLeft = fabCenterX < vw / 2
 
-  // §1 FIX: Build menu style with STRICT conditional left/right + explicit 'auto' counterpart.
-  // This prevents conflicting absolute positioning when the anchor side flips.
+  // §1: Strict conditional menuStyle with explicit 'auto' counterparts
   const menuStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column' }
   if (isOnLeft) {
-    // Left half: menu opens to the RIGHT of the FAB. Anchor menu's LEFT edge to FAB's RIGHT edge.
     menuStyle.left = `${position.x + FAB_SIZE + MENU_GAP}px`
     menuStyle.right = 'auto'
     menuStyle.alignItems = 'flex-start'
   } else {
-    // Right half: menu opens to the LEFT of the FAB. Anchor menu's RIGHT edge to FAB's LEFT edge.
     menuStyle.right = `${vw - position.x + MENU_GAP}px`
     menuStyle.left = 'auto'
     menuStyle.alignItems = 'flex-end'
   }
-  // Vertical anchor — flip downward when FAB is near the top
   const nearTop = position.y - MENU_HEIGHT < TOP_BAR + 20
   if (nearTop) {
     menuStyle.top = `${position.y + FAB_SIZE + MENU_GAP}px`
@@ -152,12 +190,12 @@ export function SideDrawerFab() {
     menuStyle.top = 'auto'
   }
 
-  // §2: Peek offset — nudge FAB towards center by 35px while peeking
+  // Peek offset — nudge FAB towards center by 35px while peeking
   const peekOffset = peekMode ? (isOnLeft ? 35 : -35) : 0
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — fade in/out over 200ms */}
       <AnimatePresence>
         {fabOpen && (
           <motion.div
@@ -171,7 +209,7 @@ export function SideDrawerFab() {
         )}
       </AnimatePresence>
 
-      {/* §2 + §3: Menu — spring open (damping 15 / stiffness 100 / mass 0.8), timed fade+scale exit */}
+      {/* §2 + §3: Menu — spring open (damping 15 / stiffness 100 / mass 0.8), timed fade+scale exit (200ms) */}
       <AnimatePresence>
         {fabOpen && (
           <motion.div
@@ -217,7 +255,7 @@ export function SideDrawerFab() {
 
       {/* FAB container with idle ripple halo */}
       <div className="fixed z-50 select-none" style={{ left: `${position.x + peekOffset}px`, top: `${position.y}px`, width: FAB_SIZE, height: FAB_SIZE }}>
-        {/* Idle Ripple Halo — two offset pulses, infinite */}
+        {/* Idle Ripple Halo — two offset pulses, infinite (only when not interacted & closed) */}
         {!interacted && !fabOpen && (
           <>
             <motion.div
@@ -254,11 +292,12 @@ export function SideDrawerFab() {
           aria-label={t('qa.title')}
           aria-expanded={fabOpen}
         >
-          {/* §3: Icon rotates to 45deg (open) with spring, rotates back to 0 (close) with spring */}
-          <motion.div
-            animate={{ rotate: fabOpen ? 45 : 0 }}
-            transition={{ type: 'spring', stiffness: 200, damping: 15, mass: 0.8 }}
-          >
+          {/* §1: Infinite idle rotation icon.
+              - CLOSED: continuously spins 360° linearly over 3s (premium attention-grabber)
+              - OPEN:   cancels spin, springs to 45° (+ → ×)
+              - CLOSE:  springs back to 0°, then resumes spin
+              Driven by iconControls (useAnimationControls) — see the useEffect above. */}
+          <motion.div animate={iconControls}>
             <Plus className="w-7 h-7 drop-shadow" />
           </motion.div>
         </motion.button>

@@ -2124,3 +2124,40 @@ Stage Summary:
 - DEFENSIVE FIXES: getGradeMeta() helper, useFetch hardening (JSON parse isolation + per-item scrubbing + keep-previous-on-error), name?.charAt guards, GRADE_META fallbacks across 5 files.
 - ALL 6 SCREENS VERIFIED WORKING: 3 list views + 3 detail screens render data correctly with zero console errors.
 - VERCEL NOTE: schema.prisma is `sqlite` for local dev. For Vercel deployment, switch to `postgresql` and regenerate. No `prisma migrate reset` was run — no data was wiped.
+
+---
+Task ID: FAB-SPIN-1
+Agent: main
+Task: Add infinite idle rotation to FAB '+' icon + ensure open/close transitions interrupt and resume the spin loop smoothly.
+
+Work Log:
+- Read current side-drawer-fab.tsx — icon used a simple `animate={{ rotate: fabOpen ? 45 : 0 }}` with spring. No idle rotation. Menu exit animation existed but user reported it "still feels stiff and instantly unmounts."
+- §1 INFINITE IDLE ROTATION implementation:
+  * Added `useAnimationControls` from framer-motion (web equivalent of react-native-reanimated's `useSharedValue` + `withRepeat`/`withSpring`/`withTiming`).
+  * Created `iconControls` to imperatively drive the icon's rotation.
+  * useEffect on `[fabOpen]` orchestrates the 3 states:
+    - CLOSED: `iconControls.start({ rotate: 0, transition: ICON_SPRING }).then(() => iconControls.start({ rotate: 360, transition: { duration: 3, repeat: Infinity, ease: 'linear' } }))` — springs to 0° first, then starts infinite linear 360° spin at 3s/revolution (matches user's `withRepeat(withTiming(360, { duration: 3000, easing: Easing.linear }), -1, false)` spec).
+    - OPEN: `iconControls.start({ rotate: 45, transition: ICON_SPRING })` — cancels the infinite loop, springs to 45° (turns + into ×). ICON_SPRING = `{ type: 'spring', stiffness: 200, damping: 15, mass: 0.8 }`.
+    - CLOSE: same as CLOSED path — springs back to 0°, then resumes the infinite spin.
+  * Added `fabOpenRef` (synced via useEffect, not during render — per react-hooks/refs lint rule) to guard the `.then()` callback: only resumes the spin if `fabOpenRef.current` is still false (prevents stale callback from starting a spin during open state on rapid toggle).
+  * The icon `<motion.div animate={iconControls}>` — bind controls to the element.
+- §2 Menu spring open + timed exit (already present, kept as-is):
+  * Open: spring `{ stiffness: 100, damping: 15, mass: 0.8 }` (user's exact spec).
+  * Exit: `{ opacity: 0, scale: 0.8, x: ±14, y: 8, transition: { duration: 0.2, ease: [0.4,0,1,1] } }` — 200ms timed fade+scale before AnimatePresence unmounts.
+- Fixed lint error: `fabOpenRef.current = fabOpen` during render → moved to `useEffect(() => { fabOpenRef.current = fabOpen }, [fabOpen])`.
+
+- §3 BROWSER VERIFICATION (Agent Browser, 390x844 mobile):
+  * TEST 1 — Idle spin on mount: sampled icon transform at t=0 (matrix→~35°) and t=1.5s (~220°). ~185° delta over 1.5s = matches 3s/360° linear spec ✓
+  * TEST 2 — Tap to open: icon transform = `matrix(0.707107, 0.707107, -0.707107, 0.707107, 0, 0)` = exactly 45° (cos45=sin45=0.707). Menu visible. ✓
+  * TEST 3 — Close exit animation: menu STILL visible immediately after close click (exit playing), gone by 0.5s. Confirms AnimatePresence defers unmount until 200ms exit completes — NOT instant unmount. ✓
+  * TEST 4 — Spin resumes after close: sampled at t=0 (~301°) and t=1.5s (~130°) after close — values differ and change, confirming infinite spin resumed. ✓
+  * TEST 5 — Rapid toggle (open→close→open in <1s): final state expanded=true, transform at exactly 45°, menu visible. No animation breakage, no stale-callback spin during open. ✓
+  * Console errors: ZERO. Dev.log errors: ZERO.
+
+Stage Summary:
+- Infinite idle rotation implemented via `useAnimationControls` — the `+` icon continuously spins 360° linearly over 3s when the menu is closed (premium attention-grabber matching user's Reanimated spec).
+- Open transition: infinite loop cancelled, icon springs to 45° (stiffness 200, damping 15, mass 0.8).
+- Close transition: icon springs back to 0°, then RESUMES the infinite spin. The menu plays its 200ms exit fade+scale before unmount (verified: menu stays mounted during exit, then unmounts — not instant).
+- Rapid-toggle safe: `fabOpenRef` guard prevents stale `.then()` callbacks from starting a spin during the open state.
+- Files changed: src/components/layout/side-drawer-fab.tsx only.
+- Note: User referenced react-native-reanimated APIs (`withRepeat`, `withTiming`, `withSpring`, `Easing.linear`). This is a Next.js web project, so used Framer Motion equivalents: `useAnimationControls` (≡ shared value + animate API), `repeat: Infinity` (≡ `withRepeat(..., -1, false)`), `ease: 'linear'` (≡ `Easing.linear`), `type: 'spring'` with damping/stiffness/mass (≡ `withSpring`).
