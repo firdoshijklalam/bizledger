@@ -62,3 +62,9 @@ recovery*
 super-watchdog*
 persistent-dev*
 start-server*
+
+# Test artifacts & screenshots
+*.png
+fab-*.png
+data-*.png
+tool-results/
