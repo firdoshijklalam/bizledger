@@ -4,20 +4,22 @@ import { db } from '@/lib/db'
 // GET /api/business — get the current business (single-tenant dev).
 // Security: prefers "Sharma Trading Co." (the owner's business) over demo shops.
 export async function GET() {
-  // Prefer the owner's business (Sharma Trading Co.) if it exists
-  let business = await db.business.findFirst({
-    where: { name: 'Sharma Trading Co.' },
-  })
-  // Fallback: if no Sharma business, return the first business by creation order
-  if (!business) {
-    business = await db.business.findFirst({
-      orderBy: { createdAt: 'asc' },
+  try {
+    let business = await db.business.findFirst({
+      where: { name: 'Sharma Trading Co.' },
     })
+    if (!business) {
+      business = await db.business.findFirst({
+        orderBy: { createdAt: 'asc' },
+      })
+    }
+    if (!business) {
+      return NextResponse.json(null)
+    }
+    return NextResponse.json(business)
+  } catch (e: any) {
+    return NextResponse.json({ error: 'DB error', detail: String(e?.message || e), code: e?.code }, { status: 500 })
   }
-  if (!business) {
-    return NextResponse.json(null)
-  }
-  return NextResponse.json(business)
 }
 
 // PUT /api/business — update business profile
