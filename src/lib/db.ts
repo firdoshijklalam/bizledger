@@ -20,6 +20,15 @@ function createPrismaClient() {
     databaseUrl += (databaseUrl.includes('?') ? '&' : '?') + 'sslmode=require'
   }
 
+  // CRITICAL: Disable prepared statements for Neon/PostgreSQL.
+  // Prevents "cached plan must not change result type" errors (Postgres 0A000)
+  // when the DB schema is altered (e.g. by prisma db push). Without this,
+  // cached prepared statements become invalid after schema changes and ALL
+  // queries fail with HTTP 500.
+  if (databaseUrl.includes('neon.tech') && !databaseUrl.includes('prepared_statements=')) {
+    databaseUrl += (databaseUrl.includes('?') ? '&' : '?') + 'pgbouncer=true&prepared_statements=false'
+  }
+
   return new PrismaClient({
     log: ['error'],
     datasources: {
