@@ -97,6 +97,16 @@ export const GRADE_META: Record<string, { label: string; color: string; bg: stri
 }
 
 /**
+ * Null-safe GRADE_META lookup. Always returns a valid meta object.
+ * Falls back to grade 'B' (the schema default) for null/undefined/invalid grades.
+ * Use this instead of GRADE_META[grade] to prevent "Cannot read properties of undefined" crashes.
+ */
+export function getGradeMeta(grade: string | null | undefined) {
+  if (!grade) return GRADE_META['B']
+  return GRADE_META[grade] ?? GRADE_META['B']
+}
+
+/**
  * Format a date as a relative "time ago" string.
  * e.g. "2s ago", "5m ago", "3h ago", "2d ago"
  */

@@ -137,7 +137,7 @@ export function ProductProfile({ productId }: { productId: string }) {
         ) : (
           <div className="flex flex-col items-center gap-2">
             <Package className="w-16 h-16 text-amber-600/50" />
-            <span className="text-4xl font-bold text-amber-700/30">{product.name.charAt(0).toUpperCase()}</span>
+            <span className="text-4xl font-bold text-amber-700/30">{(product.name || '?').charAt(0).toUpperCase()}</span>
           </div>
         )}
         {isLow && (

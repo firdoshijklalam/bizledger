@@ -176,7 +176,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
     )
   }
   const currency = business?.currency || 'INR'
-  const meta = GRADE_META[data.qualityGrade]
+  const meta = GRADE_META[data.qualityGrade] ?? GRADE_META['B']
   const isReceivable = data.balance > 0
   const isPayable = data.balance < 0
 

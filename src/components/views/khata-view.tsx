@@ -180,7 +180,7 @@ export function KhataView() {
         <div className="space-y-2">
           <AnimatePresence>
             {filtered.map((p, i) => {
-              const meta = GRADE_META[p.qualityGrade]
+              const meta = GRADE_META[p.qualityGrade] ?? GRADE_META['B']
               const isReceivable = p.balance > 0
               const isPayable = p.balance < 0
               return (

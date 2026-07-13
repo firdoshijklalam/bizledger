@@ -4,7 +4,7 @@ import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
 import type { Party, Product } from '@/lib/types'
-import { formatCurrency, GRADE_META } from '@/lib/utils'
+import { formatCurrency, GRADE_META, getGradeMeta } from '@/lib/utils'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -247,7 +247,7 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
     title: p.name,
     subtitle: p.phone || 'No phone',
     badge: p.qualityGrade,
-    badgeClass: `${GRADE_META[p.qualityGrade].bg} ${GRADE_META[p.qualityGrade].color}`,
+    badgeClass: `${getGradeMeta(p.qualityGrade).bg} ${getGradeMeta(p.qualityGrade).color}`,
   }))
 
   const productItems = (products || []).map((p) => ({
@@ -286,7 +286,7 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <p className="text-sm font-medium truncate">{customer.name}</p>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${GRADE_META[customer.qualityGrade].bg} ${GRADE_META[customer.qualityGrade].color}`}>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${getGradeMeta(customer.qualityGrade).bg} ${getGradeMeta(customer.qualityGrade).color}`}>
                       {customer.qualityGrade}
                     </span>
                   </div>

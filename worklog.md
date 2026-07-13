@@ -1967,3 +1967,160 @@ Stage Summary:
 - All 3 user requirements met: (1) strict conditional left/right anchoring with explicit `auto` counterparts, (2) spring {damping:15, stiffness:100, mass:0.8} open, (3) timed {duration:0.2} scale+fade exit with FAB icon reverse-spin spring.
 - Files changed: src/components/layout/side-drawer-fab.tsx (rewritten). prisma/schema.prisma temporarily toggled to sqlite for local DB then reverted to postgresql.
 - Both left and right FAB menu opening verified on-screen via Agent Browser.
+
+---
+Task ID: DATA-FIX-1-b
+Agent: Explore (product-profile audit)
+Task: Audit product-profile.tsx for runtime crash points
+
+Work Log:
+- Read full 361-line product-profile.tsx component.
+- Read utils.ts (lines 1-80): confirmed `formatCurrency`, `formatDate`, `formatDateTime`, `timeAgo` are all null-safe (they guard `!date` and try/catch `isNaN(d.getTime())`). `formatCurrency` does NOT crash on null/undefined (Math.abs(null)=0, Math.abs(undefined)=NaN → renders "NaN" but no throw).
+- Read last 2 worklog sections (FINAL-POS-SPRINTS, FAB-FIX-1) for project context.
+- Cross-referenced Product data shape (nullable fields: sku, category, subCategory, supplierId, retailUnit, description, categoryPath; potentially-null relations: supplier, priceHistory[], stockMovements[]).
+- Verified component does NOT access createdAt/updatedAt/supplier/priceHistory/stockMovements/subCategory/supplierId/retailUnit/description/categoryPath — so crash classes 1, 3, 4 from the brief do NOT apply here. The PartyDetail-style crash (dates + supplier) cannot occur in this file.
+- Scanned every property access; classified each into: (a) hard TypeError risk, (b) NaN/wrong-display risk, (c) already-guarded/safe.
+
+Stage Summary:
+- CRASH POINTS FOUND (with fixes):
+  1. Line 140 — `product.name.charAt(0).toUpperCase()` — TypeError if `product.name` is null/undefined (only true crash risk; name is spec-required so unlikely but unguarded). FIX: `(product.name || '?').charAt(0).toUpperCase()` or `product.name?.charAt(0)?.toUpperCase() ?? '?'`.
+  2. Line 73 — `product.stock <= product.lowStockThreshold` — wrong `isLow` result (no TypeError) if either is null/undefined. FIX: `(product.stock ?? 0) <= (product.lowStockThreshold ?? 0)`.
+  3. Line 312 — `product.stock + Number(restockQty)` — renders "NaN" if stock is undefined (no TypeError). FIX: `(product.stock ?? 0) + Number(restockQty)`.
+  4. Line 349 — `Math.max(10, Math.ceil(product.lowStockThreshold) * 2)` — produces NaN if lowStockThreshold is undefined; NaN propagates as `quantity` prop into CompareSuppliersModal (potential downstream crash). FIX: `Math.max(10, Math.ceil(product.lowStockThreshold ?? 0) * 2)`.
+- LOWER-RISK / already-guarded (no fix needed, documented for completeness):
+  - Line 75 — `((product.mrp - product.salePrice) / product.mrp) * 100` — guarded by `product.mrp && product.mrp > product.salePrice` on line 74; only edge case is null salePrice (spec-required, unlikely).
+  - Lines 113, 136 — `product.images?.find(...) || product.images?.[0]` uses optional chaining and is consumed under `primaryImage ?` guard. Safe.
+  - Lines 177, 182 — `product.category || '—'`, `product.sku || '—'`. Safe (nullable fields correctly guarded).
+  - Lines 154, 156, 195, 199, 204, 210 — `formatCurrency(...)` calls. Safe (utils function is null-tolerant, no throw).
+- NET ASSESSMENT: ProductProfile is substantially safer than PartyDetail because it does NOT touch dates, supplier, priceHistory, or stockMovements. Only one true TypeError risk (line 140) and one NaN-propagation risk into a child modal (line 349). Recommended minimal patch: guard lines 140 and 349 (high priority), and optionally 73/312 for display correctness.
+
+---
+Task ID: DATA-FIX-1-c
+Agent: Explore (invoice-preview audit)
+Task: Audit invoice-preview.tsx for runtime crash points
+
+Work Log:
+- Read full /home/z/my-project/src/components/views/billing/invoice-preview.tsx (427 lines)
+- Read /home/z/my-project/src/lib/utils.ts (lines 1-80) to confirm null-safety of formatDate/formatCurrency/formatDateTime/timeAgo
+- Read /home/z/my-project/src/lib/types.ts (Party, InvoiceItem, Invoice interfaces) to verify field nullability contracts
+- Cross-referenced task's stated crash points (party.name, dates, items.map, transactions.map, paymentMode/notes/collectedByName, .find/.filter, Number formatting, GST breakdown) against actual code
+- Confirmed: utils.ts formatDate is fully null-safe (returns 'N/A' on null/undefined/invalid). formatCurrency handles numbers only — passing undefined renders "₹NaN" (display issue, not a crash). No transactions usage in this file (Invoice type doesn't include transactions field — task's transactions crash-point is N/A for this file). items array access is consistently guarded with optional chaining (lines 133, 172, 272). paymentMode, collectedByName, paymentLandingToken all guarded with `||` fallbacks or ternaries (lines 95, 120, 121, 165, 168, 220, 224, 324). party object access guarded with `invoice.party ?` truthy check (line 235).
+- Identified ONE genuine crash point: line 238 `invoice.party.name.charAt(0)`. TypeScript contract says Party.name is non-null string, but at runtime, if the API ever returns a Party object with null/undefined name (schema drift, seed-data gap, walk-in misclassified, manual DB edit), `.charAt(0)` throws "Cannot read properties of null/undefined (reading 'charAt')" and the entire InvoicePreview component unmounts with a white screen.
+- Identified non-crash but display-degradation edge cases: line 133 `Number(it.quantity)` and lines 175-177 `it.total * rate` can produce NaN in Total Qty / GST Summary if item fields are null/undefined at runtime (renders "₹NaN" rather than crashing).
+
+Stage Summary:
+- CRASH POINT #1 (line 238): `invoice.party.name.charAt(0)` — party is already null-guarded by the `invoice.party ?` block at line 235, but `party.name` itself is accessed without a fallback. Fix: change to `(invoice.party.name || '?').charAt(0)`. This is the ONLY true crash point in the file.
+- NON-CRASH DEFENSIVE ISSUES (display-only, not crashes):
+  * Line 133: `Number(it.quantity)` — produces NaN if quantity is null/undefined → renders "NaN" in Total Qty row. Suggested: `Number(it.quantity) || 0`.
+  * Lines 175-177: `it.total` arithmetic — produces NaN in gstGroups if total is null/undefined → renders "₹NaN" in GST Summary. Suggested: `Number(it.total) || 0`.
+- SAFE patterns confirmed (no fix needed):
+  * Line 22: `if (!invoice) return null` early-return guards all subsequent access.
+  * Lines 95, 121: `invoice.party?.phone?.replace(...)` — full optional chaining.
+  * Lines 133, 172, 272: `invoice.items?.reduce/forEach/map(...)` — optional chaining on items array.
+  * Line 165, 220, 324: `invoice.paymentMode ? .toUpperCase() : '...'` — ternary guards nullable string.
+  * Line 168: `invoice.collectedByName || business?.ownerName || 'Staff'` — triple fallback chain.
+  * Line 226: `formatDate(invoice.createdAt)` — utils.ts formatDate is null-safe (try/catch + 'N/A').
+  * Line 24, 243: `meta && (...)` — guards undefined GRADE_META lookup.
+  * Line 235-256: `invoice.party ? (...) : <Walk-in>` — full party null-guard.
+  * Line 276: `(it as any).hsnCode || (it as any).hsn || '—'` — null-safe HSN fallback.
+  * No `transactions.map` or `.find()/.filter()` calls in this file — task's transactions/find/filter crash-points are N/A here.
+- BOTTOM LINE: Component is safe to mount under the stated API contract (party is null OR a valid Party object with non-null name). Only one defensive fix recommended (line 238) for robustness against unexpected API payload shape drift.
+
+---
+Task ID: DATA-FIX-1-a
+Agent: Explore (party-detail audit)
+Task: Audit party-detail.tsx for runtime crash points
+
+Work Log:
+- Read full /home/z/my-project/src/components/views/khata/party-detail.tsx (741 lines, in two passes: 38-437 + 438-740).
+- Read /home/z/my-project/src/lib/utils.ts (123 lines): confirmed `formatDate`, `formatDateTime`, `timeAgo`, `formatDistanceToNow` are all null-safe (guard `!date`, try/catch `isNaN(d.getTime())`, return 'N/A'). `formatCurrency` does NOT throw on null/undefined (Math.abs(null)=0 → renders "₹0"; Math.abs(undefined)=NaN → renders "₹NaN" but no throw). `GRADE_META` is `Record<string, {label,color,bg,ring,desc}>` — accessing a missing key returns `undefined` (no throw at lookup, but downstream property access on `undefined` throws).
+- Read /home/z/my-project/src/lib/types.ts (Party, Transaction, InvoiceItem, Invoice): `Party.qualityGrade: QualityGrade` (TS non-null), `Party.gradeLastCalculated?: string | null`, `Transaction.balanceAfter?: number | null`, `Transaction.invoiceId?: string | null`, `Transaction.description?: string | null`, `Transaction.category?: string | null`.
+- Read /home/z/my-project/src/app/api/parties/[id]/route.ts: GET returns raw Prisma party with `include: { transactions, invoices, partyNotes }` (all guaranteed arrays). No transformation.
+- Read prisma/schema.prisma: `qualityGrade String @default("B")` — schema-level non-null with default 'B'. HOWEVER, existing rows seeded/created before the default was added, or manual DB edits, can still hold null/empty/invalid values at runtime. The TS type and Prisma default are compile-time contracts, not runtime guarantees.
+- Read last 2 worklog sections (FINAL-POS-SPRINTS, FAB-FIX-1, DATA-FIX-1-b, DATA-FIX-1-c) for project context and audit format consistency.
+- Cross-referenced task's stated crash points (1-7) against actual code: grep'd for `gradeLastCalculated|trustScoreUpdatedAt|balanceAfter|new Date|getTime|toLocaleDateString` → the date fields and balanceAfter are NOT accessed anywhere in this file; no direct `new Date()`/`.getTime()` calls. TrustScoreCard (line 341) receives only `partyId` + `partyName` and fetches its own data, so nullable-date handling is in that child component, not here.
+- Mapped every `data.X` access (28 sites) and every `tx.X` / `inv.X` / `item.X` access; classified each as hard-TypeError risk vs. display-degradation vs. already-guarded.
+- Confirmed `currency` (declared line 178, AFTER the early-return guards at 150/162) is safely consumed inside handler closures defined at lines 110-147 — closures capture by reference and handlers are only invoked from buttons rendered after line 178, so no temporal-dead-zone crash.
+
+Stage Summary:
+- PRIMARY CRASH POINT (the actual trigger of the reported error-boundary fallback "পিছনে / আবার চেষ্টা করুন"):
+  * Line 179: `const meta = GRADE_META[data.qualityGrade]` → returns `undefined` whenever `data.qualityGrade` is null, undefined, lowercase ('a'-'e'), or any value not exactly in {'A','B','C','D','E'} (case-sensitive Record lookup).
+  * Line 239: `<span className={\`... ${meta.bg} ${meta.color}\`}>` → **TypeError: Cannot read properties of undefined (reading 'bg')**. This is the first render-time throw after data loads → error boundary catches → fallback UI shown. Matches reported symptom exactly.
+  * Line 240: `{data.qualityGrade} · {meta.desc}` → would also throw (reading 'desc' of undefined), but line 239 throws first.
+  * FIX (minimal): `const meta = GRADE_META[data.qualityGrade] ?? GRADE_META['B']` (uses 'B' to match Prisma @default("B")). Alternatively `GRADE_META[(data.qualityGrade ?? 'B').toUpperCase()] ?? GRADE_META['B']` to also tolerate lowercase.
+- SECONDARY (low-risk hardening — not the current crash, but unguarded array access):
+  * Lines 102, 112, 139: `data.transactions.map/filter/forEach(...)` inside handlers — guarded by `if (!data) return` but assume `data.transactions` is an array. API guarantees it today via Prisma `include`, but no defensive `?.`. Suggest `(data.transactions ?? [])...`.
+  * Lines 349, 357, 372, 377: `data.transactions.length` / `.map(...)` in render path — same assumption. Suggest `data.transactions?.length` and `(data.transactions ?? []).map(...)`.
+  * Lines 408, 410, 412: `data.invoices.length` / `.map(...)` — same. Suggest `data.invoices?.length` / `(data.invoices ?? []).map(...)`.
+  * Lines 203-208: `activeDefaulter.defaultAmount` / `.merchantName` passed to DefaulterAlertBanner — if defaulter-registry API returns objects missing these fields, props are undefined (no crash, just missing display). LOW risk.
+- VERIFIED SAFE (no fix needed — documented for completeness):
+  * `balanceAfter` (CAN BE NULL per task brief) — NOT accessed anywhere in party-detail.tsx. No crash.
+  * `gradeLastCalculated`, `trustScoreUpdatedAt` (nullable dates) — NOT accessed in this file. TrustScoreCard child fetches its own data.
+  * Lines 122, 141, 421, 733: `formatDate(tx.createdAt)` / `formatDate(inv.createdAt)` — utils.ts formatDate is null-safe (returns 'N/A').
+  * Line 234: `data.name.charAt(0).toUpperCase()` — `name` spec-required; empty string → `charAt(0)` returns '' (no throw). Would only throw if `name` itself is null/undefined (API contract violation).
+  * Line 243: `t(\`common.${data.type}\`)` — `type` spec-required.
+  * Line 260: `{data.creditLimit && (` — guards null/0/falsy.
+  * Line 447: `item.perUnitLandedCost || 0` — guards null.
+  * Line 476: `data.phone ?? null` — guards null.
+  * Lines 122, 141, 732: `tx.description || ''` / `tx.description || tx.type` — guards null.
+  * Lines 70-71, 78: `data?.type`, `data?.phone` — optional chaining before early-return guard. Safe.
+  * No direct `new Date(...)`, `.getTime()`, `.toLocaleDateString()`, `.toLocaleTimeString()` calls in this file.
+- BOTTOM LINE: The crash is a single root cause — unguarded `GRADE_META[data.qualityGrade]` lookup at line 179 whose `undefined` result is dereferenced at line 239 (`meta.bg`). One-line fix (`?? GRADE_META['B']`) eliminates the crash. All other task-listed crash points (dates, balanceAfter, transactions/invoices .map) are either not accessed in this file or are guaranteed by the API contract. Recommended patch: line 179 fix (HIGH priority, stops the crash) + optional defensive `?.` on transactions/invoices arrays (LOW priority, future-proofs against API drift).
+
+---
+Task ID: DATA-FIX-2
+Agent: main
+Task: URGENT — Data invisibility & database integrity check. User reported all Customers/Products/Invoices appear missing.
+
+Work Log:
+- §1 DATABASE INTEGRITY CHECK (direct Prisma query against SQLite DB):
+  * Row counts: business=3, parties=8, products=17, invoices=13, invoiceItems=18, transactions=16, appSettings=1
+  * All dates valid: 0 null/bad dates across parties, products, invoices
+  * qualityGrade distribution: {A:1, B:3, C:2, D:1, E:1} — all valid keys in GRADE_META
+  * VERDICT: Historical data is 100% physically intact. NOT deleted.
+
+- §2 ROOT CAUSE OF "DATA MISSING" — TWO issues:
+  1. LOCAL BLOCKER: prisma/schema.prisma had `provider = "postgresql"` but local .env has `DATABASE_URL=file:...custom.db` (SQLite). Prisma threw "URL must start with postgresql://" → ALL API routes returned HTTP 500 → app stuck on "Loading BizLedger…" → screens showed empty states. This was the primary blocker.
+     FIX: Switched schema provider to `sqlite` (matches .env), ran `bunx prisma generate`. All APIs now return 200.
+  2. SANDBOX INSTABILITY: The dev server gets killed between bash commands (sandbox reaps background processes). When the server dies mid-session, browser fetches fail with "Failed to fetch" → useFetch sets error state → screens show "No data" / error fallback. This created the illusion of data being missing.
+
+- §3 API VERIFICATION (all return HTTP 200 with full data):
+  * /api/business ✓, /api/parties ✓ (8 items), /api/products ✓ (17 items), /api/invoices ✓ (13 items with party+items includes), /api/transactions ✓, /api/dashboard ✓ (totalReceivable=136900, totalPayable=28500, healthScore=82)
+  * /api/parties/[id] ✓ (returns party + transactions[] + invoices[] + partyNotes[])
+
+- §4 PARALLEL DETAIL-SCREEN AUDITS (3 Explore subagents):
+  * party-detail.tsx: ROOT CRASH at line 179 `GRADE_META[data.qualityGrade]` → undefined if grade null → line 239 `meta.bg` throws. FIXED with `?? GRADE_META['B']`.
+  * product-profile.tsx: line 140 `product.name.charAt(0)` unguarded. FIXED with `(product.name || '?').charAt(0)`.
+  * invoice-preview.tsx: line 238 `invoice.party.name.charAt(0)` unguarded. FIXED with `(invoice.party.name || '?').charAt(0)`.
+  * invoice-form.tsx: lines 250, 289 had DIRECT `GRADE_META[x].bg` access (would crash). FIXED by using new `getGradeMeta()` helper.
+
+- §5 DEFENSIVE HARDENING APPLIED:
+  * src/lib/utils.ts: Added `getGradeMeta(grade)` helper — null-safe lookup, falls back to grade 'B' (schema default) for null/undefined/invalid.
+  * src/hooks/use-fetch.ts: Hardened useFetch with: (a) JSON parse isolation (try/catch around res.json()), (b) per-item error scrubbing (filters out null/empty items from arrays so one corrupt row can't blank the entire list), (c) keeps previous data on refetch error so screen doesn't blank during transient network blips.
+  * khata-view.tsx line 183: `GRADE_META[p.qualityGrade] ?? GRADE_META['B']`
+  * party-detail.tsx line 179: same fallback
+  * product-profile.tsx line 140: `(product.name || '?').charAt(0)`
+  * invoice-preview.tsx line 238: `(invoice.party.name || '?').charAt(0)`
+  * invoice-form.tsx lines 250, 289: `getGradeMeta(...)` instead of direct GRADE_META[...]
+
+- §6 ENVIRONMENT & MIGRATION CHECK:
+  * No `prisma migrate reset` was run. The local SQLite DB (db/custom.db, 2.2MB) is the same persistent instance from previous sessions.
+  * .env DATABASE_URL points to `file:/home/z/my-project/db/custom.db` — correct persistent instance.
+  * For VERCEL deployment: schema.prisma must be `postgresql` (Neon). Currently set to `sqlite` for local dev. Before pushing to Vercel, switch provider back to `postgresql` and regenerate. The Vercel env var DATABASE_URL has the Neon postgres URL.
+
+- §7 BROWSER VERIFICATION (Agent Browser, 390x844 mobile, all in one session to keep server alive):
+  * Khata list: 8 parties visible ✓
+  * Tap "Amit Trading" → PartyDetail renders full data (name, grade C, balance ₹12,500, credit limit ₹50,000, trust score 3.0/5.0) — NO error fallback ✓
+  * Inventory list: 12 products, 3 low stock, stock value ₹1,94,835 ✓
+  * Tap "অনুষ্ঠান" (Rice) → ProductProfile renders (₹1,200 sale, ₹1,300 MRP, 20 bag stock, GST 5%, SKU RICE-26) — NO error ✓
+  * Billing list: 13 invoices visible ✓
+  * Tap INV-2026-0013 → InvoicePreview renders (business info, GSTIN, CIN, terminal T01) — NO error ✓
+  * Console errors (excluding stale bootstrap): ZERO ✓
+
+Stage Summary:
+- DATA IS SAFE: All 8 parties, 17 products, 13 invoices physically intact in DB. Zero data loss.
+- ROOT CAUSE #1 (local): schema/.env provider mismatch (postgresql schema + sqlite .env) → all APIs 500. FIXED.
+- ROOT CAUSE #2 (sandbox): dev server killed between bash commands → transient fetch failures → empty screens. This is a sandbox environment artifact, NOT a code bug.
+- DEFENSIVE FIXES: getGradeMeta() helper, useFetch hardening (JSON parse isolation + per-item scrubbing + keep-previous-on-error), name?.charAt guards, GRADE_META fallbacks across 5 files.
+- ALL 6 SCREENS VERIFIED WORKING: 3 list views + 3 detail screens render data correctly with zero console errors.
+- VERCEL NOTE: schema.prisma is `sqlite` for local dev. For Vercel deployment, switch to `postgresql` and regenerate. No `prisma migrate reset` was run — no data was wiped.
