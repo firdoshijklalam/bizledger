@@ -210,8 +210,8 @@ export function SideDrawerFab() {
         )}
       </AnimatePresence>
 
-      {/* §2 + §3: Menu — spring open (damping 15 / stiffness 100 / mass 0.8), timed fade+scale exit (200ms).
-          Premium container styling: 16px border-radius, elevated shadow, proper padding/spacing. */}
+      {/* Menu — restored to original premium styling (w-56, shadow-2xl, p-2, no dividers).
+          Keeps the dynamic X-axis anchoring + spring animations + exit fade. */}
       <AnimatePresence>
         {fabOpen && (
           <motion.div
@@ -231,21 +231,15 @@ export function SideDrawerFab() {
               y: 8,
               transition: { duration: 0.2, ease: [0.4, 0, 1, 1] }
             }}
-            className="fixed z-50 w-60 bg-card rounded-2xl border border-border overflow-hidden"
-            style={{
-              ...menuStyle,
-              // Premium elevation: layered shadow for depth (matches Material/shadcn dialog spec)
-              boxShadow: '0 10px 15px -3px rgba(0,0,0,0.12), 0 4px 6px -4px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04)',
-            }}
+            className="fixed z-50 w-56 bg-card rounded-2xl shadow-2xl border border-border p-2 overflow-hidden"
+            style={menuStyle}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header — proper padding (px-4 py-3) with bottom divider */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
-              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{t('qa.title')}</p>
-              <button onClick={() => setFabOpen(false)} className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg p-1 transition-colors" aria-label="Close"><X className="w-4 h-4" /></button>
+            <div className="px-3 py-2 flex items-center justify-between">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('qa.title')}</p>
+              <button onClick={() => setFabOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-4 h-4" /></button>
             </div>
-            {/* Action list — proper padding + spacing */}
-            <div className="p-2 space-y-1">
+            <div className="space-y-1">
               {ACTIONS.map((a) => {
                 const Icon = a.icon
                 return (
@@ -256,8 +250,7 @@ export function SideDrawerFab() {
                 )
               })}
             </div>
-            {/* Footer hint — proper padding with top divider */}
-            <p className="px-4 py-2 text-[10px] text-muted-foreground/60 text-center border-t border-border/60">হোল্ড করে টেনে বাটন সরানো যায়</p>
+            <p className="px-3 pt-1 pb-0.5 text-[9px] text-muted-foreground/60 text-center">হোল্ড করে টেনে বাটন সরানো যায়</p>
           </motion.div>
         )}
       </AnimatePresence>
