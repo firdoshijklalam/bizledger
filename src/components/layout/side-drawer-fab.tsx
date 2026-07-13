@@ -2,14 +2,13 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Plus, UserPlus, PackagePlus, FilePlus, ArrowLeftRight, Zap, X } from 'lucide-react'
+import { Plus, UserPlus, PackagePlus, ArrowLeftRight, Zap, X } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
 const ACTIONS = [
-  { id: 'add-party', icon: UserPlus, labelKey: 'qa.addParty', color: 'text-emerald-600' },
-  { id: 'add-product', icon: PackagePlus, labelKey: 'qa.addProduct', color: 'text-amber-600' },
-  { id: 'add-transaction', icon: ArrowLeftRight, labelKey: 'qa.addTransaction', color: 'text-teal-600' },
-  { id: 'new-invoice', icon: FilePlus, labelKey: 'qa.newInvoice', color: 'text-orange-600' },
-  { id: 'quick-sale', icon: Zap, labelKey: 'qa.quickSale', color: 'text-purple-600' },
+  { id: 'quick-sale', icon: Zap, labelKey: 'qa.quickSale', color: 'text-emerald-600', primary: true },
+  { id: 'add-transaction', icon: ArrowLeftRight, labelKey: 'qa.addTransaction', color: 'text-teal-600', primary: false },
+  { id: 'add-party', icon: UserPlus, labelKey: 'qa.addParty', color: 'text-emerald-600', primary: false },
+  { id: 'add-product', icon: PackagePlus, labelKey: 'qa.addProduct', color: 'text-amber-600', primary: false },
 ] as const
 const FAB_SIZE = 64, EDGE_MARGIN = 16, TOP_BAR = 56, BOTTOM_NAV = 80, DRAG_THRESH = 6, HIDE_OFFSET = 36
 interface FabPos { x: number; y: number }
@@ -36,8 +35,6 @@ export function SideDrawerFab() {
   }, [fabOpen, setFabOpen])
   const handleAction = (id: string) => {
     if (id === 'quick-sale') { setActiveView('sale-pad'); setFabOpen(false); return }
-    // §3: Route "New Invoice" to Quick Sale POS screen (unified billing interface)
-    if (id === 'new-invoice') { setActiveView('sale-pad'); setFabOpen(false); return }
     const vm: Record<string,string> = { 'add-party':'khata', 'add-product':'inventory', 'add-transaction':'khata' }
     if (vm[id]) setActiveView(vm[id] as any)
     triggerQuickAction({ id: crypto.randomUUID(), type: id as any }); setFabOpen(false)
@@ -65,7 +62,7 @@ export function SideDrawerFab() {
       <AnimatePresence>{fabOpen && (
         <motion.div initial={{opacity:0,y:20,scale:0.9}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:20,scale:0.9}} transition={{type:'spring',stiffness:400,damping:25}} className={`fixed z-50 w-56 bg-card rounded-2xl shadow-2xl border border-border p-2 overflow-hidden ${isOnLeft?'left-4':'right-4'}`} style={{bottom:`calc(${typeof window!=='undefined'?window.innerHeight-position.y-FAB_SIZE-8:96}px + env(safe-area-inset-bottom))`}} onClick={(e)=>e.stopPropagation()}>
           <div className="px-3 py-2 flex items-center justify-between"><p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('qa.title')}</p><button onClick={()=>setFabOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-4 h-4" /></button></div>
-          <div className="space-y-1">{ACTIONS.map((a) => { const Icon = a.icon; return <button key={a.id} onClick={()=>handleAction(a.id)} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-accent transition-colors min-h-[44px] text-left"><span className={`shrink-0 ${a.color}`}><Icon className="w-5 h-5" /></span><span className="text-sm font-medium flex-1">{t(a.labelKey)}</span></button> })}</div>
+          <div className="space-y-1">{ACTIONS.map((a) => { const Icon = a.icon; return <button key={a.id} onClick={()=>handleAction(a.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-accent transition-colors min-h-[44px] text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}><span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span><span className={`text-sm flex-1 ${a.primary ? 'font-bold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}>{t(a.labelKey)}</span></button> })}</div>
           <p className="px-3 pt-1 pb-0.5 text-[9px] text-muted-foreground/60 text-center">হোল্ড করে টেনে বাটন সরানো যায়</p>
         </motion.div>
       )}</AnimatePresence>
