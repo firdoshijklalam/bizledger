@@ -231,8 +231,12 @@ export function SideDrawerFab() {
               y: 8,
               transition: { duration: 0.2, ease: [0.4, 0, 1, 1] }
             }}
-            className="fixed z-50 w-56 bg-card rounded-2xl shadow-2xl border border-border p-2 overflow-hidden"
-            style={menuStyle}
+            className="fixed z-50 w-56 bg-card rounded-2xl border border-border p-2 overflow-hidden"
+            style={{
+              ...menuStyle,
+              // Explicit shadow (Tailwind v4 shadow-2xl not reliable) — matches original premium elevation
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-3 py-2 flex items-center justify-between">
