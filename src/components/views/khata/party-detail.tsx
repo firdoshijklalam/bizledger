@@ -9,7 +9,7 @@ import { motion } from 'framer-motion'
 import {
   ArrowLeft, Phone, Plus, Receipt, FileEdit, ArrowDownLeft, ArrowUpRight,
   CheckCircle2, MessageSquare, X, Zap, Share2, FileText, Award, Package,
-  Users, Briefcase, Fingerprint, ShieldAlert,
+  Users, Briefcase, Fingerprint, ShieldAlert, Loader2, AlertTriangle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -39,7 +39,7 @@ interface PartyDetailData extends Party {
 export function PartyDetail({ partyId }: { partyId: string }) {
   const { setSelectedPartyId, setActiveView, setShowInvoiceForm, business, setSelectedInvoiceId, setEditingPartyId, editingPartyId, returnToView, setReturnToView } = useAppStore()
   const { t } = useI18n()
-  const { data, refetch } = useFetch<PartyDetailData>(`/api/parties/${partyId}`, [partyId])
+  const { data, loading, error, refetch } = useFetch<PartyDetailData>(`/api/parties/${partyId}`, [partyId])
   const [showTxn, setShowTxn] = useState(false)
   const [showSettle, setShowSettle] = useState(false)
   const [showNote, setShowNote] = useState(false)
@@ -146,7 +146,35 @@ export function PartyDetail({ partyId }: { partyId: string }) {
     setShowShareSheet(true)
   }
 
-  if (!data) return null
+  // §4: Loading + error states — prevent blank screen
+  if (loading) {
+    return (
+      <div className="space-y-4 p-4">
+        <button onClick={handleBack} className="flex items-center gap-2 text-sm text-muted-foreground">
+          <ArrowLeft className="w-4 h-4" /> পিছনে
+        </button>
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    )
+  }
+  if (error || !data) {
+    return (
+      <div className="space-y-4 p-4">
+        <button onClick={handleBack} className="flex items-center gap-2 text-sm text-muted-foreground">
+          <ArrowLeft className="w-4 h-4" /> পিছনে
+        </button>
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <AlertTriangle className="w-10 h-10 text-muted-foreground/50" />
+          <p className="text-sm text-muted-foreground">ডেটা লোড করা যায়নি</p>
+          <button onClick={() => refetch()} className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium">
+            আবার চেষ্টা করুন
+          </button>
+        </div>
+      </div>
+    )
+  }
   const currency = business?.currency || 'INR'
   const meta = GRADE_META[data.qualityGrade]
   const isReceivable = data.balance > 0

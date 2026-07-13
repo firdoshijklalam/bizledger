@@ -8,7 +8,7 @@ import { formatCurrency, GRADE_META } from '@/lib/utils'
 import { motion } from 'framer-motion'
 import {
   ArrowLeft, FileEdit, Trash2, Package, Tag, Boxes, BadgePercent,
-  AlertTriangle, Plus, Minus, TrendingUp, ShoppingCart, Award, Sparkles,
+  AlertTriangle, Plus, Minus, TrendingUp, ShoppingCart, Award, Sparkles, Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -33,14 +33,42 @@ interface ProductWithImages extends Product {
 export function ProductProfile({ productId }: { productId: string }) {
   const { setSelectedProductId, setEditingProductId, business, triggerRefresh } = useAppStore()
   const { t } = useI18n()
-  const { data: product, refetch } = useFetch<ProductWithImages>(`/api/products/${productId}`, [productId])
+  const { data: product, loading, error, refetch } = useFetch<ProductWithImages>(`/api/products/${productId}`, [productId])
   const [showDelete, setShowDelete] = useState(false)
   const [showRestock, setShowRestock] = useState(false)
   const [restockQty, setRestockQty] = useState('')
   const [showCompare, setShowCompare] = useState(false)
   const [show3DStudio, setShow3DStudio] = useState(false)
 
-  if (!product) return null
+  // §4: Loading + error states
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <button onClick={() => setSelectedProductId(null)} className="flex items-center gap-2 text-sm text-muted-foreground">
+          <ArrowLeft className="w-4 h-4" /> পিছনে
+        </button>
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    )
+  }
+  if (error || !product) {
+    return (
+      <div className="space-y-4">
+        <button onClick={() => setSelectedProductId(null)} className="flex items-center gap-2 text-sm text-muted-foreground">
+          <ArrowLeft className="w-4 h-4" /> পিছনে
+        </button>
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <AlertTriangle className="w-10 h-10 text-muted-foreground/50" />
+          <p className="text-sm text-muted-foreground">পণ্য লোড করা যায়নি</p>
+          <button onClick={() => refetch()} className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium">
+            আবার চেষ্টা করুন
+          </button>
+        </div>
+      </div>
+    )
+  }
   const currency = business?.currency || 'INR'
   const isLow = product.stock <= product.lowStockThreshold
   const discountInfo = product.mrp && product.mrp > product.salePrice
