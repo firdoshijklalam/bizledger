@@ -15,16 +15,40 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const businessId = await getBusinessId()
   if (!businessId) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
-  const party = await db.party.findFirst({
-    where: { id, businessId },
-    include: {
-      transactions: { orderBy: { createdAt: 'desc' }, take: 100 },
-      invoices: { orderBy: { createdAt: 'desc' }, take: 20 },
-      partyNotes: { orderBy: { createdAt: 'desc' } },
-    },
-  })
-  if (!party) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  return NextResponse.json(party)
+  try {
+    const party = await db.party.findFirst({
+      where: { id, businessId },
+      include: {
+        transactions: { orderBy: { createdAt: 'desc' }, take: 100 },
+        invoices: { orderBy: { createdAt: 'desc' }, take: 20 },
+        partyNotes: { orderBy: { createdAt: 'desc' } },
+      },
+    })
+    if (!party) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    return NextResponse.json(party)
+  } catch (e: any) {
+    // Fallback: try without partyNotes (may not exist in Neon yet)
+    try {
+      const party = await db.party.findFirst({
+        where: { id, businessId },
+        include: {
+          transactions: { orderBy: { createdAt: 'desc' }, take: 100 },
+          invoices: { orderBy: { createdAt: 'desc' }, take: 20 },
+        },
+      })
+      if (!party) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return NextResponse.json({ ...party, partyNotes: [] })
+    } catch (e2: any) {
+      // Last resort: return party without any relations
+      try {
+        const party = await db.party.findFirst({ where: { id, businessId } })
+        if (!party) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+        return NextResponse.json({ ...party, transactions: [], invoices: [], partyNotes: [] })
+      } catch (e3: any) {
+        return NextResponse.json({ error: 'DB error', detail: String(e3?.message || e3) }, { status: 500 })
+      }
+    }
+  }
 }
 
 // PUT /api/parties/[id]

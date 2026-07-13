@@ -15,12 +15,23 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const businessId = await getBusinessId()
   if (!businessId) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
-  const product = await db.product.findFirst({
-    where: { id, businessId },
-    include: { images: { orderBy: { order: 'asc' } } },
-  })
-  if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  return NextResponse.json(product)
+  try {
+    const product = await db.product.findFirst({
+      where: { id, businessId },
+      include: { images: { orderBy: { order: 'asc' } } },
+    })
+    if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    return NextResponse.json(product)
+  } catch (e: any) {
+    // Fallback: return product without images relation (may not exist in Neon yet)
+    try {
+      const product = await db.product.findFirst({ where: { id, businessId } })
+      if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return NextResponse.json({ ...product, images: [] })
+    } catch (e2: any) {
+      return NextResponse.json({ error: 'DB error', detail: String(e2?.message || e2) }, { status: 500 })
+    }
+  }
 }
 
 // PUT /api/products/[id]
