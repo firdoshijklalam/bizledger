@@ -10,7 +10,7 @@ const ACTIONS = [
   { id: 'add-party', icon: UserPlus, labelKey: 'qa.addParty', color: 'text-emerald-600', primary: false },
   { id: 'add-product', icon: PackagePlus, labelKey: 'qa.addProduct', color: 'text-amber-600', primary: false },
 ] as const
-const FAB_SIZE = 64, EDGE_MARGIN = 16, TOP_BAR = 56, BOTTOM_NAV = 80, DRAG_THRESH = 6, HIDE_OFFSET = 36
+const FAB_SIZE = 64, EDGE_MARGIN = 16, TOP_BAR = 56, BOTTOM_NAV = 80, DRAG_THRESH = 6, HIDE_OFFSET = 36, MENU_HEIGHT = 320
 interface FabPos { x: number; y: number }
 const DEFAULT_POS: FabPos = { x: -999, y: -999 }
 function getDefault(): FabPos { if (typeof window === 'undefined') return {x:0,y:0}; return { x: window.innerWidth - FAB_SIZE - EDGE_MARGIN + HIDE_OFFSET, y: window.innerHeight - FAB_SIZE - BOTTOM_NAV - 28 } }
@@ -22,10 +22,17 @@ export function SideDrawerFab() {
   const { t } = useI18n()
   const [position, setPosition] = useState<FabPos>(() => { if (typeof window === 'undefined') return DEFAULT_POS; return loadPos() })
   const [isDragging, setIsDragging] = useState(false)
+  // §1: Attention animation state — spin + color pulse on load
+  const [attractMode, setAttractMode] = useState(true)
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false, dragging: false })
   useEffect(() => {
     const handleResize = () => { setPosition((prev) => { if (prev.x === -999) return getDefault(); const s = snapToEdge(prev); savePos(s); return s }) }
     window.addEventListener('resize', handleResize); return () => window.removeEventListener('resize', handleResize)
+  }, [])
+  // §1: Stop attention animation after 4 seconds
+  useEffect(() => {
+    const timer = setTimeout(() => setAttractMode(false), 4000)
+    return () => clearTimeout(timer)
   }, [])
   useEffect(() => {
     if (!fabOpen) return
@@ -41,6 +48,7 @@ export function SideDrawerFab() {
   }
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (fabOpen) return; e.preventDefault()
+    setAttractMode(false) // stop attention animation on interaction
     const ds = dragRef.current; ds.startX = e.clientX; ds.startY = e.clientY; ds.startPosX = position.x; ds.startPosY = position.y; ds.moved = false; ds.dragging = false
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - ds.startX, dy = ev.clientY - ds.startY
@@ -55,18 +63,59 @@ export function SideDrawerFab() {
     }
     window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp); window.addEventListener('pointercancel', onUp)
   }, [position, fabOpen, setFabOpen])
+
+  // §2: Dynamic left/right alignment
   const isOnLeft = position.x >= 0 && position.x + FAB_SIZE/2 < (typeof window !== 'undefined' ? window.innerWidth/2 : 999)
+
+  // §3: Top boundary collision detection — flip menu downward if near top
+  const menuOpensUpward = position.y - MENU_HEIGHT < TOP_BAR + 20
+  const menuOpensDownward = menuOpensUpward
+
   return (
     <>
       <AnimatePresence>{fabOpen && <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={() => setFabOpen(false)} className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]" />}</AnimatePresence>
       <AnimatePresence>{fabOpen && (
-        <motion.div initial={{opacity:0,y:20,scale:0.9}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:20,scale:0.9}} transition={{type:'spring',stiffness:400,damping:25}} className={`fixed z-50 w-56 bg-card rounded-2xl shadow-2xl border border-border p-2 overflow-hidden ${isOnLeft?'left-4':'right-4'}`} style={{bottom:`calc(${typeof window!=='undefined'?window.innerHeight-position.y-FAB_SIZE-8:96}px + env(safe-area-inset-bottom))`}} onClick={(e)=>e.stopPropagation()}>
+        <motion.div
+          initial={{opacity:0, y: menuOpensDownward ? -10 : 20, scale:0.9}}
+          animate={{opacity:1, y: menuOpensDownward ? 0 : 0, scale:1}}
+          exit={{opacity:0, y: menuOpensDownward ? -10 : 20, scale:0.9}}
+          transition={{type:'spring',stiffness:400,damping:25}}
+          className={`fixed z-50 w-56 bg-card rounded-2xl shadow-2xl border border-border p-2 overflow-hidden ${isOnLeft?'left-4':'right-4'}`}
+          style={menuOpensDownward
+            ? { top: `${position.y + FAB_SIZE + 8}px` } // §3: Open downward below FAB
+            : { bottom: `calc(${typeof window!=='undefined'?window.innerHeight-position.y-FAB_SIZE-8:96}px + env(safe-area-inset-bottom))` } // Normal: open upward
+          }
+          onClick={(e)=>e.stopPropagation()}
+        >
           <div className="px-3 py-2 flex items-center justify-between"><p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('qa.title')}</p><button onClick={()=>setFabOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-4 h-4" /></button></div>
           <div className="space-y-1">{ACTIONS.map((a) => { const Icon = a.icon; return <button key={a.id} onClick={()=>handleAction(a.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-accent transition-colors min-h-[44px] text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}><span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span><span className={`text-sm flex-1 ${a.primary ? 'font-bold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}>{t(a.labelKey)}</span></button> })}</div>
           <p className="px-3 pt-1 pb-0.5 text-[9px] text-muted-foreground/60 text-center">হোল্ড করে টেনে বাটন সরানো যায়</p>
         </motion.div>
       )}</AnimatePresence>
-      <motion.button onPointerDown={handlePointerDown} className={`fixed z-50 flex items-center justify-center w-16 h-16 rounded-full text-primary-foreground shadow-lg ring-4 ring-background/40 backdrop-blur-xl border border-white/20 select-none ${isDragging?'cursor-grabbing':'cursor-grab'}`} style={{ left:`${position.x}px`, top:`${position.y}px`, backgroundColor:'color-mix(in oklch, var(--primary) 45%, transparent)', touchAction:'none', transition: isDragging?'none':'left 0.3s cubic-bezier(0.4,0,0.2,1), top 0.3s cubic-bezier(0.4,0,0.2,1), scale 0.2s' }} animate={{scale:isDragging?1.15:1}} whileTap={{scale:0.95}} aria-label={t('qa.title')} aria-expanded={fabOpen}>
+      <motion.button
+        onPointerDown={handlePointerDown}
+        className={`fixed z-50 flex items-center justify-center w-16 h-16 rounded-full text-primary-foreground shadow-lg ring-4 ring-background/40 backdrop-blur-xl border border-white/20 select-none ${isDragging?'cursor-grabbing':'cursor-grab'}`}
+        style={{
+          left:`${position.x}px`,
+          top:`${position.y}px`,
+          backgroundColor:'color-mix(in oklch, var(--primary) 45%, transparent)',
+          touchAction:'none',
+          transition: isDragging?'none':'left 0.3s cubic-bezier(0.4,0,0.2,1), top 0.3s cubic-bezier(0.4,0,0.2,1), scale 0.2s'
+        }}
+        // §1: Attention animation — spin + pulse on load for 4s
+        animate={{
+          scale: isDragging ? 1.15 : (attractMode ? [1, 1.08, 1] : 1),
+          rotate: attractMode && !fabOpen ? [0, 360] : (fabOpen ? 0 : 0),
+          opacity: attractMode ? [1, 0.7, 1] : 1,
+        }}
+        transition={{
+          scale: { duration: 1.5, repeat: attractMode ? Infinity : 0, ease: 'easeInOut' },
+          rotate: { duration: 3, repeat: attractMode ? 1 : 0, ease: 'linear' },
+          opacity: { duration: 1.5, repeat: attractMode ? Infinity : 0, ease: 'easeInOut' },
+        }}
+        whileTap={{scale:0.95}}
+        aria-label={t('qa.title')} aria-expanded={fabOpen}
+      >
         <motion.div animate={{rotate:fabOpen?45:0}} transition={{duration:0.2}}><Plus className="w-7 h-7 drop-shadow" /></motion.div>
       </motion.button>
     </>
