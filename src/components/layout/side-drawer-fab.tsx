@@ -283,7 +283,7 @@ export function SideDrawerFab() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            {/* menuItemRow — flex row, alignItems center, paddingVertical 12, gap 12 */}
+            {/* menuItemWrapper — EXACT spec: paddingVertical 14, width 100%, justify flex-start */}
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {ACTIONS.map((a) => {
                 const Icon = a.icon
@@ -295,9 +295,10 @@ export function SideDrawerFab() {
                       display: 'flex',
                       flexDirection: 'row',
                       alignItems: 'center',
-                      paddingVertical: '12px',
-                      gap: '12px',
+                      paddingTop: '14px',
+                      paddingBottom: '14px',
                       width: '100%',
+                      justifyContent: 'flex-start',
                       textAlign: 'left',
                       cursor: 'pointer',
                       background: 'transparent',
@@ -306,10 +307,10 @@ export function SideDrawerFab() {
                     }}
                     className="hover:bg-accent transition-colors"
                   >
-                    <span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
+                    <span className={`shrink-0 ${a.color}`} style={{ marginLeft: '0px' }}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
                     <span style={{
                       fontSize: '14px',
-                      flex: 1,
+                      marginLeft: '12px',
                       fontWeight: a.primary ? 700 : 500,
                       color: a.primary
                         ? (isDark ? '#6EE7B7' : '#047857')
