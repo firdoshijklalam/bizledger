@@ -210,9 +210,9 @@ export function SideDrawerFab() {
         )}
       </AnimatePresence>
 
-      {/* Menu — RESTORED to original V1 styling (w-56, p-2, shadow-2xl, compact).
-          Keeps: dynamic X-axis anchoring (menuStyle) + spring animations + exit fade.
-          Uses Tailwind dark: classes for theme-awareness (no hardcoded inline styles). */}
+      {/* Menu — PREMIUM spacious design (w-64, px-6 py-5, shadow-2xl).
+          Keeps: dynamic X-axis anchoring (menuStyle) + spring entrance + exit fade.
+          Tailwind dark: classes for theme-awareness (no hardcoded inline styles). */}
       <AnimatePresence>
         {fabOpen && (
           <motion.div
@@ -232,29 +232,43 @@ export function SideDrawerFab() {
               y: 8,
               transition: { duration: 0.2, ease: [0.4, 0, 1, 1] }
             }}
-            className="fixed z-50 w-56 bg-card rounded-2xl shadow-2xl border border-border p-2 overflow-hidden"
+            className="fixed z-50 w-64 bg-card rounded-2xl shadow-2xl border border-border px-6 py-5 overflow-hidden"
             style={menuStyle}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header — original px-3 py-2 flex space-between */}
-            <div className="px-3 py-2 flex items-center justify-between">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('qa.title')}</p>
-              <button onClick={() => setFabOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-4 h-4" /></button>
+            {/* Header — "QUICK ACTIONS" label (14px/600) + 20px circular close button */}
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm font-semibold text-foreground/80 uppercase tracking-wide">{t('qa.title')}</p>
+              <button
+                onClick={() => setFabOpen(false)}
+                className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-full w-5 h-5 flex items-center justify-center transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
-            {/* Action list — increased spacing for spacious feel (matches reference screenshot) */}
+            {/* Action list — 48px min-height rows, 8px gap, 12px/16px padding */}
             <div className="space-y-2">
               {ACTIONS.map((a) => {
                 const Icon = a.icon
                 return (
-                  <button key={a.id} onClick={() => handleAction(a.id)} className={`w-full flex items-center gap-3 px-4 py-4 rounded-xl hover:bg-accent transition-colors min-h-[48px] text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}>
-                    <span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
-                    <span className={`text-sm flex-1 ${a.primary ? 'font-bold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}>{t(a.labelKey)}</span>
+                  <button
+                    key={a.id}
+                    onClick={() => handleAction(a.id)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-accent transition-colors min-h-[48px] text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}
+                  >
+                    <span className={`shrink-0 ${a.color}`}>
+                      <Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} />
+                    </span>
+                    <span className={`text-sm flex-1 ${a.primary ? 'font-bold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}>
+                      {t(a.labelKey)}
+                    </span>
                   </button>
                 )
               })}
             </div>
-            {/* Footer — original px-3 pt-1 pb-0.5 text-[9px] */}
-            <p className="px-3 pt-2 pb-1 text-[9px] text-muted-foreground/60 text-center">হোল্ড করে টেনে বাটন সরানো যায়</p>
+            {/* Footer — Bengali drag hint, 10px, muted */}
+            <p className="px-3 mt-3 text-[10px] text-muted-foreground/60 text-center">হোল্ড করে টেনে বাটন সরানো যায়</p>
           </motion.div>
         )}
       </AnimatePresence>
