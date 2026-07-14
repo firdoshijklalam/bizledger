@@ -253,14 +253,43 @@ export function FloatingKeyboardMic() {
           className="fixed z-[60] select-none"
           style={{ left: `${position.x}px`, top: `${position.y}px`, width: MIC_SIZE, height: MIC_SIZE }}
         >
-          {/* Listening ripple */}
+          {/* §3: Premium pulse/ripple idle animation — circular background behind mic.
+              Uses withRepeat + withTiming equivalent: scale 1→1.5, opacity 0.6→0, infinite.
+              Creates a "listening/glowing pulse" effect to grab user attention.
+              Two offset ripples for a richer effect. */}
+          {!listening && (
+            <>
+              <motion.div
+                className="absolute inset-0 rounded-full pointer-events-none"
+                style={{ backgroundColor: 'var(--primary)' }}
+                animate={{ scale: [1, 1.5], opacity: [0.6, 0] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}
+              />
+              <motion.div
+                className="absolute inset-0 rounded-full pointer-events-none"
+                style={{ backgroundColor: 'var(--primary)' }}
+                animate={{ scale: [1, 1.5], opacity: [0.4, 0] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'easeOut', delay: 0.7 }}
+              />
+            </>
+          )}
+
+          {/* Listening ripple — faster red pulse when actively listening */}
           {listening && (
-            <motion.div
-              className="absolute inset-0 rounded-full"
-              style={{ backgroundColor: 'rgb(239 68 68)', opacity: 0.3 }}
-              animate={{ scale: [1, 1.8], opacity: [0.3, 0] }}
-              transition={{ duration: 1.2, repeat: Infinity, ease: 'easeOut' }}
-            />
+            <>
+              <motion.div
+                className="absolute inset-0 rounded-full pointer-events-none"
+                style={{ backgroundColor: 'rgb(239 68 68)' }}
+                animate={{ scale: [1, 1.8], opacity: [0.5, 0] }}
+                transition={{ duration: 1.2, repeat: Infinity, ease: 'easeOut' }}
+              />
+              <motion.div
+                className="absolute inset-0 rounded-full pointer-events-none"
+                style={{ backgroundColor: 'rgb(239 68 68)' }}
+                animate={{ scale: [1, 1.8], opacity: [0.3, 0] }}
+                transition={{ duration: 1.2, repeat: Infinity, ease: 'easeOut', delay: 0.4 }}
+              />
+            </>
           )}
 
           <motion.button

@@ -308,11 +308,19 @@ export function generateSearchTags(name: string): string[] {
     tags.add(romanized.replace(/b/g, 'v'))
     tags.add(romanized.replace(/j/g, 'z'))
     tags.add(romanized.replace(/sh/g, 's'))
+    tags.add(romanized.replace(/s/g, 'sh'))
     tags.add(romanized.replace(/t/g, 'th'))
     tags.add(romanized.replace(/v/g, 'b'))
     tags.add(romanized.replace(/ph/g, 'f'))
     tags.add(romanized.replace(/chh/g, 'ch'))
     tags.add(romanized.replace(/ng/g, 'n'))
+    // §1: More vowel swaps for tolerance (Firdosh ↔ Firdosh/Ferdous/Firdaus)
+    tags.add(romanized.replace(/i/g, 'e'))
+    tags.add(romanized.replace(/e/g, 'i'))
+    tags.add(romanized.replace(/o/g, 'u'))
+    tags.add(romanized.replace(/u/g, 'o'))
+    tags.add(romanized.replace(/o/g, 'ou'))
+    tags.add(romanized.replace(/sh/g, 's').replace(/o/g, 'ou'))
 
     // Trailing vowel add/remove variants (utsab ↔ utsaba)
     tags.add(romanized.replace(/a$/, ''))
@@ -322,11 +330,22 @@ export function generateSearchTags(name: string): string[] {
     }
   }
 
-  // §1: TWO-WAY search — also generate Bengali reverse transliteration
-  // so that searching "অমিত" finds "Amit" (English-named entities).
+  // §1: TWO-WAY search — generate MULTIPLE Bengali reverse transliterations
+  // so that searching "ফেরদৌস" finds "Firdosh" (which might map to ফিরদোশ).
+  // We generate variants with different vowel mappings to cover common phonetic spellings.
   const bengaliReverse = transliterateEnglishToBengali(name)
   if (bengaliReverse && bengaliReverse.trim() && bengaliReverse !== name) {
     tags.add(bengaliReverse)
+    // §1: Generate Bengali variants by swapping শ↔স, ই↔এ, ও↔ঔ, etc.
+    tags.add(bengaliReverse.replace(/শ/g, 'স'))
+    tags.add(bengaliReverse.replace(/স/g, 'শ'))
+    tags.add(bengaliReverse.replace(/ি/g, 'ে')) // িি → ে (i-sound → e-sound)
+    tags.add(bengaliReverse.replace(/ে/g, 'ি')) // ে → িি
+    tags.add(bengaliReverse.replace(/ো/g, 'ৌ')) // ো → ৌ (o → ou)
+    tags.add(bengaliReverse.replace(/ৌ/g, 'ো')) // ৌ → ো
+    tags.add(bengaliReverse.replace(/শ/g, 'স').replace(/ি/g, 'ে').replace(/ো/g, 'ৌ'))
+    // Remove inherent vowel অ at end (Firdosh → ফিরদোশ vs ফিরদোশঅ)
+    tags.add(bengaliReverse.replace(/অ$/g, ''))
   }
 
   // Remove empty strings and very short tags (< 2 chars)
@@ -447,26 +466,69 @@ export function transliterateEnglishToBengali(text: string): string {
  * Check if a query phonetically matches a name in EITHER direction.
  * - English query "Utsab" → matches Bengali name "উৎসব"
  * - Bengali query "অমিত" → matches English name "Amit"
- * Used for cross-lingual search matching.
+ * - Bengali query "ফেরদৌস" → matches English name "Firdosh" (tolerant)
+ *
+ * Uses multiple strategies:
+ * 1. Substring match against generated search tags (both directions)
+ * 2. Transliterate query both ways and check
+ * 3. §1: Consonant-skeleton matching — strip all vowels, compare consonants only
+ *    (tolerates any vowel differences: Firdosh/Ferdous/Firdaus all → "frdsh")
  */
 export function phoneticMatch(query: string, name: string): boolean {
   if (!query || !name) return false
   const q = query.toLowerCase().trim()
   const tags = generateSearchTags(name)
-  // Check if query is substring of any tag, or any tag is substring of query
+  // Strategy 1: substring match against tags
   if (tags.some((tag) => tag.includes(q) || q.includes(tag))) return true
 
-  // §1: Two-way — also transliterate the query and check against name
-  // If query is Bengali, transliterate to English and check against name
+  // Strategy 2: transliterate query both ways
   const queryRomanized = transliterateBengaliToEnglish(query)
   if (queryRomanized && queryRomanized.trim()) {
     const nameLower = name.toLowerCase()
     if (nameLower.includes(queryRomanized) || queryRomanized.includes(nameLower)) return true
+    // Also check against romanized name
+    const nameRomanized = transliterateBengaliToEnglish(name)
+    if (nameRomanized && (nameRomanized.includes(queryRomanized) || queryRomanized.includes(nameRomanized))) return true
   }
-  // If query is English, transliterate to Bengali and check against name
   const queryBengali = transliterateEnglishToBengali(query)
   if (queryBengali && queryBengali.trim()) {
     if (name.includes(queryBengali) || queryBengali.includes(name)) return true
+  }
+
+  // §1: Strategy 3 — Consonant skeleton matching (highly tolerant)
+  // Strip ALL vowels from both query and name (in both scripts), compare consonants.
+  // "Firdosh" → "frdsh", "Ferdous" → "frds", "ফেরদৌস" → "ফরদস"
+  const stripVowels = (s: string): string => {
+    // Remove English vowels
+    let result = s.toLowerCase().replace(/[aeiou]/g, '')
+    // Remove Bengali vowels and vowel signs
+    result = result.replace(/[অআইঈউঊঋএঐওঔািীুূৃেৈোৌংঃঁঅ]/g, '')
+    // Remove virama
+    result = result.replace(/্/g, '')
+    return result
+  }
+  const qSkeleton = stripVowels(query)
+  const nSkeleton = stripVowels(name)
+  const nRomanizedSkeleton = stripVowels(transliterateBengaliToEnglish(name))
+  const qRomanizedSkeleton = stripVowels(transliterateBengaliToEnglish(query))
+
+  // If consonant skeletons overlap (at least 3 chars in sequence), it's a match
+  if (qSkeleton.length >= 3 && nSkeleton.length >= 3) {
+    if (nSkeleton.includes(qSkeleton) || qSkeleton.includes(nSkeleton)) return true
+  }
+  if (qRomanizedSkeleton.length >= 3 && nRomanizedSkeleton.length >= 3) {
+    if (nRomanizedSkeleton.includes(qRomanizedSkeleton) || qRomanizedSkeleton.includes(nRomanizedSkeleton)) return true
+  }
+  // Cross-script skeleton match
+  if (qSkeleton.length >= 3 && nRomanizedSkeleton.length >= 3) {
+    // Map Bengali consonants to English for comparison
+    const bnToEnConsonant: Record<string, string> = {
+      'ক':'k','খ':'kh','গ':'g','ঘ':'gh','ঙ':'ng','চ':'ch','ছ':'chh','জ':'j','ঝ':'jh','ঞ':'ny',
+      'ট':'tt','ঠ':'tth','ড':'dd','ঢ':'ddh','ণ':'nn','ত':'t','থ':'th','দ':'d','ধ':'dh','ন':'n',
+      'প':'p','ফ':'ph','ব':'b','ভ':'bh','ম':'m','য':'y','র':'r','ল':'l','শ':'sh','ষ':'ss','স':'s','হ':'h',
+    }
+    const qSkeletonEn = qSkeleton.split('').map(c => bnToEnConsonant[c] || c).join('')
+    if (nRomanizedSkeleton.includes(qSkeletonEn) || qSkeletonEn.includes(nRomanizedSkeleton)) return true
   }
 
   return false

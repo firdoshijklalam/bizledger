@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
-import { generateSearchTags } from '@/lib/transliteration'
+import { generateSearchTags, phoneticMatch } from '@/lib/transliteration'
 
 // GET /api/parties — optimized with pagination + field selection
 export async function GET(req: NextRequest) {
@@ -43,6 +43,19 @@ export async function GET(req: NextRequest) {
   if (q && usePhonetic) {
     const ranked = phoneticSearch(parties, q)
     return NextResponse.json({ items: ranked.map((r) => r.item), total: totalCount, hasMore: offset + limit < totalCount })
+  }
+
+  // §1: Fallback — if contains search returned 0 results, try phoneticMatch
+  // This catches cross-lingual matches like "ফেরদৌস" → "Firdosh Alam"
+  if (q && result.length === 0 && !usePhonetic) {
+    const allParties = await db.party.findMany({
+      where: { businessId: business.id, ...(type ? { type } : {}) },
+      take: 200,
+    })
+    const phoneticMatches = allParties.filter((p) => phoneticMatch(q, p.name))
+    if (phoneticMatches.length > 0) {
+      return NextResponse.json({ items: phoneticMatches, total: phoneticMatches.length, hasMore: false })
+    }
   }
 
   return NextResponse.json({ items: result, total: totalCount, hasMore: offset + limit < totalCount })

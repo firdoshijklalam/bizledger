@@ -51,7 +51,8 @@ export function SearchOverlay() {
       { name: 'phone', weight: 0.3 },
       { name: 'searchTags', weight: 0.2 }, // §3: phonetic tags
     ],
-    threshold: 0.4, // 0 = exact, 1 = matches anything
+    // §1: Increased threshold to 0.5 for highly tolerant fuzzy search (typos + phonetic)
+    threshold: 0.5, // 0 = exact, 1 = matches anything
     ignoreLocation: true,
     minMatchCharLength: 1,
   }), [parties])
@@ -64,7 +65,7 @@ export function SearchOverlay() {
       { name: 'subCategory', weight: 0.1 },
       { name: 'searchTags', weight: 0.1 }, // §3: phonetic tags
     ],
-    threshold: 0.4,
+    threshold: 0.5, // §1: tolerant fuzzy
     ignoreLocation: true,
     minMatchCharLength: 1,
   }), [products])
@@ -74,7 +75,7 @@ export function SearchOverlay() {
       { name: 'invoiceNumber', weight: 0.6 },
       { name: 'party.name', weight: 0.4 },
     ],
-    threshold: 0.3,
+    threshold: 0.5, // §1: tolerant fuzzy
     ignoreLocation: true,
     minMatchCharLength: 1,
   }), [invoices])
@@ -85,7 +86,7 @@ export function SearchOverlay() {
       { name: 'category', weight: 0.2 },
       { name: 'party.name', weight: 0.2 },
     ],
-    threshold: 0.4,
+    threshold: 0.5, // §1: tolerant fuzzy
     ignoreLocation: true,
     minMatchCharLength: 1,
   }), [txns])

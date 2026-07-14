@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
-import { generateSearchTags } from '@/lib/transliteration'
+import { generateSearchTags, phoneticMatch } from '@/lib/transliteration'
 
 // GET /api/products — optimized with pagination + field selection
 // Supports ?q=search&phonetic=true&lowStock=true&limit=50&offset=0
@@ -45,6 +45,18 @@ export async function GET(req: NextRequest) {
   if (q && usePhonetic) {
     const ranked = phoneticSearch(result as any[], q)
     return NextResponse.json({ items: ranked.map((r) => r.item), total: totalCount, hasMore: offset + limit < totalCount })
+  }
+
+  // §1: Fallback — if contains search returned 0 results, try phoneticMatch
+  if (q && result.length === 0 && !usePhonetic) {
+    const allProducts = await db.product.findMany({
+      where: { businessId: business.id },
+      take: 200,
+    })
+    const phoneticMatches = allProducts.filter((p) => phoneticMatch(q, p.name))
+    if (phoneticMatches.length > 0) {
+      return NextResponse.json({ items: phoneticMatches, total: phoneticMatches.length, hasMore: false })
+    }
   }
 
   return NextResponse.json({ items: result, total: totalCount, hasMore: offset + limit < totalCount })
