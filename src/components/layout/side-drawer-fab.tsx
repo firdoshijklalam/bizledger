@@ -1,7 +1,6 @@
 'use client'
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
-import { useTheme } from 'next-themes'
 import { AnimatePresence, motion, useAnimationControls } from 'framer-motion'
 import { Plus, UserPlus, PackagePlus, ArrowLeftRight, Zap, X } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
@@ -62,9 +61,6 @@ function snapToEdge(p: FabPos): FabPos {
 export function SideDrawerFab() {
   const { fabOpen, setFabOpen, triggerQuickAction, setActiveView } = useAppStore()
   const { t } = useI18n()
-  // §1: Theme detection for dark mode compatibility (useColorScheme equivalent)
-  const { theme, resolvedTheme } = useTheme()
-  const isDark = (resolvedTheme || theme) === 'dark'
   const [position, setPosition] = useState<FabPos>(() => { if (typeof window === 'undefined') return DEFAULT_POS; return loadPos() })
   const [isDragging, setIsDragging] = useState(false)
   const [peekMode, setPeekMode] = useState(true)
@@ -214,9 +210,9 @@ export function SideDrawerFab() {
         )}
       </AnimatePresence>
 
-      {/* Menu — EXACT original V1 layout structure (wide, padded) with theme-aware colors.
-          §1: Container keeps original wide dimensions (padding 24, minWidth 260).
-          §2: Flexbox applied ONLY to header/footer wrappers, NOT the container. */}
+      {/* Menu — RESTORED to original V1 styling (w-56, p-2, shadow-2xl, compact).
+          Keeps: dynamic X-axis anchoring (menuStyle) + spring animations + exit fade.
+          Uses Tailwind dark: classes for theme-awareness (no hardcoded inline styles). */}
       <AnimatePresence>
         {fabOpen && (
           <motion.div
@@ -236,111 +232,29 @@ export function SideDrawerFab() {
               y: 8,
               transition: { duration: 0.2, ease: [0.4, 0, 1, 1] }
             }}
-            className="fixed z-50 overflow-hidden"
-            style={{
-              ...menuStyle,
-              // §1: MAIN CONTAINER — keep wide and padded like original V1
-              backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF',
-              borderRadius: '16px',
-              padding: '24px',        // DO NOT REMOVE — original padding
-              minWidth: '260px',      // RESTORE WIDE LOOK (was shrunk to 230)
-              boxShadow: isDark
-                ? '0 10px 15px -3px rgba(0,0,0,0.5), 0 4px 6px -4px rgba(0,0,0,0.3)'
-                : '0 10px 15px -3px rgba(0,0,0,0.15), 0 4px 6px -4px rgba(0,0,0,0.08)',
-            }}
+            className="fixed z-50 w-56 bg-card rounded-2xl shadow-2xl border border-border p-2 overflow-hidden"
+            style={menuStyle}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* §2: HEADER ROW — flexbox wrapper for "QUICK ACTIONS" + X button */}
-            <div style={{
-              display: 'flex',
-              flexDirection: 'row',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '16px',
-              width: '100%',
-            }}>
-              <p style={{
-                fontSize: '12px',
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                color: isDark ? '#9CA3AF' : '#6B7280',
-                margin: 0,
-              }}>{t('qa.title')}</p>
-              <button
-                onClick={() => setFabOpen(false)}
-                style={{
-                  color: isDark ? '#9CA3AF' : '#6B7280',
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '4px',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
+            {/* Header — original px-3 py-2 flex space-between */}
+            <div className="px-3 py-2 flex items-center justify-between">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('qa.title')}</p>
+              <button onClick={() => setFabOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-4 h-4" /></button>
             </div>
-            {/* Action buttons — original spacing */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {/* Action list — original space-y-1 */}
+            <div className="space-y-1">
               {ACTIONS.map((a) => {
                 const Icon = a.icon
                 return (
-                  <button
-                    key={a.id}
-                    onClick={() => handleAction(a.id)}
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: '12px',
-                      width: '100%',
-                      padding: '12px',
-                      borderRadius: '12px',
-                      minHeight: '44px',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      backgroundColor: a.primary
-                        ? (isDark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 252, 244, 1)')
-                        : 'transparent',
-                      border: a.primary
-                        ? '1px solid rgba(16, 185, 129, 0.4)'
-                        : '1px solid transparent',
-                    }}
-                    className="hover:bg-accent transition-colors"
-                  >
+                  <button key={a.id} onClick={() => handleAction(a.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-accent transition-colors min-h-[44px] text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}>
                     <span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
-                    <span style={{
-                      fontSize: '14px',
-                      flex: 1,
-                      fontWeight: a.primary ? 700 : 500,
-                      color: a.primary
-                        ? (isDark ? '#6EE7B7' : '#047857')
-                        : (isDark ? '#F3F4F6' : '#111827'),
-                    }}>{t(a.labelKey)}</span>
+                    <span className={`text-sm flex-1 ${a.primary ? 'font-bold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}>{t(a.labelKey)}</span>
                   </button>
                 )
               })}
             </div>
-            {/* §2: FOOTER ROW — flexbox wrapper for drag hint text */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginTop: '12px',
-              width: '100%',
-            }}>
-              <p style={{
-                fontSize: '9px',
-                textAlign: 'center',
-                color: isDark ? '#6B7280' : 'rgba(107, 114, 128, 0.6)',
-                margin: 0,
-              }}>হোল্ড করে টেনে বাটন সরানো যায়</p>
-            </div>
+            {/* Footer — original px-3 pt-1 pb-0.5 text-[9px] */}
+            <p className="px-3 pt-1 pb-0.5 text-[9px] text-muted-foreground/60 text-center">হোল্ড করে টেনে বাটন সরানো যায়</p>
           </motion.div>
         )}
       </AnimatePresence>
