@@ -9,12 +9,15 @@ import type { Party, Product, Invoice, Transaction } from '@/lib/types'
 import { formatCurrency, formatDate, getGradeMeta } from '@/lib/utils'
 import { highlightMatch } from '@/lib/highlight'
 import { transliterateBengaliToEnglish, phoneticMatch, generateSearchTags } from '@/lib/transliteration'
+import { useVoiceInput } from '@/hooks/use-voice-input'
 import Fuse from 'fuse.js'
 
 export function SearchOverlay() {
   const { showSearch, setShowSearch, setActiveView, setSelectedPartyId, setSelectedProductId, setSelectedInvoiceId } = useAppStore()
   const { t } = useI18n()
   const [q, setQ] = useState('')
+  // §3: Register this search input with the global mic
+  const voiceProps = useVoiceInput<HTMLInputElement>((text) => setQ(text))
   const [parties, setParties] = useState<Party[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -167,6 +170,7 @@ export function SearchOverlay() {
               <Search className="w-5 h-5 text-muted-foreground shrink-0" />
               <input
                 autoFocus
+                {...voiceProps}
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder={t('header.search') + '… (fuzzy + phonetic)'}

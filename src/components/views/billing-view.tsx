@@ -15,6 +15,7 @@ import { InvoiceForm } from './billing/invoice-form'
 import { InvoicePreview } from './billing/invoice-preview'
 import { BillingTabs } from './billing/billing-tabs'
 import { Input } from '@/components/ui/input'
+import { useVoiceInput } from '@/hooks/use-voice-input'
 
 const STATUS_COLORS: Record<string, string> = {
   paid: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
@@ -44,6 +45,7 @@ export function BillingView() {
   } = useAppStore()
   const { t } = useI18n()
   const [search, setSearch] = useState('')
+  const voiceProps = useVoiceInput<HTMLInputElement>((text) => setSearch(text))
   const [statusFilter, setStatusFilter] = useState<BillingStatusFilter>('all')
 
   const { data: invoices, loading } = useFetch<Invoice[]>('/api/invoices', [])
@@ -168,6 +170,7 @@ export function BillingView() {
       {/* Search (hidden on hold tab since it shows drafts) */}
       {statusFilter !== 'hold' && (
         <Input
+          {...voiceProps}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t('common.search') + ' invoices…'}

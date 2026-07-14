@@ -16,6 +16,7 @@ import { PartyForm } from './khata/party-form'
 import { PartyDetail } from './khata/party-detail'
 import { Input } from '@/components/ui/input'
 import { useScrollStore } from '@/store/scroll-store'
+import { useVoiceInput } from '@/hooks/use-voice-input'
 
 export function KhataView() {
   const {
@@ -28,6 +29,7 @@ export function KhataView() {
   } = useAppStore()
   const { t } = useI18n()
   const [search, setSearch] = useState('')
+  const voiceProps = useVoiceInput<HTMLInputElement>((text) => setSearch(text))
   const [gradeFilter, setGradeFilter] = useState<string>('all')
 
   const { data: parties, loading } = useFetch<Party[]>('/api/parties', [])
@@ -116,6 +118,7 @@ export function KhataView() {
       {/* Search */}
       <div className="relative">
         <Input
+          {...voiceProps}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t('common.search') + ' parties…'}

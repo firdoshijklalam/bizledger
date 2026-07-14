@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { ProductProfile } from './inventory/product-profile'
+import { useVoiceInput } from '@/hooks/use-voice-input'
 
 // PRD Part 26 §4: Simple Levenshtein distance for phonetic matching
 function levenshtein(a: string, b: string): number {
@@ -44,6 +45,7 @@ export function InventoryView() {
   } = useAppStore()
   const { t } = useI18n()
   const [search, setSearch] = useState('')
+  const voiceProps = useVoiceInput<HTMLInputElement>((text) => setSearch(text))
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [activeCategory, setActiveCategory] = useState<string>('All')
 
@@ -159,6 +161,7 @@ export function InventoryView() {
 
       {/* Search */}
       <Input
+        {...voiceProps}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder={t('common.search') + ' products…'}
