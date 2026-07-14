@@ -274,8 +274,6 @@ export function SalePadView() {
   const setCustomer = (p: Party | null) => updateActiveCart((c) => ({ ...c, customer: p }))
   const setPaymentMode = (m: PaymentMode) => updateActiveCart((c) => ({ ...c, paymentMode: m }))
 
-  const [cashReceived, setCashReceived] = useState('')
-  const [partialPaid, setPartialPaid] = useState('')
   const [chequeNo, setChequeNo] = useState('')
   // §1: Multi-mode split payment — simultaneous inputs across modes
   const [splitCash, setSplitCash] = useState('')
@@ -580,8 +578,6 @@ export function SalePadView() {
     }
     setCarts([...carts, newCart])
     setActiveCartId(nextId)
-    setCashReceived('')
-    setPartialPaid('')
     setDiscountValue(''); setDeliveryCharge('')
     toast.success(`${newCart.label} এর জন্য নতুন কার্ট খোলা হলো`, {
       description: 'আগের কার্ট হোল্ড করা আছে',
@@ -591,8 +587,6 @@ export function SalePadView() {
   const switchCart = (id: number) => {
     if (id === activeCartId) return
     setActiveCartId(id)
-    setCashReceived('')
-    setPartialPaid('')
     setDiscountValue(''); setDeliveryCharge('')
     toast(`কার্ট সুইচ হলো`, { description: carts.find((c) => c.id === id)?.label })
   }
@@ -738,7 +732,6 @@ export function SalePadView() {
       // Clear active cart + split payment fields
       setCart([])
       setCustomer(null)
-      setCashReceived('')
       setSplitCash('')
       setSplitUpi('')
       setSplitCredit('')
@@ -824,7 +817,6 @@ export function SalePadView() {
       triggerRefresh()
       setCart([])
       setCustomer(null)
-      setCashReceived('')
       setSplitCash('')
       setSplitUpi('')
       setSplitCredit('')

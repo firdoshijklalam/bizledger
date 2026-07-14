@@ -210,8 +210,8 @@ export function SideDrawerFab() {
         )}
       </AnimatePresence>
 
-      {/* Menu — restored to original premium styling (w-56, shadow-2xl, p-2, no dividers).
-          Keeps the dynamic X-axis anchoring + spring animations + exit fade. */}
+      {/* Menu — EXACT premium styling per user spec:
+          borderRadius:16, padding:16/20, minWidth:230, shadow 0 6px 10px rgba(0,0,0,0.15), gap:12 */}
       <AnimatePresence>
         {fabOpen && (
           <motion.div
@@ -231,30 +231,34 @@ export function SideDrawerFab() {
               y: 8,
               transition: { duration: 0.2, ease: [0.4, 0, 1, 1] }
             }}
-            className="fixed z-50 w-56 bg-card rounded-2xl border border-border p-2 overflow-hidden"
+            className="fixed z-50 overflow-hidden"
             style={{
               ...menuStyle,
-              // Explicit shadow (Tailwind v4 shadow-2xl not reliable) — matches original premium elevation
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              backgroundColor: '#FFFFFF',
+              borderRadius: '16px',
+              padding: '16px 20px',
+              minWidth: '230px',
+              boxShadow: '0 6px 10px rgba(0, 0, 0, 0.15)',
+              gap: '12px',
+              display: 'flex',
+              flexDirection: 'column',
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-3 py-2 flex items-center justify-between">
+            <div className="flex items-center justify-between">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('qa.title')}</p>
               <button onClick={() => setFabOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-4 h-4" /></button>
             </div>
-            <div className="space-y-1">
-              {ACTIONS.map((a) => {
-                const Icon = a.icon
-                return (
-                  <button key={a.id} onClick={() => handleAction(a.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-accent transition-colors min-h-[44px] text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}>
-                    <span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
-                    <span className={`text-sm flex-1 ${a.primary ? 'font-bold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}>{t(a.labelKey)}</span>
-                  </button>
-                )
-              })}
-            </div>
-            <p className="px-3 pt-1 pb-0.5 text-[9px] text-muted-foreground/60 text-center">হোল্ড করে টেনে বাটন সরানো যায়</p>
+            {ACTIONS.map((a) => {
+              const Icon = a.icon
+              return (
+                <button key={a.id} onClick={() => handleAction(a.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-accent transition-colors min-h-[44px] text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}>
+                  <span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
+                  <span className={`text-sm flex-1 ${a.primary ? 'font-bold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}>{t(a.labelKey)}</span>
+                </button>
+              )
+            })}
+            <p className="text-[9px] text-muted-foreground/60 text-center">হোল্ড করে টেনে বাটন সরানো যায়</p>
           </motion.div>
         )}
       </AnimatePresence>
