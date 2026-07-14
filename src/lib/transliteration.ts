@@ -236,16 +236,13 @@ export function transliterateBengaliToEnglish(text: string): string {
       //  - it's followed by virama (্) which suppresses the vowel
       //  - it's ৎ (khanda ta) which inherently suppresses
       if (isKhandaTa) {
-        // ৎ gives "t" sound, no inherent vowel.
-        // It also forms a conjunct with the following consonant — that consonant
-        // should NOT get inherent "a" (e.g. ৎস = "ts", not "tasa").
+        // ৎ gives "t" sound, no inherent vowel on itself.
+        // It forms a conjunct with the following consonant (ৎস = "ts"),
+        // and the following consonant gets ITS normal inherent vowel treatment.
         result += 't'
         i++
-        if (nextCh && CONSONANT_MAP[nextCh]) {
-          // Add the next consonant sound WITHOUT inherent vowel
-          result += CONSONANT_MAP[nextCh]
-          i++
-        }
+        // The next consonant is processed normally in the next iteration
+        // (it will get inherent "a" if followed by another consonant, or no vowel if last)
         continue
       } else if (nextCh && VOWEL_MAP[nextCh] !== undefined && nextCh !== '্') {
         // Next char is a vowel sign — it provides the vowel, no inherent "a"
@@ -254,8 +251,9 @@ export function transliterateBengaliToEnglish(text: string): string {
         // Next char is virama — suppress inherent vowel
         result += consonantSound
       } else if (!nextCh || (nextCh && !CONSONANT_MAP[nextCh] && !VOWEL_MAP[nextCh] && !NUMERAL_MAP[nextCh])) {
-        // Last consonant or followed by non-Bengali char — add inherent "a"
-        result += consonantSound + 'a'
+        // §3: Last consonant of the word — NO inherent vowel (Bengali drops final inherent vowel)
+        // e.g. উৎসব → utsb (ব at end = just "b", not "ba")
+        result += consonantSound
       } else if (nextCh && CONSONANT_MAP[nextCh]) {
         // Next is another consonant — add inherent "a"
         result += consonantSound + 'a'
