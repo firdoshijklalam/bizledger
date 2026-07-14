@@ -1,6 +1,7 @@
 'use client'
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
+import { useTheme } from 'next-themes'
 import { AnimatePresence, motion, useAnimationControls } from 'framer-motion'
 import { Plus, UserPlus, PackagePlus, ArrowLeftRight, Zap, X } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
@@ -61,6 +62,8 @@ function snapToEdge(p: FabPos): FabPos {
 export function SideDrawerFab() {
   const { fabOpen, setFabOpen, triggerQuickAction, setActiveView } = useAppStore()
   const { t } = useI18n()
+  const { theme, resolvedTheme } = useTheme()
+  const isDark = (resolvedTheme || theme) === 'dark'
   const [position, setPosition] = useState<FabPos>(() => { if (typeof window === 'undefined') return DEFAULT_POS; return loadPos() })
   const [isDragging, setIsDragging] = useState(false)
   const [peekMode, setPeekMode] = useState(true)
@@ -210,9 +213,8 @@ export function SideDrawerFab() {
         )}
       </AnimatePresence>
 
-      {/* Menu — PREMIUM spacious design (w-64, px-6 py-5, shadow-2xl).
-          Keeps: dynamic X-axis anchoring (menuStyle) + spring entrance + exit fade.
-          Tailwind dark: classes for theme-awareness (no hardcoded inline styles). */}
+      {/* Menu — EXACT premium compact design per user spec (250px, 20px radius, 20px padding).
+          ALL old styles deleted. Uses inline styles for exact match. */}
       <AnimatePresence>
         {fabOpen && (
           <motion.div
@@ -232,43 +234,101 @@ export function SideDrawerFab() {
               y: 8,
               transition: { duration: 0.2, ease: [0.4, 0, 1, 1] }
             }}
-            className="fixed z-50 w-64 bg-card rounded-2xl shadow-2xl border border-border px-6 py-5 overflow-hidden"
-            style={menuStyle}
+            className="fixed z-50"
+            style={{
+              ...menuStyle,
+              // menuContainer — EXACT spec
+              backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+              borderRadius: '20px',
+              padding: '20px',
+              width: '250px',
+              boxShadow: '0 8px 16px rgba(0, 0, 0, 0.12)',
+            }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header — "QUICK ACTIONS" label (14px/600) + 20px circular close button */}
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-sm font-semibold text-foreground/80 uppercase tracking-wide">{t('qa.title')}</p>
+            {/* headerRow — flex row, space-between, marginBottom 12, borderBottom */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '12px',
+              borderBottomWidth: '1px',
+              borderBottomStyle: 'solid',
+              borderBottomColor: isDark ? '#333333' : '#F0F0F0',
+              paddingBottom: '12px',
+            }}>
+              {/* headerText — 12px, 700, #8E8E93, letterSpacing 0.5 */}
+              <p style={{
+                fontSize: '12px',
+                fontWeight: '700',
+                color: '#8E8E93',
+                letterSpacing: '0.5px',
+                margin: 0,
+              }}>{t('qa.title')}</p>
               <button
                 onClick={() => setFabOpen(false)}
-                className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-full w-5 h-5 flex items-center justify-center transition-colors"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#8E8E93',
+                }}
                 aria-label="Close"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
-            {/* Action list — 48px min-height rows, 8px gap, 12px/16px padding */}
-            <div className="space-y-2">
+            {/* menuItemRow — flex row, alignItems center, paddingVertical 12, gap 12 */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
               {ACTIONS.map((a) => {
                 const Icon = a.icon
                 return (
                   <button
                     key={a.id}
                     onClick={() => handleAction(a.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-accent transition-colors min-h-[48px] text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingVertical: '12px',
+                      gap: '12px',
+                      width: '100%',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      background: 'transparent',
+                      border: 'none',
+                      borderRadius: '8px',
+                    }}
+                    className="hover:bg-accent transition-colors"
                   >
-                    <span className={`shrink-0 ${a.color}`}>
-                      <Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} />
-                    </span>
-                    <span className={`text-sm flex-1 ${a.primary ? 'font-bold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}>
-                      {t(a.labelKey)}
-                    </span>
+                    <span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
+                    <span style={{
+                      fontSize: '14px',
+                      flex: 1,
+                      fontWeight: a.primary ? 700 : 500,
+                      color: a.primary
+                        ? (isDark ? '#6EE7B7' : '#047857')
+                        : (isDark ? '#F3F4F6' : '#111827'),
+                    }}>{t(a.labelKey)}</span>
                   </button>
                 )
               })}
             </div>
-            {/* Footer — Bengali drag hint, 10px, muted */}
-            <p className="px-3 mt-3 text-[10px] text-muted-foreground/60 text-center">হোল্ড করে টেনে বাটন সরানো যায়</p>
+            {/* footerText — 10px, #A1A1AA, center, marginTop 16, italic */}
+            <p style={{
+              fontSize: '10px',
+              color: '#A1A1AA',
+              textAlign: 'center',
+              marginTop: '16px',
+              fontStyle: 'italic',
+              margin: 0,
+              paddingTop: '16px',
+            }}>হোল্ড করে টেনে বাটন সরানো যায়</p>
           </motion.div>
         )}
       </AnimatePresence>
