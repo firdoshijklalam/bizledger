@@ -294,7 +294,7 @@ export function generateSearchTags(name: string): string[] {
   if (!name || typeof name !== 'string') return []
 
   const tags = new Set<string>()
-  // Original name (for Bengali text search)
+  // Original name (for exact text search)
   tags.add(name.toLowerCase())
 
   const romanized = transliterateBengaliToEnglish(name)
@@ -302,49 +302,157 @@ export function generateSearchTags(name: string): string[] {
     tags.add(romanized)
 
     // Common phonetic variants for looser matching
-    // Replace 'o' with 'a' (Bengali অ can be either "o" or "a")
     tags.add(romanized.replace(/o/g, 'a'))
-    // Replace 'a' with 'o' (reverse direction)
     tags.add(romanized.replace(/a/g, 'o'))
-    // Replace 'aa' with 'a'
     tags.add(romanized.replace(/aa/g, 'a'))
-    // Replace 'b' with 'v' (common in Bengali — ব can be b or v)
     tags.add(romanized.replace(/b/g, 'v'))
-    // Replace 'j' with 'z' (common confusion)
     tags.add(romanized.replace(/j/g, 'z'))
-    // Replace 'sh' with 's'
     tags.add(romanized.replace(/sh/g, 's'))
-    // Replace 't' with 'th'
     tags.add(romanized.replace(/t/g, 'th'))
-    // Replace 'v' with 'b'
     tags.add(romanized.replace(/v/g, 'b'))
-    // Replace 'ph' with 'f'
     tags.add(romanized.replace(/ph/g, 'f'))
-    // Replace 'chh' with 'ch'
     tags.add(romanized.replace(/chh/g, 'ch'))
-    // Replace 'ng' with 'n'
     tags.add(romanized.replace(/ng/g, 'n'))
 
-    // §3: Also generate variants with trailing vowel removed (utsaba → utsab)
+    // Trailing vowel add/remove variants (utsab ↔ utsaba)
     tags.add(romanized.replace(/a$/, ''))
-    // And with trailing vowel added (utsab → utsaba)
     if (!romanized.match(/[aeiou]$/)) {
       tags.add(romanized + 'a')
       tags.add(romanized + 'o')
     }
   }
 
+  // §1: TWO-WAY search — also generate Bengali reverse transliteration
+  // so that searching "অমিত" finds "Amit" (English-named entities).
+  const bengaliReverse = transliterateEnglishToBengali(name)
+  if (bengaliReverse && bengaliReverse.trim() && bengaliReverse !== name) {
+    tags.add(bengaliReverse)
+  }
+
   // Remove empty strings and very short tags (< 2 chars)
   return Array.from(tags).filter((t) => t.trim().length >= 2)
 }
 
+// §1: Reverse map — English phonetic → Bengali (for two-way search)
+// Used when an entity is stored with an English name; we generate Bengali
+// phonetic aliases so searching "অমিত" finds "Amit".
+const REVERSE_VOWEL_MAP: Record<string, string> = {
+  a: 'অ', 'aa': 'া', 'a@': 'া', // 'a' alone → অ (inherent), 'aa' → া (vowel sign)
+  e: 'এ', 'ee': 'ী', i: 'ই', 'ii': 'ী',
+  u: 'উ', 'uu': 'ূ', 'oo': 'ু',
+  o: 'ও', 'oi': 'ঐ', 'ou': 'ঔ',
+  'ri': 'ৃ',
+}
+
+const REVERSE_CONSONANT_MAP: Record<string, string> = {
+  k: 'ক', 'kh': 'খ', g: 'গ', 'gh': 'ঘ', 'ng': 'ঙ',
+  'ch': 'চ', 'chh': 'ছ', j: 'জ', 'jh': 'ঝ', 'ny': 'ঞ',
+  't': 'ত', 'th': 'থ', 'd': 'দ', 'dh': 'ধ', 'n': 'ন',
+  'tt': 'ট', 'tth': 'ঠ', 'dd': 'ড', 'ddh': 'ঢ', 'nn': 'ণ',
+  p: 'প', 'ph': 'ফ', f: 'ফ', b: 'ব', 'bh': 'ভ', v: 'ভ',
+  m: 'ম', y: 'য', r: 'র', l: 'ল',
+  'sh': 'শ', 'ss': 'ষ', s: 'স', h: 'হ',
+  'r@': 'ড়', 'rh': 'ঢ়',
+  'w': 'ব', // w → ব (common in Bengali)
+  'z': 'জ', // z → জ
+  'q': 'ক', 'x': 'ক্স',
+}
+
 /**
- * Check if an English query phonetically matches a Bengali name.
+ * Reverse transliterate English text to Bengali phonetic form.
+ * Example: "Amit" → "অমিত", "Utsab" → "উৎসব"
+ * This is approximate — used only for generating search aliases.
+ */
+export function transliterateEnglishToBengali(text: string): string {
+  if (!text) return ''
+
+  let result = ''
+  let i = 0
+  const lower = text.toLowerCase()
+
+  while (i < lower.length) {
+    const remaining = lower.substring(i)
+
+    // Check 3-char sequences first (chh, ddh, tth, etc.)
+    const three = remaining.substring(0, 3)
+    if (REVERSE_CONSONANT_MAP[three]) {
+      result += REVERSE_CONSONANT_MAP[three]
+      i += 3
+      continue
+    }
+
+    // Check 2-char sequences (kh, gh, ch, sh, aa, ee, oo, etc.)
+    const two = remaining.substring(0, 2)
+    if (REVERSE_VOWEL_MAP[two]) {
+      result += REVERSE_VOWEL_MAP[two]
+      i += 2
+      continue
+    }
+    if (REVERSE_CONSONANT_MAP[two]) {
+      result += REVERSE_CONSONANT_MAP[two]
+      i += 2
+      continue
+    }
+
+    const ch = lower[i]
+
+    // Single char — vowel
+    if (REVERSE_VOWEL_MAP[ch]) {
+      result += REVERSE_VOWEL_MAP[ch]
+      i++
+      continue
+    }
+
+    // Single char — consonant
+    if (REVERSE_CONSONANT_MAP[ch]) {
+      // Add inherent vowel অ after consonant if next char is not a vowel
+      const nextCh = lower[i + 1]
+      const isVowelNext = nextCh && ['a','e','i','o','u'].includes(nextCh)
+      result += REVERSE_CONSONANT_MAP[ch]
+      if (!isVowelNext && nextCh && REVERSE_CONSONANT_MAP[nextCh]) {
+        // Consonant followed by consonant — add inherent vowel অ
+        result += 'অ'
+      } else if (!nextCh) {
+        // Last char — add inherent vowel অ
+        result += 'অ'
+      }
+      i++
+      continue
+    }
+
+    // Non-letter — keep as-is
+    result += ch
+    i++
+  }
+
+  return result
+}
+
+/**
+ * Check if a query phonetically matches a name in EITHER direction.
+ * - English query "Utsab" → matches Bengali name "উৎসব"
+ * - Bengali query "অমিত" → matches English name "Amit"
  * Used for cross-lingual search matching.
  */
 export function phoneticMatch(query: string, name: string): boolean {
   if (!query || !name) return false
   const q = query.toLowerCase().trim()
   const tags = generateSearchTags(name)
-  return tags.some((tag) => tag.includes(q) || q.includes(tag))
+  // Check if query is substring of any tag, or any tag is substring of query
+  if (tags.some((tag) => tag.includes(q) || q.includes(tag))) return true
+
+  // §1: Two-way — also transliterate the query and check against name
+  // If query is Bengali, transliterate to English and check against name
+  const queryRomanized = transliterateBengaliToEnglish(query)
+  if (queryRomanized && queryRomanized.trim()) {
+    const nameLower = name.toLowerCase()
+    if (nameLower.includes(queryRomanized) || queryRomanized.includes(nameLower)) return true
+  }
+  // If query is English, transliterate to Bengali and check against name
+  const queryBengali = transliterateEnglishToBengali(query)
+  if (queryBengali && queryBengali.trim()) {
+    if (name.includes(queryBengali) || queryBengali.includes(name)) return true
+  }
+
+  return false
 }

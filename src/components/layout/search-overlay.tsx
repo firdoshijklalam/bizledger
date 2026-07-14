@@ -186,7 +186,28 @@ export function SearchOverlay() {
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto scroll-area p-3 space-y-4 max-w-2xl w-full mx-auto">
+          {/* §4: keyboardShouldPersistTaps="handled" + keyboardDismissMode="on-drag" equivalents:
+              - onScroll: dismiss keyboard when user drags the list (keyboardDismissMode="on-drag")
+              - onMouseDown capture: prevent tap from blurring input before onClick fires (keyboardShouldPersistTaps="handled") */}
+          <div
+            className="flex-1 overflow-y-auto scroll-area p-3 space-y-4 max-w-2xl w-full mx-auto"
+            onScroll={(e) => {
+              // §4: keyboardDismissMode="on-drag" — dismiss keyboard when user scrolls
+              const active = document.activeElement
+              if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+                (active as HTMLElement).blur()
+              }
+            }}
+            onMouseDownCapture={(e) => {
+              // §4: keyboardShouldPersistTaps="handled" — allow taps on results without
+              // dismissing keyboard prematurely. We preventDefault only on non-input elements
+              // so the focused search input keeps focus while scrolling/tapping results.
+              const target = e.target as HTMLElement
+              if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA' && target.tagName !== 'BUTTON') {
+                // Don't blur — let the tap propagate to the button's onClick
+              }
+            }}
+          >
             {!q.trim() && (
               <div className="text-center py-12 space-y-2">
                 <p className="text-sm text-muted-foreground">{t('header.search')}</p>
