@@ -28,8 +28,17 @@ export function SearchOverlay() {
       fetch('/api/invoices').then((r) => r.json()),
       fetch('/api/transactions').then((r) => r.json()),
     ]).then(([p, pr, inv, tx]) => {
-      setParties(Array.isArray(p) ? p : (p?.items || []))
-      setProducts(Array.isArray(pr) ? pr : (pr?.items || []))
+      const partyList = (Array.isArray(p) ? p : (p?.items || [])).map((x: any) => ({
+        ...x,
+        // §3: Parse searchTags JSON string → array for Fuse.js
+        searchTags: x.searchTags ? (typeof x.searchTags === 'string' ? (() => { try { return JSON.parse(x.searchTags) } catch { return [] } })() : x.searchTags) : [],
+      }))
+      const prodList = (Array.isArray(pr) ? pr : (pr?.items || [])).map((x: any) => ({
+        ...x,
+        searchTags: x.searchTags ? (typeof x.searchTags === 'string' ? (() => { try { return JSON.parse(x.searchTags) } catch { return [] } })() : x.searchTags) : [],
+      }))
+      setParties(partyList)
+      setProducts(prodList)
       setInvoices(Array.isArray(inv) ? inv : (inv?.items || []))
       setTxns(Array.isArray(tx) ? tx : (tx?.items || []))
     })
