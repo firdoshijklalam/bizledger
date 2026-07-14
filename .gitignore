@@ -68,3 +68,4 @@ start-server*
 fab-*.png
 data-*.png
 tool-results/
+.github/workflows/ci.yml
