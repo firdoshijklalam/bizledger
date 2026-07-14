@@ -1,41 +1,35 @@
 'use client'
 
 /**
- * §2 FloatingKeyboardMic — draggable microphone button that ONLY appears when
+ * FloatingKeyboardMic — draggable microphone button that ONLY appears when
  * a text input/keyboard is active.
  *
- * Features:
- * - §2: Spawn position dynamically set to keyboardHeight + 20 (always visible
- *   just above keyboard top edge). Uses VisualViewport API (web equivalent of
- *   Keyboard.addListener('keyboardDidShow') + event.endCoordinates.height).
- * - §3: Spring entrance animation (withSpring equivalent).
- * - §3: Breathing idle animation (scale 1→1.1→1 repeat, withRepeat equivalent).
- * - Draggable via pointer events, snaps to screen edge on release.
- * - Tapping starts Web Speech API voice recognition → fills the focused input.
- * - Position persists in localStorage.
+ * §1: Dynamic STT Language — uses useI18n() to sync recognition.lang with the
+ *     app's active language (bn→bn-IN, hi→hi-IN, en→en-US).
+ * §2: Unrestricted 2D Drag — both X and Y axis, position relative to entire
+ *     window (fixed positioning), no vertical clamping that blocks dragging down.
+ * §3: Global Root Overlay — mounted at app-shell root level (not screen-level).
+ * §4: Prevent Focus Steal — mic button uses onPointerDown + preventDefault to
+ *     avoid blurring the active TextInput. tabIndex={-1} + onMouseDown prevent.
  */
 
 import { AnimatePresence, motion, useAnimationControls } from 'framer-motion'
 import { Mic, MicOff, X } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { toast } from 'sonner'
+import { useI18n } from '@/store/i18n-store'
 
 const MIC_SIZE = 52
 const EDGE_MARGIN = 12
 const TOP_BAR = 56
-const BOTTOM_NAV = 80
 const DRAG_THRESH = 6
-const KEYBOARD_GAP = 20 // §2: gap above keyboard top edge
+const KEYBOARD_GAP = 20
 
 interface MicPos { x: number; y: number }
 const DEFAULT_POS: MicPos = { x: -999, y: -999 }
 
 function getDefault(keyboardHeight = 0): MicPos {
   if (typeof window === 'undefined') return { x: 0, y: 0 }
-  // §2: Spawn position = bottom of visible viewport + KEYBOARD_GAP
-  // The VisualViewport.height shrinks when keyboard opens, so the bottom of
-  // the visible area is the top of the keyboard. We place the mic KEYBOARD_GAP
-  // pixels above that.
   const visibleHeight = window.visualViewport?.height ?? window.innerHeight
   const bottomY = visibleHeight - MIC_SIZE - KEYBOARD_GAP - keyboardHeight
   return {
@@ -55,30 +49,38 @@ function loadPos(): MicPos {
   return DEFAULT_POS
 }
 function savePos(p: MicPos) { try { localStorage.setItem('bizledger-keyboard-mic-pos', JSON.stringify(p)) } catch {} }
-function snapToEdge(p: MicPos, keyboardHeight = 0): MicPos {
+// §2: snapToEdge only clamps X to nearest edge; Y is clamped to viewport but
+// NOT restricted to a small band — allows full vertical drag.
+function snapToEdge(p: MicPos): MicPos {
   if (typeof window === 'undefined') return p
   const cx = p.x + MIC_SIZE / 2
   const left = cx < window.innerWidth / 2
   const visibleHeight = window.visualViewport?.height ?? window.innerHeight
-  const maxY = visibleHeight - MIC_SIZE - KEYBOARD_GAP - keyboardHeight
   return {
     x: left ? EDGE_MARGIN : window.innerWidth - MIC_SIZE - EDGE_MARGIN,
-    y: Math.max(TOP_BAR + 8, Math.min(maxY, p.y))
+    // §2: Y can go anywhere from top bar to bottom of visible viewport
+    y: Math.max(TOP_BAR + 8, Math.min(visibleHeight - MIC_SIZE - 8, p.y))
   }
 }
 
 export function FloatingKeyboardMic() {
+  // §1: Get active app language for dynamic STT locale
+  const { language } = useI18n()
+
   const [keyboardActive, setKeyboardActive] = useState(false)
-  const [keyboardHeight, setKeyboardHeight] = useState(0) // §2: track keyboard height
+  const [keyboardHeight, setKeyboardHeight] = useState(0)
   const [position, setPosition] = useState<MicPos>(loadPos)
   const [isDragging, setIsDragging] = useState(false)
   const [listening, setListening] = useState(false)
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false, dragging: false })
   const focusedInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
   const recognitionRef = useRef<any>(null)
+  const languageRef = useRef(language) // §1: ref to access latest language in callbacks
   const micControls = useAnimationControls()
 
-  // §1: stopListening — declared first so it can be referenced in the focus tracking effect
+  // §1: Keep languageRef in sync with active language
+  useEffect(() => { languageRef.current = language }, [language])
+
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
       try { recognitionRef.current.stop() } catch {}
@@ -87,7 +89,7 @@ export function FloatingKeyboardMic() {
     setListening(false)
   }, [])
 
-  // §1: Track focus/blur on ALL inputs/textareas to detect keyboard active state
+  // §3: Track focus/blur on ALL inputs/textareas (document-level = global scope)
   useEffect(() => {
     const handleFocusIn = (e: FocusEvent) => {
       const target = e.target as HTMLElement
@@ -99,10 +101,15 @@ export function FloatingKeyboardMic() {
     const handleFocusOut = (e: FocusEvent) => {
       const target = e.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        // §4: Delay to allow focus to transfer — but DON'T dismiss if mic button
+        // or its children are being interacted with
         setTimeout(() => {
           const active = document.activeElement
           if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
             focusedInputRef.current = active as HTMLInputElement | HTMLTextAreaElement
+          } else if (active && active.getAttribute('data-mic-button') === 'true') {
+            // Mic button stole focus — re-focus the input
+            if (focusedInputRef.current) focusedInputRef.current.focus()
           } else {
             focusedInputRef.current = null
             setKeyboardActive(false)
@@ -119,19 +126,15 @@ export function FloatingKeyboardMic() {
     }
   }, [stopListening])
 
-  // §2: VisualViewport API — web equivalent of Keyboard.addListener('keyboardDidShow')
-  // Fires when the on-screen keyboard opens/closes, giving us the exact keyboard height.
+  // §2: VisualViewport API — keyboard height detection
   useEffect(() => {
     if (!window.visualViewport) return
     const onResize = () => {
-      // When keyboard opens, visualViewport.height shrinks below window.innerHeight.
-      // The difference is the keyboard height (event.endCoordinates.height equivalent).
       const kbHeight = Math.max(0, window.innerHeight - window.visualViewport!.height)
       setKeyboardHeight(kbHeight)
-      // Reposition mic to stay above keyboard
       setPosition((prev) => {
         if (prev.x === -999) return getDefault(kbHeight)
-        const s = snapToEdge(prev, kbHeight)
+        const s = snapToEdge(prev)
         savePos(s)
         return s
       })
@@ -149,7 +152,10 @@ export function FloatingKeyboardMic() {
     if (recognitionRef.current) { try { recognitionRef.current.stop() } catch {} }
 
     const recognition = new SpeechRecognition()
-    recognition.lang = 'bn-IN'
+    // §1: Dynamic STT language — sync with app's active language
+    // bn → bn-IN, hi → hi-IN, en → en-US (default)
+    const lang = languageRef.current
+    recognition.lang = lang === 'bn' ? 'bn-IN' : lang === 'hi' ? 'hi-IN' : 'en-US'
     recognition.continuous = false
     recognition.interimResults = true
 
@@ -179,11 +185,15 @@ export function FloatingKeyboardMic() {
     recognition.onend = () => {
       setListening(false)
       recognitionRef.current = null
+      // §4: Re-focus the input after recognition ends
+      if (focusedInputRef.current) {
+        setTimeout(() => focusedInputRef.current?.focus(), 100)
+      }
     }
     recognitionRef.current = recognition
     recognition.start()
     setListening(true)
-    toast.info('বলুন...', { duration: 1500 })
+    toast.info(lang === 'bn' ? 'বলুন...' : lang === 'hi' ? 'बोलिए...' : 'Speak...', { duration: 1500 })
   }, [])
 
   const handleToggleMic = useCallback(() => {
@@ -191,42 +201,46 @@ export function FloatingKeyboardMic() {
     else startListening()
   }, [listening, startListening, stopListening])
 
+  // §2: Unrestricted 2D Drag — both X and Y axis, relative to entire window.
+  // §4: preventDefault stops the mic from stealing focus from the active input.
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault()
+    e.preventDefault() // §4: Prevent focus steal
     const ds = dragRef.current
     ds.startX = e.clientX; ds.startY = e.clientY; ds.startPosX = position.x; ds.startPosY = position.y; ds.moved = false; ds.dragging = false
     const visibleHeight = window.visualViewport?.height ?? window.innerHeight
-    const maxY = visibleHeight - MIC_SIZE - KEYBOARD_GAP - keyboardHeight
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - ds.startX, dy = ev.clientY - ds.startY
       if (!ds.moved && (Math.abs(dx) > DRAG_THRESH || Math.abs(dy) > DRAG_THRESH)) { ds.moved = true; ds.dragging = true; setIsDragging(true) }
       if (ds.dragging) {
+        // §2: Allow full 2D movement — X clamped to viewport width, Y clamped to
+        // visible viewport (top bar to bottom). NO restricted band.
         setPosition({
           x: Math.max(0, Math.min(window.innerWidth - MIC_SIZE, ds.startPosX + dx)),
-          y: Math.max(TOP_BAR, Math.min(maxY, ds.startPosY + dy))
+          y: Math.max(TOP_BAR, Math.min(visibleHeight - MIC_SIZE - 8, ds.startPosY + dy))
         })
       }
     }
     const onUp = () => {
       window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); window.removeEventListener('pointercancel', onUp)
-      if (ds.dragging) { setPosition((c) => { const s = snapToEdge(c, keyboardHeight); savePos(s); return s }); setIsDragging(false) }
+      if (ds.dragging) { setPosition((c) => { const s = snapToEdge(c); savePos(s); return s }); setIsDragging(false) }
       else if (!ds.moved) { handleToggleMic() }
       ds.dragging = false; ds.moved = false
+      // §4: Re-focus the input after drag/tap
+      if (focusedInputRef.current) {
+        setTimeout(() => focusedInputRef.current?.focus(), 50)
+      }
     }
     window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', onUp); window.addEventListener('pointercancel', onUp)
-  }, [position, handleToggleMic, keyboardHeight])
+  }, [position, handleToggleMic])
 
-  // §3: Animations — breathing idle (scale 1→1.1→1 repeat) when NOT listening.
-  // When listening, faster pulse (scale 1→1.15→1).
+  // §3: Animations — breathing idle + pulse
   useEffect(() => {
     if (listening) {
-      // Active listening — faster pulse
       micControls.start({
         scale: [1, 1.15, 1],
         transition: { duration: 1, repeat: Infinity, ease: 'easeInOut' }
       })
     } else if (keyboardActive) {
-      // §3: Breathing idle animation — scale 1→1.1→1 continuously (withRepeat + withTiming equivalent)
       micControls.start({
         scale: [1, 1.1, 1],
         transition: { duration: 2.5, repeat: Infinity, ease: 'easeInOut' }
@@ -241,7 +255,6 @@ export function FloatingKeyboardMic() {
       {keyboardActive && (
         <motion.div
           key="floating-keyboard-mic"
-          // §3: Spring entrance — withSpring equivalent (pops up smoothly)
           initial={{ opacity: 0, scale: 0.3, y: 30 }}
           animate={{
             opacity: 1,
@@ -250,13 +263,11 @@ export function FloatingKeyboardMic() {
             transition: { type: 'spring', stiffness: 300, damping: 18, mass: 0.8 }
           }}
           exit={{ opacity: 0, scale: 0.3, y: 30, transition: { duration: 0.2 } }}
+          // §2: position: fixed = relative to entire window (not trapped in a container)
           className="fixed z-[60] select-none"
           style={{ left: `${position.x}px`, top: `${position.y}px`, width: MIC_SIZE, height: MIC_SIZE }}
         >
-          {/* §3: Premium pulse/ripple idle animation — circular background behind mic.
-              Uses withRepeat + withTiming equivalent: scale 1→1.5, opacity 0.6→0, infinite.
-              Creates a "listening/glowing pulse" effect to grab user attention.
-              Two offset ripples for a richer effect. */}
+          {/* §3: Premium pulse/ripple idle animation */}
           {!listening && (
             <>
               <motion.div
@@ -274,7 +285,7 @@ export function FloatingKeyboardMic() {
             </>
           )}
 
-          {/* Listening ripple — faster red pulse when actively listening */}
+          {/* Listening ripple */}
           {listening && (
             <>
               <motion.div
@@ -294,6 +305,11 @@ export function FloatingKeyboardMic() {
 
           <motion.button
             onPointerDown={handlePointerDown}
+            // §4: Prevent focus steal — don't let this button become focusable
+            // or blur the active input when tapped
+            tabIndex={-1}
+            onMouseDown={(e) => e.preventDefault()} // §4: Prevent default focus behavior
+            data-mic-button="true" // §4: Marker for focusout handler to detect mic interaction
             animate={micControls}
             whileTap={{ scale: 0.9 }}
             className={`absolute inset-0 flex items-center justify-center rounded-full text-white shadow-xl border-2 backdrop-blur-xl ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} ${listening ? 'border-red-300' : 'border-white/30'}`}
@@ -306,10 +322,13 @@ export function FloatingKeyboardMic() {
             {listening ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
           </motion.button>
 
-          {/* Close button (X) — top right of mic, only when not listening */}
+          {/* Close button (X) */}
           {!listening && (
             <button
               onClick={(e) => { e.stopPropagation(); setKeyboardActive(false); }}
+              // §4: Prevent focus steal on close button too
+              tabIndex={-1}
+              onMouseDown={(e) => e.preventDefault()}
               className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center shadow-md z-10"
               aria-label="Hide microphone"
             >
