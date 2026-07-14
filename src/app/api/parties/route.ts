@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
+import { generateSearchTags } from '@/lib/transliteration'
 
 // GET /api/parties — optimized with pagination + field selection
 export async function GET(req: NextRequest) {
@@ -21,6 +22,8 @@ export async function GET(req: NextRequest) {
     where.OR = [
       { name: { contains: q, mode: 'insensitive' } },
       { phone: { contains: q, mode: 'insensitive' } },
+      // §3: Also search the phonetic searchTags JSON field
+      { searchTags: { contains: q.toLowerCase(), mode: 'insensitive' } },
     ]
   }
 
@@ -52,6 +55,9 @@ export async function POST(req: NextRequest) {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
+    // §3: Auto-generate phonetic search tags from the party name
+    const searchTags = JSON.stringify(generateSearchTags(body.name || ''))
+
     const party = await db.party.create({
       data: {
         businessId: business.id,
@@ -65,6 +71,7 @@ export async function POST(req: NextRequest) {
         address: body.address || null,
         gstin: body.gstin || null,
         notes: body.notes || null,
+        searchTags,
       },
     })
     return NextResponse.json(party)

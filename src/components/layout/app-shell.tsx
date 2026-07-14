@@ -6,6 +6,7 @@ import { useI18n } from '@/store/i18n-store'
 import { TopAppBar } from './top-app-bar'
 import { BottomTabNav } from './bottom-tab-nav'
 import { SideDrawerFab } from './side-drawer-fab'
+import { FloatingKeyboardMic } from './floating-keyboard-mic'
 import { SearchOverlay } from './search-overlay'
 import { DashboardView } from '@/components/views/dashboard-view'
 import { KhataView } from '@/components/views/khata-view'
@@ -192,6 +193,8 @@ export function AppShell() {
       <SideDrawerFab />
       <BottomTabNav />
       <SearchOverlay />
+      {/* §1: Draggable floating mic — only visible when keyboard/input is active */}
+      <FloatingKeyboardMic />
       <FloatingInvoiceModal />
       {/* PRD Part 32: Biometric ecosystem — global overlays */}
       <BiometricGateModal />

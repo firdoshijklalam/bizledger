@@ -79,6 +79,9 @@ model Party {
   maxCreditSuggestion  Float    @default(0) // AI-suggested max credit (₹)
   trustScoreUpdatedAt  DateTime?
   trustScoreReason     String?  // human-readable reason
+  // §3: Cross-lingual phonetic search tags (JSON array of English phonetic variants)
+  // Generated from Bengali name via transliteration. e.g. "অমিত" → ["amit","omit"]
+  searchTags           String?  // JSON array string: ["amit","omit","অমিত"]
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -121,6 +124,9 @@ model Product {
   // PRD Part 35 §3.1: online catalog publishing status
   isPublished        Boolean  @default(true) // auto-published to PWA store on save
   categoryPath       String?  // PRD Part 35 §2: full nested path (e.g. "Groceries > চাল > বাসমতি")
+  // §3: Cross-lingual phonetic search tags (JSON array of English phonetic variants)
+  // e.g. "উৎসব" → ["utsab","utshob","utsob","উৎসব"]
+  searchTags         String?  // JSON array string
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

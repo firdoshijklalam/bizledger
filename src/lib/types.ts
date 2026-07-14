@@ -66,6 +66,8 @@ export interface Party {
   avgDiscountPct: number
   gradeLastCalculated?: string | null
   gradeOverrideReason?: string | null
+  // §3: phonetic search tags (JSON array string from transliteration)
+  searchTags?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -94,6 +96,8 @@ export interface Product {
   description?: string | null
   isPublished?: boolean
   categoryPath?: string | null
+  // §3: phonetic search tags (JSON array string from transliteration)
+  searchTags?: string | null
   createdAt: string
   updatedAt: string
 }

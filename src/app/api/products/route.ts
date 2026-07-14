@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
+import { generateSearchTags } from '@/lib/transliteration'
 
 // GET /api/products — optimized with pagination + field selection
 // Supports ?q=search&phonetic=true&lowStock=true&limit=50&offset=0
@@ -20,6 +21,8 @@ export async function GET(req: NextRequest) {
     where.OR = [
       { name: { contains: q, mode: 'insensitive' } },
       { sku: { contains: q, mode: 'insensitive' } },
+      // §3: Also search the phonetic searchTags JSON field
+      { searchTags: { contains: q.toLowerCase(), mode: 'insensitive' } },
     ]
   }
 
@@ -54,6 +57,9 @@ export async function POST(req: NextRequest) {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
+    // §3: Auto-generate phonetic search tags from the product name
+    const searchTags = JSON.stringify(generateSearchTags(body.name || ''))
+
     const product = await db.product.create({
       data: {
         businessId: business.id,
@@ -81,6 +87,7 @@ export async function POST(req: NextRequest) {
         description: body.description || null,
         isPublished: body.isPublished ?? true,
         categoryPath: body.categoryPath || null,
+        searchTags,
       },
     })
     return NextResponse.json(product)

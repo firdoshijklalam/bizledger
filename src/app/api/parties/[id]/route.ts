@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { generateSearchTags } from '@/lib/transliteration'
 
 // /api/parties/[id] — CRUD for a single party.
 // Security: all operations verify the party belongs to the current business.
@@ -63,6 +64,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!existing) return NextResponse.json({ error: 'Not found in your business' }, { status: 404 })
 
     const body = await req.json()
+    // §3: Regenerate search tags if name changed
+    const searchTags = body.name !== existing.name
+      ? JSON.stringify(generateSearchTags(body.name || ''))
+      : undefined
     const updated = await db.party.update({
       where: { id },
       data: {
@@ -75,6 +80,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         notes: body.notes,
         qualityGrade: body.qualityGrade,
         gradeOverrideReason: body.gradeOverrideReason || null,
+        ...(searchTags ? { searchTags } : {}),
       },
     })
     return NextResponse.json(updated)

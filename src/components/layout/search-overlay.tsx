@@ -3,11 +3,13 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Search, X, User, Package, Receipt, ArrowLeftRight, Mic } from 'lucide-react'
+import { Search, X, User, Package, Receipt, ArrowLeftRight } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { Party, Product, Invoice, Transaction } from '@/lib/types'
-import { formatCurrency, formatDate, GRADE_META } from '@/lib/utils'
-import { toast } from 'sonner'
+import { formatCurrency, formatDate, getGradeMeta } from '@/lib/utils'
+import { highlightMatch } from '@/lib/highlight'
+import { transliterateBengaliToEnglish, phoneticMatch, generateSearchTags } from '@/lib/transliteration'
+import Fuse from 'fuse.js'
 
 export function SearchOverlay() {
   const { showSearch, setShowSearch, setActiveView, setSelectedPartyId, setSelectedProductId, setSelectedInvoiceId } = useAppStore()
@@ -17,8 +19,6 @@ export function SearchOverlay() {
   const [products, setProducts] = useState<Product[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [txns, setTxns] = useState<Transaction[]>([])
-  const [phoneticParties, setPhoneticParties] = useState<Party[]>([])
-  const [phoneticProducts, setPhoneticProducts] = useState<Product[]>([])
 
   useEffect(() => {
     if (!showSearch) return
@@ -28,49 +28,97 @@ export function SearchOverlay() {
       fetch('/api/invoices').then((r) => r.json()),
       fetch('/api/transactions').then((r) => r.json()),
     ]).then(([p, pr, inv, tx]) => {
-      setParties(p || [])
-      setProducts(pr || [])
-      setInvoices(inv || [])
-      setTxns(tx || [])
+      setParties(Array.isArray(p) ? p : (p?.items || []))
+      setProducts(Array.isArray(pr) ? pr : (pr?.items || []))
+      setInvoices(Array.isArray(inv) ? inv : (inv?.items || []))
+      setTxns(Array.isArray(tx) ? tx : (tx?.items || []))
     })
   }, [showSearch])
 
-  // Phonetic search: when query has no exact matches, try phonetic API (PRD v2 §12.2)
-  useEffect(() => {
-    if (!q.trim() || q.trim().length < 2) return
-    const timer = setTimeout(() => {
-      // Only fetch phonetic if no exact matches found locally
-      const localPartyMatch = parties.filter((p) =>
-        p.name.toLowerCase().includes(q.toLowerCase()) || (p.phone || '').includes(q)
-      )
-      const localProdMatch = products.filter((p) =>
-        p.name.toLowerCase().includes(q.toLowerCase()) || (p.sku || '').toLowerCase().includes(q.toLowerCase())
-      )
-      if (localPartyMatch.length === 0) {
-        fetch(`/api/parties?q=${encodeURIComponent(q)}&phonetic=true`).then((r) => r.json()).then((res) => setPhoneticParties(res || [])).catch(() => {})
-      }
-      if (localProdMatch.length === 0) {
-        fetch(`/api/products?q=${encodeURIComponent(q)}&phonetic=true`).then((r) => r.json()).then((res) => setPhoneticProducts(res || [])).catch(() => {})
-      }
-    }, 400)
-    return () => clearTimeout(timer)
+  // §2: Fuse.js fuzzy search instances with phonetic search_tags included
+  const partyFuse = useMemo(() => new Fuse(parties, {
+    keys: [
+      { name: 'name', weight: 0.5 },
+      { name: 'phone', weight: 0.3 },
+      { name: 'searchTags', weight: 0.2 }, // §3: phonetic tags
+    ],
+    threshold: 0.4, // 0 = exact, 1 = matches anything
+    ignoreLocation: true,
+    minMatchCharLength: 1,
+  }), [parties])
+
+  const productFuse = useMemo(() => new Fuse(products, {
+    keys: [
+      { name: 'name', weight: 0.5 },
+      { name: 'sku', weight: 0.2 },
+      { name: 'category', weight: 0.1 },
+      { name: 'subCategory', weight: 0.1 },
+      { name: 'searchTags', weight: 0.1 }, // §3: phonetic tags
+    ],
+    threshold: 0.4,
+    ignoreLocation: true,
+    minMatchCharLength: 1,
+  }), [products])
+
+  const invoiceFuse = useMemo(() => new Fuse(invoices, {
+    keys: [
+      { name: 'invoiceNumber', weight: 0.6 },
+      { name: 'party.name', weight: 0.4 },
+    ],
+    threshold: 0.3,
+    ignoreLocation: true,
+    minMatchCharLength: 1,
+  }), [invoices])
+
+  const txnFuse = useMemo(() => new Fuse(txns, {
+    keys: [
+      { name: 'description', weight: 0.6 },
+      { name: 'category', weight: 0.2 },
+      { name: 'party.name', weight: 0.2 },
+    ],
+    threshold: 0.4,
+    ignoreLocation: true,
+    minMatchCharLength: 1,
+  }), [txns])
+
+  // §3: Cross-lingual phonetic results — English query matches Bengali names
+  const phoneticResults = useMemo(() => {
+    if (!q.trim() || q.trim().length < 2) return { parties: [], products: [] }
+    const query = q.toLowerCase().trim()
+
+    // Find parties where phonetic transliteration of name matches the query
+    const phoneticParties = parties.filter((p) => {
+      // Skip if already an exact substring match (those show in main results)
+      if (p.name.toLowerCase().includes(query) || (p.phone || '').includes(query)) return false
+      // Check phonetic match: does "Utsab" match "উৎসব"?
+      return phoneticMatch(query, p.name)
+    }).slice(0, 3)
+
+    const phoneticProducts = products.filter((p) => {
+      if (p.name.toLowerCase().includes(query) || (p.sku || '').toLowerCase().includes(query)) return false
+      return phoneticMatch(query, p.name)
+    }).slice(0, 3)
+
+    return { parties: phoneticParties, products: phoneticProducts }
   }, [q, parties, products])
 
   const results = useMemo(() => {
-    if (!q.trim()) return { parties: [], products: [], invoices: [], txns: [], phoneticParties: [], phoneticProducts: [] }
-    const query = q.toLowerCase()
-    const localParties = parties.filter((p) => p.name.toLowerCase().includes(query) || (p.phone || '').includes(query)).slice(0, 4)
-    const localProducts = products.filter((p) => p.name.toLowerCase().includes(query) || (p.sku || '').toLowerCase().includes(query)).slice(0, 4)
+    if (!q.trim()) return { parties: [], products: [], invoices: [], txns: [] }
+    const query = q.trim()
+
+    // §2: Use Fuse.js for fuzzy matching
+    const partyResults = partyFuse.search(query).slice(0, 4).map((r) => r.item)
+    const productResults = productFuse.search(query).slice(0, 4).map((r) => r.item)
+    const invoiceResults = invoiceFuse.search(query).slice(0, 4).map((r) => r.item)
+    const txnResults = txnFuse.search(query).slice(0, 4).map((r) => r.item)
+
     return {
-      parties: localParties,
-      products: localProducts,
-      invoices: invoices.filter((i) => i.invoiceNumber.toLowerCase().includes(query)).slice(0, 4),
-      txns: txns.filter((t) => (t.description || '').toLowerCase().includes(query)).slice(0, 4),
-      // Phonetic matches — only show ones NOT already in local results
-      phoneticParties: localParties.length === 0 ? phoneticParties.filter((p) => !localParties.find((lp) => lp.id === p.id)).slice(0, 3) : [],
-      phoneticProducts: localProducts.length === 0 ? phoneticProducts.filter((p) => !localProducts.find((lp) => lp.id === p.id)).slice(0, 3) : [],
+      parties: partyResults,
+      products: productResults,
+      invoices: invoiceResults,
+      txns: txnResults,
     }
-  }, [q, parties, products, invoices, txns, phoneticParties, phoneticProducts])
+  }, [q, partyFuse, productFuse, invoiceFuse, txnFuse])
 
   const close = () => {
     setQ('')
@@ -93,6 +141,8 @@ export function SearchOverlay() {
     close()
   }
 
+  const hasAnyResults = results.parties.length > 0 || results.products.length > 0 || results.invoices.length > 0 || results.txns.length > 0 || phoneticResults.parties.length > 0 || phoneticResults.products.length > 0
+
   return (
     <AnimatePresence>
       {showSearch && (
@@ -109,36 +159,18 @@ export function SearchOverlay() {
                 autoFocus
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder={t('header.search')}
+                placeholder={t('header.search') + '… (fuzzy + phonetic)'}
                 className="flex-1 bg-transparent outline-none text-sm placeholder:text-muted-foreground"
               />
-              {/* PRD Part 38 §3: Voice search mic icon inside search bar */}
-              <button
-                onClick={() => {
-                  // Use Web Speech API for voice input
-                  const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-                  if (!SpeechRecognition) {
-                    toast.error('ভয়েস সার্চ এই ব্রাউজারে সাপোর্ট করে না')
-                    return
-                  }
-                  const recognition = new SpeechRecognition()
-                  recognition.lang = 'en-IN'
-                  recognition.continuous = false
-                  recognition.interimResults = false
-                  recognition.onresult = (event: any) => {
-                    const transcript = event.results[0][0].transcript
-                    setQ(transcript)
-                    toast.success(`ভয়েস: "${transcript}"`)
-                  }
-                  recognition.onerror = () => toast.error('ভয়েস সার্চ ব্যর্থ')
-                  recognition.start()
-                  toast.info('বলুন...')
-                }}
-                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-background text-emerald-600 shrink-0"
-                aria-label="Voice search"
-              >
-                <Mic className="w-4 h-4" />
-              </button>
+              {q && (
+                <button
+                  onClick={() => setQ('')}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-background text-muted-foreground shrink-0"
+                  aria-label="Clear"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
             <button onClick={close} className="h-11 w-11 flex items-center justify-center rounded-xl hover:bg-muted" aria-label="Close">
               <X className="w-5 h-5" />
@@ -147,47 +179,49 @@ export function SearchOverlay() {
 
           <div className="flex-1 overflow-y-auto scroll-area p-3 space-y-4 max-w-2xl w-full mx-auto">
             {!q.trim() && (
-              <p className="text-sm text-muted-foreground text-center py-12">
-                {t('header.search')}
-              </p>
+              <div className="text-center py-12 space-y-2">
+                <p className="text-sm text-muted-foreground">{t('header.search')}</p>
+                <p className="text-xs text-muted-foreground/60">Fuzzy match + cross-lingual phonetic search</p>
+                <p className="text-[11px] text-muted-foreground/50 mt-4">Try: &quot;Utsab&quot; → finds &quot;উৎসব&quot;</p>
+              </div>
             )}
-            {q.trim() && results.parties.length === 0 && results.products.length === 0 && results.invoices.length === 0 && results.txns.length === 0 && results.phoneticParties.length === 0 && results.phoneticProducts.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-12">No results for “{q}”.</p>
+            {q.trim() && !hasAnyResults && (
+              <p className="text-sm text-muted-foreground text-center py-12">No results for &ldquo;{q}&rdquo;.</p>
             )}
 
-            {/* Phonetic search results — Bengali ↔ English sound matching (PRD v2 §12.2) */}
-            {results.phoneticParties.length > 0 && (
+            {/* §3: Phonetic search results — English query matches Bengali names */}
+            {phoneticResults.parties.length > 0 && (
               <Section title="Parties (phonetic match 🔊)">
-                {results.phoneticParties.map((p) => {
-                  const meta = GRADE_META[p.qualityGrade]
+                {phoneticResults.parties.map((p) => {
+                  const meta = getGradeMeta(p.qualityGrade)
                   return (
-                    <button key={p.id} onClick={() => openParty(p.id)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
-                      <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                    <button key={p.id} onClick={() => openParty(p.id)} className="w-full flex items-center gap-3 p-3 hover:bg-muted text-left">
+                      <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center shrink-0">
                         <User className="w-4 h-4 text-emerald-600" />
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{p.name}</p>
-                        <p className="text-xs text-muted-foreground">{p.phone || 'No phone'}</p>
+                        <p className="text-sm font-medium truncate">{highlightMatch(p.name, q)}</p>
+                        <p className="text-xs text-muted-foreground">{highlightMatch(p.phone || 'No phone', q)}</p>
                       </div>
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{p.qualityGrade}</span>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color} shrink-0`}>{p.qualityGrade}</span>
                     </button>
                   )
                 })}
               </Section>
             )}
 
-            {results.phoneticProducts.length > 0 && (
+            {phoneticResults.products.length > 0 && (
               <Section title="Products (phonetic match 🔊)">
-                {results.phoneticProducts.map((p) => (
-                  <button key={p.id} onClick={() => openProduct(p.id)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
-                    <span className="w-9 h-9 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                {phoneticResults.products.map((p) => (
+                  <button key={p.id} onClick={() => openProduct(p.id)} className="w-full flex items-center gap-3 p-3 hover:bg-muted text-left">
+                    <span className="w-9 h-9 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
                       <Package className="w-4 h-4 text-amber-600" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{p.name}</p>
+                      <p className="text-sm font-medium truncate">{highlightMatch(p.name, q)}</p>
                       <p className="text-xs text-muted-foreground">Stock: {p.stock} {p.unit}</p>
                     </div>
-                    <span className="text-sm font-semibold tabular">{formatCurrency(p.salePrice)}</span>
+                    <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(p.salePrice)}</span>
                   </button>
                 ))}
               </Section>
@@ -196,17 +230,17 @@ export function SearchOverlay() {
             {results.parties.length > 0 && (
               <Section title="Parties">
                 {results.parties.map((p) => {
-                  const meta = GRADE_META[p.qualityGrade]
+                  const meta = getGradeMeta(p.qualityGrade)
                   return (
-                    <button key={p.id} onClick={() => openParty(p.id)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
-                      <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                    <button key={p.id} onClick={() => openParty(p.id)} className="w-full flex items-center gap-3 p-3 hover:bg-muted text-left">
+                      <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center shrink-0">
                         <User className="w-4 h-4 text-emerald-600" />
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{p.name}</p>
-                        <p className="text-xs text-muted-foreground">{p.phone || 'No phone'}</p>
+                        <p className="text-sm font-medium truncate">{highlightMatch(p.name, q)}</p>
+                        <p className="text-xs text-muted-foreground">{highlightMatch(p.phone || 'No phone', q)}</p>
                       </div>
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{p.qualityGrade}</span>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color} shrink-0`}>{p.qualityGrade}</span>
                     </button>
                   )
                 })}
@@ -216,15 +250,15 @@ export function SearchOverlay() {
             {results.products.length > 0 && (
               <Section title="Products">
                 {results.products.map((p) => (
-                  <button key={p.id} onClick={() => openProduct(p.id)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
-                    <span className="w-9 h-9 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                  <button key={p.id} onClick={() => openProduct(p.id)} className="w-full flex items-center gap-3 p-3 hover:bg-muted text-left">
+                    <span className="w-9 h-9 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
                       <Package className="w-4 h-4 text-amber-600" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{p.name}</p>
+                      <p className="text-sm font-medium truncate">{highlightMatch(p.name, q)}</p>
                       <p className="text-xs text-muted-foreground">Stock: {p.stock} {p.unit}</p>
                     </div>
-                    <span className="text-sm font-semibold tabular">{formatCurrency(p.salePrice)}</span>
+                    <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(p.salePrice)}</span>
                   </button>
                 ))}
               </Section>
@@ -233,15 +267,15 @@ export function SearchOverlay() {
             {results.invoices.length > 0 && (
               <Section title="Invoices">
                 {results.invoices.map((i) => (
-                  <button key={i.id} onClick={() => openInvoice(i.id)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
-                    <span className="w-9 h-9 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
+                  <button key={i.id} onClick={() => openInvoice(i.id)} className="w-full flex items-center gap-3 p-3 hover:bg-muted text-left">
+                    <span className="w-9 h-9 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
                       <Receipt className="w-4 h-4 text-orange-600" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{i.invoiceNumber}</p>
-                      <p className="text-xs text-muted-foreground">{formatDate(i.createdAt)}</p>
+                      <p className="text-sm font-medium truncate">{highlightMatch(i.invoiceNumber, q)}</p>
+                      <p className="text-xs text-muted-foreground">{highlightMatch(i.party?.name || 'Walk-in', q)} · {formatDate(i.createdAt)}</p>
                     </div>
-                    <span className="text-sm font-semibold tabular">{formatCurrency(i.grandTotal)}</span>
+                    <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(i.grandTotal)}</span>
                   </button>
                 ))}
               </Section>
@@ -250,15 +284,15 @@ export function SearchOverlay() {
             {results.txns.length > 0 && (
               <Section title="Transactions">
                 {results.txns.map((tx) => (
-                  <div key={tx.id} className="w-full flex items-center gap-3 p-3 rounded-xl">
-                    <span className="w-9 h-9 rounded-full bg-teal-100 dark:bg-teal-900/30 flex items-center justify-center">
+                  <div key={tx.id} className="w-full flex items-center gap-3 p-3">
+                    <span className="w-9 h-9 rounded-full bg-teal-100 dark:bg-teal-900/30 flex items-center justify-center shrink-0">
                       <ArrowLeftRight className="w-4 h-4 text-teal-600" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{tx.description || tx.type}</p>
+                      <p className="text-sm font-medium truncate">{highlightMatch(tx.description || tx.type, q)}</p>
                       <p className="text-xs text-muted-foreground">{formatDate(tx.createdAt)}</p>
                     </div>
-                    <span className={`text-sm font-semibold tabular ${tx.type === 'credit' ? 'text-emerald-600' : 'text-red-600'}`}>
+                    <span className={`text-sm font-semibold tabular shrink-0 ${tx.type === 'credit' ? 'text-emerald-600' : 'text-red-600'}`}>
                       {tx.type === 'credit' ? '+' : '-'}{formatCurrency(tx.amount)}
                     </span>
                   </div>

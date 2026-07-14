@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { generateSearchTags } from '@/lib/transliteration'
 
 // /api/products/[id] — CRUD for a single product.
 // Security: all operations verify the product belongs to the current business.
@@ -45,6 +46,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!existing) return NextResponse.json({ error: 'Not found in your business' }, { status: 404 })
 
     const body = await req.json()
+    // §3: Regenerate search tags if name changed
+    const searchTags = body.name !== existing.name
+      ? JSON.stringify(generateSearchTags(body.name || ''))
+      : undefined
     const updated = await db.product.update({
       where: { id },
       data: {
@@ -72,6 +77,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         description: body.description || null,
         isPublished: body.isPublished ?? true,
         categoryPath: body.categoryPath || null,
+        ...(searchTags ? { searchTags } : {}),
       },
     })
     return NextResponse.json(updated)
