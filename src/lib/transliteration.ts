@@ -336,11 +336,17 @@ export function generateSearchTags(name: string): string[] {
 // §1: Reverse map — English phonetic → Bengali (for two-way search)
 // Used when an entity is stored with an English name; we generate Bengali
 // phonetic aliases so searching "অমিত" finds "Amit".
-const REVERSE_VOWEL_MAP: Record<string, string> = {
-  a: 'অ', 'aa': 'া', 'a@': 'া', // 'a' alone → অ (inherent), 'aa' → া (vowel sign)
-  e: 'এ', 'ee': 'ী', i: 'ই', 'ii': 'ী',
-  u: 'উ', 'uu': 'ূ', 'oo': 'ু',
-  o: 'ও', 'oi': 'ঐ', 'ou': 'ঔ',
+// Two maps: standalone vowels (word-initial) and vowel signs (after consonants)
+const REVERSE_VOWEL_STANDALONE: Record<string, string> = {
+  a: 'অ', 'aa': 'আ', e: 'এ', 'ee': 'ঈ', i: 'ই', 'ii': 'ঈ',
+  u: 'উ', 'uu': 'ঊ', 'oo': 'উ', o: 'ও', 'oi': 'ঐ', 'ou': 'ঔ',
+  'ri': 'ঋ',
+}
+const REVERSE_VOWEL_SIGN: Record<string, string> = {
+  // Vowel signs (মাত্রা) — used when vowel follows a consonant
+  a: '', // inherent vowel — no sign needed (consonant has built-in অ)
+  'aa': 'া', e: 'ে', 'ee': 'ী', i: 'ি', 'ii': 'ী',
+  u: 'ু', 'uu': 'ূ', 'oo': 'ু', o: 'ো', 'oi': 'ৈ', 'ou': 'ৌ',
   'ri': 'ৃ',
 }
 
@@ -352,16 +358,15 @@ const REVERSE_CONSONANT_MAP: Record<string, string> = {
   p: 'প', 'ph': 'ফ', f: 'ফ', b: 'ব', 'bh': 'ভ', v: 'ভ',
   m: 'ম', y: 'য', r: 'র', l: 'ল',
   'sh': 'শ', 'ss': 'ষ', s: 'স', h: 'হ',
-  'r@': 'ড়', 'rh': 'ঢ়',
-  'w': 'ব', // w → ব (common in Bengali)
-  'z': 'জ', // z → জ
-  'q': 'ক', 'x': 'ক্স',
+  'w': 'ব', 'z': 'জ', 'q': 'ক', 'x': 'ক্স',
 }
+
+const isVowel = (ch: string) => ['a','e','i','o','u'].includes(ch)
 
 /**
  * Reverse transliterate English text to Bengali phonetic form.
  * Example: "Amit" → "অমিত", "Utsab" → "উৎসব"
- * This is approximate — used only for generating search aliases.
+ * Handles vowel signs (মাত্রা) correctly: consonant+vowel → consonant + vowel sign.
  */
 export function transliterateEnglishToBengali(text: string): string {
   if (!text) return ''
@@ -369,27 +374,39 @@ export function transliterateEnglishToBengali(text: string): string {
   let result = ''
   let i = 0
   const lower = text.toLowerCase()
+  let prevWasConsonant = false
 
   while (i < lower.length) {
     const remaining = lower.substring(i)
 
-    // Check 3-char sequences first (chh, ddh, tth, etc.)
+    // Check 3-char consonant sequences (chh, ddh, tth, etc.)
     const three = remaining.substring(0, 3)
     if (REVERSE_CONSONANT_MAP[three]) {
       result += REVERSE_CONSONANT_MAP[three]
+      prevWasConsonant = true
       i += 3
       continue
     }
 
-    // Check 2-char sequences (kh, gh, ch, sh, aa, ee, oo, etc.)
+    // Check 2-char sequences
     const two = remaining.substring(0, 2)
-    if (REVERSE_VOWEL_MAP[two]) {
-      result += REVERSE_VOWEL_MAP[two]
+    // 2-char vowel (aa, ee, oo, oi, ou, ii, uu, ri)
+    if (REVERSE_VOWEL_STANDALONE[two] || REVERSE_VOWEL_SIGN[two]) {
+      if (prevWasConsonant && REVERSE_VOWEL_SIGN[two] !== undefined) {
+        // Vowel after consonant → use vowel sign (মাত্রা)
+        result += REVERSE_VOWEL_SIGN[two]
+      } else {
+        // Standalone vowel at word start or after another vowel
+        result += REVERSE_VOWEL_STANDALONE[two] || REVERSE_VOWEL_SIGN[two]
+      }
+      prevWasConsonant = false
       i += 2
       continue
     }
+    // 2-char consonant (kh, gh, ch, sh, etc.)
     if (REVERSE_CONSONANT_MAP[two]) {
       result += REVERSE_CONSONANT_MAP[two]
+      prevWasConsonant = true
       i += 2
       continue
     }
@@ -397,31 +414,29 @@ export function transliterateEnglishToBengali(text: string): string {
     const ch = lower[i]
 
     // Single char — vowel
-    if (REVERSE_VOWEL_MAP[ch]) {
-      result += REVERSE_VOWEL_MAP[ch]
+    if (REVERSE_VOWEL_STANDALONE[ch] !== undefined || REVERSE_VOWEL_SIGN[ch] !== undefined) {
+      if (prevWasConsonant && REVERSE_VOWEL_SIGN[ch] !== undefined) {
+        // Vowel after consonant → use vowel sign
+        result += REVERSE_VOWEL_SIGN[ch]
+      } else {
+        result += REVERSE_VOWEL_STANDALONE[ch] || ''
+      }
+      prevWasConsonant = false
       i++
       continue
     }
 
     // Single char — consonant
     if (REVERSE_CONSONANT_MAP[ch]) {
-      // Add inherent vowel অ after consonant if next char is not a vowel
-      const nextCh = lower[i + 1]
-      const isVowelNext = nextCh && ['a','e','i','o','u'].includes(nextCh)
       result += REVERSE_CONSONANT_MAP[ch]
-      if (!isVowelNext && nextCh && REVERSE_CONSONANT_MAP[nextCh]) {
-        // Consonant followed by consonant — add inherent vowel অ
-        result += 'অ'
-      } else if (!nextCh) {
-        // Last char — add inherent vowel অ
-        result += 'অ'
-      }
+      prevWasConsonant = true
       i++
       continue
     }
 
-    // Non-letter — keep as-is
+    // Non-letter (space, etc.) — reset
     result += ch
+    prevWasConsonant = false
     i++
   }
 
