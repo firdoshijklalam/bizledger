@@ -214,9 +214,9 @@ export function SideDrawerFab() {
         )}
       </AnimatePresence>
 
-      {/* Menu — theme-aware premium styling with proper flex layout.
-          §1: Dark mode uses #1E1E1E bg + #F3F4F6 text; Light mode uses #FFFFFF + #111827.
-          §2: Header row uses flex space-between + marginBottom 12; container uniform padding 20. */}
+      {/* Menu — EXACT original V1 layout structure (wide, padded) with theme-aware colors.
+          §1: Container keeps original wide dimensions (padding 24, minWidth 260).
+          §2: Flexbox applied ONLY to header/footer wrappers, NOT the container. */}
       <AnimatePresence>
         {fabOpen && (
           <motion.div
@@ -239,35 +239,31 @@ export function SideDrawerFab() {
             className="fixed z-50 overflow-hidden"
             style={{
               ...menuStyle,
-              // §1: Theme-aware background — no more white-on-white in dark mode
+              // §1: MAIN CONTAINER — keep wide and padded like original V1
               backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF',
               borderRadius: '16px',
-              // §2: Uniform padding 20px so text doesn't hit edges
-              padding: '20px',
-              minWidth: '230px',
+              padding: '24px',        // DO NOT REMOVE — original padding
+              minWidth: '260px',      // RESTORE WIDE LOOK (was shrunk to 230)
               boxShadow: isDark
-                ? '0 6px 10px rgba(0, 0, 0, 0.5)'
-                : '0 6px 10px rgba(0, 0, 0, 0.15)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
+                ? '0 10px 15px -3px rgba(0,0,0,0.5), 0 4px 6px -4px rgba(0,0,0,0.3)'
+                : '0 10px 15px -3px rgba(0,0,0,0.15), 0 4px 6px -4px rgba(0,0,0,0.08)',
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* §2: Header — flex row, space-between, alignItems center, marginBottom 12 */}
+            {/* §2: HEADER ROW — flexbox wrapper for "QUICK ACTIONS" + X button */}
             <div style={{
               display: 'flex',
               flexDirection: 'row',
               justifyContent: 'space-between',
               alignItems: 'center',
-              marginBottom: '12px',
+              marginBottom: '16px',
+              width: '100%',
             }}>
               <p style={{
                 fontSize: '12px',
                 fontWeight: 600,
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em',
-                // §1: Theme-aware text color
                 color: isDark ? '#9CA3AF' : '#6B7280',
                 margin: 0,
               }}>{t('qa.title')}</p>
@@ -289,54 +285,62 @@ export function SideDrawerFab() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            {ACTIONS.map((a) => {
-              const Icon = a.icon
-              return (
-                <button
-                  key={a.id}
-                  onClick={() => handleAction(a.id)}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: '12px',
-                    width: '100%',
-                    padding: '12px',
-                    borderRadius: '12px',
-                    minHeight: '44px',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    // §1: Theme-aware button colors
-                    backgroundColor: a.primary
-                      ? (isDark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 252, 244, 1)')
-                      : 'transparent',
-                    border: a.primary
-                      ? (isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(16, 185, 129, 0.4)')
-                      : '1px solid transparent',
-                  }}
-                  className="hover:bg-accent transition-colors"
-                >
-                  <span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
-                  <span style={{
-                    fontSize: '14px',
-                    flex: 1,
-                    fontWeight: a.primary ? 700 : 500,
-                    // §1: Theme-aware text color
-                    color: a.primary
-                      ? (isDark ? '#6EE7B7' : '#047857')
-                      : (isDark ? '#F3F4F6' : '#111827'),
-                  }}>{t(a.labelKey)}</span>
-                </button>
-              )
-            })}
-            <p style={{
-              fontSize: '9px',
-              textAlign: 'center',
-              // §1: Theme-aware footer color
-              color: isDark ? '#6B7280' : 'rgba(107, 114, 128, 0.6)',
-              marginTop: '4px',
-              margin: 0,
-            }}>হোল্ড করে টেনে বাটন সরানো যায়</p>
+            {/* Action buttons — original spacing */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {ACTIONS.map((a) => {
+                const Icon = a.icon
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => handleAction(a.id)}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: '12px',
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: '12px',
+                      minHeight: '44px',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      backgroundColor: a.primary
+                        ? (isDark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 252, 244, 1)')
+                        : 'transparent',
+                      border: a.primary
+                        ? '1px solid rgba(16, 185, 129, 0.4)'
+                        : '1px solid transparent',
+                    }}
+                    className="hover:bg-accent transition-colors"
+                  >
+                    <span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
+                    <span style={{
+                      fontSize: '14px',
+                      flex: 1,
+                      fontWeight: a.primary ? 700 : 500,
+                      color: a.primary
+                        ? (isDark ? '#6EE7B7' : '#047857')
+                        : (isDark ? '#F3F4F6' : '#111827'),
+                    }}>{t(a.labelKey)}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {/* §2: FOOTER ROW — flexbox wrapper for drag hint text */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginTop: '12px',
+              width: '100%',
+            }}>
+              <p style={{
+                fontSize: '9px',
+                textAlign: 'center',
+                color: isDark ? '#6B7280' : 'rgba(107, 114, 128, 0.6)',
+                margin: 0,
+              }}>হোল্ড করে টেনে বাটন সরানো যায়</p>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
