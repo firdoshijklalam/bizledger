@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react'
 import { useGateTrigger } from '@/store/biometric-gate-store'
 import { Package, Tag, Boxes, AlertTriangle, X, Plus, Upload, Camera, Sparkles, Loader2, ChevronRight, Globe, CheckCircle2 } from 'lucide-react'
 import { BadgePercent } from 'lucide-react'
+import { useVoiceInput } from '@/hooks/use-voice-input'
 import { Switch } from '@/components/ui/switch'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -56,6 +57,9 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   const [isPublished, setIsPublished] = useState(true)
   const [categoryPath, setCategoryPath] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // §3: Voice input support
+  const nameVoice = useVoiceInput<HTMLInputElement>((text) => setName(text))
 
   // PRD Part 35 §1: AI auto-fill media dropzone
   const [mediaImage, setMediaImage] = useState<string | null>(null)
@@ -345,7 +349,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
             <Label htmlFor="pname" className="text-xs">{t('common.name')} *</Label>
             <div className="relative">
               <Package className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input id="pname" value={name} onChange={(e) => setName(e.target.value)} className="pl-9 h-11" placeholder="LED Bulb 9W" autoFocus />
+              <Input id="pname" {...nameVoice} value={name} onChange={(e) => setName(e.target.value)} className="pl-9 h-11" placeholder="LED Bulb 9W" autoFocus />
             </div>
           </div>
 

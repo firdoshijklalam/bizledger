@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { User, Phone, FileText, MapPin, CreditCard } from 'lucide-react'
+import { useVoiceInput } from '@/hooks/use-voice-input'
 
 interface Props {
   open: boolean
@@ -38,6 +39,10 @@ export function PartyForm({ open, onOpenChange, partyId }: Props) {
   const [gstin, setGstin] = useState('')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // §3: Voice input support — register name + phone inputs with global mic
+  const nameVoice = useVoiceInput<HTMLInputElement>((text) => setName(text))
+  const phoneVoice = useVoiceInput<HTMLInputElement>((text) => setPhone(text))
 
   useEffect(() => {
     if (existing) {
@@ -131,7 +136,7 @@ export function PartyForm({ open, onOpenChange, partyId }: Props) {
             <Label htmlFor="name" className="text-xs">{t('common.name')} *</Label>
             <div className="relative">
               <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input id="name" value={name} onChange={(e) => setName(e.target.value)} className="pl-9 h-11" placeholder="Amit Trading" />
+              <Input id="name" {...nameVoice} value={name} onChange={(e) => setName(e.target.value)} className="pl-9 h-11" placeholder="Amit Trading" />
             </div>
           </div>
 
@@ -139,7 +144,7 @@ export function PartyForm({ open, onOpenChange, partyId }: Props) {
             <Label htmlFor="phone" className="text-xs">{t('set.phone')}</Label>
             <div className="relative">
               <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="pl-9 h-11" placeholder="+91 98300 12345" inputMode="tel" />
+              <Input id="phone" {...phoneVoice} value={phone} onChange={(e) => setPhone(e.target.value)} className="pl-9 h-11" placeholder="+91 98300 12345" inputMode="tel" />
             </div>
           </div>
 

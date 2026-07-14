@@ -20,6 +20,7 @@ import { Mic, MicOff, X } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { toast } from 'sonner'
 import { useVoiceInputStore } from '@/store/voice-input-store'
+import { useI18n } from '@/store/i18n-store'
 
 const MIC_SIZE = 52
 const EDGE_MARGIN = 12
@@ -65,6 +66,10 @@ function snapToEdge(p: MicPos): MicPos {
 export function FloatingKeyboardMic() {
   // §3: Read from global store — no local focus tracking needed
   const { keyboardActive, activeInputCallback, activeInputRef, unregisterInput } = useVoiceInputStore()
+  // §4: Dynamic language sync — use app's current global language
+  const { language } = useI18n()
+  const languageRef = useRef(language)
+  useEffect(() => { languageRef.current = language }, [language])
 
   const [keyboardHeight, setKeyboardHeight] = useState(0)
   const [position, setPosition] = useState<MicPos>(loadPos)
@@ -111,7 +116,10 @@ export function FloatingKeyboardMic() {
     if (recognitionRef.current) { try { recognitionRef.current.stop() } catch {} }
 
     const recognition = new SpeechRecognition()
-    recognition.lang = 'bn-IN'
+    // §4: Dynamic language sync — use app's current global language
+    // bn → bn-IN, hi → hi-IN, en → en-US
+    const lang = languageRef.current
+    recognition.lang = lang === 'bn' ? 'bn-IN' : lang === 'hi' ? 'hi-IN' : 'en-US'
     recognition.continuous = false
     recognition.interimResults = true
 
@@ -141,7 +149,7 @@ export function FloatingKeyboardMic() {
     recognitionRef.current = recognition
     recognition.start()
     setListening(true)
-    toast.info('বলুন...', { duration: 1500 })
+    toast.info(lang === 'bn' ? 'বলুন...' : lang === 'hi' ? 'बोलिए...' : 'Speak...', { duration: 1500 })
   }, [activeInputCallback, activeInputRef])
 
   const handleToggleMic = useCallback(() => {
@@ -193,7 +201,10 @@ export function FloatingKeyboardMic() {
     }
   }, [listening, keyboardActive, micControls])
 
-  // §1: Mic renders ONLY when keyboardActive is true (strict keyboard sync)
+  // §2: Strict keyboard sync — if keyboard is NOT visible, mic does NOT render at all.
+  // Returns null immediately when no keyboard is active.
+  if (!keyboardActive) return null
+
   return (
     <AnimatePresence>
       {keyboardActive && (
