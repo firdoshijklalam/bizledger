@@ -183,7 +183,12 @@ const NUMERAL_MAP: Record<string, string> = {
 
 /**
  * Transliterate Bengali text to romanized English phonetic form.
- * Example: "উৎসব" → "utsab", "অমিত" → "omit", "চাল" → "chaal"
+ * Handles inherent vowels: a consonant NOT followed by a vowel sign or virama (্)
+ * gets an inherent "a" sound (Bengali phonetic rule).
+ *
+ * Example: "উৎসব" → "utsab" (u + t[suppressed] + sa + b → utsab)
+ * Example: "অমিত" → "omit" (o + mi + t → omit)
+ * Example: "চাল" → "chaal" (ch + aa + l → chaal)
  */
 export function transliterateBengaliToEnglish(text: string): string {
   if (!text) return ''
@@ -195,7 +200,7 @@ export function transliterateBengaliToEnglish(text: string): string {
   while (i < chars.length) {
     const remaining = chars.slice(i).join('')
 
-    // Check 2-char conjuncts first
+    // Check 2-char conjuncts first (conjuncts already include the inherent vowel in their mapping)
     const twoChar = remaining.substring(0, 2)
     if (CONJUNCT_MAP[twoChar]) {
       result += CONJUNCT_MAP[twoChar]
@@ -204,6 +209,7 @@ export function transliterateBengaliToEnglish(text: string): string {
     }
 
     const ch = chars[i]
+    const nextCh = chars[i + 1]
 
     // Numerals
     if (NUMERAL_MAP[ch]) {
@@ -221,7 +227,47 @@ export function transliterateBengaliToEnglish(text: string): string {
 
     // Consonants
     if (CONSONANT_MAP[ch]) {
-      result += CONSONANT_MAP[ch]
+      const consonantSound = CONSONANT_MAP[ch]
+      // §3: ৎ (khanda ta) is a special consonant that inherently suppresses the following vowel
+      // (it's equivalent to ত্). It should NOT add inherent "a" after itself.
+      const isKhandaTa = ch === 'ৎ'
+      // Inherent vowel rule: a consonant gets inherent "a" UNLESS:
+      //  - it's followed by a vowel sign (which provides the vowel)
+      //  - it's followed by virama (্) which suppresses the vowel
+      //  - it's ৎ (khanda ta) which inherently suppresses
+      if (isKhandaTa) {
+        // ৎ gives "t" sound, no inherent vowel.
+        // It also forms a conjunct with the following consonant — that consonant
+        // should NOT get inherent "a" (e.g. ৎস = "ts", not "tasa").
+        result += 't'
+        i++
+        if (nextCh && CONSONANT_MAP[nextCh]) {
+          // Add the next consonant sound WITHOUT inherent vowel
+          result += CONSONANT_MAP[nextCh]
+          i++
+        }
+        continue
+      } else if (nextCh && VOWEL_MAP[nextCh] !== undefined && nextCh !== '্') {
+        // Next char is a vowel sign — it provides the vowel, no inherent "a"
+        result += consonantSound
+      } else if (nextCh && nextCh === '্') {
+        // Next char is virama — suppress inherent vowel
+        result += consonantSound
+      } else if (!nextCh || (nextCh && !CONSONANT_MAP[nextCh] && !VOWEL_MAP[nextCh] && !NUMERAL_MAP[nextCh])) {
+        // Last consonant or followed by non-Bengali char — add inherent "a"
+        result += consonantSound + 'a'
+      } else if (nextCh && CONSONANT_MAP[nextCh]) {
+        // Next is another consonant — add inherent "a"
+        result += consonantSound + 'a'
+      } else {
+        result += consonantSound
+      }
+      i++
+      continue
+    }
+
+    // Virama (্) — skip, already handled by the preceding consonant
+    if (ch === '্') {
       i++
       continue
     }
@@ -231,10 +277,10 @@ export function transliterateBengaliToEnglish(text: string): string {
     i++
   }
 
-  // Post-processing: collapse repeated vowels, clean up
+  // Post-processing: clean up for looser matching
   result = result
-    .replace(/a{2,}/g, 'a') // "aa" → "a" for looser matching (but keep "aa" variant too)
-    .replace(/([bcdfghjklmnpqrstvwxyz])\1+/g, '$1') // collapse double consonants
+    .replace(/a{2,}/g, 'a') // collapse "aa" → "a"
+    .replace(/([bcdfghjklmnpqrstvwxyz])\1+/g, '$1') // collapse double consonants (bb → b)
 
   return result.toLowerCase()
 }
@@ -258,8 +304,10 @@ export function generateSearchTags(name: string): string[] {
     tags.add(romanized)
 
     // Common phonetic variants for looser matching
-    // Replace 'o' with 'a' (Bengali অ can be either)
+    // Replace 'o' with 'a' (Bengali অ can be either "o" or "a")
     tags.add(romanized.replace(/o/g, 'a'))
+    // Replace 'a' with 'o' (reverse direction)
+    tags.add(romanized.replace(/a/g, 'o'))
     // Replace 'aa' with 'a'
     tags.add(romanized.replace(/aa/g, 'a'))
     // Replace 'b' with 'v' (common in Bengali — ব can be b or v)
@@ -270,10 +318,26 @@ export function generateSearchTags(name: string): string[] {
     tags.add(romanized.replace(/sh/g, 's'))
     // Replace 't' with 'th'
     tags.add(romanized.replace(/t/g, 'th'))
+    // Replace 'v' with 'b'
+    tags.add(romanized.replace(/v/g, 'b'))
+    // Replace 'ph' with 'f'
+    tags.add(romanized.replace(/ph/g, 'f'))
+    // Replace 'chh' with 'ch'
+    tags.add(romanized.replace(/chh/g, 'ch'))
+    // Replace 'ng' with 'n'
+    tags.add(romanized.replace(/ng/g, 'n'))
+
+    // §3: Also generate variants with trailing vowel removed (utsaba → utsab)
+    tags.add(romanized.replace(/a$/, ''))
+    // And with trailing vowel added (utsab → utsaba)
+    if (!romanized.match(/[aeiou]$/)) {
+      tags.add(romanized + 'a')
+      tags.add(romanized + 'o')
+    }
   }
 
-  // Remove empty strings
-  return Array.from(tags).filter((t) => t.trim().length > 0)
+  // Remove empty strings and very short tags (< 2 chars)
+  return Array.from(tags).filter((t) => t.trim().length >= 2)
 }
 
 /**
