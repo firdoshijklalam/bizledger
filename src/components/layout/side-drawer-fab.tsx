@@ -236,22 +236,32 @@ export function SideDrawerFab() {
             style={menuStyle}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-3 py-2 flex items-center justify-between">
+            {/* §1 HEADER — width 100%, flex row, space-between, align-center (QUICK ACTIONS left, X right) */}
+            <div style={{ width: '100%', display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' }}>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('qa.title')}</p>
               <button onClick={() => setFabOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-4 h-4" /></button>
             </div>
-            <div className="space-y-1">
+            {/* §2 MENU ITEMS — parent: width 100%, alignItems flex-start (strictly left-aligned) */}
+            <div style={{ width: '100%', alignItems: 'flex-start', display: 'flex', flexDirection: 'column' }}>
               {ACTIONS.map((a) => {
                 const Icon = a.icon
                 return (
-                  <button key={a.id} onClick={() => handleAction(a.id)} className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-accent transition-colors min-h-[44px] text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}>
+                  <button
+                    key={a.id}
+                    onClick={() => handleAction(a.id)}
+                    className={`w-full flex items-center gap-3 px-3 rounded-xl hover:bg-accent transition-colors text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', width: '100%', paddingTop: '10px', paddingBottom: '10px' }}
+                  >
                     <span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
                     <span className={`text-sm flex-1 ${a.primary ? 'font-bold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}>{t(a.labelKey)}</span>
                   </button>
                 )
               })}
             </div>
-            <p className="px-3 pt-1 pb-0.5 text-[9px] text-muted-foreground/60 text-center">হোল্ড করে টেনে বাটন সরানো যায়</p>
+            {/* §4 FOOTER — width 100%, alignItems center, marginTop 10, text center */}
+            <div style={{ width: '100%', alignItems: 'center', marginTop: '10px', display: 'flex', justifyContent: 'center' }}>
+              <p className="text-[9px] text-muted-foreground/60" style={{ textAlign: 'center' }}>হোল্ড করে টেনে বাটন সরানো যায়</p>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
