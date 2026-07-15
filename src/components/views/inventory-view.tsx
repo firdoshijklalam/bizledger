@@ -20,6 +20,7 @@ import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { ProductProfile } from './inventory/product-profile'
 import { useVoiceInput } from '@/hooks/use-voice-input'
+import { usePhoneticSearch } from '@/hooks/use-phonetic-search'
 
 // PRD Part 26 §4: Simple Levenshtein distance for phonetic matching
 function levenshtein(a: string, b: string): number {
@@ -66,48 +67,22 @@ export function InventoryView() {
     return ['All', ...cats]
   }, [products])
 
+  // §1: Use SHARED usePhoneticSearch hook — same logic as Global Search
+  // Checks: name + searchTags (aliases) + sku + category + subCategory + phonetic
+  const phoneticFiltered = usePhoneticSearch(products, search, {
+    searchFields: ['sku', 'category', 'subCategory'],
+  })
+
   const filtered = useMemo(() => {
-    if (!products) return []
-    let list = products
+    let list = phoneticFiltered
     if (inventoryFilter === 'low-stock') {
       list = list.filter((p) => p.stock <= p.lowStockThreshold)
     }
     if (activeCategory !== 'All') {
       list = list.filter((p) => p.category === activeCategory)
     }
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      // §1: Search checks name + sku + category + subCategory + searchTags (aliases)
-      // searchTags contains English phonetic variants of Bengali names (e.g. "Utsav" for "উৎসব")
-      list = list.filter((p) => {
-        const nameMatch = p.name.toLowerCase().includes(q)
-        const skuMatch = (p.sku || '').toLowerCase().includes(q)
-        const catMatch = (p.category || '').toLowerCase().includes(q)
-        const subCatMatch = (p.subCategory || '').toLowerCase().includes(q)
-        // §1: Check searchTags (JSON array string) for English↔Bengali alias matching
-        let tagMatch = false
-        if (p.searchTags) {
-          try {
-            const tags = typeof p.searchTags === 'string' ? JSON.parse(p.searchTags) : p.searchTags
-            tagMatch = Array.isArray(tags) && tags.some((tag: string) => tag.toLowerCase().includes(q))
-          } catch {}
-        }
-        // Phonetic fallback
-        const queryParts = q.split(/\s+/)
-        const nameParts = p.name.toLowerCase().split(/\s+/)
-        const phoneticMatch = queryParts.some(qp => {
-          if (qp.length < 2) return false
-          return nameParts.some(np => {
-            return np.startsWith(qp.substring(0, 3)) ||
-              np.includes(qp) ||
-              levenshtein(qp, np.substring(0, qp.length)) <= 2
-          })
-        })
-        return nameMatch || skuMatch || catMatch || subCatMatch || tagMatch || phoneticMatch
-      })
-    }
     return list
-  }, [products, inventoryFilter, search, activeCategory])
+  }, [phoneticFiltered, inventoryFilter, activeCategory])
 
   const stats = useMemo(() => {
     if (!products) return { total: 0, lowStock: 0, value: 0 }

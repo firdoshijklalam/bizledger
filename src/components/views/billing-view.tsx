@@ -16,6 +16,7 @@ import { InvoicePreview } from './billing/invoice-preview'
 import { BillingTabs } from './billing/billing-tabs'
 import { Input } from '@/components/ui/input'
 import { useVoiceInput } from '@/hooks/use-voice-input'
+import { phoneticMatch } from '@/lib/transliteration'
 
 const STATUS_COLORS: Record<string, string> = {
   paid: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
@@ -80,7 +81,15 @@ export function BillingView() {
     // 'hold' tab shows billing drafts (handled by BillingTabs component below)
     if (statusFilter !== 'hold' && search.trim()) {
       const q = search.toLowerCase()
-      list = list.filter((i) => i.invoiceNumber.toLowerCase().includes(q) || (i.party?.name || '').toLowerCase().includes(q))
+      // §1: Use same shared search logic — check invoiceNumber + party.name + phonetic
+      list = list.filter((i) => {
+        const invMatch = i.invoiceNumber.toLowerCase().includes(q)
+        const partyName = (i.party?.name || '').toLowerCase()
+        const partyMatch = partyName.includes(q)
+        // §1: Phonetic match on party name (e.g. "Abdullah" → "আব্দুল্লাহ")
+        const phonetic = i.party?.name ? phoneticMatch(search, i.party.name) : false
+        return invMatch || partyMatch || phonetic
+      })
     }
     return list
   }, [invoices, statusFilter, search])

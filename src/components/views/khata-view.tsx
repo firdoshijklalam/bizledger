@@ -17,6 +17,7 @@ import { PartyDetail } from './khata/party-detail'
 import { Input } from '@/components/ui/input'
 import { useScrollStore } from '@/store/scroll-store'
 import { useVoiceInput } from '@/hooks/use-voice-input'
+import { usePhoneticSearch } from '@/hooks/use-phonetic-search'
 
 export function KhataView() {
   const {
@@ -60,32 +61,20 @@ export function KhataView() {
 
   const currency = business?.currency || 'INR'
 
+  // §1: Use SHARED usePhoneticSearch hook — same logic as Global Search
+  // Checks: name + searchTags (aliases) + phone + phoneticMatch (cross-lingual)
+  const phoneticFiltered = usePhoneticSearch(parties, search, {
+    searchFields: ['phone'],
+  })
+
   const filtered = useMemo(() => {
-    if (!parties) return []
-    let list = parties
+    let list = phoneticFiltered
     if (khataFilter === 'receivable') list = list.filter((p) => p.balance > 0)
     if (khataFilter === 'payable') list = list.filter((p) => p.balance < 0)
     // PRD Part 38 §3.2: Grade filter bar
     if (gradeFilter !== 'all') list = list.filter((p) => p.qualityGrade === gradeFilter)
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      // §1: Search checks name + phone + searchTags (English↔Bengali aliases)
-      list = list.filter((p) => {
-        const nameMatch = p.name.toLowerCase().includes(q)
-        const phoneMatch = (p.phone || '').includes(search)
-        // §1: Check searchTags for cross-lingual matching (e.g. "Abdullah" → "আব্দুল্লাহ")
-        let tagMatch = false
-        if (p.searchTags) {
-          try {
-            const tags = typeof p.searchTags === 'string' ? JSON.parse(p.searchTags) : p.searchTags
-            tagMatch = Array.isArray(tags) && tags.some((tag: string) => tag.toLowerCase().includes(q))
-          } catch {}
-        }
-        return nameMatch || phoneMatch || tagMatch
-      })
-    }
     return list.sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance))
-  }, [parties, khataFilter, search, gradeFilter])
+  }, [phoneticFiltered, khataFilter, gradeFilter])
 
   const totals = useMemo(() => {
     if (!parties) return { receivable: 0, payable: 0 }
