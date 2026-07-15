@@ -6,11 +6,12 @@ import { useFetch } from '@/hooks/use-fetch'
 import type { Invoice } from '@/lib/types'
 import { formatCurrency, formatDate, GRADE_META, getGradeMeta } from '@/lib/utils'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Download, Share2, Printer, X, MessageCircle, User, Pencil, Bell, Trash2 } from 'lucide-react'
+import { ArrowLeft, Download, Share2, Printer, X, MessageCircle, User, MoreVertical, Bell, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
+import { apiDelete } from '@/hooks/use-fetch'
 
 export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   const { setSelectedInvoiceId, business, setSelectedPartyId, setActiveView } = useAppStore()
@@ -18,6 +19,8 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   const { data: invoice, loading, error } = useFetch<Invoice>(`/api/invoices/${invoiceId}`, [invoiceId])
   const printRef = useRef<HTMLDivElement>(null)
   const [capturing, setCapturing] = useState(false)
+  const [showKebabMenu, setShowKebabMenu] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   // §1: Loading state — show spinner while fetching
   if (loading) {
@@ -210,14 +213,14 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   // §4: Cashier name
   const cashierName = invoice.collectedByName || business?.ownerName || 'Staff'
 
-  // §3: Math fix — calculate previous balance and change due
-  // If amountPaid > grandTotal, customer overpaid (clearing previous due or advance)
-  // If amountPaid < grandTotal, customer has remaining due
-  const previousBalance = safeAmountPaid > safeGrandTotal ? (safeAmountPaid - safeGrandTotal) : 0
-  const changeDue = safeAmountPaid > safeGrandTotal ? (safeAmountPaid - safeGrandTotal) : 0
+  // §2: Correct math — GrandTotal already includes GST (from DB).
+  // Subtotal + GST - Discount = GrandTotal (stored in DB).
+  // Paid vs GrandTotal comparison:
+  //   If Paid === GrandTotal → fully paid, no due, no change
+  //   If Paid < GrandTotal → remaining due
+  //   If Paid > GrandTotal → change due / advance (customer overpaid)
   const remainingDue = safeGrandTotal > safeAmountPaid ? (safeGrandTotal - safeAmountPaid) : 0
-  // §3: Actual amount applied to THIS invoice (capped at grandTotal)
-  const actualPaid = Math.min(safeAmountPaid, safeGrandTotal)
+  const changeDue = safeAmountPaid > safeGrandTotal ? (safeAmountPaid - safeGrandTotal) : 0
 
   // §5: GST Summary — group by GST rate (safe from NaN)
   const gstGroups: Record<number, { taxable: number; cgst: number; sgst: number }> = {}
@@ -236,8 +239,8 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
       animate={{ opacity: 1, x: 0 }}
       className="space-y-4"
     >
-      {/* §2 Header — Back + invoice number + action icons row (Profile, Edit, Reminder, Delete) */}
-      <div className="flex items-center gap-2 action-buttons">
+      {/* §1 Header — Back + invoice number + Profile icon + Kebab menu */}
+      <div className="flex items-center gap-2 action-buttons relative">
         <button
           onClick={() => setSelectedInvoiceId(null)}
           className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center"
@@ -246,7 +249,6 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h2 className="text-base font-semibold flex-1">{invoice.invoiceNumber}</h2>
-        {/* §2 Action icons — flex row, gap 4 */}
         <div className="flex items-center gap-1">
           {/* Customer Profile — only if linked to a saved Party */}
           {invoice.partyId && (
@@ -263,15 +265,6 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
               <User className="w-4 h-4" />
             </button>
           )}
-          {/* Edit */}
-          <button
-            onClick={() => toast.info('Edit invoice feature coming soon')}
-            className="w-9 h-9 rounded-full hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors"
-            aria-label="Edit invoice"
-            title="Edit invoice"
-          >
-            <Pencil className="w-4 h-4" />
-          </button>
           {/* Reminder — only if invoice has due amount */}
           {remainingDue > 0 && (
             <button
@@ -283,22 +276,61 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
               <Bell className="w-4 h-4" />
             </button>
           )}
-          {/* Delete */}
+          {/* §1 Kebab menu (⋮) — replaces individual Edit/Delete icons */}
           <button
-            onClick={() => toast.info('Delete invoice feature coming soon')}
-            className="w-9 h-9 rounded-full hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center text-red-600 transition-colors"
-            aria-label="Delete invoice"
-            title="Delete invoice"
+            onClick={() => setShowKebabMenu(!showKebabMenu)}
+            className="w-9 h-9 rounded-full hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors"
+            aria-label="More options"
+            title="More options"
           >
-            <Trash2 className="w-4 h-4" />
+            <MoreVertical className="w-4 h-4" />
           </button>
         </div>
+        {/* §1 Kebab dropdown */}
+        {showKebabMenu && (
+          <>
+            {/* Backdrop to close menu on outside click */}
+            <div className="fixed inset-0 z-40" onClick={() => setShowKebabMenu(false)} />
+            {/* Dropdown */}
+            <div className="absolute top-full right-0 mt-1 z-50 bg-card border border-border rounded-xl shadow-2xl overflow-hidden min-w-[160px]">
+              <button
+                onClick={() => { setShowKebabMenu(false); toast.info('Edit invoice feature coming soon') }}
+                className="w-full flex items-center gap-2 px-4 py-3 hover:bg-accent text-sm text-left transition-colors"
+              >
+                <Pencil className="w-4 h-4 text-muted-foreground" />
+                Edit Invoice
+              </button>
+              <button
+                onClick={async () => {
+                  setShowKebabMenu(false)
+                  if (deleting) return
+                  setDeleting(true)
+                  try {
+                    await apiDelete(`/api/invoices/${invoice.id}`)
+                    toast.success('Invoice deleted')
+                    setSelectedInvoiceId(null)
+                  } catch (e) {
+                    toast.error('Failed to delete invoice')
+                  } finally {
+                    setDeleting(false)
+                  }
+                }}
+                disabled={deleting}
+                className="w-full flex items-center gap-2 px-4 py-3 hover:bg-red-50 dark:hover:bg-red-950/30 text-sm text-left text-red-600 transition-colors border-t border-border"
+              >
+                <Trash2 className="w-4 h-4" />
+                {deleting ? 'Deleting…' : 'Delete Invoice'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Premium Invoice — print area */}
-      <div ref={printRef} className="invoice-content bg-card rounded-2xl overflow-hidden border border-border shadow-sm">
+      {/* §3: Premium Invoice — print area. FORCED LIGHT MODE for image export.
+          Hardcoded white bg + black text so dark mode doesn't cause white-on-white. */}
+      <div ref={printRef} className="invoice-content rounded-2xl overflow-hidden border border-gray-200 shadow-sm" style={{ backgroundColor: '#FFFFFF', color: '#000000' }}>
         {/* Brand color header band */}
-        <div className="bg-gradient-to-r from-primary to-emerald-700 dark:from-primary dark:to-emerald-900 p-5 text-primary-foreground">
+        <div className="p-5" style={{ background: 'linear-gradient(to right, #059669, #047857)', color: '#FFFFFF' }}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <h1 className="text-xl font-bold leading-tight">{business?.name}</h1>
@@ -320,30 +352,30 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           </div>
         </div>
 
-        {/* Bill To — §1: Grade badge REMOVED (internal rating should never show on shared bill) */}
-        <div className="p-5 border-b border-border">
-          <p className="text-[10px] uppercase text-muted-foreground tracking-wider mb-1">Billed To</p>
+        {/* Bill To — §3: hardcoded light-mode colors for export safety */}
+        <div className="p-5 border-b border-gray-200" style={{ color: '#000000' }}>
+          <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: '#6B7280' }}>Billed To</p>
           {invoice.party ? (
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center font-bold text-emerald-700 dark:text-emerald-300">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold" style={{ backgroundColor: '#D1FAE5', color: '#047857' }}>
                 {(invoice.party.name || '?').charAt(0)}
               </div>
               <div className="flex-1">
-                <p className="text-sm font-semibold">{invoice.party.name}</p>
-                <p className="text-[11px] text-muted-foreground">{invoice.party.phone || ''}</p>
-                {invoice.party.address && <p className="text-[11px] text-muted-foreground">{invoice.party.address}</p>}
+                <p className="text-sm font-semibold" style={{ color: '#000000' }}>{invoice.party.name}</p>
+                <p className="text-[11px]" style={{ color: '#6B7280' }}>{invoice.party.phone || ''}</p>
+                {invoice.party.address && <p className="text-[11px]" style={{ color: '#6B7280' }}>{invoice.party.address}</p>}
               </div>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">Walk-in customer</p>
+            <p className="text-sm" style={{ color: '#6B7280' }}>Walk-in customer</p>
           )}
         </div>
 
-        {/* Items table — §1: S.No column added */}
-        <div className="px-5 py-3">
+        {/* Items table — §3: hardcoded colors */}
+        <div className="px-5 py-3" style={{ color: '#000000' }}>
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-[10px] uppercase text-muted-foreground border-b border-border">
+              <tr className="text-[10px] uppercase border-b border-gray-200" style={{ color: '#6B7280' }}>
                 <th className="text-center py-2 font-medium w-8">S.No</th>
                 <th className="text-left py-2 font-medium">Item</th>
                 <th className="text-center py-2 font-medium">HSN</th>
@@ -354,115 +386,115 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
             </thead>
             <tbody>
               {safeItems.map((it, i) => (
-                <tr key={it.id} className={i % 2 === 1 ? 'bg-muted/40' : ''}>
-                  <td className="py-2.5 text-center text-[11px] text-muted-foreground tabular">{i + 1}</td>
-                  <td className="py-2.5 text-left">{it.name}</td>
-                  <td className="py-2.5 text-center text-[11px] text-muted-foreground tabular">{(it as any).hsnCode || (it as any).hsn || '—'}</td>
-                  <td className="py-2.5 text-right tabular">{it.quantity}</td>
-                  <td className="py-2.5 text-right tabular">{formatCurrency(it.unitPrice, currency)}</td>
-                  <td className="py-2.5 text-right tabular font-medium">{formatCurrency(it.total, currency)}</td>
+                <tr key={it.id} style={i % 2 === 1 ? { backgroundColor: '#F3F4F6' } : {}}>
+                  <td className="py-2.5 text-center text-[11px] tabular" style={{ color: '#6B7280' }}>{i + 1}</td>
+                  <td className="py-2.5 text-left" style={{ color: '#000000' }}>{it.name}</td>
+                  <td className="py-2.5 text-center text-[11px] tabular" style={{ color: '#6B7280' }}>{(it as any).hsnCode || (it as any).hsn || '—'}</td>
+                  <td className="py-2.5 text-right tabular" style={{ color: '#000000' }}>{it.quantity}</td>
+                  <td className="py-2.5 text-right tabular" style={{ color: '#000000' }}>{formatCurrency(it.unitPrice, currency)}</td>
+                  <td className="py-2.5 text-right tabular font-medium" style={{ color: '#000000' }}>{formatCurrency(it.total, currency)}</td>
                 </tr>
               ))}
             </tbody>
-            {/* §1: Total Qty row */}
             <tfoot>
-              <tr className="border-t border-border">
-                <td colSpan={3} className="py-2 text-right text-[11px] text-muted-foreground font-medium">Total Qty:</td>
-                <td className="py-2 text-right text-[11px] font-bold tabular">{totalQty}</td>
+              <tr className="border-t border-gray-200">
+                <td colSpan={3} className="py-2 text-right text-[11px] font-medium" style={{ color: '#6B7280' }}>Total Qty:</td>
+                <td className="py-2 text-right text-[11px] font-bold tabular" style={{ color: '#000000' }}>{totalQty}</td>
                 <td colSpan={2}></td>
               </tr>
             </tfoot>
           </table>
         </div>
 
-        {/* Totals — §2: Premium thermal-receipt feel with dashed dividers */}
-        <div className="px-5 py-4 border-t-2 border-dashed border-gray-400 bg-muted/30 space-y-1.5 text-sm">
+        {/* §2: Totals — correct accounting labels. GrandTotal = Subtotal - Discount + GST.
+            All text hardcoded black for light-mode export safety. */}
+        <div className="px-5 py-4 border-t-2 border-dashed border-gray-400 space-y-1.5 text-sm" style={{ backgroundColor: '#F9FAFB', color: '#000000' }}>
+          {/* Row 1: Subtotal */}
           <div className="flex justify-between">
-            <span className="text-muted-foreground">{t('bill.subtotal')}</span>
-            <span className="tabular">{formatCurrency(safeSubtotal, currency)}</span>
+            <span style={{ color: '#6B7280' }}>{t('bill.subtotal')}</span>
+            <span className="tabular" style={{ color: '#000000' }}>{formatCurrency(safeSubtotal, currency)}</span>
           </div>
+          {/* Row 2: Discount (if any) */}
           {safeDiscountAmount > 0 && (
-            <div className="flex justify-between text-red-600">
+            <div className="flex justify-between" style={{ color: '#DC2626' }}>
               <span>{t('bill.discount')} {invoice.discountMode === 'percent' ? `(${safeDiscountValue}%)` : ''}</span>
               <span className="tabular">-{formatCurrency(safeDiscountAmount, currency)}</span>
             </div>
           )}
+          {/* Row 3: Total GST (if any) — labeled correctly, not "Previous Balance" */}
           {safeGstAmount > 0 && (
             <>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">CGST</span>
-                <span className="tabular">{formatCurrency(cgstAmount, currency)}</span>
+                <span style={{ color: '#6B7280' }}>CGST</span>
+                <span className="tabular" style={{ color: '#000000' }}>{formatCurrency(cgstAmount, currency)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">SGST</span>
-                <span className="tabular">{formatCurrency(sgstAmount, currency)}</span>
+                <span style={{ color: '#6B7280' }}>SGST</span>
+                <span className="tabular" style={{ color: '#000000' }}>{formatCurrency(sgstAmount, currency)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: '#6B7280' }}>Total GST</span>
+                <span className="tabular" style={{ color: '#000000' }}>+{formatCurrency(safeGstAmount, currency)}</span>
               </div>
             </>
           )}
+          {/* Grand Total = Subtotal - Discount + GST (from DB) */}
           <div className="flex justify-between pt-2 border-t border-dashed border-gray-300">
-            <span className="font-bold">{t('bill.grandTotal')}</span>
-            <span className="font-bold tabular text-primary text-lg">{formatCurrency(safeGrandTotal, currency)}</span>
+            <span className="font-bold" style={{ color: '#000000' }}>{t('bill.grandTotal')}</span>
+            <span className="font-bold tabular text-lg" style={{ color: '#059669' }}>{formatCurrency(safeGrandTotal, currency)}</span>
           </div>
-          {/* §3: Previous Balance — shown when customer paid more than grandTotal */}
-          {previousBalance > 0 && (
-            <div className="flex justify-between text-amber-600">
-              <span>Previous Balance Cleared</span>
-              <span className="tabular">+{formatCurrency(previousBalance, currency)}</span>
+          {/* Paid — shows actual amount paid */}
+          <div className="flex justify-between pt-1">
+            <span style={{ color: '#6B7280' }}>Paid {invoice.paymentMode ? `via ${invoice.paymentMode.toUpperCase()}` : ''}</span>
+            <span className="tabular" style={{ color: '#059669' }}>{formatCurrency(safeAmountPaid, currency)}</span>
+          </div>
+          {/* Remaining Due — only if underpaid */}
+          {remainingDue > 0 && (
+            <div className="flex justify-between">
+              <span className="font-bold" style={{ color: '#DC2626' }}>Due</span>
+              <span className="tabular font-bold" style={{ color: '#DC2626' }}>{formatCurrency(remainingDue, currency)}</span>
             </div>
           )}
-          {/* §3: Actual paid amount (capped at grandTotal, not the raw overpaid amount) */}
-          <div className="flex justify-between pt-1">
-            <span className="text-muted-foreground">Paid {invoice.paymentMode ? `via ${invoice.paymentMode.toUpperCase()}` : ''}</span>
-            <span className="tabular text-emerald-600">{formatCurrency(actualPaid, currency)}</span>
-          </div>
-          {/* §3: Change Due — when customer overpaid (green, money to return) */}
+          {/* Change Due — only if overpaid (customer paid more than GrandTotal) */}
           {changeDue > 0 && (
-            <div className="flex justify-between text-emerald-600 font-medium">
-              <span>Change Due / Advance</span>
+            <div className="flex justify-between" style={{ color: '#059669' }}>
+              <span className="font-medium">Change Due</span>
               <span className="tabular">{formatCurrency(changeDue, currency)}</span>
             </div>
           )}
-          {/* §3: Remaining Due — when customer underpaid (red, money still owed) */}
-          {remainingDue > 0 && (
-            <div className="flex justify-between">
-              <span className="font-bold text-red-600">Due</span>
-              <span className="tabular font-bold text-red-600">{formatCurrency(remainingDue, currency)}</span>
-            </div>
-          )}
-          {/* §2: Amount in Words */}
-          <p className="text-[10px] italic text-muted-foreground pt-1 border-t border-dashed border-gray-200">
+          {/* Amount in Words */}
+          <p className="text-[10px] italic pt-1 border-t border-dashed border-gray-200" style={{ color: '#6B7280' }}>
             {amountInWords}
           </p>
         </div>
 
-        {/* §3: Mode of Payment (MOP) Breakdown */}
-        <div className="px-5 py-3 border-t border-border bg-muted/20">
-          <p className="text-[10px] uppercase text-muted-foreground font-medium mb-1.5">Mode of Payment</p>
+        {/* §3: MOP Breakdown — hardcoded light colors */}
+        <div className="px-5 py-3 border-t border-gray-200" style={{ backgroundColor: '#F9FAFB', color: '#000000' }}>
+          <p className="text-[10px] uppercase font-medium mb-1.5" style={{ color: '#6B7280' }}>Mode of Payment</p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">{mopLabel}:</span>
-              <span className="tabular font-medium">{formatCurrency(actualPaid, currency)}</span>
+              <span style={{ color: '#6B7280' }}>{mopLabel}:</span>
+              <span className="tabular font-medium" style={{ color: '#000000' }}>{formatCurrency(safeAmountPaid, currency)}</span>
             </div>
             {remainingDue > 0 && (
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Credit:</span>
-                <span className="tabular font-medium text-red-600">{formatCurrency(remainingDue, currency)}</span>
+                <span style={{ color: '#6B7280' }}>Credit:</span>
+                <span className="tabular font-medium" style={{ color: '#DC2626' }}>{formatCurrency(remainingDue, currency)}</span>
               </div>
             )}
           </div>
-          {/* §4: Cashier/Biller Identification */}
-          <p className="text-[10px] text-muted-foreground mt-2">
-            Billed By: <span className="font-medium text-foreground">{cashierName}</span>
+          <p className="text-[10px] mt-2" style={{ color: '#6B7280' }}>
+            Billed By: <span className="font-medium" style={{ color: '#000000' }}>{cashierName}</span>
           </p>
         </div>
 
-        {/* §5: GST Summary Table — grouped by rate */}
+        {/* §5: GST Summary — hardcoded light colors */}
         {safeGstAmount > 0 && Object.keys(gstGroups).length > 0 && (
-          <div className="px-5 py-3 border-t border-border">
-            <p className="text-[10px] uppercase text-muted-foreground font-medium mb-2">GST Summary</p>
+          <div className="px-5 py-3 border-t border-gray-200" style={{ color: '#000000' }}>
+            <p className="text-[10px] uppercase font-medium mb-2" style={{ color: '#6B7280' }}>GST Summary</p>
             <table className="w-full text-[10px]">
               <thead>
-                <tr className="border-b border-border text-muted-foreground">
+                <tr className="border-b border-gray-200" style={{ color: '#6B7280' }}>
                   <th className="text-left py-1 font-medium">Description</th>
                   <th className="text-right py-1 font-medium">Taxable</th>
                   <th className="text-right py-1 font-medium">CGST</th>
@@ -471,14 +503,13 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
               </thead>
               <tbody>
                 {Object.entries(gstGroups).map(([rate, data]) => (
-                  <tr key={rate} className="border-b border-border/50">
+                  <tr key={rate} className="border-b border-gray-100">
                     <td className="py-1 text-left">GST {rate}%</td>
                     <td className="py-1 text-right tabular">{formatCurrency(data.taxable, currency)}</td>
                     <td className="py-1 text-right tabular">{formatCurrency(data.cgst, currency)}</td>
                     <td className="py-1 text-right tabular">{formatCurrency(data.sgst, currency)}</td>
                   </tr>
                 ))}
-                {/* Total row */}
                 <tr className="font-bold">
                   <td className="py-1 text-left">Total</td>
                   <td className="py-1 text-right tabular">{formatCurrency(safeSubtotal, currency)}</td>
@@ -490,10 +521,10 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           </div>
         )}
 
-        {/* Footer */}
-        <div className="px-5 py-4 text-center border-t border-border">
+        {/* Footer — hardcoded light colors */}
+        <div className="px-5 py-4 text-center border-t border-gray-200" style={{ color: '#000000' }}>
           <p className="text-xs font-medium mb-0.5">Thank you for your business! 🙏</p>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-[10px]" style={{ color: '#6B7280' }}>
             {business?.name} · {business?.phone}{business?.upiId ? ` · UPI: ${business.upiId}` : ''}
           </p>
         </div>
