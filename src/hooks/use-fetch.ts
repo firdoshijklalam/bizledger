@@ -36,8 +36,20 @@ export function useFetch<T>(url: string | null, deps: any[] = []) {
       } catch (parseErr) {
         throw new Error('Invalid response from server')
       }
-      // §4: Backward compat — if API returns { items, total, hasMore }, extract items
-      let extracted: any = Array.isArray(json) ? json : (json.items ?? json)
+      // §4: Backward compat — if API returns { items, total, hasMore }, extract items.
+      // CRITICAL: Only extract if it's a paginated response (has total/hasMore).
+      // Single-object responses (like /api/invoices/[id]) have an 'items' field
+      // (invoice line items) — we must NOT extract that, we need the whole object.
+      let extracted: any
+      if (Array.isArray(json)) {
+        extracted = json
+      } else if (json && typeof json === 'object' && 'items' in json && ('total' in json || 'hasMore' in json)) {
+        // Paginated list response: { items: [...], total: N, hasMore: bool }
+        extracted = json.items
+      } else {
+        // Single object response (e.g., invoice detail with its own items array)
+        extracted = json
+      }
       // §2: Per-item error scrubbing — filter out corrupt rows so one bad item
       // doesn't blank the entire list. Only applies to arrays.
       if (Array.isArray(extracted)) {
