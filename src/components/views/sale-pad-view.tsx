@@ -10,7 +10,7 @@ import {
   ShoppingBag, Package, Plus, Minus, Trash2, UserPlus, Receipt, AlertTriangle,
   Store, Boxes, CheckCircle2, X, Wallet, QrCode, CreditCard, FileCheck,
   ChevronLeft, ChevronRight, Calculator, Lock, Eye, EyeOff, ShieldCheck,
-  Users, BadgePercent, Layers,
+  Users, BadgePercent, Layers, Share2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -86,7 +86,9 @@ const CartRow = memo(function CartRow({
       {/* Row 1 — product name ONLY + trash icon */}
       <div className="flex items-center gap-2 mb-2">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold truncate">{item.name}</p>
+          <p className="text-sm font-semibold truncate">
+            {item.name} {item.itemMode === 'retail' && <span className="text-[10px] text-emerald-600 font-normal">(খুচরো)</span>}
+          </p>
           {hasMrpDiscount && (
             <span className="text-[10px] text-emerald-600 font-medium">
               ছাড় ₹{(effectiveMrp - item.price).toFixed(2)} per {item.unit}
@@ -275,11 +277,39 @@ export function SalePadView() {
   const setPaymentMode = (m: PaymentMode) => updateActiveCart((c) => ({ ...c, paymentMode: m }))
 
   const [chequeNo, setChequeNo] = useState('')
+  // §5: Fulfillment status — Handled Over / Pick Up Later
+  const [fulfillmentStatus, setFulfillmentStatus] = useState<'handed' | 'pickup'>('handed')
   // §1: Multi-mode split payment — simultaneous inputs across modes
   const [splitCash, setSplitCash] = useState('')
   const [splitUpi, setSplitUpi] = useState('')
   const [splitCredit, setSplitCredit] = useState('')
   const [splitChequeNo, setSplitChequeNo] = useState('')
+  // §2: Sub-categories — dynamically derived from products based on selected main category
+  const subCategories = useMemo(() => {
+    if (!products) return ['All']
+    let filtered = products
+    if (mode === 'retail') {
+      filtered = filtered.filter((p) => (p as any).retailEnabled && (p as any).retailSalePrice > 0)
+    } else if (mode === 'full') {
+      filtered = filtered.filter((p) => p.salePrice > 0)
+    } else if (mode === 'wholesale') {
+      filtered = filtered.filter((p) => p.wholesalePrice != null && p.wholesalePrice > 0)
+    }
+    if (activeCategory !== 'All') {
+      filtered = filtered.filter((p) => p.category === activeCategory)
+    }
+    const subCats = Array.from(new Set(filtered.map((p) => (p as any).subCategory).filter(Boolean))) as string[]
+    return ['All', ...subCats]
+  }, [products, mode, activeCategory])
+
+  const [activeSubCategory, setActiveSubCategory] = useState<string>('All')
+
+  // Reset sub-category when main category or mode changes — derived state pattern
+  // Instead of effect, we use a key-based reset: when category/mode changes,
+  // the sub-category filter is applied only if it exists in the current subCategories list
+  // This avoids setState-in-effect lint errors
+  const effectiveSubCategory = subCategories.includes(activeSubCategory) ? activeSubCategory : 'All'
+  const setActiveSubCategorySafe = (sub: string) => setActiveSubCategory(sub)
 
   const categories = useMemo(() => {
     if (!products) return ['All']
@@ -304,8 +334,12 @@ export function SalePadView() {
     if (activeCategory !== 'All') {
       list = list.filter((p) => p.category === activeCategory)
     }
+    // §2: Filter by sub-category
+    if (effectiveSubCategory !== 'All') {
+      list = list.filter((p) => (p as any).subCategory === effectiveSubCategory)
+    }
     return list
-  }, [products, mode, activeCategory])
+  }, [products, mode, activeCategory, effectiveSubCategory])
 
   // §2: Price display per mode — STRICT, no mixing
   const getPrice = (p: Product): number => {
@@ -837,7 +871,7 @@ export function SalePadView() {
 
   const modeMeta = {
     retail: { label: 'খুচরো প্রোডাক্ট', sub: 'Retail · per kg/pcs', icon: Store, color: 'emerald' },
-    full: { label: 'আস্ত প্রোডাক্ট', sub: 'Full · per bag/box', icon: Boxes, color: 'teal' },
+    full: { label: 'প্রোডাক্ট', sub: 'Full · per bag/box', icon: Boxes, color: 'teal' },
     wholesale: { label: 'পাইকারি প্রোডাক্ট', sub: 'Wholesale · bulk rate', icon: Layers, color: 'amber' },
   } as const
 
@@ -1118,10 +1152,27 @@ export function SalePadView() {
         ))}
       </div>
 
+      {/* §2: Sub-category slider — dynamically loaded based on selected main category */}
+      {subCategories.length > 1 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
+          {subCategories.map((subCat) => (
+            <button
+              key={subCat}
+              onClick={() => setActiveSubCategorySafe(subCat)}
+              className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all min-h-[30px] ${
+                effectiveSubCategory === subCat ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {subCat}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Product grid */}
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-          {mode === 'retail' ? 'খুচরো পণ্য (per kg/pcs)' : mode === 'full' ? 'আস্ত পণ্য (per bag/box)' : 'পাইকারি পণ্য (bulk rate)'}
+          {mode === 'retail' ? 'খুচরো পণ্য (per kg/pcs)' : mode === 'full' ? 'প্রোডাক্ট (per bag/box)' : 'পাইকারি পণ্য (bulk rate)'}
         </p>
         {filteredProducts.length === 0 ? (
           <EmptyState
@@ -1239,19 +1290,19 @@ export function SalePadView() {
 
               {/* Row 3: Discount Block — Left: discount input/button, Right: cash value subtracted */}
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted shrink-0">
+                <div className="flex items-center gap-0.5 bg-muted/50 p-0.5 rounded-md">
                   <button
                     onClick={() => setDiscountMode('flat')}
-                    className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
-                      discountMode === 'flat' ? 'bg-card shadow-sm text-foreground' : 'text-muted-foreground'
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+                      discountMode === 'flat' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-400'
                     }`}
                   >
                     ₹
                   </button>
                   <button
                     onClick={() => setDiscountMode('percent')}
-                    className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
-                      discountMode === 'percent' ? 'bg-card shadow-sm text-foreground' : 'text-muted-foreground'
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+                      discountMode === 'percent' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-400'
                     }`}
                   >
                     %
@@ -1415,9 +1466,44 @@ export function SalePadView() {
                   <div className="p-3 mt-2 rounded-xl bg-violet-50 dark:bg-violet-950/30">
                     <div className="flex items-center gap-2 mb-2">
                       <QrCode className="w-4 h-4 text-violet-600" />
-                      <p className="text-xs font-medium text-violet-700 dark:text-violet-300">
+                      <p className="text-xs font-medium text-violet-700 dark:text-violet-300 flex-1">
                         UPI পেমেন্ট QR {splitUpiNum > 0 && <span className="text-[10px]">(স্প্লিট: ₹{splitUpiNum.toFixed(2)})</span>}
                       </p>
+                      {/* §6: Share QR button */}
+                      {upiQrDataUrl && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const res = await fetch(upiQrDataUrl)
+                              const blob = await res.blob()
+                              const file = new File([blob], `upi-qr-${upiQrAmount}.png`, { type: 'image/png' })
+                              const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchantName)}&am=${upiQrAmount.toFixed(2)}&cu=INR`
+                              if (navigator.share) {
+                                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                                  await navigator.share({ title: 'UPI Payment QR', text: `Pay ₹${upiQrAmount.toFixed(2)} to ${merchantName}`, files: [file] })
+                                } else {
+                                  await navigator.share({ title: 'UPI Payment', text: upiUrl })
+                                }
+                              } else {
+                                // Fallback: open WhatsApp
+                                const text = encodeURIComponent(`Pay ₹${upiQrAmount.toFixed(2)} to ${merchantName}\n${upiUrl}`)
+                                window.open(`https://wa.me/?text=${text}`, '_blank')
+                              }
+                            } catch (e) {
+                              // Fallback: download QR image
+                              const link = document.createElement('a')
+                              link.download = `upi-qr-${upiQrAmount}.png`
+                              link.href = upiQrDataUrl
+                              link.click()
+                            }
+                          }}
+                          className="w-7 h-7 rounded-lg bg-violet-600 text-white flex items-center justify-center hover:bg-violet-700 transition-colors"
+                          aria-label="Share QR code"
+                          title="Share QR"
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                     {upiQrDataUrl ? (
                       <div className="flex flex-col items-center gap-2">
@@ -1551,6 +1637,29 @@ export function SalePadView() {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* §5: Fulfillment Status toggle — Handled Over / Pick Up Later */}
+            <div className="flex items-center gap-2 mt-2 p-2.5 rounded-xl bg-muted/30 border border-border/50">
+              <span className="text-[11px] font-medium text-muted-foreground shrink-0">Delivery Status:</span>
+              <div className="flex items-center gap-1 flex-1">
+                <button
+                  onClick={() => setFulfillmentStatus('handed')}
+                  className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    fulfillmentStatus === 'handed' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-card text-muted-foreground'
+                  }`}
+                >
+                  ✓ Handed Over
+                </button>
+                <button
+                  onClick={() => setFulfillmentStatus('pickup')}
+                  className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    fulfillmentStatus === 'pickup' ? 'bg-amber-600 text-white shadow-sm' : 'bg-card text-muted-foreground'
+                  }`}
+                >
+                  📦 Pick Up Later
+                </button>
+              </div>
+            </div>
 
             {/* §4: Action Footer — Invoice (left) + Done (right) */}
             <div className="flex items-center gap-2 mt-3">
