@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { useVoiceInputStore } from '@/store/voice-input-store'
 
 /**
@@ -8,14 +8,16 @@ import { useVoiceInputStore } from '@/store/voice-input-store'
  * the global mic. On focus, it sets the input's text-update callback in the
  * global store. On blur, it unregisters.
  *
+ * CRITICAL: The callback is stored in a ref to prevent stale closures.
+ * The ref is updated on every render with the latest setter function.
+ * When the mic fires the callback, it reads from the store which holds
+ * the ref's latest value.
+ *
  * Usage:
  *   const voiceProps = useVoiceInput<HTMLInputElement>((text) => {
- *     // Update your input value here
  *     setValue(text)
  *   })
  *   <input {...voiceProps} />
- *
- * The hook returns onFocus and onBlur props that should be spread onto the input.
  */
 
 export function useVoiceInput<T extends HTMLInputElement | HTMLTextAreaElement>(
@@ -24,18 +26,33 @@ export function useVoiceInput<T extends HTMLInputElement | HTMLTextAreaElement>(
   const registerInput = useVoiceInputStore((s) => s.registerInput)
   const unregisterInput = useVoiceInputStore((s) => s.unregisterInput)
 
+  // §3: Store the LATEST callback in a ref so it never goes stale.
+  // The callback passed to useVoiceInput changes on every render (it's a new
+  // arrow function), but the ref always points to the latest one.
+  const callbackRef = useRef(onVoiceText)
+  callbackRef.current = onVoiceText
+
   const handleFocus = useCallback((e: React.FocusEvent<T>) => {
-    registerInput(onVoiceText, e.target)
-  }, [onVoiceText, registerInput])
+    // §3: Register a STABLE wrapper function that reads from the ref.
+    // This ensures the mic always calls the LATEST setter, not a stale one.
+    const stableCallback = (text: string) => {
+      callbackRef.current(text)
+    }
+    registerInput(stableCallback, e.target)
+  }, [registerInput])
 
   const handleBlur = useCallback(() => {
     // Delay unregister to allow focus to transfer to mic or another input
     setTimeout(() => {
       const active = document.activeElement
+      // §3: Don't unregister if focus moved to the mic button itself
+      if (active && active.getAttribute('data-mic-button') === 'true') {
+        return
+      }
       if (!active || (active.tagName !== 'INPUT' && active.tagName !== 'TEXTAREA')) {
         unregisterInput()
       }
-    }, 150)
+    }, 200)
   }, [unregisterInput])
 
   return {
