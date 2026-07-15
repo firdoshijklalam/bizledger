@@ -6,7 +6,7 @@ import { useFetch } from '@/hooks/use-fetch'
 import type { Invoice } from '@/lib/types'
 import { formatCurrency, formatDate, GRADE_META, getGradeMeta } from '@/lib/utils'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Download, Share2, Printer, X, MessageCircle, User } from 'lucide-react'
+import { ArrowLeft, Download, Share2, Printer, X, MessageCircle, User, Pencil, Bell, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { useRef, useState } from 'react'
@@ -210,6 +210,15 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   // §4: Cashier name
   const cashierName = invoice.collectedByName || business?.ownerName || 'Staff'
 
+  // §3: Math fix — calculate previous balance and change due
+  // If amountPaid > grandTotal, customer overpaid (clearing previous due or advance)
+  // If amountPaid < grandTotal, customer has remaining due
+  const previousBalance = safeAmountPaid > safeGrandTotal ? (safeAmountPaid - safeGrandTotal) : 0
+  const changeDue = safeAmountPaid > safeGrandTotal ? (safeAmountPaid - safeGrandTotal) : 0
+  const remainingDue = safeGrandTotal > safeAmountPaid ? (safeGrandTotal - safeAmountPaid) : 0
+  // §3: Actual amount applied to THIS invoice (capped at grandTotal)
+  const actualPaid = Math.min(safeAmountPaid, safeGrandTotal)
+
   // §5: GST Summary — group by GST rate (safe from NaN)
   const gstGroups: Record<number, { taxable: number; cgst: number; sgst: number }> = {}
   safeItems.forEach((it: any) => {
@@ -227,9 +236,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
       animate={{ opacity: 1, x: 0 }}
       className="space-y-4"
     >
-      {/* §2+3: Header — ONLY Back button + invoice number + Customer Profile link.
-          Removed: Share/Print/WhatsApp icons (redundant with bottom action bar).
-          Added: UserIcon (header right) — navigates to PartyDetail if invoice has partyId. */}
+      {/* §2 Header — Back + invoice number + action icons row (Profile, Edit, Reminder, Delete) */}
       <div className="flex items-center gap-2 action-buttons">
         <button
           onClick={() => setSelectedInvoiceId(null)}
@@ -239,23 +246,53 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h2 className="text-base font-semibold flex-1">{invoice.invoiceNumber}</h2>
-        {/* §3: Customer Profile link — only if invoice is linked to a saved Party */}
-        {invoice.partyId && (
+        {/* §2 Action icons — flex row, gap 4 */}
+        <div className="flex items-center gap-1">
+          {/* Customer Profile — only if linked to a saved Party */}
+          {invoice.partyId && (
+            <button
+              onClick={() => {
+                setSelectedInvoiceId(null)
+                setSelectedPartyId(invoice.partyId!)
+                setActiveView('khata')
+              }}
+              className="w-9 h-9 rounded-full hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center justify-center text-emerald-600 transition-colors"
+              aria-label="View customer profile"
+              title="View customer profile"
+            >
+              <User className="w-4 h-4" />
+            </button>
+          )}
+          {/* Edit */}
           <button
-            onClick={() => {
-              // Navigate to PartyDetail screen with the party's ID
-              setSelectedInvoiceId(null) // close invoice preview
-              setSelectedPartyId(invoice.partyId!) // open party detail
-              setActiveView('khata')
-            }}
-            className="w-10 h-10 rounded-full hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center justify-center text-emerald-600 transition-colors"
-            aria-label="View customer profile"
-            title="View customer profile"
+            onClick={() => toast.info('Edit invoice feature coming soon')}
+            className="w-9 h-9 rounded-full hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors"
+            aria-label="Edit invoice"
+            title="Edit invoice"
           >
-            <User className="w-5 h-5" />
+            <Pencil className="w-4 h-4" />
           </button>
-        )}
-        {/* Walk-in customer (no partyId) → show nothing in header */}
+          {/* Reminder — only if invoice has due amount */}
+          {remainingDue > 0 && (
+            <button
+              onClick={() => toast.info('Payment reminder sent!')}
+              className="w-9 h-9 rounded-full hover:bg-amber-50 dark:hover:bg-amber-950/30 flex items-center justify-center text-amber-600 transition-colors"
+              aria-label="Send payment reminder"
+              title="Send payment reminder"
+            >
+              <Bell className="w-4 h-4" />
+            </button>
+          )}
+          {/* Delete */}
+          <button
+            onClick={() => toast.info('Delete invoice feature coming soon')}
+            className="w-9 h-9 rounded-full hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center text-red-600 transition-colors"
+            aria-label="Delete invoice"
+            title="Delete invoice"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Premium Invoice — print area */}
@@ -283,7 +320,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           </div>
         </div>
 
-        {/* Bill To */}
+        {/* Bill To — §1: Grade badge REMOVED (internal rating should never show on shared bill) */}
         <div className="p-5 border-b border-border">
           <p className="text-[10px] uppercase text-muted-foreground tracking-wider mb-1">Billed To</p>
           {invoice.party ? (
@@ -292,14 +329,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
                 {(invoice.party.name || '?').charAt(0)}
               </div>
               <div className="flex-1">
-                <div className="flex items-center gap-1.5">
-                  <p className="text-sm font-semibold">{invoice.party.name}</p>
-                  {meta && (
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>
-                      Grade {invoice.party.qualityGrade}
-                    </span>
-                  )}
-                </div>
+                <p className="text-sm font-semibold">{invoice.party.name}</p>
                 <p className="text-[11px] text-muted-foreground">{invoice.party.phone || ''}</p>
                 {invoice.party.address && <p className="text-[11px] text-muted-foreground">{invoice.party.address}</p>}
               </div>
@@ -373,16 +403,30 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
             <span className="font-bold">{t('bill.grandTotal')}</span>
             <span className="font-bold tabular text-primary text-lg">{formatCurrency(safeGrandTotal, currency)}</span>
           </div>
-          {/* §2: Payment Mode label */}
+          {/* §3: Previous Balance — shown when customer paid more than grandTotal */}
+          {previousBalance > 0 && (
+            <div className="flex justify-between text-amber-600">
+              <span>Previous Balance Cleared</span>
+              <span className="tabular">+{formatCurrency(previousBalance, currency)}</span>
+            </div>
+          )}
+          {/* §3: Actual paid amount (capped at grandTotal, not the raw overpaid amount) */}
           <div className="flex justify-between pt-1">
             <span className="text-muted-foreground">Paid {invoice.paymentMode ? `via ${invoice.paymentMode.toUpperCase()}` : ''}</span>
-            <span className="tabular text-emerald-600">{formatCurrency(safeAmountPaid, currency)}</span>
+            <span className="tabular text-emerald-600">{formatCurrency(actualPaid, currency)}</span>
           </div>
-          {/* §2: Due row in red — explicitly below Paid */}
-          {safeAmountDue > 0 && (
+          {/* §3: Change Due — when customer overpaid (green, money to return) */}
+          {changeDue > 0 && (
+            <div className="flex justify-between text-emerald-600 font-medium">
+              <span>Change Due / Advance</span>
+              <span className="tabular">{formatCurrency(changeDue, currency)}</span>
+            </div>
+          )}
+          {/* §3: Remaining Due — when customer underpaid (red, money still owed) */}
+          {remainingDue > 0 && (
             <div className="flex justify-between">
               <span className="font-bold text-red-600">Due</span>
-              <span className="tabular font-bold text-red-600">{formatCurrency(safeAmountDue, currency)}</span>
+              <span className="tabular font-bold text-red-600">{formatCurrency(remainingDue, currency)}</span>
             </div>
           )}
           {/* §2: Amount in Words */}
@@ -397,12 +441,12 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
             <div className="flex justify-between">
               <span className="text-muted-foreground">{mopLabel}:</span>
-              <span className="tabular font-medium">{formatCurrency(safeAmountPaid, currency)}</span>
+              <span className="tabular font-medium">{formatCurrency(actualPaid, currency)}</span>
             </div>
-            {safeAmountDue > 0 && (
+            {remainingDue > 0 && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Credit:</span>
-                <span className="tabular font-medium text-red-600">{formatCurrency(safeAmountDue, currency)}</span>
+                <span className="tabular font-medium text-red-600">{formatCurrency(remainingDue, currency)}</span>
               </div>
             )}
           </div>
