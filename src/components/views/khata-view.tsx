@@ -69,7 +69,20 @@ export function KhataView() {
     if (gradeFilter !== 'all') list = list.filter((p) => p.qualityGrade === gradeFilter)
     if (search.trim()) {
       const q = search.toLowerCase()
-      list = list.filter((p) => p.name.toLowerCase().includes(q) || (p.phone || '').includes(search))
+      // §1: Search checks name + phone + searchTags (English↔Bengali aliases)
+      list = list.filter((p) => {
+        const nameMatch = p.name.toLowerCase().includes(q)
+        const phoneMatch = (p.phone || '').includes(search)
+        // §1: Check searchTags for cross-lingual matching (e.g. "Abdullah" → "আব্দুল্লাহ")
+        let tagMatch = false
+        if (p.searchTags) {
+          try {
+            const tags = typeof p.searchTags === 'string' ? JSON.parse(p.searchTags) : p.searchTags
+            tagMatch = Array.isArray(tags) && tags.some((tag: string) => tag.toLowerCase().includes(q))
+          } catch {}
+        }
+        return nameMatch || phoneMatch || tagMatch
+      })
     }
     return list.sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance))
   }, [parties, khataFilter, search, gradeFilter])
@@ -169,7 +182,8 @@ export function KhataView() {
       {/* Party list */}
       {loading ? (
         <LoadingState />
-      ) : filtered.length === 0 ? (
+      ) : (!parties || parties.length === 0) ? (
+        // §2 Condition A: Database is completely empty → "No parties yet"
         <EmptyState
           icon={Users}
           title={t('khata.empty')}
@@ -179,6 +193,15 @@ export function KhataView() {
             </Button>
           }
         />
+      ) : filtered.length === 0 ? (
+        // §2 Condition B: Parties exist but search returned nothing → "No results found"
+        <div className="text-center py-12">
+          <Users className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">No parties found for &ldquo;{search}&rdquo;</p>
+          <button onClick={() => setSearch('')} className="text-xs text-primary mt-2 hover:underline">
+            Clear search
+          </button>
+        </div>
       ) : (
         <div className="space-y-2">
           <AnimatePresence>

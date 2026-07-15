@@ -77,25 +77,33 @@ export function InventoryView() {
     }
     if (search.trim()) {
       const q = search.toLowerCase()
-      // PRD Part 26 §4: Phonetic search — match by sound, not just spelling
+      // §1: Search checks name + sku + category + subCategory + searchTags (aliases)
+      // searchTags contains English phonetic variants of Bengali names (e.g. "Utsav" for "উৎসব")
       list = list.filter((p) => {
         const nameMatch = p.name.toLowerCase().includes(q)
         const skuMatch = (p.sku || '').toLowerCase().includes(q)
         const catMatch = (p.category || '').toLowerCase().includes(q)
         const subCatMatch = (p.subCategory || '').toLowerCase().includes(q)
-        // Phonetic: check if any part of the query sounds like the product name
+        // §1: Check searchTags (JSON array string) for English↔Bengali alias matching
+        let tagMatch = false
+        if (p.searchTags) {
+          try {
+            const tags = typeof p.searchTags === 'string' ? JSON.parse(p.searchTags) : p.searchTags
+            tagMatch = Array.isArray(tags) && tags.some((tag: string) => tag.toLowerCase().includes(q))
+          } catch {}
+        }
+        // Phonetic fallback
         const queryParts = q.split(/\s+/)
         const nameParts = p.name.toLowerCase().split(/\s+/)
         const phoneticMatch = queryParts.some(qp => {
           if (qp.length < 2) return false
           return nameParts.some(np => {
-            // Simple phonetic: same first 3 chars or Levenshtein distance <= 2
             return np.startsWith(qp.substring(0, 3)) ||
               np.includes(qp) ||
               levenshtein(qp, np.substring(0, qp.length)) <= 2
           })
         })
-        return nameMatch || skuMatch || catMatch || subCatMatch || phoneticMatch
+        return nameMatch || skuMatch || catMatch || subCatMatch || tagMatch || phoneticMatch
       })
     }
     return list
@@ -203,7 +211,8 @@ export function InventoryView() {
       {/* Product list */}
       {loading ? (
         <LoadingState />
-      ) : filtered.length === 0 ? (
+      ) : (!products || products.length === 0) ? (
+        // §2 Condition A: Database is completely empty → "No products yet"
         <EmptyState
           icon={Package}
           title={t('inv.empty')}
@@ -213,6 +222,15 @@ export function InventoryView() {
             </Button>
           }
         />
+      ) : filtered.length === 0 ? (
+        // §2 Condition B: Products exist but search returned nothing → "No results found"
+        <div className="text-center py-12">
+          <Package className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">No products found for &ldquo;{search}&rdquo;</p>
+          <button onClick={() => setSearch('')} className="text-xs text-primary mt-2 hover:underline">
+            Clear search
+          </button>
+        </div>
       ) : (
         <div className="space-y-2">
           <AnimatePresence>
