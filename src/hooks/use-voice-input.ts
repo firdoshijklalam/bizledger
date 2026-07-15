@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useEffect } from 'react'
 import { useVoiceInputStore } from '@/store/voice-input-store'
 
 /**
@@ -30,7 +30,7 @@ export function useVoiceInput<T extends HTMLInputElement | HTMLTextAreaElement>(
   // The callback passed to useVoiceInput changes on every render (it's a new
   // arrow function), but the ref always points to the latest one.
   const callbackRef = useRef(onVoiceText)
-  callbackRef.current = onVoiceText
+  useEffect(() => { callbackRef.current = onVoiceText }, [onVoiceText])
 
   const handleFocus = useCallback((e: React.FocusEvent<T>) => {
     // §3: Register a STABLE wrapper function that reads from the ref.
