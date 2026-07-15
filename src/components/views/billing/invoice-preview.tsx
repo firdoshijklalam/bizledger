@@ -15,11 +15,11 @@ import { toPng } from 'html-to-image'
 export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   const { setSelectedInvoiceId, business, setSelectedPartyId, setActiveView } = useAppStore()
   const { t } = useI18n()
-  const { data: invoice, loading } = useFetch<Invoice>(`/api/invoices/${invoiceId}`, [invoiceId])
+  const { data: invoice, loading, error } = useFetch<Invoice>(`/api/invoices/${invoiceId}`, [invoiceId])
   const printRef = useRef<HTMLDivElement>(null)
   const [capturing, setCapturing] = useState(false)
 
-  // §1: Loading state — show spinner while fetching, prevents NaN from undefined invoice
+  // §1: Loading state — show spinner while fetching
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -27,7 +27,31 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
       </div>
     )
   }
-  if (!invoice) return null
+
+  // §1: Error state — show error message if fetch failed (not silent null)
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <p className="text-sm text-red-600">Failed to load invoice: {error}</p>
+        <p className="text-xs text-muted-foreground">Invoice ID: {invoiceId}</p>
+        <button onClick={() => setSelectedInvoiceId(null)} className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm">
+          Go Back
+        </button>
+      </div>
+    )
+  }
+
+  if (!invoice) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <p className="text-sm text-muted-foreground">Invoice not found</p>
+        <p className="text-xs text-muted-foreground">Invoice ID: {invoiceId}</p>
+        <button onClick={() => setSelectedInvoiceId(null)} className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm">
+          Go Back
+        </button>
+      </div>
+    )
+  }
 
   const currency = business?.currency || 'INR'
   const meta = invoice.party ? getGradeMeta(invoice.party.qualityGrade) : null
