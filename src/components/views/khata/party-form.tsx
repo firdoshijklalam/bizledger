@@ -40,9 +40,12 @@ export function PartyForm({ open, onOpenChange, partyId }: Props) {
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // §3: Voice input support — register name + phone inputs with global mic
+  // §3: Voice input support — register ALL text inputs with global mic
   const nameVoice = useVoiceInput<HTMLInputElement>((text) => setName(text))
   const phoneVoice = useVoiceInput<HTMLInputElement>((text) => setPhone(text))
+  const gstinVoice = useVoiceInput<HTMLInputElement>((text) => setGstin(text))
+  const addressVoice = useVoiceInput<HTMLTextAreaElement>((text) => setAddress(text))
+  const notesVoice = useVoiceInput<HTMLTextAreaElement>((text) => setNotes(text))
 
   useEffect(() => {
     if (existing) {
@@ -193,7 +196,7 @@ export function PartyForm({ open, onOpenChange, partyId }: Props) {
                 className="space-y-1.5 overflow-hidden"
               >
                 <Label htmlFor="gstin" className="text-xs">{t('set.gstin')}</Label>
-                <Input id="gstin" value={gstin} onChange={(e) => setGstin(e.target.value)} className="h-11" placeholder="19ABCDE1234F1Z5" />
+                <Input id="gstin" {...gstinVoice} value={gstin} onChange={(e) => setGstin(e.target.value)} className="h-11" placeholder="19ABCDE1234F1Z5" />
               </motion.div>
             )}
           </AnimatePresence>
@@ -229,7 +232,7 @@ export function PartyForm({ open, onOpenChange, partyId }: Props) {
             <Label htmlFor="address" className="text-xs">{t('set.address')}</Label>
             <div className="relative">
               <MapPin className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
-              <Textarea id="address" value={address} onChange={(e) => setAddress(e.target.value)} className="pl-9 min-h-[60px]" placeholder="Address" />
+              <Textarea id="address" {...addressVoice} value={address} onChange={(e) => setAddress(e.target.value)} className="pl-9 min-h-[60px]" placeholder="Address" />
             </div>
           </div>
 
@@ -237,7 +240,7 @@ export function PartyForm({ open, onOpenChange, partyId }: Props) {
             <Label htmlFor="notes" className="text-xs flex items-center gap-1">
               <FileText className="w-3 h-3" /> Internal Notes
             </Label>
-            <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-[50px]" placeholder="Notes about this party…" />
+            <Textarea id="notes" {...notesVoice} value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-[50px]" placeholder="Notes about this party…" />
           </div>
         </div>
 

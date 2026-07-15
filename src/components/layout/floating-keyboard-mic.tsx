@@ -116,8 +116,6 @@ export function FloatingKeyboardMic() {
     if (recognitionRef.current) { try { recognitionRef.current.stop() } catch {} }
 
     const recognition = new SpeechRecognition()
-    // §4: Dynamic language sync — use app's current global language
-    // bn → bn-IN, hi → hi-IN, en → en-US
     const lang = languageRef.current
     recognition.lang = lang === 'bn' ? 'bn-IN' : lang === 'hi' ? 'hi-IN' : 'en-US'
     recognition.continuous = false
@@ -128,10 +126,25 @@ export function FloatingKeyboardMic() {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript
       }
-      // §3: Fire the globally registered callback — sends text to whichever
-      // input is currently active. This is the universal input context.
-      if (activeInputCallback) {
-        activeInputCallback(transcript)
+      // §3: CRITICAL — read callback from store AT RESULT TIME, not closure.
+      // This prevents stale closure where activeInputCallback was captured at
+      // render time and might be null or outdated.
+      const currentCallback = useVoiceInputStore.getState().activeInputCallback
+      if (currentCallback) {
+        currentCallback(transcript)
+      } else {
+        // Fallback: directly set the value on the active input DOM element
+        const activeEl = useVoiceInputStore.getState().activeInputRef.current
+        if (activeEl) {
+          const nativeSetter = Object.getOwnPropertyDescriptor(
+            activeEl.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
+            'value'
+          )?.set
+          if (nativeSetter) {
+            nativeSetter.call(activeEl, transcript)
+            activeEl.dispatchEvent(new Event('input', { bubbles: true }))
+          }
+        }
       }
     }
     recognition.onerror = (e: any) => {
@@ -150,7 +163,7 @@ export function FloatingKeyboardMic() {
     recognition.start()
     setListening(true)
     toast.info(lang === 'bn' ? 'বলুন...' : lang === 'hi' ? 'बोलिए...' : 'Speak...', { duration: 1500 })
-  }, [activeInputCallback, activeInputRef])
+  }, [activeInputRef]) // §3: Reads callback from store at result time (no stale closure)
 
   const handleToggleMic = useCallback(() => {
     if (listening) stopListening()

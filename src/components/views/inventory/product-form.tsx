@@ -58,8 +58,10 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   const [categoryPath, setCategoryPath] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // §3: Voice input support
+  // §3: Voice input support — register ALL text inputs with global mic
   const nameVoice = useVoiceInput<HTMLInputElement>((text) => setName(text))
+  const skuVoice = useVoiceInput<HTMLInputElement>((text) => setSku(text))
+  const descVoice = useVoiceInput<HTMLTextAreaElement>((text) => setDescription(text))
 
   // PRD Part 35 §1: AI auto-fill media dropzone
   const [mediaImage, setMediaImage] = useState<string | null>(null)
@@ -356,7 +358,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="sku" className="text-xs">SKU</Label>
-              <Input id="sku" value={sku} onChange={(e) => setSku(e.target.value)} className="h-11" placeholder="LED-9W" />
+              <Input id="sku" {...skuVoice} value={sku} onChange={(e) => setSku(e.target.value)} className="h-11" placeholder="LED-9W" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cat" className="text-xs">Category</Label>
@@ -444,6 +446,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
             </Label>
             <Textarea
               id="desc"
+              {...descVoice}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="min-h-[60px] text-sm"
