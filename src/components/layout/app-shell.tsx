@@ -178,17 +178,24 @@ export function AppShell() {
     <div className="min-h-screen flex flex-col bg-background">
       <TopAppBar />
       <main className="flex-1 w-full max-w-2xl mx-auto px-3 sm:px-4 pb-28 pt-3">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeView}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.18 }}
-          >
-            {renderView(activeView)}
-          </motion.div>
-        </AnimatePresence>
+        {/* §1: SalePad is ALWAYS mounted (display:none when inactive) to preserve cart state.
+            All other views use AnimatePresence for transitions. */}
+        <div style={{ display: activeView === 'sale-pad' ? 'block' : 'none' }}>
+          <SalePadView />
+        </div>
+        {activeView !== 'sale-pad' && (
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeView}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18 }}
+            >
+              {renderView(activeView)}
+            </motion.div>
+          </AnimatePresence>
+        )}
       </main>
       <SideDrawerFab />
       <BottomTabNav />
@@ -221,8 +228,7 @@ function renderView(view: string) {
       return <SettingsView />
     case 'notifications':
       return <NotificationsView />
-    case 'sale-pad':
-      return <SalePadView />
+    // §1: sale-pad is rendered separately (always mounted) — not here
     case 'sourcing':
       return <SourcingView />
     case 'staff':

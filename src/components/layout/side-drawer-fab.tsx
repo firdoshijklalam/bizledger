@@ -59,7 +59,7 @@ function snapToEdge(p: FabPos): FabPos {
 }
 
 export function SideDrawerFab() {
-  const { fabOpen, setFabOpen, triggerQuickAction, setActiveView } = useAppStore()
+  const { fabOpen, setFabOpen, triggerQuickAction, navigateTo } = useAppStore()
   const { t } = useI18n()
   const [position, setPosition] = useState<FabPos>(() => { if (typeof window === 'undefined') return DEFAULT_POS; return loadPos() })
   const [isDragging, setIsDragging] = useState(false)
@@ -134,9 +134,9 @@ export function SideDrawerFab() {
   }, [fabOpen, setFabOpen])
 
   const handleAction = (id: string) => {
-    if (id === 'quick-sale') { setActiveView('sale-pad'); setFabOpen(false); return }
+    if (id === 'quick-sale') { navigateTo('sale-pad'); setFabOpen(false); return }
     const vm: Record<string, string> = { 'add-party': 'khata', 'add-product': 'inventory', 'add-transaction': 'khata' }
-    if (vm[id]) setActiveView(vm[id] as any)
+    if (vm[id]) navigateTo(vm[id] as any)
     triggerQuickAction({ id: crypto.randomUUID(), type: id as any })
     setFabOpen(false)
   }

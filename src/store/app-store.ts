@@ -13,6 +13,11 @@ interface AppState {
   // Navigation
   activeView: ViewId
   setActiveView: (view: ViewId) => void
+  // §1: Navigation back stack — remembers where user was so Back returns correctly
+  viewStack: ViewId[]
+  navigateTo: (view: ViewId) => void
+  goBack: () => void
+  canGoBack: () => boolean
 
   // Business
   business: Business | null
@@ -82,9 +87,33 @@ interface AppState {
   setReturnToView: (view: ViewId | null) => void
 }
 
-export const useAppStore = create<AppState>()((set) => ({
+export const useAppStore = create<AppState>()((set, get) => ({
   activeView: 'dashboard',
   setActiveView: (view) => set({ activeView: view }),
+
+  // §1: Navigation back stack
+  viewStack: [],
+  navigateTo: (view) => {
+    const { activeView, viewStack } = get()
+    // Don't push if navigating to the same view
+    if (activeView === view) return
+    set({
+      viewStack: [...viewStack, activeView],
+      activeView: view,
+    })
+  },
+  goBack: () => {
+    const { viewStack } = get()
+    if (viewStack.length > 0) {
+      const newStack = [...viewStack]
+      const prevView = newStack.pop()!
+      set({ viewStack: newStack, activeView: prevView })
+    } else {
+      // No history — go to dashboard as fallback
+      set({ activeView: 'dashboard' })
+    }
+  },
+  canGoBack: () => get().viewStack.length > 0,
 
   business: null,
   setBusiness: (b) => set({ business: b }),
