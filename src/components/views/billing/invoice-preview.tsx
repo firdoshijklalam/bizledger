@@ -4,24 +4,43 @@ import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
 import type { Invoice } from '@/lib/types'
-import { formatCurrency, formatDate, GRADE_META } from '@/lib/utils'
+import { formatCurrency, formatDate, GRADE_META, getGradeMeta } from '@/lib/utils'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Download, Share2, Printer, X, MessageCircle } from 'lucide-react'
+import { ArrowLeft, Download, Share2, Printer, X, MessageCircle, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
 
 export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
-  const { setSelectedInvoiceId, business } = useAppStore()
+  const { setSelectedInvoiceId, business, setSelectedPartyId, setActiveView } = useAppStore()
   const { t } = useI18n()
-  const { data: invoice } = useFetch<Invoice>(`/api/invoices/${invoiceId}`, [invoiceId])
+  const { data: invoice, loading } = useFetch<Invoice>(`/api/invoices/${invoiceId}`, [invoiceId])
   const printRef = useRef<HTMLDivElement>(null)
   const [capturing, setCapturing] = useState(false)
 
+  // §1: Loading state — show spinner while fetching, prevents NaN from undefined invoice
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
   if (!invoice) return null
+
   const currency = business?.currency || 'INR'
-  const meta = invoice.party ? GRADE_META[invoice.party.qualityGrade] : null
+  const meta = invoice.party ? getGradeMeta(invoice.party.qualityGrade) : null
+
+  // §1: Safe numeric fallbacks — prevent NaN when fields are undefined/null
+  const safeSubtotal = Number(invoice.subtotal) || 0
+  const safeDiscountAmount = Number(invoice.discountAmount) || 0
+  const safeDiscountValue = Number(invoice.discountValue) || 0
+  const safeGstAmount = Number(invoice.gstAmount) || 0
+  const safeGrandTotal = Number(invoice.grandTotal) || 0
+  const safeAmountPaid = Number(invoice.amountPaid) || 0
+  const safeAmountDue = Number(invoice.amountDue) || 0
+  const safeItems = Array.isArray(invoice.items) ? invoice.items : []
 
   const handlePrint = () => {
     window.print()
@@ -93,7 +112,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
       } else {
         // Fallback: open WhatsApp with text + download image
         const phone = invoice.party?.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
-        const text = encodeURIComponent(`Bill from ${business?.name}\nInvoice: ${invoice.invoiceNumber}\nTotal: ${formatCurrency(invoice.grandTotal, currency)}`)
+        const text = encodeURIComponent(`Bill from ${business?.name}\nInvoice: ${invoice.invoiceNumber}\nTotal: ${formatCurrency(safeGrandTotal, currency)}`)
         window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank')
         const link = document.createElement('a')
         link.download = `invoice-${invoice.invoiceNumber}.png`
@@ -120,17 +139,17 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
     const payUrl = `${window.location.origin}/payment/${invoice.paymentLandingToken || invoice.id}`
     const phone = invoice.party?.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
     const text = encodeURIComponent(
-      `${business?.name} বিল: #${invoice.invoiceNumber}, মোট: ${formatCurrency(invoice.grandTotal, currency)}। পেমেন্ট করতে ক্লিক করুন: ${payUrl}`
+      `${business?.name} বিল: #${invoice.invoiceNumber}, মোট: ${formatCurrency(safeGrandTotal, currency)}। পেমেন্ট করতে ক্লিক করুন: ${payUrl}`
     )
     window.location.href = phone ? `sms:${phone}?body=${text}` : `sms:?body=${text}`
   }
 
-  // §2: GST breakdown — CGST = SGST = gstAmount / 2
-  const cgstAmount = invoice.gstAmount / 2
-  const sgstAmount = invoice.gstAmount / 2
+  // §2: GST breakdown — CGST = SGST = gstAmount / 2 (safe from NaN)
+  const cgstAmount = safeGstAmount / 2
+  const sgstAmount = safeGstAmount / 2
 
-  // §1: Total Quantity (sum of all item quantities)
-  const totalQty = invoice.items?.reduce((s, it) => s + Number(it.quantity), 0) || 0
+  // §1: Total Quantity (sum of all item quantities, safe from NaN)
+  const totalQty = safeItems.reduce((s, it) => s + (Number(it.quantity) || 0), 0)
 
   // §2: Amount in Words
   function numberToWords(num: number): string {
@@ -159,7 +178,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
     if (rem > 0) w += three(rem)
     return w.trim()
   }
-  const amountInWords = `Rupees ${numberToWords(Math.round(invoice.grandTotal))} Only`
+  const amountInWords = `Rupees ${numberToWords(Math.round(safeGrandTotal))} Only`
 
   // §3: MOP breakdown — parse from collectedByName/Role or paymentMode
   const mopLabel = invoice.paymentMode ? invoice.paymentMode.toUpperCase() : 'CASH'
@@ -167,14 +186,15 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   // §4: Cashier name
   const cashierName = invoice.collectedByName || business?.ownerName || 'Staff'
 
-  // §5: GST Summary — group by GST rate
+  // §5: GST Summary — group by GST rate (safe from NaN)
   const gstGroups: Record<number, { taxable: number; cgst: number; sgst: number }> = {}
-  invoice.items?.forEach((it: any) => {
+  safeItems.forEach((it: any) => {
     const rate = Number(it.gstRate) || 0
+    const itemTotal = Number(it.total) || 0
     if (!gstGroups[rate]) gstGroups[rate] = { taxable: 0, cgst: 0, sgst: 0 }
-    gstGroups[rate].taxable += it.total
-    gstGroups[rate].cgst += (it.total * rate) / 200
-    gstGroups[rate].sgst += (it.total * rate) / 200
+    gstGroups[rate].taxable += itemTotal
+    gstGroups[rate].cgst += (itemTotal * rate) / 200
+    gstGroups[rate].sgst += (itemTotal * rate) / 200
   })
 
   return (
@@ -183,7 +203,9 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
       animate={{ opacity: 1, x: 0 }}
       className="space-y-4"
     >
-      {/* Action bar (no-print) */}
+      {/* §2+3: Header — ONLY Back button + invoice number + Customer Profile link.
+          Removed: Share/Print/WhatsApp icons (redundant with bottom action bar).
+          Added: UserIcon (header right) — navigates to PartyDetail if invoice has partyId. */}
       <div className="flex items-center gap-2 action-buttons">
         <button
           onClick={() => setSelectedInvoiceId(null)}
@@ -193,15 +215,23 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h2 className="text-base font-semibold flex-1">{invoice.invoiceNumber}</h2>
-        <button onClick={handleWhatsAppShare} className="w-10 h-10 rounded-full hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center justify-center text-emerald-600" aria-label="Share on WhatsApp">
-          <MessageCircle className="w-4 h-4" />
-        </button>
-        <button onClick={handleShare} className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center" aria-label="Share">
-          <Share2 className="w-4 h-4" />
-        </button>
-        <button onClick={handlePrint} className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center" aria-label="Print">
-          <Printer className="w-4 h-4" />
-        </button>
+        {/* §3: Customer Profile link — only if invoice is linked to a saved Party */}
+        {invoice.partyId && (
+          <button
+            onClick={() => {
+              // Navigate to PartyDetail screen with the party's ID
+              setSelectedInvoiceId(null) // close invoice preview
+              setSelectedPartyId(invoice.partyId!) // open party detail
+              setActiveView('khata')
+            }}
+            className="w-10 h-10 rounded-full hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center justify-center text-emerald-600 transition-colors"
+            aria-label="View customer profile"
+            title="View customer profile"
+          >
+            <User className="w-5 h-5" />
+          </button>
+        )}
+        {/* Walk-in customer (no partyId) → show nothing in header */}
       </div>
 
       {/* Premium Invoice — print area */}
@@ -269,7 +299,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
               </tr>
             </thead>
             <tbody>
-              {invoice.items?.map((it, i) => (
+              {safeItems.map((it, i) => (
                 <tr key={it.id} className={i % 2 === 1 ? 'bg-muted/40' : ''}>
                   <td className="py-2.5 text-center text-[11px] text-muted-foreground tabular">{i + 1}</td>
                   <td className="py-2.5 text-left">{it.name}</td>
@@ -295,15 +325,15 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
         <div className="px-5 py-4 border-t-2 border-dashed border-gray-400 bg-muted/30 space-y-1.5 text-sm">
           <div className="flex justify-between">
             <span className="text-muted-foreground">{t('bill.subtotal')}</span>
-            <span className="tabular">{formatCurrency(invoice.subtotal, currency)}</span>
+            <span className="tabular">{formatCurrency(safeSubtotal, currency)}</span>
           </div>
-          {invoice.discountAmount > 0 && (
+          {safeDiscountAmount > 0 && (
             <div className="flex justify-between text-red-600">
-              <span>{t('bill.discount')} {invoice.discountMode === 'percent' ? `(${invoice.discountValue}%)` : ''}</span>
-              <span className="tabular">-{formatCurrency(invoice.discountAmount, currency)}</span>
+              <span>{t('bill.discount')} {invoice.discountMode === 'percent' ? `(${safeDiscountValue}%)` : ''}</span>
+              <span className="tabular">-{formatCurrency(safeDiscountAmount, currency)}</span>
             </div>
           )}
-          {invoice.gstAmount > 0 && (
+          {safeGstAmount > 0 && (
             <>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">CGST</span>
@@ -317,18 +347,18 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           )}
           <div className="flex justify-between pt-2 border-t border-dashed border-gray-300">
             <span className="font-bold">{t('bill.grandTotal')}</span>
-            <span className="font-bold tabular text-primary text-lg">{formatCurrency(invoice.grandTotal, currency)}</span>
+            <span className="font-bold tabular text-primary text-lg">{formatCurrency(safeGrandTotal, currency)}</span>
           </div>
           {/* §2: Payment Mode label */}
           <div className="flex justify-between pt-1">
             <span className="text-muted-foreground">Paid {invoice.paymentMode ? `via ${invoice.paymentMode.toUpperCase()}` : ''}</span>
-            <span className="tabular text-emerald-600">{formatCurrency(invoice.amountPaid, currency)}</span>
+            <span className="tabular text-emerald-600">{formatCurrency(safeAmountPaid, currency)}</span>
           </div>
           {/* §2: Due row in red — explicitly below Paid */}
-          {invoice.amountDue > 0 && (
+          {safeAmountDue > 0 && (
             <div className="flex justify-between">
               <span className="font-bold text-red-600">Due</span>
-              <span className="tabular font-bold text-red-600">{formatCurrency(invoice.amountDue, currency)}</span>
+              <span className="tabular font-bold text-red-600">{formatCurrency(safeAmountDue, currency)}</span>
             </div>
           )}
           {/* §2: Amount in Words */}
@@ -343,12 +373,12 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
             <div className="flex justify-between">
               <span className="text-muted-foreground">{mopLabel}:</span>
-              <span className="tabular font-medium">{formatCurrency(invoice.amountPaid, currency)}</span>
+              <span className="tabular font-medium">{formatCurrency(safeAmountPaid, currency)}</span>
             </div>
-            {invoice.amountDue > 0 && (
+            {safeAmountDue > 0 && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Credit:</span>
-                <span className="tabular font-medium text-red-600">{formatCurrency(invoice.amountDue, currency)}</span>
+                <span className="tabular font-medium text-red-600">{formatCurrency(safeAmountDue, currency)}</span>
               </div>
             )}
           </div>
@@ -359,7 +389,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
         </div>
 
         {/* §5: GST Summary Table — grouped by rate */}
-        {invoice.gstAmount > 0 && Object.keys(gstGroups).length > 0 && (
+        {safeGstAmount > 0 && Object.keys(gstGroups).length > 0 && (
           <div className="px-5 py-3 border-t border-border">
             <p className="text-[10px] uppercase text-muted-foreground font-medium mb-2">GST Summary</p>
             <table className="w-full text-[10px]">
@@ -383,7 +413,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
                 {/* Total row */}
                 <tr className="font-bold">
                   <td className="py-1 text-left">Total</td>
-                  <td className="py-1 text-right tabular">{formatCurrency(invoice.subtotal, currency)}</td>
+                  <td className="py-1 text-right tabular">{formatCurrency(safeSubtotal, currency)}</td>
                   <td className="py-1 text-right tabular">{formatCurrency(cgstAmount, currency)}</td>
                   <td className="py-1 text-right tabular">{formatCurrency(sgstAmount, currency)}</td>
                 </tr>
