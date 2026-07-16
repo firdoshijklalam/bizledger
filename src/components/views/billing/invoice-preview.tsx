@@ -21,6 +21,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   const [capturing, setCapturing] = useState(false)
   const [showKebabMenu, setShowKebabMenu] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [updatingStatus, setUpdatingStatus] = useState(false)
 
   // §1: Loading state — show spinner while fetching
   if (loading) {
@@ -234,7 +235,6 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   })
 
   // §3: Fulfillment status — check if pickup pending
-  const [updatingStatus, setUpdatingStatus] = useState(false)
   const isPickupPending = (invoice as any).deliveryStatus === 'pickup'
 
   const handleMarkHandedOver = async () => {
