@@ -188,15 +188,27 @@ export function SalePadView() {
   const { data: parties } = useFetch<Party[]>('/api/parties?type=customer', [])
 
   // §1: Cart state from GLOBAL store — persists across screen navigations
-  const { carts, setStoreCarts, setActiveCartId: setStoreCartId, updateActiveCart, resetCart, clearBillingState,
-    discountMode: storeDiscountMode, setDiscountMode: setStoreDiscountMode,
-    discountValue: storeDiscountValue, setDiscountValue: setStoreDiscountValue,
-    deliveryCharge: storeDeliveryCharge, setDeliveryCharge: setStoreDeliveryCharge,
-    fulfillmentStatus: storeFulfillmentStatus, setFulfillmentStatus: setStoreFulfillmentStatus,
-    splitCash: storeSplitCash, setSplitCash: setStoreSplitCash,
-    splitUpi: storeSplitUpi, setSplitUpi: setStoreSplitUpi,
-    splitChequeNo: storeSplitChequeNo, setSplitChequeNo: setStoreSplitChequeNo,
-  } = useCartStore()
+  // Use individual selectors for proper reactivity
+  const carts = useCartStore(s => s.carts)
+  const setStoreCarts = useCartStore(s => s.setCarts)
+  const setStoreCartId = useCartStore(s => s.setActiveCartId)
+  const updateActiveCart = useCartStore(s => s.updateActiveCart)
+  const resetCart = useCartStore(s => s.resetCart)
+  const clearBillingState = useCartStore(s => s.clearBillingState)
+  const storeDiscountMode = useCartStore(s => s.discountMode)
+  const setStoreDiscountMode = useCartStore(s => s.setDiscountMode)
+  const storeDiscountValue = useCartStore(s => s.discountValue)
+  const setStoreDiscountValue = useCartStore(s => s.setDiscountValue)
+  const storeDeliveryCharge = useCartStore(s => s.deliveryCharge)
+  const setStoreDeliveryCharge = useCartStore(s => s.setDeliveryCharge)
+  const storeFulfillmentStatus = useCartStore(s => s.fulfillmentStatus)
+  const setStoreFulfillmentStatus = useCartStore(s => s.setFulfillmentStatus)
+  const storeSplitCash = useCartStore(s => s.splitCash)
+  const setStoreSplitCash = useCartStore(s => s.setSplitCash)
+  const storeSplitUpi = useCartStore(s => s.splitUpi)
+  const setStoreSplitUpi = useCartStore(s => s.setSplitUpi)
+  const storeSplitChequeNo = useCartStore(s => s.splitChequeNo)
+  const setStoreSplitChequeNo = useCartStore(s => s.setSplitChequeNo)
   const activeCartId = useCartStore(s => s.activeCartId)
   const activeCart = carts.find((c) => c.id === activeCartId) || carts[0]
 
