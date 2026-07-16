@@ -1,6 +1,7 @@
 'use client'
 
 import { useAppStore } from '@/store/app-store'
+import { useCartStore, type CartItem, type HeldCart, type PaymentMode, type SaleMode } from '@/store/cart-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
 import type { Product, Party } from '@/lib/types'
@@ -24,36 +25,7 @@ import { useGateTrigger } from '@/store/biometric-gate-store'
 import { useSoundBox } from '@/hooks/use-sound-box'
 import { PartyForm } from './khata/party-form'
 
-interface CartItem {
-  cartKey: string
-  productId: string
-  name: string
-  unit: string
-  price: number
-  quantity: number
-  qtyStr: string
-  total: number
-  manualOverride: boolean
-  gstRate: number // product-level GST rate (0, 5, 12, 18, 28)
-  mrp: number // bulk MRP from inventory
-  retailMrp: number // retail per-unit MRP
-  itemGstEnabled: boolean // §2: per-item GST toggle (ON)
-  itemGstRate: number // §2: per-item custom GST %
-  itemGstManuallyDisabled: boolean // §2: user explicitly turned GST OFF for this item
-  itemMode: SaleMode // §1: mode locked at cart-item creation time — prevents MRP leakage
-}
-
-type PaymentMode = 'cash' | 'upi' | 'credit' | 'cheque'
-type SaleMode = 'retail' | 'full' | 'wholesale'
-
-// PRD Part 39 §3: Multi-Cart Hold Protocol — each person gets their own held cart
-interface HeldCart {
-  id: number
-  label: string
-  items: CartItem[]
-  customer: Party | null
-  paymentMode: PaymentMode
-}
+// §1: Types moved to cart-store.ts — imported above
 
 // §1: Memoized CartRow — prevents full-list re-render when single item changes
 interface CartRowProps {
@@ -215,11 +187,17 @@ export function SalePadView() {
   const { data: products } = useFetch<Product[]>('/api/products', [])
   const { data: parties } = useFetch<Party[]>('/api/parties?type=customer', [])
 
-  // §3: Multi-Cart Hold Protocol — পার্সন ১, ২, ৩, +
-  const [carts, setCarts] = useState<HeldCart[]>([
-    { id: 1, label: 'পার্সন ১', items: [], customer: null, paymentMode: 'cash' },
-  ])
-  const [activeCartId, setActiveCartId] = useState(1)
+  // §1: Cart state from GLOBAL store — persists across screen navigations
+  const { carts, setStoreCarts, setActiveCartId: setStoreCartId, updateActiveCart, resetCart, clearBillingState,
+    discountMode: storeDiscountMode, setDiscountMode: setStoreDiscountMode,
+    discountValue: storeDiscountValue, setDiscountValue: setStoreDiscountValue,
+    deliveryCharge: storeDeliveryCharge, setDeliveryCharge: setStoreDeliveryCharge,
+    fulfillmentStatus: storeFulfillmentStatus, setFulfillmentStatus: setStoreFulfillmentStatus,
+    splitCash: storeSplitCash, setSplitCash: setStoreSplitCash,
+    splitUpi: storeSplitUpi, setSplitUpi: setStoreSplitUpi,
+    splitChequeNo: storeSplitChequeNo, setSplitChequeNo: setStoreSplitChequeNo,
+  } = useCartStore()
+  const activeCartId = useCartStore(s => s.activeCartId)
   const activeCart = carts.find((c) => c.id === activeCartId) || carts[0]
 
   // §2: Sale mode — খুচরো / আস্ত / পাইকারি (wholesale PIN-gated)
@@ -242,22 +220,25 @@ export function SalePadView() {
   // §2: Animated credit gate — slide-in customer prompt above footer
   const [showCreditGate, setShowCreditGate] = useState(false)
 
-  // §4: Discount with % / ₹ toggle + live Grand Total
-  const [discountMode, setDiscountMode] = useState<'flat' | 'percent'>('flat')
-  const [discountValue, setDiscountValue] = useState('')
+  // §4: Discount from global store + live Grand Total
+  const discountMode = storeDiscountMode
+  const setDiscountMode = setStoreDiscountMode
+  const discountValue = storeDiscountValue
+  const setDiscountValue = setStoreDiscountValue
   // §3: Global GST override (Advanced Options) — individual product GSTs apply behind the scenes
   const [globalGstRate, setGlobalGstRate] = useState('')
   // §3: Master GST On/Off toggle — if ON, apply database-defined product taxes. If OFF, bypass all.
   const [masterGstOn, setMasterGstOn] = useState(true)
-  // §1: Delivery/Shipping Charge — added to final Actual Price
-  const [deliveryCharge, setDeliveryCharge] = useState('')
+  // §1: Delivery/Shipping Charge from global store
+  const deliveryCharge = storeDeliveryCharge
+  const setDeliveryCharge = setStoreDeliveryCharge
 
   const currency = business?.currency || 'INR'
 
   // ---- Cart helpers (operate on the active held cart) ----
-  const updateActiveCart = useCallback((updater: (c: HeldCart) => HeldCart) => {
-    setCarts((prev) => prev.map((c) => (c.id === activeCartId ? updater(c) : c)))
-  }, [activeCartId])
+  const updateActiveCartCb = useCallback((updater: (c: HeldCart) => HeldCart) => {
+    updateActiveCart(updater)
+  }, [updateActiveCart])
 
   const cart = activeCart.items
   const customer = activeCart.customer
@@ -272,18 +253,22 @@ export function SalePadView() {
     }
   }, [customer, showCreditGate])
 
-  const setCart = (items: CartItem[]) => updateActiveCart((c) => ({ ...c, items }))
-  const setCustomer = (p: Party | null) => updateActiveCart((c) => ({ ...c, customer: p }))
-  const setPaymentMode = (m: PaymentMode) => updateActiveCart((c) => ({ ...c, paymentMode: m }))
+  const setCart = (items: CartItem[]) => updateActiveCartCb((c) => ({ ...c, items }))
+  const setCustomer = (p: Party | null) => updateActiveCartCb((c) => ({ ...c, customer: p }))
+  const setPaymentMode = (m: PaymentMode) => updateActiveCartCb((c) => ({ ...c, paymentMode: m }))
 
   const [chequeNo, setChequeNo] = useState('')
-  // §5: Fulfillment status — Handled Over / Pick Up Later
-  const [fulfillmentStatus, setFulfillmentStatus] = useState<'handed' | 'pickup'>('handed')
-  // §1: Multi-mode split payment — simultaneous inputs across modes
-  const [splitCash, setSplitCash] = useState('')
-  const [splitUpi, setSplitUpi] = useState('')
-  const [splitCredit, setSplitCredit] = useState('')
-  const [splitChequeNo, setSplitChequeNo] = useState('')
+  // §5: Fulfillment status from global store
+  const fulfillmentStatus = storeFulfillmentStatus
+  const setFulfillmentStatus = setStoreFulfillmentStatus
+  // §1: Split payment from global store
+  const splitCash = storeSplitCash
+  const setSplitCash = setStoreSplitCash
+  const splitUpi = storeSplitUpi
+  const setSplitUpi = setStoreSplitUpi
+  const splitCredit = ''
+  const splitChequeNo = storeSplitChequeNo
+  const setSplitChequeNo = setStoreSplitChequeNo
   // §2: Sub-categories — dynamically derived from products based on selected main category
   const subCategories = useMemo(() => {
     if (!products) return ['All']
@@ -610,8 +595,8 @@ export function SalePadView() {
       customer: null,
       paymentMode: 'cash',
     }
-    setCarts([...carts, newCart])
-    setActiveCartId(nextId)
+    setStoreCarts([...carts, newCart])
+    setStoreCartId(nextId)
     setDiscountValue(''); setDeliveryCharge('')
     toast.success(`${newCart.label} এর জন্য নতুন কার্ট খোলা হলো`, {
       description: 'আগের কার্ট হোল্ড করা আছে',
@@ -620,7 +605,7 @@ export function SalePadView() {
 
   const switchCart = (id: number) => {
     if (id === activeCartId) return
-    setActiveCartId(id)
+    setStoreCartId(id)
     setDiscountValue(''); setDeliveryCharge('')
     toast(`কার্ট সুইচ হলো`, { description: carts.find((c) => c.id === id)?.label })
   }
@@ -643,8 +628,8 @@ export function SalePadView() {
       return
     }
     const newCarts = carts.filter((c) => c.id !== id)
-    setCarts(newCarts)
-    if (activeCartId === id) setActiveCartId(newCarts[0].id)
+    setStoreCarts(newCarts)
+    if (activeCartId === id) setStoreCartId(newCarts[0].id)
     setClosePromptCartId(null)
   }
 
@@ -672,9 +657,9 @@ export function SalePadView() {
   const restoreFromHeldQueue = (id: number) => {
     const target = heldQueue.find((c) => c.id === id)
     if (!target) return
-    setCarts([...carts, target])
+    setStoreCarts([...carts, target])
     setHeldQueue(heldQueue.filter((c) => c.id !== id))
-    setActiveCartId(id)
+    setStoreCartId(id)
     setShowHeldQueue(false)
     toast.success(`${target.customer?.name || target.label} পুনরুদ্ধার করা হয়েছে`)
   }
