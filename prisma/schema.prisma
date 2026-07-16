@@ -262,6 +262,8 @@ model Invoice {
   collectedByRole String? // family | partner | agent | primary
   paidToName      String? // e.g. "Partner - Amit" (when paid to supplier partner)
   paidToRole      String? // partner | agent | primary
+  // §3: Fulfillment status — handed | pickup (for "Pick Up Later" orders)
+  deliveryStatus  String?  @default("handed") // handed | pickup
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
