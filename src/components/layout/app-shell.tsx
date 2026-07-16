@@ -209,22 +209,9 @@ export function AppShell() {
       <FloatingKeyboardMic />
       <FloatingInvoiceModal />
 
-      {/* §2: Global overlay for Party/Invoice details — opens above current view
-          WITHOUT switching tabs. Preserves dashboard scroll state. */}
-      <AnimatePresence>
-        {overlayPartyId && (
-          <motion.div
-            key="overlay-party"
-            initial={{ opacity: 0, x: 30 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 30 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed inset-0 z-[70] bg-background overflow-y-auto"
-          >
-            <PartyDetail partyId={overlayPartyId} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* §2: Global overlay stack — Invoice overlay (z-70) below Party overlay (z-80).
+          This creates a proper push stack: Dashboard → Invoice → Party Profile.
+          Back from Party → returns to Invoice. Back from Invoice → returns to Dashboard. */}
       <AnimatePresence>
         {overlayInvoiceId && (
           <motion.div
@@ -236,6 +223,20 @@ export function AppShell() {
             className="fixed inset-0 z-[70] bg-background overflow-y-auto"
           >
             <InvoicePreview invoiceId={overlayInvoiceId} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {overlayPartyId && (
+          <motion.div
+            key="overlay-party"
+            initial={{ opacity: 0, x: 30 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 30 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            className="fixed inset-0 z-[80] bg-background overflow-y-auto"
+          >
+            <PartyDetail partyId={overlayPartyId} />
           </motion.div>
         )}
       </AnimatePresence>

@@ -14,7 +14,7 @@ import { toPng } from 'html-to-image'
 import { apiDelete } from '@/hooks/use-fetch'
 
 export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
-  const { setSelectedInvoiceId, business, setSelectedPartyId, setActiveView, overlayInvoiceId, setOverlayInvoiceId } = useAppStore()
+  const { setSelectedInvoiceId, business, setSelectedPartyId, setActiveView, overlayInvoiceId, setOverlayInvoiceId, setOverlayPartyId } = useAppStore()
   const { t } = useI18n()
   const { data: invoice, loading, error } = useFetch<Invoice>(`/api/invoices/${invoiceId}`, [invoiceId])
   const printRef = useRef<HTMLDivElement>(null)
@@ -254,13 +254,14 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
         </button>
         <h2 className="text-base font-semibold flex-1">{invoice.invoiceNumber}</h2>
         <div className="flex items-center gap-1">
-          {/* Customer Profile — only if linked to a saved Party */}
+          {/* Customer Profile — only if linked to a saved Party.
+              §1: Uses overlay (push) instead of tab switch. Profile slides OVER invoice.
+              Back from profile → returns to invoice → back from invoice → returns to dashboard. */}
           {invoice.partyId && (
             <button
               onClick={() => {
-                setSelectedInvoiceId(null)
-                setSelectedPartyId(invoice.partyId!)
-                setActiveView('khata')
+                // §1: Push party overlay ON TOP of invoice overlay — no tab switch
+                setOverlayPartyId(invoice.partyId!)
               }}
               className="w-9 h-9 rounded-full hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center justify-center text-emerald-600 transition-colors"
               aria-label="View customer profile"

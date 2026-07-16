@@ -37,7 +37,7 @@ interface PartyDetailData extends Party {
 }
 
 export function PartyDetail({ partyId }: { partyId: string }) {
-  const { setSelectedPartyId, setActiveView, setShowInvoiceForm, business, setSelectedInvoiceId, setEditingPartyId, editingPartyId, returnToView, setReturnToView, overlayPartyId, setOverlayPartyId } = useAppStore()
+  const { setSelectedPartyId, setActiveView, setShowInvoiceForm, business, setSelectedInvoiceId, setEditingPartyId, editingPartyId, returnToView, setReturnToView, overlayPartyId, setOverlayPartyId, setOverlayInvoiceId } = useAppStore()
   const { t } = useI18n()
   const { data, loading, error, refetch } = useFetch<PartyDetailData>(`/api/parties/${partyId}`, [partyId])
   const [showTxn, setShowTxn] = useState(false)
@@ -417,7 +417,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
             {data.invoices.map((inv) => (
               <button
                 key={inv.id}
-                onClick={() => { setSelectedInvoiceId(inv.id); setActiveView('billing') }}
+                onClick={() => { setOverlayInvoiceId(inv.id) }}
                 className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 text-left"
               >
                 <Receipt className="w-4 h-4 text-muted-foreground shrink-0" />
