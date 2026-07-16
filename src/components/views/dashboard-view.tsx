@@ -526,7 +526,7 @@ export function DashboardView() {
                 {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').slice(0, topExpanded ? 10 : 4).map((d) => {
                   const meta = GRADE_META[d.grade]
                   return (
-                    <button key={d.id} onClick={() => { setReturnToView('dashboard'); saveScrollAndOpenParty(d.id); setActiveView('khata') }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted text-left">
+                    <button key={d.id} onClick={() => { saveScrollAndOpenParty(d.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted text-left">
                       <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-xs font-bold text-red-600">!</div>
                       <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
                       <div className="text-right"><p className="text-sm font-semibold tabular text-red-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>
