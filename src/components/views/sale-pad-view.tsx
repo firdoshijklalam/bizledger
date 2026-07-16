@@ -731,6 +731,7 @@ export function SalePadView() {
         paymentMode,
         type: 'retail',
         amountPaid,
+        deliveryStatus: fulfillmentStatus,
       })
       // §2: If ledger due > 0 and customer is selected, auto-route remainder to debt ledger
       if (ledgerDue > 0 && customer) {

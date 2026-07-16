@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
-import { apiDelete } from '@/hooks/use-fetch'
+import { apiDelete, apiPut } from '@/hooks/use-fetch'
 
 export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   const { setSelectedInvoiceId, business, setSelectedPartyId, setActiveView, overlayInvoiceId, setOverlayInvoiceId, setOverlayPartyId } = useAppStore()
@@ -233,12 +233,49 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
     gstGroups[rate].sgst += (itemTotal * rate) / 200
   })
 
+  // §3: Fulfillment status — check if pickup pending
+  const isPickupPending = (invoice as any).deliveryStatus === 'pickup'
+  const [updatingStatus, setUpdatingStatus] = useState(false)
+
+  const handleMarkHandedOver = async () => {
+    setUpdatingStatus(true)
+    try {
+      await apiPut(`/api/invoices/${invoice.id}`, { deliveryStatus: 'handed' })
+      toast.success('মাল বুঝিয়ে দেওয়া হয়েছে ✓')
+      // Update local state
+      ;(invoice as any).deliveryStatus = 'handed'
+      // Force re-render
+      window.location.reload()
+    } catch (e) {
+      toast.error('আপডেট ব্যর্থ')
+    } finally {
+      setUpdatingStatus(false)
+    }
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       className="space-y-4"
     >
+      {/* §3: Pickup Pending banner — prominent button to mark as handed over */}
+      {isPickupPending && (
+        <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-400 flex items-center gap-3">
+          <span className="text-2xl">📦</span>
+          <div className="flex-1">
+            <p className="text-sm font-bold text-amber-700 dark:text-amber-300">Pick Up Later — মাল এখনও দোকানে আছে</p>
+            <p className="text-[11px] text-amber-600 dark:text-amber-400">গ্রাহক মাল বুঝে নিলে আপডেট করুন</p>
+          </div>
+          <Button
+            onClick={handleMarkHandedOver}
+            disabled={updatingStatus}
+            className="h-10 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shrink-0"
+          >
+            {updatingStatus ? '⏳' : '✓ বুঝিয়ে দিন'}
+          </Button>
+        </div>
+      )}
       {/* §1 Header — Back + invoice number + Profile icon + Kebab menu */}
       <div className="flex items-center gap-2 action-buttons relative">
         <button
