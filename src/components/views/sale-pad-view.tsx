@@ -2,6 +2,7 @@
 
 import { useAppStore } from '@/store/app-store'
 import { useCartStore, type CartItem, type HeldCart, type PaymentMode, type SaleMode } from '@/store/cart-store'
+import { useBillingStore } from '@/store/billing-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
 import type { Product, Party } from '@/lib/types'
@@ -255,6 +256,31 @@ export function SalePadView() {
   const cart = activeCart.items
   const customer = activeCart.customer
   const paymentMode = activeCart.paymentMode
+
+  // §1: Sync active cart to billing store so Billing tab shows draft with customer name
+  const { tabs: billingTabs, updateTab: updateBillingTab, addTab: addBillingTab } = useBillingStore()
+  useEffect(() => {
+    if (cart.length === 0) return // Don't sync empty carts
+    // Find or create a billing tab for this cart
+    const existingTab = billingTabs.find((t) => t.hasDraft && t.customerId === customer?.id)
+    const tabId = existingTab?.id || billingTabs[0]?.id
+    if (!tabId) return
+    updateBillingTab(tabId, {
+      hasDraft: true,
+      customerId: customer?.id,
+      customerName: customer?.name,
+      items: cart.map((i) => ({
+        productId: i.productId,
+        name: i.name,
+        quantity: i.quantity,
+        unitPrice: i.price,
+        gstRate: i.gstRate,
+        discount: 0,
+        total: i.total,
+      })),
+      paymentMode,
+    })
+  }, [cart, customer, paymentMode])
 
   // §2: Reactive dismissal — auto-hide red warning when customer is selected
   // Placed AFTER customer is defined to avoid TDZ issues
