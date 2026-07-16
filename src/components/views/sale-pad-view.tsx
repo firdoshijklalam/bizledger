@@ -12,7 +12,7 @@ import {
   ShoppingBag, Package, Plus, Minus, Trash2, UserPlus, Receipt, AlertTriangle,
   Store, Boxes, CheckCircle2, X, Wallet, QrCode, CreditCard, FileCheck,
   ChevronLeft, ChevronRight, Calculator, Lock, Eye, EyeOff, ShieldCheck,
-  Users, BadgePercent, Layers, Share2,
+  Users, BadgePercent, Layers, Share2, ArrowLeft,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -258,12 +258,11 @@ export function SalePadView() {
   const paymentMode = activeCart.paymentMode
 
   // §1: Sync active cart to billing store so Billing tab shows draft with customer name
-  const { tabs: billingTabs, updateTab: updateBillingTab, addTab: addBillingTab } = useBillingStore()
+  const { tabs: billingTabs, updateTab: updateBillingTab } = useBillingStore()
   useEffect(() => {
     if (cart.length === 0) return // Don't sync empty carts
-    // Find or create a billing tab for this cart
-    const existingTab = billingTabs.find((t) => t.hasDraft && t.customerId === customer?.id)
-    const tabId = existingTab?.id || billingTabs[0]?.id
+    // Use the first billing tab as the draft holder
+    const tabId = billingTabs[0]?.id
     if (!tabId) return
     updateBillingTab(tabId, {
       hasDraft: true,
@@ -901,6 +900,18 @@ export function SalePadView() {
 
   return (
     <div className="space-y-4 pb-4">
+      {/* §1: Back button → goes to Billing page (not dashboard) */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => useAppStore.getState().setActiveView('billing')}
+          className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center shrink-0"
+          aria-label="Back to Billing"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <h2 className="text-base font-semibold flex-1">Quick Sale</h2>
+      </div>
+
       {/* §1: Customer Input Bar — pinned to absolute TOP of Quick Sale */}
       <div className="flex items-center gap-2">
         <button
