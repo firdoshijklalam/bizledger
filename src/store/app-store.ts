@@ -85,6 +85,13 @@ interface AppState {
   // Return-to-view for back navigation (PRD Part 5 §3)
   returnToView: ViewId | null
   setReturnToView: (view: ViewId | null) => void
+
+  // §2: Global overlay — party detail / invoice preview can open as overlay
+  // above the current view without switching tabs. Preserves scroll state.
+  overlayPartyId: string | null
+  setOverlayPartyId: (id: string | null) => void
+  overlayInvoiceId: string | null
+  setOverlayInvoiceId: (id: string | null) => void
 }
 
 export const useAppStore = create<AppState>()((set, get) => ({
@@ -170,4 +177,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   returnToView: null,
   setReturnToView: (view) => set({ returnToView: view }),
+
+  overlayPartyId: null,
+  setOverlayPartyId: (id) => set({ overlayPartyId: id }),
+  overlayInvoiceId: null,
+  setOverlayInvoiceId: (id) => set({ overlayInvoiceId: id }),
 }))

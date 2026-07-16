@@ -14,7 +14,7 @@ import { toPng } from 'html-to-image'
 import { apiDelete } from '@/hooks/use-fetch'
 
 export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
-  const { setSelectedInvoiceId, business, setSelectedPartyId, setActiveView } = useAppStore()
+  const { setSelectedInvoiceId, business, setSelectedPartyId, setActiveView, overlayInvoiceId, setOverlayInvoiceId } = useAppStore()
   const { t } = useI18n()
   const { data: invoice, loading, error } = useFetch<Invoice>(`/api/invoices/${invoiceId}`, [invoiceId])
   const printRef = useRef<HTMLDivElement>(null)
@@ -242,7 +242,11 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
       {/* §1 Header — Back + invoice number + Profile icon + Kebab menu */}
       <div className="flex items-center gap-2 action-buttons relative">
         <button
-          onClick={() => setSelectedInvoiceId(null)}
+          onClick={() => {
+            // §2: If opened as overlay, close overlay (preserves underlying view + scroll)
+            if (overlayInvoiceId) { setOverlayInvoiceId(null); return }
+            setSelectedInvoiceId(null)
+          }}
           className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center"
           aria-label="Back"
         >

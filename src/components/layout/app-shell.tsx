@@ -32,6 +32,8 @@ import { FloatingCustomerWidget } from '@/components/shared/floating-customer-wi
 import { ExternalScannerSimulator } from '@/components/shared/external-scanner-simulator'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
+import { PartyDetail } from '@/components/views/khata/party-detail'
+import { InvoicePreview } from '@/components/views/billing/invoice-preview'
 
 export function AppShell() {
   const {
@@ -40,6 +42,10 @@ export function AppShell() {
     setBusiness,
     businessLoaded,
     setBusinessLoaded,
+    overlayPartyId,
+    setOverlayPartyId,
+    overlayInvoiceId,
+    setOverlayInvoiceId,
   } = useAppStore()
   const { setLanguage } = useI18n()
   const [paymentToken, setPaymentToken] = useState<string | null>(() => { if (typeof window === 'undefined') return null; return new URLSearchParams(window.location.search).get('payment') })
@@ -202,6 +208,38 @@ export function AppShell() {
       <SearchOverlay />
       <FloatingKeyboardMic />
       <FloatingInvoiceModal />
+
+      {/* §2: Global overlay for Party/Invoice details — opens above current view
+          WITHOUT switching tabs. Preserves dashboard scroll state. */}
+      <AnimatePresence>
+        {overlayPartyId && (
+          <motion.div
+            key="overlay-party"
+            initial={{ opacity: 0, x: 30 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 30 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            className="fixed inset-0 z-[70] bg-background overflow-y-auto"
+          >
+            <PartyDetail partyId={overlayPartyId} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {overlayInvoiceId && (
+          <motion.div
+            key="overlay-invoice"
+            initial={{ opacity: 0, x: 30 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 30 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            className="fixed inset-0 z-[70] bg-background overflow-y-auto"
+          >
+            <InvoicePreview invoiceId={overlayInvoiceId} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* PRD Part 32: Biometric ecosystem — global overlays */}
       <BiometricGateModal />
       <FloatingCustomerWidget />

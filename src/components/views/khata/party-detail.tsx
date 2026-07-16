@@ -37,7 +37,7 @@ interface PartyDetailData extends Party {
 }
 
 export function PartyDetail({ partyId }: { partyId: string }) {
-  const { setSelectedPartyId, setActiveView, setShowInvoiceForm, business, setSelectedInvoiceId, setEditingPartyId, editingPartyId, returnToView, setReturnToView } = useAppStore()
+  const { setSelectedPartyId, setActiveView, setShowInvoiceForm, business, setSelectedInvoiceId, setEditingPartyId, editingPartyId, returnToView, setReturnToView, overlayPartyId, setOverlayPartyId } = useAppStore()
   const { t } = useI18n()
   const { data, loading, error, refetch } = useFetch<PartyDetailData>(`/api/parties/${partyId}`, [partyId])
   const [showTxn, setShowTxn] = useState(false)
@@ -53,6 +53,11 @@ export function PartyDetail({ partyId }: { partyId: string }) {
   // PRD Part 7 §3: restore scroll on back button (party detail → khata)
   const { restore: restoreScrollPos } = useScrollStore()
   const handleBack = () => {
+    // §2: If opened as overlay, close overlay (preserves underlying view + scroll)
+    if (overlayPartyId) {
+      setOverlayPartyId(null)
+      return
+    }
     if (returnToView) {
       setActiveView(returnToView)
       setReturnToView(null)

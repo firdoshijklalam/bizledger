@@ -49,7 +49,7 @@ const TIME_RANGES: Array<{ id: TimeRange; label: string }> = [
 const PIE_COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6']
 
 export function DashboardView() {
-  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView } = useAppStore()
+  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId } = useAppStore()
   const { t } = useI18n()
   const [chartType, setChartType] = useState<ChartType>('revenue')
   const [chartView, setChartView] = useState<ChartView>('line')
@@ -80,7 +80,8 @@ export function DashboardView() {
   // PRD Part 7 §3: helper that saves scroll synchronously before navigating to party detail
   const saveScrollAndOpenParty = (partyId: string) => {
     saveScrollPos('dashboard')
-    setSelectedPartyId(partyId)
+    // §2: Open as overlay — preserves dashboard scroll, no tab switch
+    setOverlayPartyId(partyId)
   }
 
   const apiUrl = useMemo(() => {
@@ -397,7 +398,7 @@ export function DashboardView() {
                     <>
                       <p className="text-xs text-muted-foreground px-1 mb-2">{count} customer{count !== 1 ? 's' : ''} in this grade</p>
                       {data.topDebtors.filter((d) => d.grade === selectedGrade).map((d) => (
-                        <button key={d.id} onClick={() => { saveScrollPos('dashboard'); setSelectedGrade(null); setReturnToView('dashboard'); setSelectedPartyId(d.id); setActiveView('khata') }} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
+                        <button key={d.id} onClick={() => { saveScrollPos('dashboard'); setSelectedGrade(null); setOverlayPartyId(d.id) }} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
                           <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center font-bold text-emerald-700">{d.name.charAt(0)}</span>
                           <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">Balance: ₹{d.balance}</p></div>
                           <ChevronRight className="w-4 h-4 text-muted-foreground" />
@@ -446,7 +447,7 @@ export function DashboardView() {
                 {data.topDebtors.slice(0, topExpanded ? 10 : 4).map((d) => {
                   const meta = GRADE_META[d.grade]
                   return (
-                    <button key={d.id} onClick={() => { setReturnToView('dashboard'); saveScrollAndOpenParty(d.id); setActiveView('khata') }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
+                    <button key={d.id} onClick={() => { saveScrollAndOpenParty(d.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
                       <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-xs font-bold">{d.name.charAt(0)}</div>
                       <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
                       <div className="text-right"><p className="text-sm font-semibold tabular text-emerald-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>
@@ -600,7 +601,7 @@ export function DashboardView() {
                 {data.recentTransactions.slice(0, hubExpanded ? 10 : 5).map((tx) => {
                   const isCredit = tx.type === 'credit'
                   return (
-                    <button key={tx.id} onClick={() => { saveScrollPos('dashboard'); saveScroll(); if (tx.invoiceId) { setSelectedInvoiceId(tx.invoiceId) } else if (tx.partyId) { setReturnToView('dashboard'); setSelectedPartyId(tx.partyId); setActiveView('khata') } }} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left">
+                    <button key={tx.id} onClick={() => { saveScrollPos('dashboard'); if (tx.invoiceId) { setOverlayInvoiceId(tx.invoiceId) } else if (tx.partyId) { setOverlayPartyId(tx.partyId) } }} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left">
                       <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isCredit ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>{isCredit ? <ArrowDownRight className="w-4 h-4 text-emerald-600" /> : <ArrowUpRight className="w-4 h-4 text-red-600" />}</span>
                       <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || tx.type}</p><p className="text-[11px] text-muted-foreground">{(tx as any)?.party?.name || "—"} · {timeAgo(tx.createdAt)}</p></div>
                       <span className={`text-sm font-semibold tabular shrink-0 ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>{isCredit ? '+' : '-'}{formatCurrency(tx.amount, currency)}</span>
