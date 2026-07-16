@@ -234,8 +234,8 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
   })
 
   // §3: Fulfillment status — check if pickup pending
-  const isPickupPending = (invoice as any).deliveryStatus === 'pickup'
   const [updatingStatus, setUpdatingStatus] = useState(false)
+  const isPickupPending = (invoice as any).deliveryStatus === 'pickup'
 
   const handleMarkHandedOver = async () => {
     setUpdatingStatus(true)
