@@ -234,29 +234,7 @@ export function SalePadView() {
   const [showCreditGate, setShowCreditGate] = useState(false)
 
   // §1: HIDDEN by default. Only shows when user interacts with Ledger Due or Pick Up Later.
-  // §3: Auto-hide when ledgerDue <= 0 AND fulfillmentStatus === 'handed'
-  // §3: Reappear when fulfillmentStatus === 'pickup' (regardless of due amount)
-  // §4: MUTUALLY EXCLUSIVE with red warning — if showCreditGate is true, blue box hides
   const [showInlineCustomer, setShowInlineCustomer] = useState(false)
-
-  // §3: State-driven auto-hide/show for blue customer block
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if (customer) {
-        setShowInlineCustomer(false)
-        return
-      }
-      if (fulfillmentStatus === 'pickup') {
-        setShowInlineCustomer(true)
-        return
-      }
-      if (ledgerDue <= 0 && fulfillmentStatus === 'handed') {
-        setShowInlineCustomer(false)
-        return
-      }
-    }, 0)
-    return () => clearTimeout(t)
-  }, [ledgerDue, fulfillmentStatus, customer])
 
   // §3: Hardware back button interception — same as UI back button
   useEffect(() => {
@@ -646,6 +624,26 @@ export function SalePadView() {
   const exchangeDifference = useMemo(() => totalPaidForExchange - roundedTotal, [totalPaidForExchange, roundedTotal])
   const isShortAmount = totalPaidForExchange < roundedTotal && totalPaidForExchange > 0
   const isChangeDue = totalPaidForExchange > roundedTotal
+
+  // §3: State-driven auto-hide/show for blue customer block.
+  // MUST be AFTER ledgerDue and fulfillmentStatus are defined (TDZ fix).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (customer) {
+        setShowInlineCustomer(false)
+        return
+      }
+      if (fulfillmentStatus === 'pickup') {
+        setShowInlineCustomer(true)
+        return
+      }
+      if (ledgerDue <= 0 && fulfillmentStatus === 'handed') {
+        setShowInlineCustomer(false)
+        return
+      }
+    }, 0)
+    return () => clearTimeout(t)
+  }, [ledgerDue, fulfillmentStatus, customer])
 
     // §3: Dynamic UPI Intent QR Code Generation
   // When PAYMENT MODE 'UPI' is clicked, generate a QR code embedding the UPI amount
