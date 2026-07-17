@@ -230,8 +230,10 @@ export function SalePadView() {
   const [activeCategory, setActiveCategory] = useState<string>('All')
   const [showCustPicker, setShowCustPicker] = useState(false)
   const [confirming, setConfirming] = useState(false)
-  // §2: Animated credit gate — slide-in customer prompt above footer
+  // §2: Animated credit gate — RED warning shown ONLY on final submit failure
   const [showCreditGate, setShowCreditGate] = useState(false)
+  // §1: Inline customer reveal — NEUTRAL block shown on Ledger Due / Pick Up Later interaction
+  const [showInlineCustomer, setShowInlineCustomer] = useState(false)
 
   // §3: Hardware back button interception — same as UI back button
   useEffect(() => {
@@ -301,14 +303,13 @@ export function SalePadView() {
     })
   }, [cart, customer, paymentMode])
 
-  // §2: Reactive dismissal — auto-hide red warning when customer is selected
-  // Placed AFTER customer is defined to avoid TDZ issues
+  // §2: Reactive dismissal — auto-hide warnings when customer is selected
   useEffect(() => {
-    if (customer && showCreditGate) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (customer) {
       setShowCreditGate(false)
+      setShowInlineCustomer(false)
     }
-  }, [customer, showCreditGate])
+  }, [customer])
 
   const setCart = (items: CartItem[]) => updateActiveCartCb((c) => ({ ...c, items }))
   const setCustomer = (p: Party | null) => updateActiveCartCb((c) => ({ ...c, customer: p }))
@@ -828,8 +829,8 @@ export function SalePadView() {
       toast.error('কার্ট খালি')
       return
     }
-    // §2: Hard-stop — block if Ledger Due > 0 AND Customer == null
-    if (ledgerDue > 0 && !customer) {
+    // §2: Hard-stop — block if Ledger Due > 0 OR Pick Up Later, AND Customer == null
+    if ((ledgerDue > 0 || fulfillmentStatus === 'pickup') && !customer) {
       setShowCreditGate(true)
       toast.error('বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক', {
         description: `খাতায় বাকি ₹${ledgerDue.toFixed(2)} — কাস্টমার ছাড়া ট্রানজেকশন নিষিদ্ধ`,
@@ -1592,7 +1593,7 @@ export function SalePadView() {
                   className="overflow-hidden"
                 >
                   <div
-                    onClick={() => { if (!customer) setShowCustPicker(true); }}
+                    onClick={() => { if (!customer) setShowInlineCustomer(true); }}
                     className={`p-3 mt-2 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-400/40 ${!customer ? 'cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-950/50' : ''}`}
                   >
                     <div className="flex items-center justify-between">
@@ -1604,10 +1605,7 @@ export function SalePadView() {
                       </span>
                     </div>
                     <p className="text-[10px] text-orange-600 mt-1">
-                      {!customer
-                        ? '👆 কাস্টমার নির্বাচন করতে এখানে ট্যাপ করুন'
-                        : 'সম্পন্ন হলে এই পরিমাণ কাস্টমারের খাতায় যুক্ত হবে'
-                      }
+                      সম্পন্ন হলে এই পরিমাণ কাস্টমারের খাতায় যুক্ত হবে
                     </p>
                   </div>
                 </motion.div>
@@ -1652,7 +1650,47 @@ export function SalePadView() {
               )}
             </AnimatePresence>
 
-            {/* §2: Animated Credit Gate — slide-in customer block above footer with shake */}
+            {/* §1: Inline customer reveal — NEUTRAL block (blue/gray, NOT red).
+                Shown when user taps Ledger Due or Pick Up Later without a customer.
+                Smoothly expands with animation. No warning text. */}
+            <AnimatePresence>
+              {showInlineCustomer && !customer && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0, y: 10 }}
+                  animate={{ opacity: 1, height: 'auto', y: 0 }}
+                  exit={{ opacity: 0, height: 0, y: 10 }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-3 p-3 rounded-xl border-2 border-blue-400/50 bg-blue-50 dark:bg-blue-950/20">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <UserPlus className="w-3.5 h-3.5 text-blue-600" />
+                      <p className="text-xs font-medium text-blue-700 dark:text-blue-300">
+                        কাস্টমার যোগ করুন
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowCustPicker(true)}
+                        className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-blue-400 bg-card flex items-center gap-2 text-sm hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors"
+                      >
+                        <UserPlus className="w-4 h-4 text-blue-600" />
+                        <span className="text-blue-700 dark:text-blue-300 font-medium">কাস্টমার নির্বাচন করুন</span>
+                      </button>
+                      <button
+                        onClick={() => { setShowPartyForm(true); }}
+                        className="w-11 h-11 rounded-xl bg-blue-500 text-white flex items-center justify-center shrink-0 hover:bg-blue-600 transition-colors"
+                        aria-label="নতুন কাস্টমার"
+                      >
+                        <Plus className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* §2: Animated Credit Gate — RED warning. ONLY shown on final submit failure. */}
             <AnimatePresence>
               {showCreditGate && (
                 <motion.div
@@ -1714,10 +1752,9 @@ export function SalePadView() {
                 </button>
                 <button
                   onClick={() => {
-                    // §1: If no customer selected, auto-open customer picker
+                    // §1: If no customer, smoothly reveal inline customer block (NOT red, NOT navigation)
                     if (!customer) {
-                      setShowCustPicker(true)
-                      toast.info('Pick Up Later-এর জন্য কাস্টমার প্রয়োজন', { description: 'মাল কার জন্য রাখা হবে তা চিহ্নিত করুন' })
+                      setShowInlineCustomer(true)
                       return
                     }
                     setFulfillmentStatus('pickup')
