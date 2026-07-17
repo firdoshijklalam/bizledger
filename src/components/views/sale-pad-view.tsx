@@ -1561,7 +1561,8 @@ export function SalePadView() {
               )}
             </AnimatePresence>
 
-            {/* §2: Ledger Due — show when Total Input < Actual Price (red/orange) */}
+            {/* §2: Ledger Due — show when Total Input < Actual Price (red/orange).
+                §1: Auto-opens customer picker if no customer selected. */}
             <AnimatePresence>
               {isShortAmount && (
                 <motion.div
@@ -1570,7 +1571,10 @@ export function SalePadView() {
                   exit={{ opacity: 0, height: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="p-3 mt-2 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-400/40">
+                  <div
+                    onClick={() => { if (!customer) setShowCustPicker(true); }}
+                    className={`p-3 mt-2 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-400/40 ${!customer ? 'cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-950/50' : ''}`}
+                  >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-orange-700 dark:text-orange-300">
                         খাতায় বাকি (Ledger Due)
@@ -1580,7 +1584,10 @@ export function SalePadView() {
                       </span>
                     </div>
                     <p className="text-[10px] text-orange-600 mt-1">
-                      সম্পন্ন হলে এই পরিমাণ কাস্টমারের খাতায় যুক্ত হবে
+                      {!customer
+                        ? '👆 কাস্টমার নির্বাচন করতে এখানে ট্যাপ করুন'
+                        : 'সম্পন্ন হলে এই পরিমাণ কাস্টমারের খাতায় যুক্ত হবে'
+                      }
                     </p>
                   </div>
                 </motion.div>
@@ -1686,7 +1693,15 @@ export function SalePadView() {
                   ✓ Handed Over
                 </button>
                 <button
-                  onClick={() => setFulfillmentStatus('pickup')}
+                  onClick={() => {
+                    // §1: If no customer selected, auto-open customer picker
+                    if (!customer) {
+                      setShowCustPicker(true)
+                      toast.info('Pick Up Later-এর জন্য কাস্টমার প্রয়োজন', { description: 'মাল কার জন্য রাখা হবে তা চিহ্নিত করুন' })
+                      return
+                    }
+                    setFulfillmentStatus('pickup')
+                  }}
                   className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                     fulfillmentStatus === 'pickup' ? 'bg-amber-600 text-white shadow-sm' : 'bg-card text-muted-foreground'
                   }`}
