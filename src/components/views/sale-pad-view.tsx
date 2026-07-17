@@ -1462,14 +1462,33 @@ export function SalePadView() {
                     <QrCode className={`w-3 h-3 ${paymentMode === 'upi' ? 'text-violet-600' : ''}`} />
                     UPI ₹
                     {paymentMode === 'upi' && <span className="ml-auto text-[9px] text-violet-600">QR চালু</span>}
+                    {/* §3: Green checkmark when UPI amount matches expected total */}
+                    {splitUpiNum > 0 && splitUpiNum >= roundedTotal && (
+                      <span className="text-emerald-600 font-bold ml-1">✅</span>
+                    )}
                   </button>
-                  <Input
-                    value={splitUpi}
-                    onChange={(e) => { setSplitUpi(e.target.value); setPaymentMode('upi') }}
-                    className={`h-9 text-sm ${paymentMode === 'upi' ? 'border-violet-400' : ''}`}
-                    inputMode="numeric"
-                    placeholder="0"
-                  />
+                  <div className="relative">
+                    <Input
+                      value={splitUpi}
+                      onChange={(e) => { setSplitUpi(e.target.value); setPaymentMode('upi') }}
+                      className={`h-9 text-sm ${paymentMode === 'upi' ? 'border-violet-400' : ''} ${splitUpiNum > 0 && splitUpiNum >= roundedTotal ? 'pr-8 border-emerald-400' : ''}`}
+                      inputMode="numeric"
+                      placeholder="0"
+                    />
+                    {/* §3: Green checkmark inside UPI field when amount matches */}
+                    {splitUpiNum > 0 && splitUpiNum >= roundedTotal && (
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-500 text-sm">✓</span>
+                    )}
+                  </div>
+                  {/* §3: Status text under UPI field */}
+                  {splitUpiNum > 0 && (
+                    <p className={`text-[9px] ${splitUpiNum >= roundedTotal ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}`}>
+                      {splitUpiNum >= roundedTotal
+                        ? '✓ পরিমাণ সঠক — পেমেন্ট সম্পূর্ণ'
+                        : `₹${(roundedTotal - splitUpiNum).toFixed(2)} বাকি`
+                      }
+                    </p>
+                  )}
                 </div>
                 {/* §1: Credit split input REMOVED — user uses Cash + UPI only.
                     Ledger Due is calculated automatically when Total Input < Actual Price. */}

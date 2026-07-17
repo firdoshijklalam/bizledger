@@ -92,9 +92,12 @@ export function BillingTabs() {
           <p className="text-[11px] text-muted-foreground px-1 py-2">কোনো হোল্ড করা বিল নেই</p>
         )}
 
-        {/* Add new draft button — opens Quick Sale */}
+        {/* Add new draft button — creates new cart + opens Quick Sale */}
         <button
-          onClick={() => navigateTo('sale-pad')}
+          onClick={() => {
+            useCartStore.getState().createNewCart()
+            navigateTo('sale-pad')
+          }}
           className="shrink-0 w-9 h-9 rounded-lg bg-muted hover:bg-accent flex items-center justify-center"
           aria-label="Add new draft"
         >

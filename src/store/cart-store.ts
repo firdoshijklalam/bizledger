@@ -42,6 +42,7 @@ interface CartState {
   setActiveCartId: (id: number) => void
   updateActiveCart: (updater: (c: HeldCart) => HeldCart) => void
   resetCart: () => void
+  createNewCart: () => void
 
   // Billing state
   discountMode: 'flat' | 'percent'
@@ -81,6 +82,19 @@ export const useCartStore = create<CartState>()((set, get) => ({
     set({ carts: carts.map((c) => (c.id === activeCartId ? updater(c) : c)) })
   },
   resetCart: () => set({ carts: [{ ...DEFAULT_CART }], activeCartId: 1 }),
+
+  createNewCart: () => {
+    const { carts } = get()
+    const nextId = Math.max(0, ...carts.map((c) => c.id)) + 1
+    const newCart: HeldCart = {
+      id: nextId,
+      label: `পার্সন ${carts.length + 1}`,
+      items: [],
+      customer: null,
+      paymentMode: 'cash',
+    }
+    set({ carts: [...carts, newCart], activeCartId: nextId })
+  },
 
   discountMode: 'flat',
   setDiscountMode: (m) => set({ discountMode: m }),

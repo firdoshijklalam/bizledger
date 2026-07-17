@@ -17,6 +17,7 @@ import { BillingTabs } from './billing/billing-tabs'
 import { Input } from '@/components/ui/input'
 import { useVoiceInput } from '@/hooks/use-voice-input'
 import { phoneticMatch } from '@/lib/transliteration'
+import { useCartStore } from '@/store/cart-store'
 
 const STATUS_COLORS: Record<string, string> = {
   paid: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
@@ -147,8 +148,11 @@ export function BillingView() {
         )}
       </div>
 
-      {/* New invoice CTA — §3: routes to Quick Sale POS screen */}
-      <Button onClick={() => setActiveView('sale-pad')} className="w-full h-12 text-base">
+      {/* New invoice CTA — §1: Navigate to Quick Sale AND create a new cart */}
+      <Button onClick={() => {
+        useCartStore.getState().createNewCart()
+        setActiveView('sale-pad')
+      }} className="w-full h-12 text-base">
         <Plus className="w-5 h-5 mr-2" /> {t('bill.newInvoice')}
       </Button>
 
