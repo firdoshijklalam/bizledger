@@ -1,7 +1,7 @@
 'use client'
 
 import { useBillingStore } from '@/store/billing-store'
-import { useCartStore } from '@/store/cart-store'
+import { useCartStore, type HeldCart } from '@/store/cart-store'
 import { useAppStore } from '@/store/app-store'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Plus } from 'lucide-react'
@@ -11,140 +11,110 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
+import { formatCurrency } from '@/lib/utils'
 
 export function BillingTabs() {
-  const { tabs, activeTabId, setActiveTab, addTab, closeTab, updateTab } = useBillingStore()
-  const { setShowInvoiceForm, navigateTo } = useAppStore()
-  const { setCarts, setActiveCartId, clearBillingState } = useCartStore()
-  const [closeConfirmId, setCloseConfirmId] = useState<string | null>(null)
+  // §2: Read from cart-store (same as Quick Sale) — real-time sync
+  const carts = useCartStore(s => s.carts)
+  const setActiveCartId = useCartStore(s => s.setActiveCartId)
+  const setCarts = useCartStore(s => s.setCarts)
+  const business = useAppStore(s => s.business)
+  const navigateTo = useAppStore(s => s.navigateTo)
 
-  const tabToClose = tabs.find((t) => t.id === closeConfirmId)
+  const [closeConfirmCartId, setCloseConfirmCartId] = useState<number | null>(null)
+  const currency = business?.currency || 'INR'
 
-  // §1: Clicking a draft chip loads that cart into Quick Sale
-  const handleTabClick = (tabId: string) => {
-    const tab = tabs.find((t) => t.id === tabId)
-    if (!tab) return
-    setActiveTab(tabId)
+  // §2: Render draft chips from cart-store carts (same source as Quick Sale)
+  const draftCarts = carts.filter(c => c.items.length > 0 || c.customer)
 
-    // §1: If this tab has a draft, load it into Quick Sale cart store and navigate
-    if (tab.hasDraft && tab.items.length > 0) {
-      // Load the draft items into the global cart store
-      const cartItems = tab.items.map((item, i) => ({
-        cartKey: `${tab.id}-${i}`,
-        productId: item.productId || '',
-        name: item.name,
-        unit: 'pcs',
-        price: item.unitPrice,
-        quantity: item.quantity,
-        qtyStr: String(item.quantity),
-        total: item.total,
-        manualOverride: false,
-        gstRate: item.gstRate || 0,
-        mrp: 0,
-        retailMrp: 0,
-        itemGstEnabled: item.gstRate > 0,
-        itemGstRate: item.gstRate || 0,
-        itemGstManuallyDisabled: false,
-        itemMode: 'retail' as const,
-      }))
+  const handleDraftClick = (cart: HeldCart) => {
+    // §2: Load this cart into Quick Sale and navigate there
+    setActiveCartId(cart.id)
+    navigateTo('sale-pad')
+    toast.success(`${cart.customer?.name || 'কার্ট'} লোড হয়েছে`)
+  }
 
-      // Set the cart in the global store
-      setCarts([{
-        id: 1,
-        label: tab.customerName || tab.label,
-        items: cartItems,
-        customer: tab.customerId ? { id: tab.customerId, name: tab.customerName || '' } as any : null,
-        paymentMode: (tab.paymentMode as any) || 'cash',
-      }])
+  const handleRemoveDraft = (cartId: number) => {
+    if (carts.length <= 1) {
+      // Reset to empty
+      setCarts([{ id: 1, label: 'পার্সন ১', items: [], customer: null, paymentMode: 'cash' }])
       setActiveCartId(1)
-
-      // Navigate to Quick Sale
-      navigateTo('sale-pad')
-      toast.success(`${tab.customerName || tab.label}-এর বিল লোড হয়েছে`)
-    } else if (tab?.hasDraft) {
-      setShowInvoiceForm(true)
+    } else {
+      const newCarts = carts.filter(c => c.id !== cartId)
+      setCarts(newCarts)
+      setActiveCartId(newCarts[0].id)
     }
+    setCloseConfirmCartId(null)
   }
 
   return (
     <>
       <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 pb-1">
-        {tabs.map((tab) => {
-          const isActive = activeTabId === tab.id
-          // §1: Dynamic naming — show customer name if selected, otherwise label
-          const label = tab.customerName
-            ? tab.customerName.length > 10
-              ? tab.customerName.substring(0, 10) + '…'
-              : tab.customerName
-            : tab.label
+        {/* §2: Render from cart-store — real-time sync with Quick Sale */}
+        {draftCarts.map((cart, idx) => {
+          const label = cart.customer?.name
+            ? (cart.customer.name.length > 10 ? cart.customer.name.substring(0, 10) + '…' : cart.customer.name)
+            : `পার্সন ${carts.indexOf(cart) + 1}`
+          const itemCount = cart.items.length
+          const cartTotal = cart.items.reduce((s, i) => s + i.total, 0)
+
           return (
             <div
-              key={tab.id}
-              onClick={() => handleTabClick(tab.id)}
-              className={`group relative shrink-0 flex items-center gap-1.5 px-3 h-9 rounded-t-lg cursor-pointer transition-colors min-w-[88px] ${
-                isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-accent'
-              }`}
+              key={cart.id}
+              onClick={() => handleDraftClick(cart)}
+              className="group relative shrink-0 flex items-center gap-1.5 px-3 h-9 rounded-t-lg cursor-pointer transition-colors min-w-[88px] bg-muted text-muted-foreground hover:bg-accent"
             >
               {/* §2: Pulse animation on incomplete drafts */}
-              {tab.hasDraft && (
+              {itemCount > 0 && (
                 <motion.span
-                  className={`w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-yellow-300' : 'bg-yellow-500'}`}
+                  className="w-2 h-2 rounded-full shrink-0 bg-yellow-500"
                   animate={{ scale: [1, 1.4, 1], opacity: [1, 0.6, 1] }}
                   transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
                 />
               )}
               <span className="text-xs font-medium truncate flex-1">{label}</span>
-              {tabs.length > 1 && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    if (tab.hasDraft) {
-                      setCloseConfirmId(tab.id)
-                    } else {
-                      closeTab(tab.id)
-                    }
-                  }}
-                  className={`shrink-0 rounded-full p-0.5 ${isActive ? 'hover:bg-white/20' : 'hover:bg-background'}`}
-                  aria-label="Close tab"
-                >
-                  <X className="w-3 h-3" />
-                </button>
+              {itemCount > 0 && (
+                <span className="text-[10px] tabular text-muted-foreground">{formatCurrency(cartTotal, currency)}</span>
               )}
-              {isActive && (
-                <motion.div
-                  layoutId="billing-active-tab"
-                  className="absolute -bottom-1 inset-x-0 h-0.5 bg-primary"
-                />
-              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); setCloseConfirmCartId(cart.id) }}
+                className="shrink-0 rounded-full p-0.5 hover:bg-background"
+                aria-label="Close tab"
+              >
+                <X className="w-3 h-3" />
+              </button>
             </div>
           )
         })}
-        {tabs.length < 5 && (
-          <button
-            onClick={() => addTab()}
-            className="shrink-0 w-9 h-9 rounded-lg bg-muted hover:bg-accent flex items-center justify-center"
-            aria-label="Add tab"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
+
+        {/* Show empty state if no drafts */}
+        {draftCarts.length === 0 && (
+          <p className="text-[11px] text-muted-foreground px-1 py-2">কোনো হোল্ড করা বিল নেই</p>
         )}
+
+        {/* Add new draft button — opens Quick Sale */}
+        <button
+          onClick={() => navigateTo('sale-pad')}
+          className="shrink-0 w-9 h-9 rounded-lg bg-muted hover:bg-accent flex items-center justify-center"
+          aria-label="Add new draft"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
       </div>
 
-      <AlertDialog open={!!closeConfirmId} onOpenChange={(o) => !o && setCloseConfirmId(null)}>
+      <AlertDialog open={!!closeConfirmCartId} onOpenChange={(o) => !o && setCloseConfirmCartId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>এই বিল বাতিল করবেন?</AlertDialogTitle>
             <AlertDialogDescription>
-              {tabToClose?.customerName || tabToClose?.label}-এর হোল্ড করা বিলে {tabToClose?.items.length || 0}টি পণ্য আছে। এটি মুছে ফেললে আর ফিরে পাবেন না।
+              এই হোল্ড করা বিলে {carts.find(c => c.id === closeConfirmCartId)?.items.length || 0}টি পণ্য আছে। এটি মুছে ফেললে আর ফিরে পাবেন না।
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="h-11">Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="h-11 bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => { if (closeConfirmId) closeTab(closeConfirmId); setCloseConfirmId(null) }}
+              onClick={() => { if (closeConfirmCartId) handleRemoveDraft(closeConfirmCartId) }}
             >
               Discard Bill
             </AlertDialogAction>

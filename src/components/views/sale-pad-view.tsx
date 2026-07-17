@@ -233,6 +233,26 @@ export function SalePadView() {
   // §2: Animated credit gate — slide-in customer prompt above footer
   const [showCreditGate, setShowCreditGate] = useState(false)
 
+  // §3: Hardware back button interception — same as UI back button
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      // Check if we're on the sale-pad view
+      if (useAppStore.getState().activeView === 'sale-pad') {
+        e.preventDefault()
+        // Go to Billing page (same as UI back button)
+        useAppStore.getState().setActiveView('billing')
+        // Push state back so browser doesn't actually navigate away
+        window.history.pushState(null, '', window.location.href)
+      }
+    }
+    // Push a state so back button triggers popstate
+    window.history.pushState(null, '', window.location.href)
+    window.addEventListener('popstate', handlePopState)
+    return () => {
+      window.removeEventListener('popstate', handlePopState)
+    }
+  }, [])
+
   // §4: Discount from global store + live Grand Total
   const discountMode = storeDiscountMode
   const setDiscountMode = setStoreDiscountMode
@@ -948,13 +968,13 @@ export function SalePadView() {
           <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">কার্ট হোল্ড সিস্টেম (Multi-Cart)</p>
         </div>
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
-          {carts.map((c) => {
+          {carts.map((c, cartIndex) => {
             const active = c.id === activeCartId
             const itemCount = c.items.length
             const cartTotal = c.items.reduce((s, i) => s + i.total, 0)
-            // §1: Dynamic Tab Name — bind to selected customer. If a customer is selected,
-            // show their name instead of the fallback 'পার্সন N' label.
-            const tabLabel = c.customer?.name || c.label
+            // §1: Dynamic Tab Name — use index+1 for position-based labeling.
+            // If a customer is selected, show their name. Otherwise 'পার্সন N' (N = index+1).
+            const tabLabel = c.customer?.name || `পার্সন ${cartIndex + 1}`
             return (
               <div
                 key={c.id}
@@ -983,7 +1003,7 @@ export function SalePadView() {
                   <button
                     onClick={(e) => { e.stopPropagation(); requestCartClose(c.id) }}
                     className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors shadow-sm"
-                    aria-label={`Close ${c.label}`}
+                    aria-label={`Close পার্সন ${cartIndex + 1}`}
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -1838,13 +1858,13 @@ export function SalePadView() {
                 <p className="text-center text-sm text-muted-foreground py-4">হোল্ড কিউ খালি</p>
               ) : (
                 <div className="space-y-2 max-h-72 overflow-y-auto">
-                  {heldQueue.map((c) => {
+                  {heldQueue.map((c, hqIndex) => {
                     const cartTotal = c.items.reduce((s, i) => s + i.total, 0)
                     return (
                       <div key={c.id} className="p-3 rounded-xl bg-amber-500/5 border border-amber-400/30">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm font-bold">{c.customer?.name || c.label}</p>
+                            <p className="text-sm font-bold">{c.customer?.name || `পার্সন ${hqIndex + 1}`}</p>
                             <p className="text-[11px] text-muted-foreground">
                               {c.items.length} আইটেম · {formatCurrency(cartTotal, currency)}
                             </p>
