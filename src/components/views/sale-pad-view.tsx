@@ -1356,36 +1356,42 @@ export function SalePadView() {
                 <span className="tabular font-semibold">{formatCurrency(subtotalWithGst, currency)}</span>
               </div>
 
-              {/* Row 3: Discount Block — Left: discount input/button, Right: cash value subtracted */}
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-0.5 bg-muted/50 p-0.5 rounded-md">
-                  <button
-                    onClick={() => setDiscountMode('flat')}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
-                      discountMode === 'flat' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-400'
-                    }`}
-                  >
-                    ₹
-                  </button>
-                  <button
-                    onClick={() => setDiscountMode('percent')}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
-                      discountMode === 'percent' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-gray-400'
-                    }`}
-                  >
-                    %
-                  </button>
+              {/* Row 3: Discount Block — §1: Added label "Additional Discount (ছাড়)" */}
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Additional Discount (ছাড়)</label>
+                <div className="flex items-center gap-2">
+                  {/* §2: Segmented toggle — active: solid blue bg + white text, inactive: transparent + grey text */}
+                  <div className="flex items-center gap-0.5 bg-muted/50 p-0.5 rounded-md">
+                    <button
+                      type="button"
+                      onClick={() => setDiscountMode('flat')}
+                      className={`px-3 py-1.5 rounded-md text-[12px] font-bold transition-all ${
+                        discountMode === 'flat' ? 'bg-blue-600 text-white shadow-sm' : 'bg-transparent text-gray-400'
+                      }`}
+                    >
+                      ₹
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDiscountMode('percent')}
+                      className={`px-3 py-1.5 rounded-md text-[12px] font-bold transition-all ${
+                        discountMode === 'percent' ? 'bg-blue-600 text-white shadow-sm' : 'bg-transparent text-gray-400'
+                      }`}
+                    >
+                      %
+                    </button>
+                  </div>
+                  <Input
+                    value={discountValue}
+                    onChange={(e) => setDiscountValue(e.target.value)}
+                    className="h-8 text-sm flex-1"
+                    inputMode="numeric"
+                    placeholder="0"
+                  />
+                  <span className="tabular text-sm font-medium text-amber-600 min-w-[80px] text-right">
+                    −{formatCurrency(discountAmount, currency)}
+                  </span>
                 </div>
-                <Input
-                  value={discountValue}
-                  onChange={(e) => setDiscountValue(e.target.value)}
-                  className="h-8 text-sm flex-1"
-                  inputMode="numeric"
-                  placeholder="0"
-                />
-                <span className="tabular text-sm font-medium text-amber-600 min-w-[80px] text-right">
-                  −{formatCurrency(discountAmount, currency)}
-                </span>
               </div>
 
               {/* Row 4: Total after Discount */}
