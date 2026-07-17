@@ -232,8 +232,12 @@ export function SalePadView() {
   const [confirming, setConfirming] = useState(false)
   // §2: Animated credit gate — RED warning shown ONLY on final submit failure
   const [showCreditGate, setShowCreditGate] = useState(false)
-  // §1: Inline customer reveal — NEUTRAL block shown on Ledger Due / Pick Up Later interaction
-  const [showInlineCustomer, setShowInlineCustomer] = useState(false)
+
+  // §2: STATE-DRIVEN visibility for Add Customer block:
+  // Show when: (ledgerDue > 0 OR fulfillmentStatus === 'pickup') AND !customer
+  // Auto-hide when: ledgerDue <= 0 AND fulfillmentStatus !== 'pickup'
+  // Pick Up Later override: even if ledgerDue <= 0, show if pickup selected
+  // (computed AFTER ledgerDue is defined — see line ~620)
 
   // §3: Hardware back button interception — same as UI back button
   useEffect(() => {
@@ -303,13 +307,11 @@ export function SalePadView() {
     })
   }, [cart, customer, paymentMode])
 
-  // §2: Reactive dismissal — auto-hide warnings when customer is selected
+  // §2: Reactive dismissal — auto-hide red warning when customer is selected
   useEffect(() => {
     if (customer) {
-      // Use setTimeout to avoid synchronous setState in effect
       const t = setTimeout(() => {
         setShowCreditGate(false)
-        setShowInlineCustomer(false)
       }, 0)
       return () => clearTimeout(t)
     }
@@ -625,6 +627,12 @@ export function SalePadView() {
   const exchangeDifference = useMemo(() => totalPaidForExchange - roundedTotal, [totalPaidForExchange, roundedTotal])
   const isShortAmount = totalPaidForExchange < roundedTotal && totalPaidForExchange > 0
   const isChangeDue = totalPaidForExchange > roundedTotal
+
+  // §2: STATE-DRIVEN Add Customer block visibility.
+  // Show when: (ledgerDue > 0 OR pickup) AND !customer
+  // Auto-hide when: ledgerDue <= 0 AND not pickup (full payment made)
+  // Pick Up Later override: even if fully paid, show if pickup selected
+  const shouldShowInlineCustomer = !customer && (ledgerDue > 0 || fulfillmentStatus === 'pickup')
 
     // §3: Dynamic UPI Intent QR Code Generation
   // When PAYMENT MODE 'UPI' is clicked, generate a QR code embedding the UPI amount
@@ -1616,8 +1624,7 @@ export function SalePadView() {
                   className="overflow-hidden"
                 >
                   <div
-                    onClick={() => { if (!customer) setShowInlineCustomer(true); }}
-                    className={`p-3 mt-2 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-400/40 ${!customer ? 'cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-950/50' : ''}`}
+                    className="p-3 mt-2 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-400/40"
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-orange-700 dark:text-orange-300">
@@ -1674,10 +1681,12 @@ export function SalePadView() {
             </AnimatePresence>
 
             {/* §1: Inline customer reveal — NEUTRAL block (blue/gray, NOT red).
-                Shown when user taps Ledger Due or Pick Up Later without a customer.
-                Smoothly expands with animation. No warning text. */}
+                §2: STATE-DRIVEN — visible when shouldShowInlineCustomer is true.
+                Auto-shows when ledgerDue > 0 or pickup selected.
+                Auto-hides when full payment made AND not pickup.
+                §3: Smooth animation via AnimatePresence + spring transition. */}
             <AnimatePresence>
-              {showInlineCustomer && !customer && (
+              {shouldShowInlineCustomer && (
                 <motion.div
                   initial={{ opacity: 0, height: 0, y: 10 }}
                   animate={{ opacity: 1, height: 'auto', y: 0 }}
@@ -1774,14 +1783,7 @@ export function SalePadView() {
                   ✓ Handed Over
                 </button>
                 <button
-                  onClick={() => {
-                    // §1: If no customer, smoothly reveal inline customer block (NOT red, NOT navigation)
-                    if (!customer) {
-                      setShowInlineCustomer(true)
-                      return
-                    }
-                    setFulfillmentStatus('pickup')
-                  }}
+                  onClick={() => setFulfillmentStatus('pickup')}
                   className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                     fulfillmentStatus === 'pickup' ? 'bg-amber-600 text-white shadow-sm' : 'bg-card text-muted-foreground'
                   }`}
