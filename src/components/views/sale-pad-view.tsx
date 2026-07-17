@@ -306,8 +306,12 @@ export function SalePadView() {
   // §2: Reactive dismissal — auto-hide warnings when customer is selected
   useEffect(() => {
     if (customer) {
-      setShowCreditGate(false)
-      setShowInlineCustomer(false)
+      // Use setTimeout to avoid synchronous setState in effect
+      const t = setTimeout(() => {
+        setShowCreditGate(false)
+        setShowInlineCustomer(false)
+      }, 0)
+      return () => clearTimeout(t)
     }
   }, [customer])
 
