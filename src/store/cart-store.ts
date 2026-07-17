@@ -85,6 +85,17 @@ export const useCartStore = create<CartState>()((set, get) => ({
 
   createNewCart: () => {
     const { carts } = get()
+
+    // §1: Check if any existing cart is empty (no items AND no customer).
+    // If so, just focus on that cart instead of creating a new one.
+    const emptyCart = carts.find(c => c.items.length === 0 && !c.customer)
+    if (emptyCart) {
+      // Focus on the existing empty cart — don't create a new one
+      set({ activeCartId: emptyCart.id })
+      return
+    }
+
+    // All existing carts have items or customers — create a new one
     const nextId = Math.max(0, ...carts.map((c) => c.id)) + 1
     const newCart: HeldCart = {
       id: nextId,
