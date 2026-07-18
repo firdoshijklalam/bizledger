@@ -3,8 +3,8 @@
 # Vercel (connected to the GitHub repo) then auto-deploys on each push.
 # This makes deployment fully automatic — no manual push/deploy needed.
 #
-# Runs every 20s. Idempotent: only pushes when local main is ahead of origin.
-# Logs to auto-deploy.log. Safe to run multiple instances (uses a lock).
+# Runs every 20s. Uses flock for safe single-instance locking.
+# Logs to auto-deploy.log. Restarted by recovery.sh (cron) if it dies.
 
 set -u
 cd /home/z/my-project || exit 1
@@ -12,22 +12,18 @@ LOG=/home/z/my-project/auto-deploy.log
 LOCK=/tmp/auto-deploy.lock
 INTERVAL=20
 
-# Ensure only one instance runs
-if [ -f "$LOCK" ]; then
-  OLD_PID=$(cat "$LOCK" 2>/dev/null)
-  if kill -0 "$OLD_PID" 2>/dev/null; then
-    # Already running — exit silently
-    exit 0
-  fi
+# Single-instance lock via flock (atomic, auto-releases on process death)
+exec 200>"$LOCK"
+if ! flock -n 200; then
+  # Another instance holds the lock — exit silently
+  exit 0
 fi
-echo $$ > "$LOCK"
-trap 'rm -f "$LOCK"' EXIT
 
 # Make sure git identity is set (in case of fresh shell)
 git config user.name >/dev/null 2>&1 || git config user.name "firdoshijklalam"
 git config user.email >/dev/null 2>&1 || git config user.email "firdoshijklalam@users.noreply.github.com"
 
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] auto-deploy watcher started (interval=${INTERVAL}s)" >> "$LOG"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] auto-deploy watcher started (pid=$$, interval=${INTERVAL}s)" >> "$LOG"
 
 while true; do
   # Fetch remote state (silent — fails gracefully if offline)
