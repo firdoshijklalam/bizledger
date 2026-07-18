@@ -1776,119 +1776,121 @@ export function SalePadView() {
               )}
             </AnimatePresence>
 
-            {/* §UX-REFINEMENT: STRICT MUTUAL EXCLUSIVITY — Blue box OR Red box, NEVER both.
-                A single computed value `customerBoxMode` ('blue' | 'red' | null) drives
-                an if / else-if / null render so the two can never coexist.
-                Two-layer motion structure per box:
-                  • Outer AnimatePresence mode="wait" + stable per-box key: animates
-                    height/opacity for show↔hide and blue↔red swaps. mode="wait"
-                    guarantees red fully collapses before blue expands (NO overlap).
-                  • Inner motion.div driven by useAnimationControls (blueBoxControls /
-                    redBoxControls). The replay useEffect imperatively .set()s to
-                    initial values then .start()s to final values on EVERY key bump —
-                    GUARANTEED re-animation even when already visible. (Key-based
-                    remount does NOT replay framer-motion `initial` on React 19.)
-                All transitions use spring — no snapping. */}
-            <AnimatePresence mode="wait">
-              {(() => {
-                const customerBoxMode: 'blue' | 'red' | null = showCreditGate
-                  ? 'red'
-                  : showInlineCustomer
-                    ? 'blue'
-                    : null
+            {/* §LAYOUT-SHIFT-FIX: STRICT MUTUAL EXCLUSIVITY — Blue box OR Red box, NEVER both.
+                CRITICAL: Two-layer structure that eliminates the height dip during
+                blue↔red swaps (which caused the scroll jump when clicking Done/Invoice).
 
-                if (customerBoxMode === 'blue') {
-                  return (
+                • OUTER layer (show/hide): ONE persistent motion.div present whenever
+                  customerBoxMode !== null. Animates height 0↔auto ONLY for null↔box
+                  transitions (first appear / final hide). Its key NEVER changes during
+                  a blue↔red swap, so React reuses the same node — height stays STABLE.
+                  No height dip = no scroll clamp = no top shift.
+
+                • INNER layer (blue↔red swap): AnimatePresence mode="popLayout" swaps
+                  between blue/red motion.divs. popLayout takes the exiting node OUT of
+                  flow (position:absolute) so the entering node occupies its natural
+                  flow height immediately. NO height animation here — only opacity/transform
+                  via useAnimationControls. Height never dips during swap.
+
+                • useAnimationControls drives the re-trigger bounce on every tap
+                  (.set() to initial → .start() to final). GUARANTEED replay. */}
+            {(() => {
+              const customerBoxMode: 'blue' | 'red' | null = showCreditGate
+                ? 'red'
+                : showInlineCustomer
+                  ? 'blue'
+                  : null
+
+              return (
+                <AnimatePresence mode="wait" initial={false}>
+                  {customerBoxMode !== null && (
                     <motion.div
-                      key="blue-customer-slot"
+                      key="customer-box-slot"
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
                       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
                       className="overflow-hidden"
                     >
-                      <motion.div
-                        animate={blueBoxControls}
-                        data-anim-key={customerBlockKey}
-                        className="mt-3 p-3 rounded-xl border-2 border-blue-400/50 bg-blue-50 dark:bg-blue-950/20"
-                      >
-                          <div className="flex items-center gap-1.5 mb-2">
-                            <UserPlus className="w-3.5 h-3.5 text-blue-600" />
-                            <p className="text-xs font-medium text-blue-700 dark:text-blue-300">
-                              কাস্টমার যোগ করুন
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => setShowCustPicker(true)}
-                              className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-blue-400 bg-card flex items-center gap-2 text-sm hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors"
-                            >
-                              <UserPlus className="w-4 h-4 text-blue-600" />
-                              <span className="text-blue-700 dark:text-blue-300 font-medium">কাস্টমার নির্বাচন করুন</span>
-                            </button>
-                            <button
-                              onClick={() => { setShowPartyForm(true); }}
-                              className="w-11 h-11 rounded-xl bg-blue-500 text-white flex items-center justify-center shrink-0 hover:bg-blue-600 transition-colors"
-                              aria-label="নতুন কাস্টমার"
-                            >
-                              <Plus className="w-5 h-5" />
-                            </button>
-                          </div>
-                      </motion.div>
-                    </motion.div>
-                  )
-                } else if (customerBoxMode === 'red') {
-                  return (
-                    <motion.div
-                      key="red-warning-slot"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-                      className="overflow-hidden"
-                    >
-                      <motion.div
-                        animate={redBoxControls}
-                        data-anim-key={creditGateKey}
-                        className="mt-3"
-                      >
-                          <div className="p-3 rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-950/30">
-                            {/* Mandatory warning label */}
+                      {/* §INNER: blue↔red swap. popLayout = exiting node goes absolute,
+                          entering node takes flow position at natural height. No dip. */}
+                      <AnimatePresence mode="popLayout" initial={false}>
+                        {customerBoxMode === 'blue' && (
+                          <motion.div
+                            key="blue-inner"
+                            animate={blueBoxControls}
+                            data-anim-key={customerBlockKey}
+                            className="mt-3 p-3 rounded-xl border-2 border-blue-400/50 bg-blue-50 dark:bg-blue-950/20"
+                          >
                             <div className="flex items-center gap-1.5 mb-2">
-                              <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-                              <p className="text-xs font-bold text-red-700 dark:text-red-300">
-                                বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক
+                              <UserPlus className="w-3.5 h-3.5 text-blue-600" />
+                              <p className="text-xs font-medium text-blue-700 dark:text-blue-300">
+                                কাস্টমার যোগ করুন
                               </p>
                             </div>
-                            {/* Clone of Add Customer input */}
                             <div className="flex items-center gap-2">
                               <button
-                                onClick={() => { setShowCustPicker(true); }}
-                                className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-red-400 bg-card flex items-center gap-2 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                                onClick={() => setShowCustPicker(true)}
+                                className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-blue-400 bg-card flex items-center gap-2 text-sm hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors"
                               >
-                                <UserPlus className="w-4 h-4 text-red-600" />
-                                <span className="text-red-700 dark:text-red-300 font-medium">কাস্টমার নির্বাচন করুন</span>
+                                <UserPlus className="w-4 h-4 text-blue-600" />
+                                <span className="text-blue-700 dark:text-blue-300 font-medium">কাস্টমার নির্বাচন করুন</span>
                               </button>
                               <button
                                 onClick={() => { setShowPartyForm(true); }}
-                                className="w-11 h-11 rounded-xl bg-red-500 text-white flex items-center justify-center shrink-0 hover:bg-red-600 transition-colors"
+                                className="w-11 h-11 rounded-xl bg-blue-500 text-white flex items-center justify-center shrink-0 hover:bg-blue-600 transition-colors"
                                 aria-label="নতুন কাস্টমার"
                               >
                                 <Plus className="w-5 h-5" />
                               </button>
                             </div>
-                            {/* Ledger due amount */}
-                            <p className="text-[10px] text-red-600 mt-1.5 text-center">
-                              খাতায় বাকি: ₹{ledgerDue.toFixed(2)} · কাস্টমার যুক্ত করলে ট্রানজেকশন সম্পন্ন হবে
-                            </p>
-                          </div>
-                        </motion.div>
+                          </motion.div>
+                        )}
+                        {customerBoxMode === 'red' && (
+                          <motion.div
+                            key="red-inner"
+                            animate={redBoxControls}
+                            data-anim-key={creditGateKey}
+                            className="mt-3"
+                          >
+                            <div className="p-3 rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-950/30">
+                              {/* Mandatory warning label */}
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                                <p className="text-xs font-bold text-red-700 dark:text-red-300">
+                                  বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক
+                                </p>
+                              </div>
+                              {/* Clone of Add Customer input */}
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => { setShowCustPicker(true); }}
+                                  className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-red-400 bg-card flex items-center gap-2 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                                >
+                                  <UserPlus className="w-4 h-4 text-red-600" />
+                                  <span className="text-red-700 dark:text-red-300 font-medium">কাস্টমার নির্বাচন করুন</span>
+                                </button>
+                                <button
+                                  onClick={() => { setShowPartyForm(true); }}
+                                  className="w-11 h-11 rounded-xl bg-red-500 text-white flex items-center justify-center shrink-0 hover:bg-red-600 transition-colors"
+                                  aria-label="নতুন কাস্টমার"
+                                >
+                                  <Plus className="w-5 h-5" />
+                                </button>
+                              </div>
+                              {/* Ledger due amount */}
+                              <p className="text-[10px] text-red-600 mt-1.5 text-center">
+                                খাতায় বাকি: ₹{ledgerDue.toFixed(2)} · কাস্টমার যুক্ত করলে ট্রানজেকশন সম্পন্ন হবে
+                              </p>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </motion.div>
-                  )
-                }
-                return null
-              })()}
-            </AnimatePresence>
+                  )}
+                </AnimatePresence>
+              )
+            })()}
 
             {/* §5: Fulfillment Status toggle — Handled Over / Pick Up Later */}
             <div className="flex items-center gap-2 mt-2 p-2.5 rounded-xl bg-muted/30 border border-border/50">
