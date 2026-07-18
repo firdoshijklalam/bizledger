@@ -36,8 +36,8 @@ export function BillingTabs() {
 
   const handleRemoveDraft = (cartId: number) => {
     if (carts.length <= 1) {
-      // Reset to empty
-      setCarts([{ id: 1, label: 'পার্সন ১', items: [], customer: null, paymentMode: 'cash' }])
+      // Reset to empty (§STATE-LEAK-FIX: include all per-cart billing fields)
+      setCarts([{ id: 1, label: 'পার্সন ১', items: [], customer: null, paymentMode: 'cash', splitCash: '', splitUpi: '', splitChequeNo: '', discountMode: 'flat', discountValue: '', deliveryCharge: '', fulfillmentStatus: 'handed' }])
       setActiveCartId(1)
     } else {
       const newCarts = carts.filter(c => c.id !== cartId)

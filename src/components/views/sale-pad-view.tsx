@@ -682,16 +682,27 @@ export function SalePadView() {
   // ---- §3: Multi-Cart Hold Protocol ----
   const addNewCart = () => {
     const nextId = Math.max(0, ...carts.map((c) => c.id)) + 1
+    // §STATE-LEAK-FIX: new cart gets its OWN fresh billing fields (empty).
+    // No longer inherits/leaks from the previous cart's payment inputs.
     const newCart: HeldCart = {
       id: nextId,
       label: `পার্সন ${nextId}`,
       items: [],
       customer: null,
       paymentMode: 'cash',
+      splitCash: '',
+      splitUpi: '',
+      splitChequeNo: '',
+      discountMode: 'flat',
+      discountValue: '',
+      deliveryCharge: '',
+      fulfillmentStatus: 'handed',
     }
     setStoreCarts([...carts, newCart])
     setStoreCartId(nextId)
-    setDiscountValue(''); setDeliveryCharge('')
+    // §STATE-LEAK-FIX: removed setDiscountValue('')/setDeliveryCharge('') —
+    // billing is now per-cart; new cart already starts empty. Clearing here
+    // would have wiped the values of the cart we just switched FROM (bug).
     toast.success(`${newCart.label} এর জন্য নতুন কার্ট খোলা হলো`, {
       description: 'আগের কার্ট হোল্ড করা আছে',
     })
@@ -700,7 +711,10 @@ export function SalePadView() {
   const switchCart = (id: number) => {
     if (id === activeCartId) return
     setStoreCartId(id)
-    setDiscountValue(''); setDeliveryCharge('')
+    // §STATE-LEAK-FIX: removed setDiscountValue('')/setDeliveryCharge('') —
+    // billing is now per-cart; switching to a cart shows THAT cart's own
+    // preserved payment inputs. The mirror subscription in the store keeps
+    // the top-level selectors in sync automatically.
     toast(`কার্ট সুইচ হলো`, { description: carts.find((c) => c.id === id)?.label })
   }
 
