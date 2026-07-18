@@ -12,6 +12,7 @@
  */
 
 import { execSync } from 'child_process'
+import { appendFileSync } from 'fs'
 
 const PROJECT_DIR = '/home/z/my-project'
 const LOG_FILE = '/home/z/my-project/auto-deploy.log'
@@ -23,7 +24,6 @@ function log(msg: string) {
   const line = `[${ts}] ${msg}`
   console.log(line)
   try {
-    const { appendFileSync } = require('fs')
     appendFileSync(LOG_FILE, line + '\n')
   } catch {}
 }
