@@ -7,7 +7,7 @@ import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
 import type { Product, Party } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useAnimationControls } from 'framer-motion'
 import {
   ShoppingBag, Package, Plus, Minus, Trash2, UserPlus, Receipt, AlertTriangle,
   Store, Boxes, CheckCircle2, X, Wallet, QrCode, CreditCard, FileCheck,
@@ -237,10 +237,17 @@ export function SalePadView() {
   const [showInlineCustomer, setShowInlineCustomer] = useState(false)
 
   // §UX-REFINEMENT: Force-reanimation keys. Incrementing these forces the
-  // respective box to remount and replay its entrance animation on EVERY tap,
+  // respective box to replay its entrance animation on EVERY tap,
   // even when already visible on screen.
   const [customerBlockKey, setCustomerBlockKey] = useState(0)
   const [creditGateKey, setCreditGateKey] = useState(0)
+
+  // §UX-REFINEMENT: Imperative animation controls. Key-based remount does NOT
+  // replay framer-motion's `initial` prop on React 19 (the new node mounts
+  // directly at its `animate` state). useAnimationControls lets us imperatively
+  // .set() to initial values then .start() to final values — GUARANTEED replay.
+  const blueBoxControls = useAnimationControls()
+  const redBoxControls = useAnimationControls()
 
   // §3: Hardware back button interception — same as UI back button
   useEffect(() => {
@@ -783,19 +790,67 @@ export function SalePadView() {
 
   // §UX-REFINEMENT: Strict mutual exclusivity + force re-animation helpers.
   // BLUE box (Add Customer) and RED box (Warning) can NEVER coexist.
-  // Each trigger clears the opposite flag AND bumps a key so the motion
-  // component remounts and replays its entrance animation every single tap.
+  // Each trigger clears the opposite flag AND bumps a key. The key bump is
+  // watched by the replay effects below which imperatively .set()+.start()
+  // the animation controls — GUARANTEED replay on every tap.
   const triggerBlueCustomerBox = useCallback(() => {
     setShowCreditGate(false)        // strict exclusivity: kill red
     setShowInlineCustomer(true)     // show blue
-    setCustomerBlockKey((k) => k + 1) // force re-animate even if already visible
+    setCustomerBlockKey((k) => k + 1) // signal replay effect
   }, [])
 
   const triggerRedWarningBox = useCallback(() => {
     setShowInlineCustomer(false)    // strict exclusivity: kill blue
     setShowCreditGate(true)         // show red
-    setCreditGateKey((k) => k + 1)  // force re-animate even if already visible
+    setCreditGateKey((k) => k + 1)  // signal replay effect
   }, [])
+
+  // §UX-REFINEMENT: Imperative animation replay. Runs AFTER render so the
+  // motion.div is mounted. .set() snaps to initial values, .start() animates
+  // to final values — this is the ONLY reliable way to replay an entrance
+  // animation on an already-mounted component (key-based remount does NOT
+  // replay `initial` on React 19 + framer-motion 12).
+  useEffect(() => {
+    if (customerBlockKey === 0) return // skip initial mount
+    if (!showInlineCustomer || showCreditGate) return // box not visible
+    let cancelled = false
+    blueBoxControls.set({ opacity: 0, y: 18, scale: 0.94 })
+    // Small delay so the .set() is committed before .start()
+    const t = setTimeout(() => {
+      if (!cancelled) {
+        blueBoxControls.start({
+          opacity: 1, y: 0, scale: 1,
+          transition: { type: 'spring', stiffness: 320, damping: 18 },
+        })
+      }
+    }, 16)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [customerBlockKey, showInlineCustomer, showCreditGate, blueBoxControls])
+
+  useEffect(() => {
+    if (creditGateKey === 0) return // skip initial mount
+    if (!showCreditGate) return // box not visible
+    let cancelled = false
+    redBoxControls.set({ opacity: 0, y: 20, scale: 0.93, x: 0 })
+    const t = setTimeout(() => {
+      if (!cancelled) {
+        // Entrance spring
+        redBoxControls.start({
+          opacity: 1, y: 0, scale: 1,
+          transition: { type: 'spring', stiffness: 320, damping: 16 },
+        }).then(() => {
+          if (!cancelled) {
+            // Shake warning after entrance
+            redBoxControls.start({
+              x: [0, -8, 8, -6, 6, 0],
+              transition: { duration: 0.45, ease: 'easeInOut' },
+            })
+          }
+        })
+      }
+    }, 16)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [creditGateKey, showCreditGate, redBoxControls])
 
   const handleGenerateInvoice = async () => {
     if (cart.length === 0) {
@@ -1728,14 +1783,12 @@ export function SalePadView() {
                   • Outer AnimatePresence mode="wait" + stable per-box key: animates
                     height/opacity for show↔hide and blue↔red swaps. mode="wait"
                     guarantees red fully collapses before blue expands (NO overlap).
-                  • Inner AnimatePresence mode="popLayout" + keyed by a counter:
-                    replays the slide-in/bounce on EVERY tap. popLayout takes the
-                    exiting node out of flow so re-animation never collapses the
-                    layout or leaves a gap — clean re-bounce even when already visible.
-                    (Wrapping the keyed child in AnimatePresence is what reliably
-                    forces framer-motion to re-run initial→animate on key bump; a
-                    bare key change on a single child does NOT remount in React 19.)
-                All transitions use spring / easeInOut — no snapping. */}
+                  • Inner motion.div driven by useAnimationControls (blueBoxControls /
+                    redBoxControls). The replay useEffect imperatively .set()s to
+                    initial values then .start()s to final values on EVERY key bump —
+                    GUARANTEED re-animation even when already visible. (Key-based
+                    remount does NOT replay framer-motion `initial` on React 19.)
+                All transitions use spring — no snapping. */}
             <AnimatePresence mode="wait">
               {(() => {
                 const customerBoxMode: 'blue' | 'red' | null = showCreditGate
@@ -1754,15 +1807,11 @@ export function SalePadView() {
                       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
                       className="overflow-hidden"
                     >
-                      <AnimatePresence mode="popLayout" initial={false}>
-                        <motion.div
-                          key={`blue-customer-${customerBlockKey}`}
-                          initial={{ opacity: 0, y: 16, scale: 0.96 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: -12, scale: 0.97 }}
-                          transition={{ type: 'spring', stiffness: 360, damping: 22 }}
-                          className="mt-3 p-3 rounded-xl border-2 border-blue-400/50 bg-blue-50 dark:bg-blue-950/20"
-                        >
+                      <motion.div
+                        animate={blueBoxControls}
+                        data-anim-key={customerBlockKey}
+                        className="mt-3 p-3 rounded-xl border-2 border-blue-400/50 bg-blue-50 dark:bg-blue-950/20"
+                      >
                           <div className="flex items-center gap-1.5 mb-2">
                             <UserPlus className="w-3.5 h-3.5 text-blue-600" />
                             <p className="text-xs font-medium text-blue-700 dark:text-blue-300">
@@ -1785,8 +1834,7 @@ export function SalePadView() {
                               <Plus className="w-5 h-5" />
                             </button>
                           </div>
-                        </motion.div>
-                      </AnimatePresence>
+                      </motion.div>
                     </motion.div>
                   )
                 } else if (customerBoxMode === 'red') {
@@ -1799,20 +1847,12 @@ export function SalePadView() {
                       transition={{ type: 'spring', stiffness: 300, damping: 28 }}
                       className="overflow-hidden"
                     >
-                      <AnimatePresence mode="popLayout" initial={false}>
-                        <motion.div
-                          key={`red-warning-${creditGateKey}`}
-                          initial={{ opacity: 0, y: 18, scale: 0.95 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: -12, scale: 0.96 }}
-                          transition={{ type: 'spring', stiffness: 360, damping: 20 }}
-                          className="mt-3"
-                        >
-                          <motion.div
-                            animate={{ x: [0, -8, 8, -6, 6, 0] }}
-                            transition={{ duration: 0.45, repeat: 2, ease: 'easeInOut' }}
-                            className="p-3 rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-950/30"
-                          >
+                      <motion.div
+                        animate={redBoxControls}
+                        data-anim-key={creditGateKey}
+                        className="mt-3"
+                      >
+                          <div className="p-3 rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-950/30">
                             {/* Mandatory warning label */}
                             <div className="flex items-center gap-1.5 mb-2">
                               <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
@@ -1841,9 +1881,8 @@ export function SalePadView() {
                             <p className="text-[10px] text-red-600 mt-1.5 text-center">
                               খাতায় বাকি: ₹{ledgerDue.toFixed(2)} · কাস্টমার যুক্ত করলে ট্রানজেকশন সম্পন্ন হবে
                             </p>
-                          </motion.div>
+                          </div>
                         </motion.div>
-                      </AnimatePresence>
                     </motion.div>
                   )
                 }
