@@ -236,6 +236,12 @@ export function SalePadView() {
   // §1: HIDDEN by default. Only shows when user interacts with Ledger Due or Pick Up Later.
   const [showInlineCustomer, setShowInlineCustomer] = useState(false)
 
+  // §UX-REFINEMENT: Force-reanimation keys. Incrementing these forces the
+  // respective box to remount and replay its entrance animation on EVERY tap,
+  // even when already visible on screen.
+  const [customerBlockKey, setCustomerBlockKey] = useState(0)
+  const [creditGateKey, setCreditGateKey] = useState(0)
+
   // §3: Hardware back button interception — same as UI back button
   useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
@@ -775,6 +781,22 @@ export function SalePadView() {
     setMode(newMode)
   }
 
+  // §UX-REFINEMENT: Strict mutual exclusivity + force re-animation helpers.
+  // BLUE box (Add Customer) and RED box (Warning) can NEVER coexist.
+  // Each trigger clears the opposite flag AND bumps a key so the motion
+  // component remounts and replays its entrance animation every single tap.
+  const triggerBlueCustomerBox = useCallback(() => {
+    setShowCreditGate(false)        // strict exclusivity: kill red
+    setShowInlineCustomer(true)     // show blue
+    setCustomerBlockKey((k) => k + 1) // force re-animate even if already visible
+  }, [])
+
+  const triggerRedWarningBox = useCallback(() => {
+    setShowInlineCustomer(false)    // strict exclusivity: kill blue
+    setShowCreditGate(true)         // show red
+    setCreditGateKey((k) => k + 1)  // force re-animate even if already visible
+  }, [])
+
   const handleGenerateInvoice = async () => {
     if (cart.length === 0) {
       toast.error('কার্ট খালি')
@@ -782,8 +804,8 @@ export function SalePadView() {
     }
     // §2: Hard-stop — block if Ledger Due > 0 AND Customer == null
     if (ledgerDue > 0 && !customer) {
-      // §2: Trigger animated slide-in credit gate above footer
-      setShowCreditGate(true)
+      // §UX-REFINEMENT: Trigger animated RED warning (re-animates every failure)
+      triggerRedWarningBox()
       toast.error('বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক', {
         description: `খাতায় বাকি ₹${ledgerDue.toFixed(2)} — কাস্টমার ছাড়া ট্রানজেকশন নিষিদ্ধ`,
       })
@@ -854,7 +876,8 @@ export function SalePadView() {
     }
     // §2: Hard-stop — block if Ledger Due > 0 OR Pick Up Later, AND Customer == null
     if ((ledgerDue > 0 || fulfillmentStatus === 'pickup') && !customer) {
-      setShowCreditGate(true)
+      // §UX-REFINEMENT: Trigger animated RED warning (re-animates every failure)
+      triggerRedWarningBox()
       toast.error('বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক', {
         description: `খাতায় বাকি ₹${ledgerDue.toFixed(2)} — কাস্টমার ছাড়া ট্রানজেকশন নিষিদ্ধ`,
       })
@@ -1641,8 +1664,8 @@ export function SalePadView() {
                   className="overflow-hidden"
                 >
                   <div
-                    onClick={() => { if (!customer) setShowInlineCustomer(true); }}
-                    className={`p-3 mt-2 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-400/40 ${!customer ? 'cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-950/50' : ''}`}
+                    onClick={() => { if (!customer) triggerBlueCustomerBox(); }}
+                    className={`p-3 mt-2 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-400/40 ${!customer ? 'cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-950/50 active:scale-[0.98]' : ''} transition-transform`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-orange-700 dark:text-orange-300">
@@ -1698,101 +1721,134 @@ export function SalePadView() {
               )}
             </AnimatePresence>
 
-            {/* §4: MUTUALLY EXCLUSIVE — Blue box OR Red box, NEVER both.
-                if (showCreditGate) → Red warning only
-                else if (showInlineCustomer) → Blue neutral box only
-                else → nothing */}
+            {/* §UX-REFINEMENT: STRICT MUTUAL EXCLUSIVITY — Blue box OR Red box, NEVER both.
+                A single computed value `customerBoxMode` ('blue' | 'red' | null) drives
+                an if / else-if / null render so the two can never coexist.
+                Two-layer motion structure per box:
+                  • Outer AnimatePresence mode="wait" + stable per-box key: animates
+                    height/opacity for show↔hide and blue↔red swaps. mode="wait"
+                    guarantees red fully collapses before blue expands (NO overlap).
+                  • Inner AnimatePresence mode="popLayout" + keyed by a counter:
+                    replays the slide-in/bounce on EVERY tap. popLayout takes the
+                    exiting node out of flow so re-animation never collapses the
+                    layout or leaves a gap — clean re-bounce even when already visible.
+                    (Wrapping the keyed child in AnimatePresence is what reliably
+                    forces framer-motion to re-run initial→animate on key bump; a
+                    bare key change on a single child does NOT remount in React 19.)
+                All transitions use spring / easeInOut — no snapping. */}
+            <AnimatePresence mode="wait">
+              {(() => {
+                const customerBoxMode: 'blue' | 'red' | null = showCreditGate
+                  ? 'red'
+                  : showInlineCustomer
+                    ? 'blue'
+                    : null
 
-            {/* §1: Blue neutral "Add Customer" block — HIDDEN by default.
-                §2: Shows with animation when user clicks Ledger Due or Pick Up Later.
-                §3: Auto-hides when ledgerDue <= 0 AND handed.
-                §3: Reappears when pickup selected (regardless of due).
-                §4: HIDDEN when red warning is showing (mutually exclusive). */}
-            <AnimatePresence>
-              {showInlineCustomer && !showCreditGate && (
-                <motion.div
-                  key="inline-customer"
-                  initial={{ opacity: 0, height: 0, y: 10 }}
-                  animate={{ opacity: 1, height: 'auto', y: 0 }}
-                  exit={{ opacity: 0, height: 0, y: 10 }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                  className="overflow-hidden"
-                >
-                  <div className="mt-3 p-3 rounded-xl border-2 border-blue-400/50 bg-blue-50 dark:bg-blue-950/20">
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <UserPlus className="w-3.5 h-3.5 text-blue-600" />
-                      <p className="text-xs font-medium text-blue-700 dark:text-blue-300">
-                        কাস্টমার যোগ করুন
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setShowCustPicker(true)}
-                        className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-blue-400 bg-card flex items-center gap-2 text-sm hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors"
-                      >
-                        <UserPlus className="w-4 h-4 text-blue-600" />
-                        <span className="text-blue-700 dark:text-blue-300 font-medium">কাস্টমার নির্বাচন করুন</span>
-                      </button>
-                      <button
-                        onClick={() => { setShowPartyForm(true); }}
-                        className="w-11 h-11 rounded-xl bg-blue-500 text-white flex items-center justify-center shrink-0 hover:bg-blue-600 transition-colors"
-                        aria-label="নতুন কাস্টমার"
-                      >
-                        <Plus className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* §4: Red warning — ONLY shown on final submit failure.
-                Mutually exclusive with blue box above. */}
-            <AnimatePresence>
-              {showCreditGate && (
-                <motion.div
-                  initial={{ opacity: 0, y: 30, height: 0 }}
-                  animate={{ opacity: 1, y: 0, height: 'auto' }}
-                  exit={{ opacity: 0, y: 20, height: 0 }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                  className="overflow-hidden"
-                >
-                  <motion.div
-                    animate={{ x: [0, -8, 8, -6, 6, 0] }}
-                    transition={{ duration: 0.4, repeat: 2 }}
-                    className="mt-3 p-3 rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-950/30"
-                  >
-                    {/* Mandatory warning label */}
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-                      <p className="text-xs font-bold text-red-700 dark:text-red-300">
-                        বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক
-                      </p>
-                    </div>
-                    {/* Clone of Add Customer input */}
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => { setShowCustPicker(true); }}
-                        className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-red-400 bg-card flex items-center gap-2 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
-                      >
-                        <UserPlus className="w-4 h-4 text-red-600" />
-                        <span className="text-red-700 dark:text-red-300 font-medium">কাস্টমার নির্বাচন করুন</span>
-                      </button>
-                      <button
-                        onClick={() => { setShowPartyForm(true); }}
-                        className="w-11 h-11 rounded-xl bg-red-500 text-white flex items-center justify-center shrink-0 hover:bg-red-600 transition-colors"
-                        aria-label="নতুন কাস্টমার"
-                      >
-                        <Plus className="w-5 h-5" />
-                      </button>
-                    </div>
-                    {/* Ledger due amount */}
-                    <p className="text-[10px] text-red-600 mt-1.5 text-center">
-                      খাতায় বাকি: ₹{ledgerDue.toFixed(2)} · কাস্টমার যুক্ত করলে ট্রানজেকশন সম্পন্ন হবে
-                    </p>
-                  </motion.div>
-                </motion.div>
-              )}
+                if (customerBoxMode === 'blue') {
+                  return (
+                    <motion.div
+                      key="blue-customer-slot"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                      className="overflow-hidden"
+                    >
+                      <AnimatePresence mode="popLayout" initial={false}>
+                        <motion.div
+                          key={`blue-customer-${customerBlockKey}`}
+                          initial={{ opacity: 0, y: 16, scale: 0.96 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -12, scale: 0.97 }}
+                          transition={{ type: 'spring', stiffness: 360, damping: 22 }}
+                          className="mt-3 p-3 rounded-xl border-2 border-blue-400/50 bg-blue-50 dark:bg-blue-950/20"
+                        >
+                          <div className="flex items-center gap-1.5 mb-2">
+                            <UserPlus className="w-3.5 h-3.5 text-blue-600" />
+                            <p className="text-xs font-medium text-blue-700 dark:text-blue-300">
+                              কাস্টমার যোগ করুন
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setShowCustPicker(true)}
+                              className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-blue-400 bg-card flex items-center gap-2 text-sm hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors"
+                            >
+                              <UserPlus className="w-4 h-4 text-blue-600" />
+                              <span className="text-blue-700 dark:text-blue-300 font-medium">কাস্টমার নির্বাচন করুন</span>
+                            </button>
+                            <button
+                              onClick={() => { setShowPartyForm(true); }}
+                              className="w-11 h-11 rounded-xl bg-blue-500 text-white flex items-center justify-center shrink-0 hover:bg-blue-600 transition-colors"
+                              aria-label="নতুন কাস্টমার"
+                            >
+                              <Plus className="w-5 h-5" />
+                            </button>
+                          </div>
+                        </motion.div>
+                      </AnimatePresence>
+                    </motion.div>
+                  )
+                } else if (customerBoxMode === 'red') {
+                  return (
+                    <motion.div
+                      key="red-warning-slot"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+                      className="overflow-hidden"
+                    >
+                      <AnimatePresence mode="popLayout" initial={false}>
+                        <motion.div
+                          key={`red-warning-${creditGateKey}`}
+                          initial={{ opacity: 0, y: 18, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -12, scale: 0.96 }}
+                          transition={{ type: 'spring', stiffness: 360, damping: 20 }}
+                          className="mt-3"
+                        >
+                          <motion.div
+                            animate={{ x: [0, -8, 8, -6, 6, 0] }}
+                            transition={{ duration: 0.45, repeat: 2, ease: 'easeInOut' }}
+                            className="p-3 rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-950/30"
+                          >
+                            {/* Mandatory warning label */}
+                            <div className="flex items-center gap-1.5 mb-2">
+                              <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                              <p className="text-xs font-bold text-red-700 dark:text-red-300">
+                                বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক
+                              </p>
+                            </div>
+                            {/* Clone of Add Customer input */}
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => { setShowCustPicker(true); }}
+                                className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-red-400 bg-card flex items-center gap-2 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                              >
+                                <UserPlus className="w-4 h-4 text-red-600" />
+                                <span className="text-red-700 dark:text-red-300 font-medium">কাস্টমার নির্বাচন করুন</span>
+                              </button>
+                              <button
+                                onClick={() => { setShowPartyForm(true); }}
+                                className="w-11 h-11 rounded-xl bg-red-500 text-white flex items-center justify-center shrink-0 hover:bg-red-600 transition-colors"
+                                aria-label="নতুন কাস্টমার"
+                              >
+                                <Plus className="w-5 h-5" />
+                              </button>
+                            </div>
+                            {/* Ledger due amount */}
+                            <p className="text-[10px] text-red-600 mt-1.5 text-center">
+                              খাতায় বাকি: ₹{ledgerDue.toFixed(2)} · কাস্টমার যুক্ত করলে ট্রানজেকশন সম্পন্ন হবে
+                            </p>
+                          </motion.div>
+                        </motion.div>
+                      </AnimatePresence>
+                    </motion.div>
+                  )
+                }
+                return null
+              })()}
             </AnimatePresence>
 
             {/* §5: Fulfillment Status toggle — Handled Over / Pick Up Later */}
@@ -1810,8 +1866,9 @@ export function SalePadView() {
                 <button
                   onClick={() => {
                     setFulfillmentStatus('pickup')
-                    // §1: If no customer, show inline customer block with animation
-                    if (!customer) setShowInlineCustomer(true)
+                    // §UX-REFINEMENT: Force blue box to (re-)animate on every tap.
+                    // Strict exclusivity: this also dismisses any red warning.
+                    if (!customer) triggerBlueCustomerBox()
                   }}
                   className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                     fulfillmentStatus === 'pickup' ? 'bg-amber-600 text-white shadow-sm' : 'bg-card text-muted-foreground'
