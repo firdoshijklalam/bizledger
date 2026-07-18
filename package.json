@@ -7,10 +7,10 @@
     "build": "npx prisma generate && npx prisma db push && next build",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
-    "db:push": "prisma db push",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:reset": "prisma migrate reset",
+    "db:push": "prisma db push --schema prisma/schema.dev.prisma",
+    "db:generate": "prisma generate --schema prisma/schema.dev.prisma",
+    "db:migrate": "prisma migrate dev --schema prisma/schema.dev.prisma",
+    "db:reset": "prisma migrate reset --schema prisma/schema.dev.prisma",
     "postinstall": "prisma generate"
   },
   "dependencies": {
