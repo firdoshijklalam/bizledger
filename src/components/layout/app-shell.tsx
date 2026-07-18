@@ -183,7 +183,10 @@ export function AppShell() {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <TopAppBar />
-      <main className="flex-1 w-full max-w-2xl mx-auto px-3 sm:px-4 pb-28 pt-3">
+      <main
+        className="flex-1 w-full max-w-2xl mx-auto px-3 sm:px-4 pb-28 pt-3"
+        style={{ overflowAnchor: 'none' }}
+      >
         {/* §1: SalePad is ALWAYS mounted (display:none when inactive) to preserve cart state.
             All other views use AnimatePresence for transitions. */}
         <div style={{ display: activeView === 'sale-pad' ? 'block' : 'none' }}>

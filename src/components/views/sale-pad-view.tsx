@@ -1021,7 +1021,7 @@ export function SalePadView() {
   } as const
 
   return (
-    <div className="space-y-4 pb-4">
+    <div className="space-y-4 pb-4" style={{ overflowAnchor: 'none' }}>
       {/* §1: Back button → goes to Billing page (not dashboard) */}
       <div className="flex items-center gap-2">
         <button
