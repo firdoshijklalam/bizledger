@@ -16,3 +16,11 @@ if ! pgrep -f "watchdog-server.sh" > /dev/null 2>&1; then
   disown
   echo "[$(date '+%H:%M:%S')] Recovery: started watchdog" >> /home/z/my-project/recovery.log
 fi
+
+# §AUTO-DEPLOY: Ensure the auto-push watcher is running so every committed
+# change auto-deploys to Vercel via GitHub. Restarted if it dies.
+if ! pgrep -f "auto-deploy.sh" > /dev/null 2>&1; then
+  setsid bash /home/z/my-project/auto-deploy.sh 0<&- 1>/dev/null 2>&1 &
+  disown
+  echo "[$(date '+%H:%M:%S')] Recovery: started auto-deploy watcher" >> /home/z/my-project/recovery.log
+fi
