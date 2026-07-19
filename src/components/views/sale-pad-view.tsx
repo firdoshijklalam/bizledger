@@ -249,6 +249,20 @@ export function SalePadView() {
   const blueBoxControls = useAnimationControls()
   const redBoxControls = useAnimationControls()
 
+  // §STATE-LEAK-FIX: Reset checkout UI states on cart switch.
+  // The Red Warning box + Blue Add Customer box visibility must NOT bleed
+  // across Person 1 / Person 2 carts. When the active cart changes (switch or
+  // new cart), reset both to false so the new cart starts fresh/un-triggered.
+  // The auto-show effect further down will re-show the blue box if the new
+  // cart's fulfillmentStatus is 'pickup' (correct per-cart behavior).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setShowCreditGate(false)
+      setShowInlineCustomer(false)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [activeCartId])
+
   // §3: Hardware back button interception — same as UI back button
   useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
