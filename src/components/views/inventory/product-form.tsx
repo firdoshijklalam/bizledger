@@ -2,7 +2,7 @@
 
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
-import { useFetch, apiPost, apiPut } from '@/hooks/use-fetch'
+import { useFetch, apiPost, apiPut, apiDelete } from '@/hooks/use-fetch'
 import type { Product, Party } from '@/lib/types'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -597,10 +597,17 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
               <Input id="mrp" value={mrp} onChange={(e) => setMrp(e.target.value)} className="h-11" inputMode="numeric" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="wp" className="text-xs">Wholesale ₹</Label>
+              <Label htmlFor="wp" className="text-xs">Wholesale ₹ <span className="text-[9px] text-muted-foreground">(default)</span></Label>
               <Input id="wp" value={wholesalePrice} onChange={(e) => setWholesalePrice(e.target.value)} className="h-11" inputMode="numeric" />
             </div>
           </div>
+
+          {/* §DYNAMIC-PRICING: Tiered pricing manager — set per-buyer/per-group
+              custom prices that override the default wholesale price.
+              Resolution: Specific Buyer > Group > Default Wholesale. */}
+          {productId && (
+            <DynamicPricingManager productId={productId} />
+          )}
 
           {/* Auto discount display */}
           {discountInfo && (
@@ -680,4 +687,171 @@ function getSubCategorySuggestions(category: string): string[] {
     if (c.includes(key)) return map[key]
   }
   return []
+}
+
+// ============================================================================
+// §DYNAMIC-PRICING: Tiered pricing manager.
+// Lets a supplier set custom prices per buyer or per group for a product.
+// Resolution: Specific Buyer Price > Group Price > Default Wholesale Price.
+// ============================================================================
+interface CustomPriceRow {
+  id: string
+  buyerId: string | null
+  buyerGroupName: string | null
+  customPrice: number
+  buyer?: { id: string; name: string; phone?: string | null; buyerGroup?: string | null } | null
+}
+
+function DynamicPricingManager({ productId }: { productId: string }) {
+  const { triggerRefresh } = useAppStore()
+  const { data: customPrices, setData } = useFetch<CustomPriceRow[]>(`/api/products/${productId}/custom-prices`, [productId])
+  const { data: parties } = useFetch<Party[]>('/api/parties?type=customer', [])
+  const [expanded, setExpanded] = useState(false)
+  const [showAdd, setShowAdd] = useState(false)
+  const [mode, setMode] = useState<'buyer' | 'group'>('buyer')
+  const [selectedBuyerId, setSelectedBuyerId] = useState('')
+  const [groupName, setGroupName] = useState('')
+  const [newPrice, setNewPrice] = useState('')
+
+  const handleAdd = async () => {
+    const price = Number(newPrice)
+    if (isNaN(price) || price < 0) { toast.error('Invalid price'); return }
+    if (mode === 'buyer' && !selectedBuyerId) { toast.error('Select a buyer'); return }
+    if (mode === 'group' && !groupName.trim()) { toast.error('Enter a group name'); return }
+    try {
+      await apiPost(`/api/products/${productId}/custom-prices`, {
+        buyerId: mode === 'buyer' ? selectedBuyerId : null,
+        buyerGroupName: mode === 'group' ? groupName.trim() : null,
+        customPrice: price,
+        buyerName: mode === 'buyer' ? parties?.find((p) => p.id === selectedBuyerId)?.name : groupName.trim(),
+      })
+      toast.success('Custom price set · Buyer notified')
+      setShowAdd(false)
+      setNewPrice('')
+      setSelectedBuyerId('')
+      setGroupName('')
+      triggerRefresh()
+    } catch (e) {
+      toast.error('Failed to set custom price')
+    }
+  }
+
+  const handleDelete = async (priceId: string) => {
+    try {
+      await apiDelete(`/api/products/${productId}/custom-prices/${priceId}`)
+      toast.success('Custom price removed')
+      triggerRefresh()
+    } catch (e) {
+      toast.error('Failed to remove')
+    }
+  }
+
+  const rows = customPrices || []
+
+  return (
+    <div className="rounded-xl border border-violet-200 dark:border-violet-900/50 bg-violet-50/50 dark:bg-violet-950/20 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-3 text-left"
+      >
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center">
+            <Tag className="w-3.5 h-3.5 text-violet-600" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold">Tiered / Custom Pricing</p>
+            <p className="text-[10px] text-muted-foreground">
+              {rows.length > 0 ? `${rows.length} custom price${rows.length > 1 ? 's' : ''} set` : 'Per-buyer & per-group rates'}
+            </p>
+          </div>
+        </div>
+        <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform ${expanded ? 'rotate-90' : ''}`} />
+      </button>
+
+      {expanded && (
+        <div className="px-3 pb-3 space-y-2">
+          {rows.length > 0 && (
+            <div className="space-y-1.5">
+              {rows.map((row) => (
+                <div key={row.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-card border border-border">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium truncate">
+                      {row.buyer ? `👤 ${row.buyer.name}` : `👥 ${row.buyerGroupName}`}
+                    </p>
+                    {row.buyer?.phone && <p className="text-[10px] text-muted-foreground">{row.buyer.phone}</p>}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-sm font-bold tabular text-violet-600">₹{row.customPrice.toFixed(2)}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(row.id)}
+                      className="w-6 h-6 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center text-muted-foreground hover:text-red-600"
+                      aria-label="Remove custom price"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {showAdd ? (
+            <div className="p-3 rounded-lg bg-card border border-border space-y-2">
+              <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted">
+                <button
+                  type="button"
+                  onClick={() => setMode('buyer')}
+                  className={`flex-1 py-1.5 rounded-md text-[11px] font-medium ${mode === 'buyer' ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}
+                >👤 Specific Buyer</button>
+                <button
+                  type="button"
+                  onClick={() => setMode('group')}
+                  className={`flex-1 py-1.5 rounded-md text-[11px] font-medium ${mode === 'group' ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}
+                >👥 Group / Tier</button>
+              </div>
+              {mode === 'buyer' ? (
+                <select
+                  value={selectedBuyerId}
+                  onChange={(e) => setSelectedBuyerId(e.target.value)}
+                  className="w-full h-10 px-3 rounded-lg border border-border bg-card text-sm"
+                >
+                  <option value="">Select buyer…</option>
+                  {(parties || []).map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}{p.phone ? ` · ${p.phone}` : ''}</option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  placeholder="e.g. Wholesalers, VIP Retailers"
+                  className="h-10 text-sm"
+                />
+              )}
+              <div className="flex items-center gap-2">
+                <Input
+                  value={newPrice}
+                  onChange={(e) => setNewPrice(e.target.value)}
+                  placeholder="Custom price ₹"
+                  className="h-10 text-sm flex-1"
+                  inputMode="numeric"
+                />
+                <Button type="button" size="sm" onClick={handleAdd} className="h-10">Set</Button>
+              </div>
+              <button type="button" onClick={() => setShowAdd(false)} className="text-[10px] text-muted-foreground">Cancel</button>
+            </div>
+          ) : (
+            <Button type="button" variant="outline" size="sm" onClick={() => setShowAdd(true)} className="w-full h-9 text-xs">
+              <Plus className="w-3.5 h-3.5 mr-1" /> Add Custom Price
+            </Button>
+          )}
+          <p className="text-[9px] text-muted-foreground leading-tight">
+            Hierarchy: Specific Buyer &gt; Group &gt; Default Wholesale. Buyers get a push notification when a price is set for them.
+          </p>
+        </div>
+      )}
+    </div>
+  )
 }

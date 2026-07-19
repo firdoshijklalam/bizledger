@@ -539,6 +539,48 @@ export function SalePadView() {
     }))
   }
 
+  // §DYNAMIC-PRICING: POS automation. When a customer is selected, query the
+  // resolved-price endpoint for each cart product. If the customer has a
+  // special wholesale price (Specific Buyer > Group > Default), auto-apply it
+  // to cart items that are NOT manually overridden. This re-runs whenever the
+  // customer changes (including clearing → reverts to default).
+  useEffect(() => {
+    if (cart.length === 0) return
+    // Items eligible for re-pricing: have a productId and not manually overridden
+    const eligible = cart.filter((i) => i.productId && !i.manualOverride)
+    if (eligible.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        // Fetch resolved price for each eligible product (batch via individual
+        // resolved-price calls — lightweight and cached by HTTP).
+        const updates: Record<string, { price: number; source: string }> = {}
+        await Promise.all(eligible.map(async (item) => {
+          const url = `/api/products/${item.productId}/resolved-price` +
+            (customer?.id ? `?buyerId=${encodeURIComponent(customer.id)}` : '')
+          const res = await fetch(url)
+          if (!res.ok) return
+          const data = await res.json()
+          if (data && typeof data.price === 'number') {
+            updates[item.cartKey] = { price: data.price, source: data.source }
+          }
+        }))
+        if (cancelled || Object.keys(updates).length === 0) return
+        // Apply only where the resolved price differs from current price
+        setCart(cart.map((i) => {
+          const u = updates[i.cartKey]
+          if (!u || u.price === i.price) return i
+          return { ...i, price: u.price, total: u.price * i.quantity }
+        }))
+        const appliedCount = Object.values(updates).filter((u) => u.source !== 'default').length
+        if (appliedCount > 0 && customer) {
+          toast.success(`${appliedCount} item${appliedCount > 1 ? 's' : ''} re-priced for ${customer.name}`)
+        }
+      } catch {}
+    })()
+    return () => { cancelled = true }
+  }, [customer?.id])
+
   // §4: Manual Price Override — editable total field in cart
   const setManualTotal = (cartKey: string, total: number) => {
     setCart(cart.map((i) =>

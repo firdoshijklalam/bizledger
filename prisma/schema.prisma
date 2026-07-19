@@ -55,6 +55,54 @@ model Business {
   commissionPaid   CommissionLog[] @relation("CommissionPayer")
   mediaAssets  ProductMediaAsset[]
   categories   Category[]
+  // §DYNAMIC-PRICING + §NOTIFICATIONS
+  customPrices  CustomPrice[]
+  notifications Notification[]
+}
+
+// §DYNAMIC-PRICING: Tiered B2B pricing — a supplier assigns different prices
+// to different buyers (buyerId) or tiers (buyerGroupName) for the same product
+// or catalog item. Resolution hierarchy:
+//   Specific Buyer Price > Group Price > Default Wholesale Price
+model CustomPrice {
+  id              String   @id @default(cuid())
+  businessId      String   // the supplier who sets this price
+  productId       String?  // for Product-based pricing (inventory + POS)
+  catalogItemId   String?  // for SupplierCatalogItem-based pricing (B2B sourcing)
+  buyerId         String?  // specific Party (buyer) — HIGHEST priority
+  buyerGroupName  String?  // tier label ("Wholesalers", "VIP") — group priority
+  customPrice     Float
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  product     Product?  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  buyer       Party?    @relation("CustomPriceBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([productId])
+  @@index([catalogItemId])
+  @@index([buyerId])
+  @@index([buyerGroupName])
+}
+
+// §NOTIFICATIONS: DB-backed notifications for cross-context alerts
+// (e.g. supplier sets a custom price → buyer gets notified).
+// type: 'custom-price' | 'low-stock' | 'overdue' | 'system' | 'order'
+model Notification {
+  id           String   @id @default(cuid())
+  businessId   String   // the recipient business (buyer)
+  type         String   @default("system")
+  title        String
+  body         String
+  link         String?  // optional deep-link (e.g. "/?sourcing=1")
+  isRead       Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([isRead])
 }
 
 model Party {
@@ -82,6 +130,10 @@ model Party {
   // §3: Cross-lingual phonetic search tags (JSON array of English phonetic variants)
   // Generated from Bengali name via transliteration. e.g. "অমিত" → ["amit","omit"]
   searchTags           String?  // JSON array string: ["amit","omit","অমিত"]
+  // §DYNAMIC-PRICING: tier label for group-based custom pricing
+  // (e.g. "Wholesalers", "VIP Retailers", "Distributors"). Free-form string
+  // so suppliers can create ad-hoc tiers without a separate table.
+  buyerGroup           String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -92,6 +144,8 @@ model Party {
   purchaseOrders PurchaseOrder[]
   supplierCatalogItems SupplierCatalogItem[] @relation("SupplierCatalogItems")
   fingerprints FingerprintRecord[]
+  // §DYNAMIC-PRICING: custom prices targeted at this buyer (as the buyer Party)
+  customPricesAsBuyer  CustomPrice[] @relation("CustomPriceBuyer")
 
   @@index([businessId])
 }
@@ -134,6 +188,8 @@ model Product {
   images      ProductImage[]
   mediaAssets ProductMediaAsset[]
   invoiceItems InvoiceItem[]
+  // §DYNAMIC-PRICING: custom per-buyer/per-tier prices for this product
+  customPrices CustomPrice[]
 
   @@index([businessId])
   @@index([supplierId])
