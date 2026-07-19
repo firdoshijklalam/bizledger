@@ -97,6 +97,14 @@ export function SideDrawerFab() {
   //   OPEN   → cancel the infinite loop, spring to 45° (turns + into ×).
   //   CLOSE  → spring back to 0°, then RESUME the infinite spin.
   // The .then() promise guards against rapid toggles via fabOpenRef.
+  // §FAB-ICON-FIX: on mount, explicitly set rotate to 0 so the Plus icon
+  // never appears as an X (45°) when collapsed. Without this, a race between
+  // the initial render and the first .start() could leave it stuck at 45°.
+  useEffect(() => {
+    // Mount-only: force the icon to 0° (Plus orientation) before any animation.
+    iconControls.set({ rotate: 0 })
+  }, [])
+
   useEffect(() => {
     if (fabOpen) {
       // OPEN: cancel idle spin → spring to 45°

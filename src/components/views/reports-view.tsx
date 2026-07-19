@@ -9,6 +9,7 @@ import {
   FileText, FileSpreadsheet, Printer, TrendingUp, TrendingDown,
   IndianRupee, Users, Package, BarChart3, AlertCircle, Receipt,
   Megaphone, Medal, ShoppingCart, Gift, Bell, Ban, ChevronDown, ChevronUp,
+  X, Heart,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -24,7 +25,11 @@ const PIE_COLORS = ['#10b981', '#14b8a6', '#f59e0b', '#f97316', '#ef4444']
 
 interface ReportData {
   business: any
-  profitLoss: { revenue: number; expense: number; netProfit: number; gst: number; discount: number }
+  profitLoss: {
+    revenue: number; netRevenue: number; discount: number;
+    cogs: number; grossProfit: number; indirectExpenses: number;
+    expense: number; netProfit: number; gst: number;
+  }
   gst: { totalGst: number; breakdown: Array<{ rate: number; taxable: number; gst: number }> }
   partyLedger: Array<{ id: string; name: string; type: string; grade: string; balance: number; phone?: string | null }>
   outstanding: {
@@ -48,6 +53,9 @@ export function ReportsView() {
   const { business, setActiveView } = useAppStore()
   const { t } = useI18n()
   const { data, loading } = useFetch<ReportData>('/api/reports', [])
+  // §HEALTH-BANNER: fetch dashboard stats for the Business Health score context
+  const { data: dashData } = useFetch<{ healthScore?: number; totalReceivable?: number } & Record<string, unknown>>('/api/dashboard?range=7d', [])
+  const [healthBannerDismissed, setHealthBannerDismissed] = useState(false)
   const { data: allProducts } = useFetch<any[]>('/api/products', [])
   const [activeReport, setActiveReport] = useState<'pl' | 'gst' | 'party' | 'outstanding' | 'stock' | 'grade'>('pl')
 
@@ -132,11 +140,14 @@ export function ReportsView() {
     const rows: string[] = []
     if (type === 'P&L') {
       rows.push('Metric,Amount')
-      rows.push(`Revenue,${data.profitLoss.revenue}`)
-      rows.push(`Expense,${data.profitLoss.expense}`)
+      rows.push(`Total Sales (Gross),${data.profitLoss.revenue}`)
+      rows.push(`Discounts Given,${data.profitLoss.discount}`)
+      rows.push(`Net Revenue,${data.profitLoss.netRevenue}`)
+      rows.push(`Purchase Cost (COGS),${data.profitLoss.cogs}`)
+      rows.push(`Gross Profit,${data.profitLoss.grossProfit}`)
+      rows.push(`Indirect Expenses,${data.profitLoss.indirectExpenses}`)
       rows.push(`Net Profit,${data.profitLoss.netProfit}`)
-      rows.push(`GST,${data.profitLoss.gst}`)
-      rows.push(`Discount,${data.profitLoss.discount}`)
+      rows.push(`GST Collected,${data.profitLoss.gst}`)
     } else if (type === 'Party Ledger') {
       rows.push('Name,Type,Grade,Balance,Phone')
       data.partyLedger.forEach((p) => rows.push(`${p.name},${p.type},${p.grade},${p.balance},${p.phone || ''}`))
@@ -164,18 +175,18 @@ export function ReportsView() {
     { id: 'grade', label: t('rep.gradeDist'), icon: BarChart3 },
   ] as const
 
-  // P&L: bar chart data with net loss highlight
+  // P&L: bar chart data with net loss highlight (uses netRevenue, not gross)
   const plChartData = [
-    { name: 'Revenue', value: data.profitLoss.revenue, color: '#10b981' },
-    { name: 'Expense', value: data.profitLoss.expense, color: '#f87171' },
-    { name: 'Net', value: data.profitLoss.netProfit, color: data.profitLoss.netProfit >= 0 ? '#10b981' : '#ef4444' },
+    { name: 'Net Revenue', value: data.profitLoss.netRevenue, color: '#10b981' },
+    { name: 'COGS', value: data.profitLoss.cogs, color: '#f97316' },
+    { name: 'Indirect Exp', value: data.profitLoss.indirectExpenses, color: '#f87171' },
+    { name: 'Net Profit', value: data.profitLoss.netProfit, color: data.profitLoss.netProfit >= 0 ? '#10b981' : '#ef4444' },
   ]
 
-  // P&L: expense breakdown pie chart
+  // P&L: expense breakdown pie chart (real COGS vs Indirect, not estimated)
   const expenseBreakdown = [
-    { name: 'Purchases', value: data.profitLoss.expense * 0.6 },
-    { name: 'Operating', value: data.profitLoss.expense * 0.25 },
-    { name: 'Other', value: data.profitLoss.expense * 0.15 },
+    { name: 'Purchase Cost (COGS)', value: data.profitLoss.cogs },
+    { name: 'Indirect Expenses', value: data.profitLoss.indirectExpenses },
   ].filter((e) => e.value > 0)
 
   // GST breakdown: CGST/SGST/IGST split (PRD Part 19 §2)
@@ -248,6 +259,37 @@ export function ReportsView() {
       >
         {activeReport === 'pl' && (
           <>
+            {/* §HEALTH-BANNER: dismissible context banner explaining the
+                Business Health score the user clicked to get here. */}
+            {dashData?.healthScore != null && !healthBannerDismissed && (
+              <div className="relative rounded-xl border border-teal-200 dark:border-teal-900/50 bg-teal-50 dark:bg-teal-950/30 p-3 pr-9">
+                <button
+                  onClick={() => setHealthBannerDismissed(true)}
+                  className="absolute top-2 right-2 w-6 h-6 rounded-md hover:bg-teal-100 dark:hover:bg-teal-900/50 flex items-center justify-center text-teal-700 dark:text-teal-300"
+                  aria-label="Dismiss"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-lg bg-teal-100 dark:bg-teal-900/50 flex items-center justify-center shrink-0">
+                    <Heart className="w-4 h-4 text-teal-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-teal-800 dark:text-teal-200">
+                      Business Health Score: {dashData.healthScore}/100
+                    </p>
+                    <p className="text-[11px] text-teal-700 dark:text-teal-300 leading-tight mt-0.5">
+                      {dashData.healthScore >= 80
+                        ? 'Profitability is good'
+                        : dashData.healthScore >= 60
+                          ? 'Profitability is stable'
+                          : 'Profitability needs attention'}
+                      {(dashData.totalReceivable ?? 0) > 0 ? ' — check outstanding dues to improve the score.' : ' — keep up the good work.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             {/* Date filter chips (PRD Part 19 §1) */}
             <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
               {([
@@ -277,13 +319,32 @@ export function ReportsView() {
 
             <Card className="p-5">
               <h3 className="text-sm font-semibold mb-4">{t('rep.pl')}</h3>
-              <div className="space-y-3">
-                <Row icon={TrendingUp} label={t('rep.revenue')} value={formatCurrency(data.profitLoss.revenue, currency)} color="text-emerald-600" />
-                <Row icon={TrendingDown} label={t('rep.expense')} value={formatCurrency(data.profitLoss.expense, currency)} color="text-red-600" />
-                <Row icon={IndianRupee} label="GST Collected" value={formatCurrency(data.profitLoss.gst, currency)} color="text-amber-600" />
-                <Row icon={IndianRupee} label="Discounts Given" value={formatCurrency(data.profitLoss.discount, currency)} color="text-purple-600" />
-                <div className="pt-3 border-t border-border">
-                  <Row icon={BarChart3} label={t('rep.netProfit')} value={formatCurrency(data.profitLoss.netProfit, currency)} color={data.profitLoss.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} bold />
+              <div className="space-y-2.5">
+                {/* §ACCOUNTING FLOW:
+                    Total Sales (subtotal)
+                    − Discounts Given
+                    = Net Revenue
+                    − Purchase Cost (COGS)
+                    = Gross Profit
+                    − Indirect Expenses
+                    = Net Profit
+                    Numbers add up/subtract visibly so shopkeepers trust the math. */}
+                <Row icon={TrendingUp} label="Total Sales (Gross)" value={formatCurrency(data.profitLoss.revenue, currency)} color="text-emerald-600" />
+                <Row icon={IndianRupee} label="Less: Discounts Given" value={`− ${formatCurrency(data.profitLoss.discount, currency)}`} color="text-purple-600" />
+                <div className="pt-2 border-t border-dashed border-border">
+                  <Row icon={TrendingUp} label="Net Revenue" value={formatCurrency(data.profitLoss.netRevenue, currency)} color="text-emerald-600" bold />
+                </div>
+                <Row icon={Package} label="Less: Purchase Cost (COGS)" value={`− ${formatCurrency(data.profitLoss.cogs, currency)}`} color="text-orange-600" />
+                <div className="pt-2 border-t border-dashed border-border">
+                  <Row icon={BarChart3} label="Gross Profit" value={formatCurrency(data.profitLoss.grossProfit, currency)} color={data.profitLoss.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} bold />
+                </div>
+                <Row icon={TrendingDown} label="Less: Indirect Expenses" value={`− ${formatCurrency(data.profitLoss.indirectExpenses, currency)}`} color="text-red-600" />
+                <div className="pt-3 border-t-2 border-border">
+                  <Row icon={BarChart3} label="Net Profit" value={formatCurrency(data.profitLoss.netProfit, currency)} color={data.profitLoss.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} bold />
+                </div>
+                {/* GST shown separately (collected on behalf of govt, not part of profit) */}
+                <div className="pt-2 mt-1 bg-amber-50 dark:bg-amber-950/20 rounded-lg p-2.5">
+                  <Row icon={IndianRupee} label="GST Collected (liability)" value={formatCurrency(data.profitLoss.gst, currency)} color="text-amber-600" />
                 </div>
               </div>
             </Card>

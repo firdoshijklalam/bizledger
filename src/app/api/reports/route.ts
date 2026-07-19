@@ -26,12 +26,26 @@ export async function GET() {
     .filter((i) => i.type === 'sales' || i.type === 'retail')
     .reduce((s, i) => s + i.gstAmount, 0)
   const totalDiscount = invoices.reduce((s, i) => s + i.discountAmount, 0)
-  const totalExpense = transactions
-    .filter((t) => t.type === 'debit' || t.type === 'purchase' || t.type === 'expense')
+  // §ACCOUNTING: Net Revenue = Total Sales (subtotal) − Discounts Given.
+  // This is the actual revenue realized after discounts, before COGS.
+  const netRevenue = totalRevenue - totalDiscount
+  // §ACCOUNTING: Split expenses into COGS (purchase cost) vs Indirect Expenses.
+  // COGS = transactions of type 'purchase' (inventory bought for resale).
+  // Indirect Expenses = transactions of type 'expense' (rent, salaries, utilities).
+  // 'debit' type is a legacy catch-all — count it as indirect expense.
+  const cogs = transactions
+    .filter((t) => t.type === 'purchase')
     .reduce((s, t) => s + t.amount, 0)
+  const indirectExpenses = transactions
+    .filter((t) => t.type === 'expense' || t.type === 'debit')
+    .reduce((s, t) => s + t.amount, 0)
+  const totalExpense = cogs + indirectExpenses
+  // §ACCOUNTING: Gross Profit = Net Revenue − COGS.
+  // Net Profit = Gross Profit − Indirect Expenses.
+  const grossProfit = netRevenue - cogs
+  const netProfit = grossProfit - indirectExpenses
   const totalReceivable = parties.filter((p) => p.balance > 0).reduce((s, p) => s + p.balance, 0)
   const totalPayable = parties.filter((p) => p.balance < 0).reduce((s, p) => s + Math.abs(p.balance), 0)
-  const netProfit = totalRevenue - totalExpense
 
   // GST breakdown
   const gstBreakdown = invoices
@@ -75,10 +89,14 @@ export async function GET() {
     business,
     profitLoss: {
       revenue: totalRevenue,
+      netRevenue,
+      discount: totalDiscount,
+      cogs,
+      grossProfit,
+      indirectExpenses,
       expense: totalExpense,
       netProfit,
       gst: totalGst,
-      discount: totalDiscount,
     },
     gst: {
       totalGst,
