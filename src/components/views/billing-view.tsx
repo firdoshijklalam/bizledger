@@ -186,7 +186,7 @@ export function BillingView() {
           {...voiceProps}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder={t('common.search') + ' invoices…'}
+          placeholder="Search by name or bill no…"
           className="h-11"
         />
       )}
@@ -210,20 +210,94 @@ export function BillingView() {
               description="Create your first invoice to start tracking sales."
             />
           ) : (
-            <div className="space-y-2">
-              <AnimatePresence>
-                {filtered.map((inv, i) => (
+            <GroupedInvoiceList invoices={filtered} currency={currency} />
+          )}
+        </>
+      )}
+
+      <InvoiceForm open={showInvoiceForm} onOpenChange={setShowInvoiceForm} />
+    </div>
+  )
+}
+
+// ============================================================================
+// §UX-POLISH: Grouped invoice list with date-based sticky section headers.
+// Groups invoices into "Today", "Yesterday", and specific date labels
+// (e.g. "17 July 2026"). Each invoice card shows an item-count indicator
+// so identical Walk-in bills (e.g. two ₹110 bills) can be differentiated.
+// ============================================================================
+
+function startOfDay(d: Date): Date {
+  const x = new Date(d)
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+
+function getDateLabel(date: Date): { label: string; sortKey: number } {
+  const now = new Date()
+  const today = startOfDay(now).getTime()
+  const yesterday = today - 86400000
+  const invoiceDay = startOfDay(date).getTime()
+  if (invoiceDay === today) return { label: 'Today', sortKey: today }
+  if (invoiceDay === yesterday) return { label: 'Yesterday', sortKey: yesterday }
+  // Specific date: e.g. "17 July 2026"
+  const label = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+  return { label, sortKey: invoiceDay }
+}
+
+function GroupedInvoiceList({ invoices, currency }: { invoices: Invoice[]; currency: string }) {
+  // Group invoices by date label, preserving newest-first order
+  const groups = useMemo(() => {
+    const map = new Map<string, { label: string; sortKey: number; items: Invoice[] }>()
+    for (const inv of invoices) {
+      const d = new Date(inv.createdAt)
+      const { label, sortKey } = getDateLabel(d)
+      const key = String(sortKey)
+      if (!map.has(key)) map.set(key, { label, sortKey, items: [] })
+      map.get(key)!.items.push(inv)
+    }
+    // Sort groups newest first; within each group keep newest first (invoices
+    // are already sorted desc from the API, but sort defensively)
+    const arr = Array.from(map.values()).sort((a, b) => b.sortKey - a.sortKey)
+    for (const g of arr) {
+      g.items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    }
+    return arr
+  }, [invoices])
+
+  let globalIndex = 0
+
+  return (
+    <div className="space-y-3">
+      {groups.map((group) => (
+        <div key={group.sortKey}>
+          {/* §Sticky date header */}
+          <div className="sticky top-14 z-10 -mx-1 px-2 py-1 bg-background/95 backdrop-blur-sm">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">
+                {group.label}
+              </p>
+              <span className="text-[10px] text-muted-foreground">
+                {group.items.length} {group.items.length === 1 ? 'bill' : 'bills'}
+              </span>
+            </div>
+          </div>
+          <div className="space-y-2 mt-1.5">
+            <AnimatePresence>
+              {group.items.map((inv) => {
+                const idx = globalIndex++
+                const itemCount = inv.items?.length || 0
+                return (
                   <motion.div
                     key={inv.id}
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.02 }}
+                    transition={{ delay: Math.min(idx * 0.02, 0.4) }}
                     layout
                   >
                     <Card className="p-3.5 hover:shadow-md transition-shadow">
                       <button
                         onClick={() => {
-                          // §1: Direct navigation to Full Invoice screen — no bottom sheet
                           useAppStore.getState().setSelectedInvoiceId(inv.id)
                         }}
                         className="w-full flex items-center gap-3 text-left"
@@ -234,12 +308,16 @@ export function BillingView() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <p className="text-sm font-semibold truncate">{inv.invoiceNumber}</p>
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${STATUS_COLORS[inv.status]}`}>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${STATUS_COLORS[inv.status] || STATUS_COLORS.unpaid}`}>
                               {inv.status}
                             </span>
                           </div>
+                          {/* §ITEM-COUNT: includes item count so identical Walk-in
+                              bills (e.g. two ₹110) can be differentiated. */}
                           <p className="text-[11px] text-muted-foreground truncate">
-                            {inv.party?.name || 'Walk-in'} · {formatDate(inv.createdAt)}
+                            {inv.party?.name || 'Walk-in'}
+                            {itemCount > 0 && <span className="text-muted-foreground/70"> • {itemCount} {itemCount === 1 ? 'Item' : 'Items'}</span>}
+                            {' · '}{formatDate(inv.createdAt)}
                           </p>
                         </div>
                         <div className="text-right shrink-0">
@@ -251,14 +329,12 @@ export function BillingView() {
                       </button>
                     </Card>
                   </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
-          )}
-        </>
-      )}
-
-      <InvoiceForm open={showInvoiceForm} onOpenChange={setShowInvoiceForm} />
+                )
+              })}
+            </AnimatePresence>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
