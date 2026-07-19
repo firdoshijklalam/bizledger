@@ -14,7 +14,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 
 // ============================================================================
 // §HISTORY: Transaction History & Reports Module
@@ -74,7 +74,7 @@ const STATUS_BADGE: Record<string, { label: string; cls: string; dot: string }> 
 }
 
 export function TransactionHistoryView() {
-  const { business, triggerRefresh, overlayInvoiceId, setOverlayInvoiceId } = useAppStore()
+  const { business, triggerRefresh, overlayInvoiceId, setOverlayInvoiceId, historyDateRange, setHistoryDateRange } = useAppStore()
   const currency = business?.currency || 'INR'
 
   // ---- Filters ----
@@ -83,6 +83,18 @@ export function TransactionHistoryView() {
   const [customEnd, setCustomEnd] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
+
+  // §HISTORY-ROUTING: Auto-filter from the dashboard Sales card. When the
+  // dashboard passes a historyDateRange (e.g. 'today' / 'week'), apply it on
+  // mount and clear the param so it doesn't re-apply on later visits.
+  useEffect(() => {
+    if (!historyDateRange) return
+    const t = setTimeout(() => {
+      setRange(historyDateRange)
+      setHistoryDateRange(null)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [historyDateRange, setHistoryDateRange])
 
   // ---- Data ----
   const summaryQuery = useMemo(() => {

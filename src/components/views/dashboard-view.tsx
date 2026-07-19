@@ -50,7 +50,7 @@ const TIME_RANGES: Array<{ id: TimeRange; label: string }> = [
 const PIE_COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6']
 
 export function DashboardView() {
-  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId } = useAppStore()
+  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange } = useAppStore()
   const { t } = useI18n()
   const [chartType, setChartType] = useState<ChartType>('revenue')
   const [chartView, setChartView] = useState<ChartView>('line')
@@ -155,7 +155,18 @@ export function DashboardView() {
   const metrics = [
     { label: t('dash.receivable'), value: formatCurrency(data.totalReceivable, currency), icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', onClick: () => { saveScrollPos('dashboard'); setKhataFilter('receivable'); setActiveView('khata') } },
     { label: t('dash.payable'), value: formatCurrency(data.totalPayable, currency), icon: TrendingDown, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', onClick: () => { saveScrollPos('dashboard'); setKhataFilter('payable'); setActiveView('khata') } },
-    { label: t('dash.todaySales'), value: formatCurrency(data.todaySales, currency), icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', onClick: () => { saveScrollPos('dashboard'); setActiveView('billing') } },
+    { label: t('dash.todaySales'), value: formatCurrency(data.todaySales, currency), icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', onClick: () => {
+      // §HISTORY-ROUTING: Sales metric → Transaction History with the active
+      // dashboard dateRange auto-applied. Map dashboard TimeRange → History DateRange.
+      saveScrollPos('dashboard')
+      const historyRange: 'today' | 'yesterday' | 'week' | 'custom' =
+        timeRange === '1d' ? 'today'
+        : timeRange === 'yesterday' ? 'yesterday'
+        : timeRange === 'custom' ? 'custom'
+        : 'week' // 2d/3d/5d/7d/1m/3m/6m/1y all fall back to 'week'
+      setHistoryDateRange(historyRange)
+      setActiveView('history')
+    } },
     { label: t('dash.health'), value: `${data.healthScore}/100`, icon: Heart, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', onClick: () => { saveScrollPos('dashboard'); setActiveView('reports') } },
     { label: t('dash.lowStock'), value: String(data.lowStockCount), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', onClick: () => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') } },
     { label: t('dash.monthlyRevenue'), value: formatCurrency(data.monthlyRevenue, currency), icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', onClick: () => { saveScrollPos('dashboard'); setActiveView('reports') } },

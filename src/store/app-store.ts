@@ -86,6 +86,12 @@ interface AppState {
   returnToView: ViewId | null
   setReturnToView: (view: ViewId | null) => void
 
+  // §HISTORY-ROUTING: when the dashboard Sales card is tapped, this carries the
+  // active dateRange so the History view can auto-filter to the same timeframe.
+  // 'today' | 'yesterday' | 'week' | 'custom'. Cleared after consumption.
+  historyDateRange: 'today' | 'yesterday' | 'week' | 'custom' | null
+  setHistoryDateRange: (r: 'today' | 'yesterday' | 'week' | 'custom' | null) => void
+
   // §2: Global overlay — party detail / invoice preview can open as overlay
   // above the current view without switching tabs. Preserves scroll state.
   overlayPartyId: string | null
@@ -177,6 +183,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   returnToView: null,
   setReturnToView: (view) => set({ returnToView: view }),
+
+  // §HISTORY-ROUTING: date range passed from dashboard Sales card → History view
+  historyDateRange: null,
+  setHistoryDateRange: (r) => set({ historyDateRange: r }),
 
   overlayPartyId: null,
   setOverlayPartyId: (id) => set({ overlayPartyId: id }),
