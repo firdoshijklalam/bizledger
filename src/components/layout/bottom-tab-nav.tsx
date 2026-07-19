@@ -3,7 +3,7 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
-import { Home, BookOpen, Package, Receipt, MoreHorizontal, BarChart3, Sparkles, Settings, Bell, Store, Users } from 'lucide-react'
+import { Home, BookOpen, Package, Receipt, MoreHorizontal, BarChart3, Sparkles, Settings, Bell, Store, Users, History } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ViewId } from '@/lib/types'
 import { useState } from 'react'
@@ -18,9 +18,9 @@ const TABS: Array<{ id: ViewId | 'more'; icon: typeof Home; labelKey: string }> 
 ]
 
 const MORE_ITEMS = [
+  { id: 'history' as ViewId, icon: History, labelKey: 'History', color: 'text-orange-600 bg-orange-100 dark:bg-orange-900/30' },
   { id: 'sourcing' as ViewId, icon: Store, labelKey: 'B2B Sourcing', color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/30' },
   { id: 'reports' as ViewId, icon: BarChart3, labelKey: 'rep.title', color: 'text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30' },
-  { id: 'sourcing' as ViewId, icon: Store, labelKey: 'nav.sourcing', color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/30' },
   { id: 'ai-tools' as ViewId, icon: Sparkles, labelKey: 'ai.tools', color: 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' },
   { id: 'notifications' as ViewId, icon: Bell, labelKey: 'header.notifications', color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30' },
   { id: 'staff' as ViewId, icon: Users, labelKey: 'Staff', color: 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' },

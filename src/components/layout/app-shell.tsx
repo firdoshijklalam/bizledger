@@ -13,6 +13,7 @@ import { KhataView } from '@/components/views/khata-view'
 import { InventoryView } from '@/components/views/inventory-view'
 import { BillingView } from '@/components/views/billing-view'
 import { ReportsView } from '@/components/views/reports-view'
+import { TransactionHistoryView } from '@/components/views/transaction-history-view'
 import { SettingsView } from '@/components/views/settings-view'
 import { NotificationsView } from '@/components/views/notifications-view'
 import { AiToolsView } from '@/components/views/ai-tools-view'
@@ -264,6 +265,8 @@ function renderView(view: string) {
       return <BillingView />
     case 'reports':
       return <ReportsView />
+    case 'history':
+      return <TransactionHistoryView />
     case 'ai-tools':
       return <AiToolsView />
     case 'settings':

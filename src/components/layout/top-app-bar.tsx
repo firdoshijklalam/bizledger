@@ -21,6 +21,7 @@ const VIEW_TITLES: Record<string, string> = {
   'sale-pad': 'qa.quickSale',
   sourcing: 'B2B Sourcing',
   staff: 'Staff Management',
+  history: 'History & Reports',
 }
 
 export function TopAppBar() {

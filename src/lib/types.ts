@@ -11,6 +11,7 @@ export type ViewId =
   | 'notifications'
   | 'sale-pad'
   | 'sourcing'
+  | 'history'
 
 export type PartyType = 'customer' | 'supplier' | 'both'
 export type QualityGrade = 'A' | 'B' | 'C' | 'D' | 'E'
@@ -18,7 +19,7 @@ export type QualityGrade = 'A' | 'B' | 'C' | 'D' | 'E'
 export type TransactionType = 'credit' | 'debit' | 'sale' | 'purchase' | 'expense'
 
 export type InvoiceType = 'sales' | 'purchase' | 'retail' | 'challan'
-export type InvoiceStatus = 'unpaid' | 'partial' | 'paid'
+export type InvoiceStatus = 'unpaid' | 'partial' | 'paid' | 'void'
 export type PaymentMode = 'cash' | 'upi' | 'credit' | 'cheque'
 export type DiscountMode = 'flat' | 'percent'
 
@@ -159,7 +160,14 @@ export interface Invoice {
   paymentMode?: string | null
   notes?: string | null
   paymentLandingToken?: string | null
+  // §HISTORY: fulfillment + collection fields (synced with Prisma schema)
+  deliveryStatus?: string | null
+  collectedByName?: string | null
+  collectedByRole?: string | null
+  paidToName?: string | null
+  paidToRole?: string | null
   createdAt: string
+  updatedAt?: string
   items?: InvoiceItem[]
   party?: Party | null
 }
