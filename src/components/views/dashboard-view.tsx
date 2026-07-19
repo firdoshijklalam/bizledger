@@ -9,6 +9,7 @@ import {
   TrendingUp, TrendingDown, Wallet, Heart, AlertTriangle, Package,
   ArrowUpRight, ArrowDownRight, ArrowLeftRight, Users, Receipt, ChevronRight,
   BarChart3, LineChart, X, Loader2, Calendar,
+  MapPin, Phone, Building2, ShieldCheck, Store,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -92,6 +93,8 @@ export function DashboardView() {
   }, [timeRange, customStart, customEnd])
 
   const { data, loading: apiLoading } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl])
+  // §HERO-PROFILE: fetch userRole for the role tag (Owner/Admin/Sales)
+  const { data: appSettings } = useFetch<any>('/api/app-settings', [])
 
   // PRD Part 38 §4.2: Keep scroll position locked during time filter changes.
   // Save scroll before data changes, restore immediately after.
@@ -160,16 +163,64 @@ export function DashboardView() {
 
   return (
     <div className="space-y-4">
-      {/* Hero greeting */}
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl bg-gradient-to-br from-primary to-emerald-700 dark:from-primary dark:to-emerald-900 p-5 text-primary-foreground shadow-lg shadow-primary/20">
-        <p className="text-xs opacity-80">Namaste, {business?.ownerName?.split(' ')[0] || 'Trader'} 👋</p>
-        <h2 className="text-lg font-bold mt-0.5">{business?.name}</h2>
-        <div className="flex items-center gap-4 mt-3">
-          <div><p className="text-[11px] opacity-75">{t('dash.receivable')}</p><p className="text-lg font-bold tabular">{formatCurrency(data.totalReceivable, currency)}</p></div>
-          <div className="w-px h-10 bg-white/20" />
-          <div><p className="text-[11px] opacity-75">{t('dash.payable')}</p><p className="text-lg font-bold tabular">{formatCurrency(data.totalPayable, currency)}</p></div>
+      {/* §HERO-PROFILE: Interactive business profile card.
+          Removed redundant receivable/payable (shown in grid cards below).
+          Now shows business metadata (avatar, location, phone, GSTIN, role).
+          Clickable → navigates to Settings → Profile tab to edit. */}
+      <motion.button
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        onClick={() => setActiveView('settings')}
+        className="w-full text-left rounded-2xl bg-gradient-to-br from-primary to-emerald-700 dark:from-primary dark:to-emerald-900 p-4 text-primary-foreground shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform"
+      >
+        <div className="flex items-center gap-3">
+          {/* Circular avatar — business logo or initials fallback */}
+          <div className="w-14 h-14 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0 overflow-hidden border-2 border-white/30">
+            {business?.logoUrl ? (
+              <img src={business.logoUrl} alt={business?.name || 'Business'} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-xl font-bold">
+                {(business?.name || 'B').charAt(0).toUpperCase()}
+              </span>
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-xs opacity-80">Namaste, {business?.ownerName?.split(' ')[0] || 'Trader'} 👋</p>
+              {/* User role tag */}
+              <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-white/20 backdrop-blur-sm flex items-center gap-0.5">
+                <ShieldCheck className="w-2.5 h-2.5" />
+                {(appSettings?.userRole || 'owner').charAt(0).toUpperCase() + (appSettings?.userRole || 'owner').slice(1)}
+              </span>
+            </div>
+            <h2 className="text-base font-bold truncate">{business?.name}</h2>
+            {/* Business metadata row: location • phone */}
+            <div className="flex items-center gap-3 mt-1 text-[10px] opacity-90">
+              {business?.address && (
+                <span className="flex items-center gap-0.5 min-w-0">
+                  <MapPin className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{business.address.split(',').slice(-2).join(',').trim()}</span>
+                </span>
+              )}
+              {business?.phone && (
+                <span className="flex items-center gap-0.5 shrink-0">
+                  <Phone className="w-3 h-3" />
+                  <span>{business.phone}</span>
+                </span>
+              )}
+            </div>
+            {/* GSTIN line (if registered) */}
+            {business?.gstin && (
+              <div className="flex items-center gap-0.5 mt-0.5 text-[10px] opacity-75">
+                <Building2 className="w-3 h-3 shrink-0" />
+                <span className="truncate">GSTIN: {business.gstin}</span>
+              </div>
+            )}
+          </div>
+          {/* Edit chevron */}
+          <ChevronRight className="w-5 h-5 opacity-60 shrink-0" />
         </div>
-      </motion.div>
+      </motion.button>
 
       {/* PRD Part 38 §1.1: Horizontal swipe time filter bar — at top of dashboard */}
       <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 pb-1">
