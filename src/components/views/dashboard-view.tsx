@@ -169,7 +169,17 @@ export function DashboardView() {
     } },
     { label: t('dash.health'), value: `${data.healthScore}/100`, icon: Heart, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', onClick: () => { saveScrollPos('dashboard'); setActiveView('reports') } },
     { label: t('dash.lowStock'), value: String(data.lowStockCount), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', onClick: () => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') } },
-    { label: t('dash.monthlyRevenue'), value: formatCurrency(data.monthlyRevenue, currency), icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', onClick: () => { saveScrollPos('dashboard'); setActiveView('reports') } },
+    { label: t('dash.monthlyRevenue'), value: formatCurrency(data.monthlyRevenue, currency), icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', onClick: () => {
+      // §ROUTING: Monthly Revenue is about sales volume, not profitability.
+      // Route to Transaction History (invoice list) like Today's Sales —
+      // only Business Health card / direct menu links go to P&L.
+      saveScrollPos('dashboard')
+      // Monthly revenue spans ~30 days → 'week' is the closest History filter
+      // (History only has today/yesterday/week/custom). Use 'week' so the
+      // user sees recent invoices rather than just today.
+      setHistoryDateRange('week')
+      setActiveView('history')
+    } },
   ]
 
   return (

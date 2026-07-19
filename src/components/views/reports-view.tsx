@@ -373,15 +373,34 @@ export function ReportsView() {
             {expenseBreakdown.length > 0 && (
               <Card className="p-5">
                 <h3 className="text-sm font-semibold mb-3">Expense Breakdown</h3>
-                <div className="h-48">
+                {/* §PIE-FIX: Removed inline `label` prop (drew text ON the pie
+                    slices → overlapped/clipped behind the chart graphic).
+                    Chart is now label-free; a custom legend list below shows
+                    color dot + name + amount + percentage with proper spacing. */}
+                <div className="h-40">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
-                      <Pie data={expenseBreakdown} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={(e: any) => e.name}>
+                      <Pie data={expenseBreakdown} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={60}>
                         {expenseBreakdown.map((_, i) => <Cell key={i} fill={PIE_COLORS[i]} />)}
                       </Pie>
                       <Tooltip formatter={(v: number) => formatCurrency(v, currency)} />
                     </PieChart>
                   </ResponsiveContainer>
+                </div>
+                {/* Custom legend — proper spacing, no overlap with chart */}
+                <div className="mt-3 space-y-2">
+                  {expenseBreakdown.map((e, i) => {
+                    const total = expenseBreakdown.reduce((s, x) => s + x.value, 0) || 1
+                    const pct = ((e.value / total) * 100).toFixed(0)
+                    return (
+                      <div key={e.name} className="flex items-center gap-2 text-xs">
+                        <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: PIE_COLORS[i] }} />
+                        <span className="flex-1 truncate text-muted-foreground">{e.name}</span>
+                        <span className="font-semibold tabular">{formatCurrency(e.value, currency)}</span>
+                        <span className="text-muted-foreground tabular w-8 text-right">{pct}%</span>
+                      </div>
+                    )
+                  })}
                 </div>
               </Card>
             )}
