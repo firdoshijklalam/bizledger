@@ -92,6 +92,13 @@ interface AppState {
   historyDateRange: 'today' | 'yesterday' | 'week' | 'custom' | null
   setHistoryDateRange: (r: 'today' | 'yesterday' | 'week' | 'custom' | null) => void
 
+  // §REPORTS-ROUTING: when the dashboard Expense/Revenue card is tapped, this
+  // carries the active dateRange so the P&L report auto-filters to the same
+  // timeframe. Maps to PLRange ('today'|'week'|'month'|'3months'|'custom').
+  // Cleared after consumption.
+  reportsDateRange: 'today' | 'week' | 'month' | '3months' | 'custom' | null
+  setReportsDateRange: (r: 'today' | 'week' | 'month' | '3months' | 'custom' | null) => void
+
   // §2: Global overlay — party detail / invoice preview can open as overlay
   // above the current view without switching tabs. Preserves scroll state.
   overlayPartyId: string | null
@@ -187,6 +194,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
   // §HISTORY-ROUTING: date range passed from dashboard Sales card → History view
   historyDateRange: null,
   setHistoryDateRange: (r) => set({ historyDateRange: r }),
+
+  // §REPORTS-ROUTING: date range passed from dashboard Expense/Revenue card → P&L
+  reportsDateRange: null,
+  setReportsDateRange: (r) => set({ reportsDateRange: r }),
 
   overlayPartyId: null,
   setOverlayPartyId: (id) => set({ overlayPartyId: id }),

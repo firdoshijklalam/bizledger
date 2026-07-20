@@ -59,7 +59,7 @@ function snapToEdge(p: FabPos): FabPos {
 }
 
 export function SideDrawerFab() {
-  const { fabOpen, setFabOpen, triggerQuickAction, navigateTo } = useAppStore()
+  const { fabOpen, setFabOpen, triggerQuickAction, navigateTo, activeView } = useAppStore()
   const { t } = useI18n()
   const [position, setPosition] = useState<FabPos>(() => { if (typeof window === 'undefined') return DEFAULT_POS; return loadPos() })
   const [isDragging, setIsDragging] = useState(false)
@@ -104,6 +104,14 @@ export function SideDrawerFab() {
     // Mount-only: force the icon to 0° (Plus orientation) before any animation.
     iconControls.set({ rotate: 0 })
   }, [])
+
+  // §FAB-ICON-FIX: Close the FAB menu whenever the active view changes.
+  // This prevents the icon from staying at 45° (×) when the user navigates
+  // away from the view where they opened the FAB (e.g. opened on dashboard,
+  // tapped a card → reports screen → FAB still showed ×).
+  useEffect(() => {
+    setFabOpen(false)
+  }, [activeView, setFabOpen])
 
   useEffect(() => {
     if (fabOpen) {

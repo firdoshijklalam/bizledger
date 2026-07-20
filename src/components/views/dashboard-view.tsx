@@ -56,8 +56,29 @@ const TIME_RANGES: Array<{ id: TimeRange; label: string }> = [
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6']
 
+// §ROUTING: Map a dashboard TimeRange → History DateRange.
+// History only has today/yesterday/week/custom, so multi-day ranges collapse to 'week'.
+function mapToHistoryRange(r: TimeRange): 'today' | 'yesterday' | 'week' | 'custom' {
+  if (r === '1d') return 'today'
+  if (r === 'yesterday') return 'yesterday'
+  if (r === 'custom') return 'custom'
+  return 'week' // 2d/3d/5d/7d/1m/3m/6m/1y → week
+}
+
+// §ROUTING: Map a dashboard TimeRange → Reports PLRange.
+// P&L has today/week/month/3months/custom.
+function mapToReportsRange(r: TimeRange): 'today' | 'week' | 'month' | '3months' | 'custom' {
+  if (r === '1d') return 'today'
+  if (r === 'yesterday') return 'today' // P&L has no yesterday → today is closest
+  if (r === 'custom') return 'custom'
+  if (r === '2d' || r === '3d' || r === '5d' || r === '7d') return 'week'
+  if (r === '1m') return 'month'
+  if (r === '3m' || r === '6m' || r === '1y') return '3months'
+  return 'month'
+}
+
 export function DashboardView() {
-  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange } = useAppStore()
+  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setReportsDateRange } = useAppStore()
   const { t } = useI18n()
   const [chartType, setChartType] = useState<ChartType>('revenue')
   const [chartView, setChartView] = useState<ChartView>('line')
@@ -295,10 +316,9 @@ export function DashboardView() {
           currency={currency}
           valueExtractor={(d) => d?.rangeSales ?? 0}
           onClick={(r) => {
+            // §ROUTING: Total Sales → History & Reports (sales volume)
             saveScrollPos('dashboard')
-            const historyRange: 'today' | 'yesterday' | 'week' | 'custom' =
-              r === '1d' ? 'today' : r === 'yesterday' ? 'yesterday' : r === 'custom' ? 'custom' : 'week'
-            setHistoryDateRange(historyRange)
+            setHistoryDateRange(mapToHistoryRange(r))
             setActiveView('history')
           }}
         />
@@ -311,7 +331,12 @@ export function DashboardView() {
           defaultRange="1d"
           currency={currency}
           valueExtractor={(d) => d?.rangeCollection ?? 0}
-          onClick={() => { saveScrollPos('dashboard'); setKhataFilter('all'); setActiveView('khata') }}
+          onClick={(r) => {
+            // §ROUTING: Total Collection → History & Reports (collections feed)
+            saveScrollPos('dashboard')
+            setHistoryDateRange(mapToHistoryRange(r))
+            setActiveView('history')
+          }}
         />
         <TimeMetricCard
           label="Total Expense"
@@ -322,7 +347,12 @@ export function DashboardView() {
           defaultRange="1d"
           currency={currency}
           valueExtractor={(d) => d?.rangeExpense ?? 0}
-          onClick={() => { saveScrollPos('dashboard'); setActiveView('reports') }}
+          onClick={(r) => {
+            // §ROUTING: Total Expense → Profit & Loss (expense breakdown)
+            saveScrollPos('dashboard')
+            setReportsDateRange(mapToReportsRange(r))
+            setActiveView('reports')
+          }}
         />
         <TimeMetricCard
           label="Total Revenue"
@@ -334,11 +364,10 @@ export function DashboardView() {
           currency={currency}
           valueExtractor={(d) => d?.rangeSales ?? 0}
           onClick={(r) => {
+            // §ROUTING: Total Revenue → Profit & Loss (revenue analysis)
             saveScrollPos('dashboard')
-            const historyRange: 'today' | 'yesterday' | 'week' | 'custom' =
-              r === '1d' ? 'today' : r === 'yesterday' ? 'yesterday' : r === 'custom' ? 'custom' : 'week'
-            setHistoryDateRange(historyRange)
-            setActiveView('history')
+            setReportsDateRange(mapToReportsRange(r))
+            setActiveView('reports')
           }}
         />
       </div>

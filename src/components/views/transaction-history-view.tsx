@@ -517,8 +517,8 @@ function StatCard({
       {loading ? (
         <div className="h-5 w-20 bg-muted rounded animate-pulse" />
       ) : (
-        <p className="text-base font-bold tabular leading-tight">
-          {isCount ? value : formatCurrency(value)}
+        <p className="text-base font-bold tabular leading-tight text-foreground">
+          {isCount ? value : formatCurrency(value || 0)}
         </p>
       )}
       <p className="text-[9px] text-muted-foreground mt-0.5 truncate">{sub}</p>

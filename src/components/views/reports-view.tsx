@@ -19,7 +19,7 @@ import { toast } from 'sonner'
 import {
   Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 
 const PIE_COLORS = ['#10b981', '#14b8a6', '#f59e0b', '#f97316', '#ef4444']
 
@@ -50,7 +50,7 @@ type OutstandingTab = 'receivables' | 'payables'
 type StockMovement = 'all' | 'fast' | 'slow' | 'non-moving'
 
 export function ReportsView() {
-  const { business, setActiveView } = useAppStore()
+  const { business, setActiveView, reportsDateRange, setReportsDateRange } = useAppStore()
   const { t } = useI18n()
   const { data, loading } = useFetch<ReportData>('/api/reports', [])
   // §HEALTH-BANNER: fetch dashboard stats for the Business Health score context
@@ -63,6 +63,18 @@ export function ReportsView() {
   const [plRange, setPlRange] = useState<PLRange>('month')
   const [plCustomStart, setPlCustomStart] = useState('')
   const [plCustomEnd, setPlCustomEnd] = useState('')
+
+  // §REPORTS-ROUTING: Auto-apply date range passed from dashboard cards.
+  // When the dashboard Expense/Revenue card passes a reportsDateRange, apply
+  // it to the P&L filter on mount, then clear the param.
+  useEffect(() => {
+    if (!reportsDateRange) return
+    const t = setTimeout(() => {
+      setPlRange(reportsDateRange)
+      setReportsDateRange(null)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [reportsDateRange, setReportsDateRange])
 
   // GST date filter (PRD Part 19 §2)
   const [gstRange, setGstRange] = useState<GSTRange>('month')
