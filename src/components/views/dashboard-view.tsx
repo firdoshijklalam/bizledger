@@ -324,6 +324,23 @@ export function DashboardView() {
           valueExtractor={(d) => d?.rangeExpense ?? 0}
           onClick={() => { saveScrollPos('dashboard'); setActiveView('reports') }}
         />
+        <TimeMetricCard
+          label="Total Revenue"
+          icon={Receipt}
+          tint="bg-purple-500"
+          bg="bg-purple-50 dark:bg-purple-950/30"
+          text="text-purple-700 dark:text-purple-300"
+          defaultRange="1d"
+          currency={currency}
+          valueExtractor={(d) => d?.rangeSales ?? 0}
+          onClick={(r) => {
+            saveScrollPos('dashboard')
+            const historyRange: 'today' | 'yesterday' | 'week' | 'custom' =
+              r === '1d' ? 'today' : r === 'yesterday' ? 'yesterday' : r === 'custom' ? 'custom' : 'week'
+            setHistoryDateRange(historyRange)
+            setActiveView('history')
+          }}
+        />
       </div>
 
       {/* Chart — PRD Part 4: Chart toggle + dynamic time-frame + advanced charts */}
@@ -894,14 +911,15 @@ function TimeMetricCard({
 
   return (
     <Card className={`p-4 ${bg} border-none hover:shadow-md transition-shadow h-full relative`}>
-      {/* Dropdown trigger — top-right corner */}
-      <div className="absolute top-2 right-2 z-10">
+      {/* Dropdown trigger — top-right corner. z-20 sits above the card button.
+          stopPropagation on the wrapper prevents the card's onClick from
+          firing when the dropdown trigger is tapped. */}
+      <div className="absolute top-2 right-2 z-20" onClick={(e) => e.stopPropagation()}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               className="w-6 h-6 rounded-md bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 flex items-center justify-center text-muted-foreground transition-colors"
               aria-label="Select date range"
-              onClick={(e) => e.stopPropagation()}
             >
               <Calendar className="w-3.5 h-3.5" />
             </button>
@@ -910,7 +928,7 @@ function TimeMetricCard({
             {CARD_RANGES.map((r) => (
               <DropdownMenuItem
                 key={r.id}
-                onClick={(e) => { e.stopPropagation(); setRange(r.id) }}
+                onSelect={() => setRange(r.id)}
                 className={range === r.id ? 'font-bold' : ''}
               >
                 {r.label}
@@ -920,7 +938,7 @@ function TimeMetricCard({
         </DropdownMenu>
       </div>
 
-      <button onClick={() => onClick(range)} className="w-full text-left">
+      <button onClick={() => onClick(range)} className="w-full text-left relative z-0 pr-8">
         <div className="flex items-start mb-2">
           <span className={`w-8 h-8 rounded-lg ${tint} text-white flex items-center justify-center`}>
             <Icon className="w-4 h-4" />
