@@ -1,83 +1,102 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/store/app-store'
+import { useCallback } from 'react'
 
 /**
- * Defensive fetch hook with 10s timeout, JSON parse isolation, and per-item
- * error scrubbing so a single corrupt row can't blank the entire list.
+ * §PERFORMANCE: TanStack Query-backed fetch hook.
  *
- * - Network errors / timeouts → sets `error` (UI shows retry, not blank)
- * - JSON parse errors → caught, sets `error`
- * - Individual corrupt items in an array → filtered out with console.warn,
- *   so the rest of the list still renders (one bad row ≠ empty screen)
- * - If API returns { items, total, hasMore }, extracts `items`
+ * Replaces the old useState+useEffect approach with TanStack Query, which
+ * caches responses at the app-root level (above the view tree). Benefits:
+ *   - Stale-While-Revalidate: returning to a view shows cached data
+ *     INSTANTLY (no loading screen) while revalidating in the background.
+ *   - No re-fetch on rapid back-forth navigation (30s staleTime).
+ *   - Cache survives view unmount (5min gcTime).
+ *
+ * API is unchanged from the old useFetch: returns { data, loading, error,
+ * refetch, setData }. All existing components work without modification.
+ *
+ * Also preserves the old hook's defensive features:
+ *   - 10s timeout via AbortController
+ *   - JSON parse isolation
+ *   - Paginated response extraction ({ items, total, hasMore } → items)
+ *   - Per-item null/empty scrubbing
  */
 export function useFetch<T>(url: string | null, deps: any[] = []) {
-  const [data, setData] = useState<T | null>(null)
-  const [loading, setLoading] = useState(!!url)
-  const [error, setError] = useState<string | null>(null)
   const { refreshKey } = useAppStore()
+  const queryClient = useQueryClient()
 
-  const refetch = useCallback(async () => {
-    if (!url) return
-    setLoading(true)
-    setError(null)
-    try {
+  // Build a stable query key: url + refreshKey + deps
+  const queryKey = [url, refreshKey, ...deps]
+
+  const query = useQuery<T>({
+    queryKey,
+    queryFn: async () => {
+      if (!url) return null as T
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 10000)
-      const res = await fetch(url, { signal: controller.signal })
-      clearTimeout(timeout)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      // §1: JSON parse isolation — a malformed body shouldn't crash the UI
-      let json: any
       try {
-        json = await res.json()
-      } catch (parseErr) {
-        throw new Error('Invalid response from server')
+        const res = await fetch(url, { signal: controller.signal })
+        clearTimeout(timeout)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        let json: any
+        try {
+          json = await res.json()
+        } catch {
+          throw new Error('Invalid response from server')
+        }
+        // Extract paginated responses; single objects pass through
+        let extracted: any
+        if (Array.isArray(json)) {
+          extracted = json
+        } else if (json && typeof json === 'object' && 'items' in json && ('total' in json || 'hasMore' in json)) {
+          extracted = json.items
+        } else {
+          extracted = json
+        }
+        // Scrub null/empty items so one bad row doesn't blank the list
+        if (Array.isArray(extracted)) {
+          extracted = extracted.filter((item, idx) => {
+            if (item == null || (typeof item === 'object' && Object.keys(item).length === 0)) {
+              console.warn(`[useFetch] Dropping empty/null item at index ${idx} from ${url}`)
+              return false
+            }
+            return true
+          })
+        }
+        return extracted as T
+      } catch (e: any) {
+        clearTimeout(timeout)
+        throw e
       }
-      // §4: Backward compat — if API returns { items, total, hasMore }, extract items.
-      // CRITICAL: Only extract if it's a paginated response (has total/hasMore).
-      // Single-object responses (like /api/invoices/[id]) have an 'items' field
-      // (invoice line items) — we must NOT extract that, we need the whole object.
-      let extracted: any
-      if (Array.isArray(json)) {
-        extracted = json
-      } else if (json && typeof json === 'object' && 'items' in json && ('total' in json || 'hasMore' in json)) {
-        // Paginated list response: { items: [...], total: N, hasMore: bool }
-        extracted = json.items
-      } else {
-        // Single object response (e.g., invoice detail with its own items array)
-        extracted = json
-      }
-      // §2: Per-item error scrubbing — filter out corrupt rows so one bad item
-      // doesn't blank the entire list. Only applies to arrays.
-      if (Array.isArray(extracted)) {
-        extracted = extracted.filter((item, idx) => {
-          if (item == null || (typeof item === 'object' && Object.keys(item).length === 0)) {
-            console.warn(`[useFetch] Dropping empty/null item at index ${idx} from ${url}`)
-            return false
-          }
-          return true
-        })
-      }
-      setData(extracted as T)
-      setError(null)
-    } catch (e: any) {
-      const msg = e?.name === 'AbortError' ? 'Request timeout' : (e?.message || String(e))
-      setError(msg)
-      // §3: Keep previous data on refetch error so screen doesn't blank —
-      // only clear data if this is the first load (data was null)
-    } finally {
-      setLoading(false)
-    }
-  }, [url])
+    },
+    enabled: !!url,
+    // Don't show loading on refetch if we have cached data (stale-while-revalidate)
+    placeholderData: (prev) => prev,
+  })
 
-  useEffect(() => {
-    refetch()
-  }, [url, refreshKey, ...deps])
+  const refetch = useCallback(async () => {
+    await query.refetch()
+  }, [query])
 
-  return { data, loading, error, refetch, setData }
+  // setData: imperatively update the cached data (for optimistic updates)
+  const setData = useCallback(
+    (updater: T | ((prev: T | null) => T)) => {
+      queryClient.setQueryData<T>(queryKey, (prev) =>
+        typeof updater === 'function' ? (updater as (prev: T | null) => T)(prev) : updater,
+      )
+    },
+    [queryClient, queryKey],
+  )
+
+  return {
+    data: query.data ?? null,
+    loading: query.isLoading,
+    error: query.error ? (query.error instanceof Error ? query.error.message : String(query.error)) : null,
+    refetch,
+    setData,
+  }
 }
 
 export async function apiPost(url: string, body: any) {

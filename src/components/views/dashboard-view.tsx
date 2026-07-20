@@ -127,34 +127,12 @@ export function DashboardView() {
   // PRD Part 38 §4.2: Keep scroll position locked during time filter changes.
   // Save scroll before data changes, restore immediately after.
   const scrollPosRef = useRef(0)
-  const [loading, setLoading] = useState(false)
-  const prevUrlRef = useRef(apiUrl)
-
-  useEffect(() => {
-    if (prevUrlRef.current !== apiUrl) {
-      // Time filter changed — save scroll, show loading overlay without unmount
-      scrollPosRef.current = window.scrollY
-      prevUrlRef.current = apiUrl
-      // Use setTimeout to avoid setState-in-effect lint error
-      const timer = setTimeout(() => setLoading(true), 0)
-      return () => clearTimeout(timer)
-    }
-  }, [apiUrl])
-
-  useEffect(() => {
-    if (apiLoading) return
-    // Data loaded — hide loading, restore scroll instantly
-    const timer = setTimeout(() => {
-      setLoading(false)
-      if (scrollPosRef.current > 0) {
-        requestAnimationFrame(() => {
-          window.scrollTo({ top: scrollPosRef.current, behavior: 'instant' as ScrollBehavior })
-          setTimeout(() => window.scrollTo({ top: scrollPosRef.current, behavior: 'instant' as ScrollBehavior }), 50)
-        })
-      }
-    }, 0)
-    return () => clearTimeout(timer)
-  }, [apiLoading])
+  // §PERFORMANCE: With TanStack Query, cached data shows instantly (stale-while-
+  // revalidate). The full-screen loading overlay only shows on the VERY FIRST
+  // load when there's no cached data. Filter changes update data in-place
+  // without a loading screen — the old values stay visible until the new ones
+  // arrive, then snap in. This eliminates the "page reload" UX.
+  const loading = apiLoading && !data
 
   const chartOptions: Array<{ id: ChartType; label: string }> = [
     { id: 'revenue', label: t('dash.chart.revenue') },
