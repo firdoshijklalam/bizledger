@@ -69,6 +69,21 @@ export async function GET(req: NextRequest) {
   monthStart.setHours(0, 0, 0, 0)
   const monthlyRevenue = invoices.filter((i) => new Date(i.createdAt) >= monthStart).reduce((s, i) => s + i.grandTotal, 0)
 
+  // §LOCALIZED-CARD-FILTERS: range-aware totals for the time-dependent metric
+  // cards (Sales, Collection, Expense). Each card fetches /api/dashboard with
+  // its own range and reads these fields. Computed over [rangeStart, rangeEnd].
+  const rangeInvoices = invoices.filter((i) => {
+    const d = new Date(i.createdAt)
+    return d >= rangeStart && d <= rangeEnd
+  })
+  const rangeTransactions = allTransactions.filter((t) => {
+    const d = new Date(t.createdAt)
+    return d >= rangeStart && d <= rangeEnd
+  })
+  const rangeSales = rangeInvoices.reduce((s, i) => s + i.grandTotal, 0)
+  const rangeCollection = rangeTransactions.filter((t) => t.type === 'credit').reduce((s, t) => s + t.amount, 0)
+  const rangeExpense = rangeTransactions.filter((t) => t.type === 'debit' || t.type === 'expense' || t.type === 'purchase').reduce((s, t) => s + t.amount, 0)
+
   const lowStockCount = products.filter((p) => p.stock <= p.lowStockThreshold).length
 
   const paidInvoices = invoices.filter((i) => i.status === 'paid').length
@@ -198,6 +213,10 @@ export async function GET(req: NextRequest) {
     totalPayable,
     todaySales,
     monthlyRevenue,
+    // §LOCALIZED-CARD-FILTERS: range-aware totals for time-dependent cards
+    rangeSales,
+    rangeCollection,
+    rangeExpense,
     lowStockCount,
     healthScore,
     topDebtors,

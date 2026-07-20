@@ -17,6 +17,9 @@ import {
   Bar, BarChart, Cell, Pie, PieChart, Line, ComposedChart, ReferenceLine,
 } from 'recharts'
 import { Card } from '@/components/ui/card'
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 import { LoadingState, EmptyState } from '@/components/shared/states'
 import { useScrollRetention } from '@/hooks/use-scroll-retention'
 import { useScrollStore } from '@/store/scroll-store'
@@ -31,6 +34,10 @@ interface ExtendedDashboardStats extends DashboardStats {
   topProductsBySales?: Array<{ name: string; value: number }>
   inventoryValue?: number
   inventoryTrend?: Array<{ month: string; value: number }>
+  // §LOCALIZED-CARD-FILTERS: range-aware totals (computed over the requested range)
+  rangeSales?: number
+  rangeCollection?: number
+  rangeExpense?: number
 }
 
 const TIME_RANGES: Array<{ id: TimeRange; label: string }> = [
@@ -152,34 +159,15 @@ export function DashboardView() {
   if (!data && !apiLoading) return <EmptyState icon={Heart} title="No data yet" />
   if (!data) return <LoadingState />
 
-  const metrics = [
+  // §LOCALIZED-CARD-FILTERS: Lifetime metric cards (no time filter — these are
+  // running balances/counts, not time-dependent). Time-dependent cards (Sales,
+  // Collection, Expense) are rendered separately as TimeMetricCard components
+  // with their own dropdown range selector.
+  const lifetimeMetrics = [
     { label: t('dash.receivable'), value: formatCurrency(data.totalReceivable, currency), icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', onClick: () => { saveScrollPos('dashboard'); setKhataFilter('receivable'); setActiveView('khata') } },
     { label: t('dash.payable'), value: formatCurrency(data.totalPayable, currency), icon: TrendingDown, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', onClick: () => { saveScrollPos('dashboard'); setKhataFilter('payable'); setActiveView('khata') } },
-    { label: t('dash.todaySales'), value: formatCurrency(data.todaySales, currency), icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', onClick: () => {
-      // §HISTORY-ROUTING: Sales metric → Transaction History with the active
-      // dashboard dateRange auto-applied. Map dashboard TimeRange → History DateRange.
-      saveScrollPos('dashboard')
-      const historyRange: 'today' | 'yesterday' | 'week' | 'custom' =
-        timeRange === '1d' ? 'today'
-        : timeRange === 'yesterday' ? 'yesterday'
-        : timeRange === 'custom' ? 'custom'
-        : 'week' // 2d/3d/5d/7d/1m/3m/6m/1y all fall back to 'week'
-      setHistoryDateRange(historyRange)
-      setActiveView('history')
-    } },
     { label: t('dash.health'), value: `${data.healthScore}/100`, icon: Heart, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', onClick: () => { saveScrollPos('dashboard'); setActiveView('reports') } },
     { label: t('dash.lowStock'), value: String(data.lowStockCount), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', onClick: () => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') } },
-    { label: t('dash.monthlyRevenue'), value: formatCurrency(data.monthlyRevenue, currency), icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', onClick: () => {
-      // §ROUTING: Monthly Revenue is about sales volume, not profitability.
-      // Route to Transaction History (invoice list) like Today's Sales —
-      // only Business Health card / direct menu links go to P&L.
-      saveScrollPos('dashboard')
-      // Monthly revenue spans ~30 days → 'week' is the closest History filter
-      // (History only has today/yesterday/week/custom). Use 'week' so the
-      // user sees recent invoices rather than just today.
-      setHistoryDateRange('week')
-      setActiveView('history')
-    } },
   ]
 
   return (
@@ -243,42 +231,11 @@ export function DashboardView() {
         </div>
       </motion.button>
 
-      {/* PRD Part 38 §1.1: Horizontal swipe time filter bar — at top of dashboard */}
-      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 pb-1">
-        {([
-          { id: '1d' as TimeRange, label: 'Today' },
-          { id: 'yesterday' as TimeRange, label: 'Yesterday' },
-          { id: '3d' as TimeRange, label: '3 Days' },
-          { id: '5d' as TimeRange, label: '5 Days' },
-          { id: '7d' as TimeRange, label: '7 Days' },
-          { id: '1m' as TimeRange, label: '1 Month' },
-        ]).map((r) => (
-          <button
-            key={r.id}
-            onClick={() => { setTimeRange(r.id) }}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all min-h-[34px] ${
-              timeRange === r.id && timeRange !== 'custom'
-                ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'bg-muted text-muted-foreground'
-            }`}
-          >
-            {r.label}
-          </button>
-        ))}
-        {/* PRD Part 38 §1: Calendar / Custom Range button */}
-        <button
-          onClick={() => { setShowCustomPicker(true); setTimeRange('custom') }}
-          className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all min-h-[34px] flex items-center gap-1 ${
-            timeRange === 'custom'
-              ? 'bg-purple-500 text-white shadow-sm'
-              : 'bg-muted text-muted-foreground'
-          }`}
-        >
-          <Calendar className="w-3 h-3" /> Custom
-        </button>
-      </div>
+      {/* §LOCALIZED-CARD-FILTERS: Global time filter row REMOVED.
+          Time-dependent cards now have their own dropdown range selector.
+          The chart below still has its own range selector. */}
 
-      {/* Custom Date Range Picker — PRD Part 38 §1 */}
+      {/* Custom Date Range Picker — used by the chart's range selector */}
       <AnimatePresence>
         {showCustomPicker && timeRange === 'custom' && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
@@ -303,9 +260,16 @@ export function DashboardView() {
         )}
       </AnimatePresence>
 
-      {/* Metric cards grid */}
+      {/* §LOCALIZED-CARD-FILTERS: Metric cards grid.
+          Lifetime cards (Receivable, Payable, Health, LowStock) have NO
+          time filter — they're running balances/counts.
+          Time-dependent cards (Sales, Collection, Expense) have a dropdown
+          range selector in the top-right corner. Each fetches its own
+          /api/dashboard?range=X slice. */}
+
+      {/* Lifetime metric cards (no time filter) */}
       <div className="grid grid-cols-2 gap-3">
-        {metrics.map((m, i) => {
+        {lifetimeMetrics.map((m, i) => {
           const Icon = m.icon
           return (
             <motion.button key={m.label} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={m.onClick} className="text-left">
@@ -317,6 +281,49 @@ export function DashboardView() {
             </motion.button>
           )
         })}
+      </div>
+
+      {/* Time-dependent metric cards (with localized dropdown filter) */}
+      <div className="grid grid-cols-2 gap-3">
+        <TimeMetricCard
+          label="Total Sales"
+          icon={Wallet}
+          tint="bg-amber-500"
+          bg="bg-amber-50 dark:bg-amber-950/30"
+          text="text-amber-700 dark:text-amber-300"
+          defaultRange="1d"
+          currency={currency}
+          valueExtractor={(d) => d?.rangeSales ?? 0}
+          onClick={(r) => {
+            saveScrollPos('dashboard')
+            const historyRange: 'today' | 'yesterday' | 'week' | 'custom' =
+              r === '1d' ? 'today' : r === 'yesterday' ? 'yesterday' : r === 'custom' ? 'custom' : 'week'
+            setHistoryDateRange(historyRange)
+            setActiveView('history')
+          }}
+        />
+        <TimeMetricCard
+          label="Total Collection"
+          icon={ArrowDownRight}
+          tint="bg-teal-500"
+          bg="bg-teal-50 dark:bg-teal-950/30"
+          text="text-teal-700 dark:text-teal-300"
+          defaultRange="1d"
+          currency={currency}
+          valueExtractor={(d) => d?.rangeCollection ?? 0}
+          onClick={() => { saveScrollPos('dashboard'); setKhataFilter('all'); setActiveView('khata') }}
+        />
+        <TimeMetricCard
+          label="Total Expense"
+          icon={ArrowUpRight}
+          tint="bg-red-500"
+          bg="bg-red-50 dark:bg-red-950/30"
+          text="text-red-700 dark:text-red-300"
+          defaultRange="1d"
+          currency={currency}
+          valueExtractor={(d) => d?.rangeExpense ?? 0}
+          onClick={() => { saveScrollPos('dashboard'); setActiveView('reports') }}
+        />
       </div>
 
       {/* Chart — PRD Part 4: Chart toggle + dynamic time-frame + advanced charts */}
@@ -834,5 +841,103 @@ function OnlineOrdersList({ currency, onNavigate }: { currency: string; onNaviga
         View All Orders →
       </button>
     </div>
+  )
+}
+
+// ============================================================================
+// §LOCALIZED-CARD-FILTERS: TimeMetricCard — a metric card with its own range
+// dropdown in the top-right corner. Fetches /api/dashboard?range=X and extracts
+// the value via valueExtractor. Used for time-dependent metrics (Sales,
+// Collection, Expense). Lifetime metrics (Receivable, Payable, Health, LowStock)
+// do NOT use this — they have no time dimension.
+// ============================================================================
+
+const CARD_RANGES: Array<{ id: TimeRange; label: string }> = [
+  { id: '1d', label: '1 Day (Today)' },
+  { id: '2d', label: '2 Days' },
+  { id: '3d', label: '3 Days' },
+  { id: '5d', label: '5 Days' },
+  { id: '7d', label: '1 Week' },
+  { id: '1m', label: '1 Month' },
+  { id: '6m', label: '6 Months' },
+  { id: '1y', label: '1 Year' },
+  { id: 'custom', label: 'Custom Range' },
+]
+
+function TimeMetricCard({
+  label, icon: Icon, tint, bg, text, defaultRange, currency, valueExtractor, onClick,
+}: {
+  label: string
+  icon: typeof Wallet
+  tint: string
+  bg: string
+  text: string
+  defaultRange: TimeRange
+  currency: string
+  valueExtractor: (d: ExtendedDashboardStats | null | undefined) => number
+  onClick: (range: TimeRange) => void
+}) {
+  const [range, setRange] = useState<TimeRange>(defaultRange)
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
+
+  const apiUrl = useMemo(() => {
+    if (range === 'custom' && customStart && customEnd) {
+      return `/api/dashboard?range=custom&startDate=${customStart}&endDate=${customEnd}`
+    }
+    return `/api/dashboard?range=${range}`
+  }, [range, customStart, customEnd])
+
+  const { data } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl])
+  const value = valueExtractor(data)
+  const rangeLabel = CARD_RANGES.find((r) => r.id === range)?.label || ''
+
+  return (
+    <Card className={`p-4 ${bg} border-none hover:shadow-md transition-shadow h-full relative`}>
+      {/* Dropdown trigger — top-right corner */}
+      <div className="absolute top-2 right-2 z-10">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="w-6 h-6 rounded-md bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 flex items-center justify-center text-muted-foreground transition-colors"
+              aria-label="Select date range"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            {CARD_RANGES.map((r) => (
+              <DropdownMenuItem
+                key={r.id}
+                onClick={(e) => { e.stopPropagation(); setRange(r.id) }}
+                className={range === r.id ? 'font-bold' : ''}
+              >
+                {r.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <button onClick={() => onClick(range)} className="w-full text-left">
+        <div className="flex items-start mb-2">
+          <span className={`w-8 h-8 rounded-lg ${tint} text-white flex items-center justify-center`}>
+            <Icon className="w-4 h-4" />
+          </span>
+        </div>
+        <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{label}</p>
+        <p className={`text-base font-bold tabular ${text}`}>{formatCurrency(value, currency)}</p>
+        <p className="text-[9px] text-muted-foreground/70 mt-0.5 truncate">{rangeLabel}</p>
+      </button>
+
+      {/* Custom date picker — inline when Custom selected */}
+      {range === 'custom' && (
+        <div className="mt-2 space-y-1" onClick={(e) => e.stopPropagation()}>
+          <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full h-7 rounded bg-card border border-border px-1.5 text-[10px] outline-none" />
+          <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full h-7 rounded bg-card border border-border px-1.5 text-[10px] outline-none" />
+        </div>
+      )}
+    </Card>
   )
 }
