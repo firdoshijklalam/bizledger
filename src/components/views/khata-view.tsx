@@ -23,6 +23,7 @@ export function KhataView() {
   const {
     selectedPartyId, setSelectedPartyId,
     khataFilter, setKhataFilter,
+    khataGradeFilter, setKhataGradeFilter,
     showPartyForm, setShowPartyForm,
     editingPartyId, setEditingPartyId,
     pendingQuickAction, clearQuickAction,
@@ -32,6 +33,18 @@ export function KhataView() {
   const [search, setSearch] = useState('')
   const voiceProps = useVoiceInput<HTMLInputElement>((text) => setSearch(text))
   const [gradeFilter, setGradeFilter] = useState<string>('all')
+
+  // §GRADE-ROUTING: Auto-apply grade filter passed from dashboard's grade
+  // distribution bottom sheet ("Go to Khata →" button). Applies on mount,
+  // then clears the param so it doesn't re-apply on later visits.
+  useEffect(() => {
+    if (!khataGradeFilter) return
+    const t = setTimeout(() => {
+      setGradeFilter(khataGradeFilter)
+      setKhataGradeFilter(null)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [khataGradeFilter, setKhataGradeFilter])
 
   const { data: parties, loading } = useFetch<Party[]>('/api/parties', [])
 

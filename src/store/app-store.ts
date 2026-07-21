@@ -28,6 +28,10 @@ interface AppState {
   // Khata
   khataFilter: KhataFilter
   setKhataFilter: (f: KhataFilter) => void
+  // §GRADE-ROUTING: grade passed from dashboard grade-distribution bottom
+  // sheet → Khata auto-selects this grade chip on mount. Cleared after use.
+  khataGradeFilter: string | null
+  setKhataGradeFilter: (g: string | null) => void
   selectedPartyId: string | null
   setSelectedPartyId: (id: string | null) => void
   showPartyForm: boolean
@@ -142,6 +146,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   khataFilter: 'all',
   setKhataFilter: (f) => set({ khataFilter: f }),
+  khataGradeFilter: null,
+  setKhataGradeFilter: (g) => set({ khataGradeFilter: g }),
   selectedPartyId: null,
   setSelectedPartyId: (id) => set({ selectedPartyId: id }),
   showPartyForm: false,

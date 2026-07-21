@@ -78,7 +78,7 @@ function mapToReportsRange(r: TimeRange): 'today' | 'week' | 'month' | '3months'
 }
 
 export function DashboardView() {
-  const { business, setActiveView, setKhataFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setReportsDateRange } = useAppStore()
+  const { business, setActiveView, setKhataFilter, setKhataGradeFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setReportsDateRange } = useAppStore()
   const { t } = useI18n()
   const [chartType, setChartType] = useState<ChartType>('revenue')
   const [chartView, setChartView] = useState<ChartView>('line')
@@ -123,6 +123,10 @@ export function DashboardView() {
   const { data, loading: apiLoading } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl])
   // §HERO-PROFILE: fetch userRole for the role tag (Owner/Admin/Sales)
   const { data: appSettings } = useFetch<any>('/api/app-settings', [])
+  // §GRADE-BOTTOM-SHEET: fetch all parties so the grade distribution bottom
+  // sheet can show ALL customers in a grade (not just topDebtors which is
+  // sliced to 5). Cached by TanStack Query so this is instant on re-open.
+  const { data: allParties } = useFetch<Party[]>('/api/parties', [])
 
   // PRD Part 38 §4.2: Keep scroll position locked during time filter changes.
   // Save scroll before data changes, restore immediately after.
@@ -536,7 +540,7 @@ export function DashboardView() {
               <div className="flex items-center justify-between p-4 border-b border-border">
                 <div className="flex items-center gap-2"><span className={`text-xs font-bold px-2 py-0.5 rounded-full ${GRADE_META[selectedGrade]?.bg} ${GRADE_META[selectedGrade]?.color}`}>Grade {selectedGrade}</span><span className="text-sm font-semibold">{GRADE_META[selectedGrade]?.desc}</span></div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => { setSelectedGrade(null); setKhataFilter('all'); setReturnToView('dashboard'); setActiveView('khata') }} className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-1 rounded-lg">Go to Khata →</button>
+                  <button onClick={() => { setKhataGradeFilter(selectedGrade); setSelectedGrade(null); setKhataFilter('all'); setReturnToView('dashboard'); setActiveView('khata') }} className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-1 rounded-lg">Go to Khata →</button>
                   <button onClick={() => setSelectedGrade(null)} className="text-muted-foreground"><X className="w-4 h-4" /></button>
                 </div>
               </div>
@@ -544,17 +548,19 @@ export function DashboardView() {
                 {(() => {
                   const count = data.gradeDistribution.find((g) => g.grade === selectedGrade)?.count || 0
                   if (count === 0) return <p className="text-sm text-muted-foreground text-center py-8">No customers in this grade</p>
+                  // §FIX: use allParties (full list) instead of topDebtors (sliced to 5)
+                  const gradeParties = (allParties || []).filter((p) => p.qualityGrade === selectedGrade)
                   return (
                     <>
                       <p className="text-xs text-muted-foreground px-1 mb-2">{count} customer{count !== 1 ? 's' : ''} in this grade</p>
-                      {data.topDebtors.filter((d) => d.grade === selectedGrade).map((d) => (
-                        <button key={d.id} onClick={() => { saveScrollPos('dashboard'); setSelectedGrade(null); setOverlayPartyId(d.id) }} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
-                          <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center font-bold text-emerald-700">{d.name.charAt(0)}</span>
-                          <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">Balance: ₹{d.balance}</p></div>
+                      {gradeParties.map((p) => (
+                        <button key={p.id} onClick={() => { saveScrollPos('dashboard'); setSelectedGrade(null); setOverlayPartyId(p.id) }} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
+                          <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center font-bold text-emerald-700">{p.name.charAt(0)}</span>
+                          <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.name}</p><p className="text-[11px] text-muted-foreground">Balance: {formatCurrency(p.balance, currency)}</p></div>
                           <ChevronRight className="w-4 h-4 text-muted-foreground" />
                         </button>
                       ))}
-                      {data.topDebtors.filter((d) => d.grade === selectedGrade).length === 0 && <p className="text-xs text-muted-foreground text-center py-4">Tap "Go to Khata" to see all {count} customers</p>}
+                      {gradeParties.length === 0 && <p className="text-xs text-muted-foreground text-center py-4">Tap "Go to Khata" to see all {count} customers</p>}
                     </>
                   )
                 })()}
