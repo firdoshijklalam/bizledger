@@ -14,7 +14,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid,
-  Bar, BarChart, Cell, Pie, PieChart, Line, ComposedChart, ReferenceLine,
+  Bar, BarChart, Cell, Pie, PieChart, Line, LineChart as RechartsLineChart, ComposedChart, ReferenceLine,
 } from 'recharts'
 import { Card } from '@/components/ui/card'
 import {
@@ -355,7 +355,6 @@ export function DashboardView() {
         <div className="flex items-center justify-between mb-2">
           <div>
             <h3 className="text-sm font-semibold">{chartOptions.find((o) => o.id === chartType)?.label || 'Business Analytics'}</h3>
-            <p className="text-[11px] text-muted-foreground">{TIME_RANGES.find((r) => r.id === timeRange)?.label || '7 Days'}</p>
           </div>
           {chartType !== 'categories' && (
             <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
@@ -373,7 +372,9 @@ export function DashboardView() {
           </select>
         </div>
 
-        {/* Chart rendering */}
+        {/* §TOGGLE-FIX: Chart rendering respects chartView (line vs bar) for
+            ALL chart types. Categories (pie) ignores the toggle. Inventory
+            uses AreaChart (line variant) / BarChart (bar variant). */}
         <motion.div key={chartType + chartView} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }} className="h-44 -ml-2">
           <ResponsiveContainer width="100%" height="100%">
             {chartType === 'revenue' && chartView === 'line' ? (
@@ -383,8 +384,8 @@ export function DashboardView() {
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" />
-                <Area type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} fill="url(#exp)" />
+                <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" name="Revenue" />
+                <Area type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} fill="url(#exp)" name="Expense" />
               </AreaChart>
             ) : chartType === 'revenue' && chartView === 'bar' ? (
               <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
@@ -395,10 +396,18 @@ export function DashboardView() {
                 <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Revenue" />
                 <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Expense" />
               </BarChart>
-            ) : chartType === 'profit' ? (
-              // §FIX: Profit vs Loss — two distinct datasets + legend.
-              // Split each bucket: profit (green, only positive values) and
-              // loss (red, negative values shown as positive bars).
+            ) : chartType === 'profit' && chartView === 'line' ? (
+              // §TOGGLE-FIX: Profit vs Loss — LINE variant (LineChart)
+              <RechartsLineChart data={data.salesTrend.map((d) => ({ ...d, profitVal: d.profit >= 0 ? d.profit : 0, lossVal: d.profit < 0 ? Math.abs(d.profit) : 0 }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <Line type="monotone" dataKey="profitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Profit" />
+                <Line type="monotone" dataKey="lossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Loss" />
+              </RechartsLineChart>
+            ) : chartType === 'profit' && chartView === 'bar' ? (
+              // §TOGGLE-FIX: Profit vs Loss — BAR variant (BarChart)
               <BarChart data={data.salesTrend.map((d) => ({ ...d, profitVal: d.profit >= 0 ? d.profit : 0, lossVal: d.profit < 0 ? Math.abs(d.profit) : 0 }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
@@ -407,17 +416,40 @@ export function DashboardView() {
                 <Bar dataKey="profitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Profit" />
                 <Bar dataKey="lossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Loss" />
               </BarChart>
-            ) : chartType === 'cashflow' ? (
-              <ComposedChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+            ) : chartType === 'cashflow' && chartView === 'line' ? (
+              // §TOGGLE-FIX: Cashflow — LINE variant (pure lines, no bars)
+              <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <Line type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} dot={false} name="Cash In" />
+                <Line type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} dot={false} name="Cash Out" />
+                <Line type="monotone" dataKey="profit" stroke="#6366f1" strokeWidth={2} dot={false} name="Net" />
+              </RechartsLineChart>
+            ) : chartType === 'cashflow' && chartView === 'bar' ? (
+              // §TOGGLE-FIX: Cashflow — BAR variant (pure bars, no line)
+              <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Cash In" />
                 <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Cash Out" />
-                <Line type="monotone" dataKey="profit" stroke="#6366f1" strokeWidth={2} dot={false} name="Net" />
-              </ComposedChart>
-            ) : chartType === 'collections' ? (
+                <Bar dataKey="profit" fill="#6366f1" radius={[3, 3, 0, 0]} name="Net" />
+              </BarChart>
+            ) : chartType === 'collections' && chartView === 'line' ? (
+              // §TOGGLE-FIX: Collections — LINE variant
+              <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <Line type="monotone" dataKey="collected" stroke="#10b981" strokeWidth={2} dot={false} name="Collected" />
+                <Line type="monotone" dataKey="creditGiven" stroke="#ef4444" strokeWidth={2} dot={false} name="New Credit" />
+              </RechartsLineChart>
+            ) : chartType === 'collections' && chartView === 'bar' ? (
+              // §TOGGLE-FIX: Collections — BAR variant
               <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
@@ -433,10 +465,8 @@ export function DashboardView() {
                 </Pie>
                 <Tooltip formatter={(v: number) => formatCurrency(v, currency)} />
               </PieChart>
-            ) : (
-              // §FIX: Inventory chart now uses salesTrend data (time-filtered)
-              // instead of inventoryTrend (always 6 months). Shows sales value
-              // per bucket — respects the selected time filter.
+            ) : chartView === 'line' ? (
+              // §TOGGLE-FIX: Inventory — LINE variant (AreaChart)
               <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <defs><linearGradient id="inv" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.4} /><stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} /></linearGradient></defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
@@ -445,6 +475,15 @@ export function DashboardView() {
                 <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Area type="monotone" dataKey="revenue" stroke="#8b5cf6" strokeWidth={2} fill="url(#inv)" name="Inventory Sales" />
               </AreaChart>
+            ) : (
+              // §TOGGLE-FIX: Inventory — BAR variant
+              <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <Bar dataKey="revenue" fill="#8b5cf6" radius={[3, 3, 0, 0]} name="Inventory Sales" />
+              </BarChart>
             )}
           </ResponsiveContainer>
         </motion.div>
