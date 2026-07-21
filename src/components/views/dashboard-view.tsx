@@ -751,16 +751,46 @@ export function DashboardView() {
             </button>
           ))}
           <div className="ml-auto shrink-0">
-            <button onClick={() => { saveScrollPos('dashboard'); setKhataFilter('all'); setActiveView('khata') }} className="text-xs text-primary font-medium flex items-center">
+            <button onClick={() => {
+              saveScrollPos('dashboard')
+              // §DYNAMIC-ROUTING: View All routes based on active hub tab.
+              if (hubTab === 'transactions') {
+                // Transactions → History (with active time filter)
+                setHistoryDateRange(mapToHistoryRange(timeRange))
+                setActiveView('history')
+              } else if (hubTab === 'lowstock') {
+                // Low Stock → Inventory (with low-stock filter, no time param)
+                setInventoryFilter('low-stock')
+                setActiveView('inventory')
+              } else if (hubTab === 'orders') {
+                // Online Orders → Khata (orders are managed in customer orders)
+                // Pass time filter for order date filtering
+                setHistoryDateRange(mapToHistoryRange(timeRange))
+                setActiveView('history')
+              } else {
+                setKhataFilter('all')
+                setActiveView('khata')
+              }
+            }} className="text-xs text-primary font-medium flex items-center">
               View All <ChevronRight className="w-3 h-3" />
             </button>
           </div>
         </div>
 
-        {/* Time filter sync indicator */}
-        <p className="text-[10px] text-muted-foreground mb-2">
-          📅 Showing data for: {TIME_RANGES.find((r) => r.id === timeRange)?.label || '7 Days'}
-        </p>
+        {/* §FILTER-DROPDOWN: Interactive date range picker for the hub.
+            Transactions + Orders respect this filter. Low Stock ignores it
+            (stock is real-time). */}
+        <div className="flex items-center gap-1 mb-2">
+          <Calendar className="w-3 h-3 text-muted-foreground shrink-0" />
+          <select
+            value={timeRange}
+            onChange={(e) => { const val = e.target.value as TimeRange; setTimeRange(val); if (val === 'custom') setShowCustomPicker(true) }}
+            className="text-[10px] bg-muted rounded-md px-1.5 py-0.5 border-0 outline-none font-medium text-muted-foreground cursor-pointer"
+          >
+            {TIME_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+          </select>
+          {hubTab === 'lowstock' && <span className="text-[9px] text-muted-foreground/60 ml-1">(real-time)</span>}
+        </div>
 
         {/* Tab 1: Recent Transactions with Cash Flow Summary */}
         {hubTab === 'transactions' && (
@@ -909,9 +939,8 @@ function LowStockList({ currency, onNavigate }: { currency: string; onNavigate: 
           </div>
         </button>
       ))}
-      <button onClick={onNavigate} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
-        View All in Inventory →
-      </button>
+      {/* §UI-REDUNDANCY: Removed duplicate 'View All in Inventory →' button.
+          The top-right 'View All >' button in the header handles navigation. */}
     </div>
   )
 }
@@ -945,9 +974,8 @@ function OnlineOrdersList({ currency, onNavigate }: { currency: string; onNaviga
           <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(order.grandTotal, currency)}</span>
         </div>
       ))}
-      <button onClick={onNavigate} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
-        View All Orders →
-      </button>
+      {/* §UI-REDUNDANCY: Removed duplicate 'View All Orders →' button.
+          The top-right 'View All >' button in the header handles navigation. */}
     </div>
   )
 }
