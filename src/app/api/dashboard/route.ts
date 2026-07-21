@@ -193,6 +193,38 @@ export async function GET(req: NextRequest) {
     .sort((a, b) => b.value - a.value)
     .slice(0, 5)
 
+  // §DATA-BINDING-FIX: Top Buyers = customers sorted by total purchase volume
+  // (sum of invoice grandTotal where partyId is set). Top Products by Units =
+  // inventory items sorted by total quantity sold (not revenue).
+  const buyerSales: Record<string, { id: string; name: string; total: number }> = {}
+  invoices.forEach((inv) => {
+    if (inv.partyId && inv.party) {
+      const key = inv.partyId
+      if (!buyerSales[key]) buyerSales[key] = { id: inv.partyId, name: inv.party.name, total: 0 }
+      buyerSales[key].total += inv.grandTotal
+    }
+  })
+  const topBuyers = Object.values(buyerSales)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10)
+    .map((b) => ({ id: b.id, name: b.name, value: b.total }))
+
+  // §DATA-BINDING-FIX: Top Products by Units sold (quantity, not revenue)
+  const productUnits: Record<string, { name: string; units: number; revenue: number }> = {}
+  invoices.forEach((inv) => {
+    inv.items?.forEach((item) => {
+      const product = products.find((p) => p.id === item.productId)
+      const name = product?.name || item.name
+      if (!productUnits[name]) productUnits[name] = { name, units: 0, revenue: 0 }
+      productUnits[name].units += item.quantity
+      productUnits[name].revenue += item.total
+    })
+  })
+  const topProductsByUnits = Object.values(productUnits)
+    .sort((a, b) => b.units - a.units)
+    .slice(0, 10)
+    .map((p) => ({ name: p.name, value: p.units, revenue: p.revenue }))
+
   // Inventory Value Trend (PRD P4-3.3)
   const inventoryValue = products.reduce((s, p) => s + p.stock * p.purchasePrice, 0)
   const inventoryTrend: Array<{ month: string; value: number }> = []
@@ -229,6 +261,8 @@ export async function GET(req: NextRequest) {
     // Advanced chart data (PRD P4-3)
     topCategories,
     topProductsBySales,
+    topBuyers,
+    topProductsByUnits,
     inventoryValue,
     inventoryTrend,
   })

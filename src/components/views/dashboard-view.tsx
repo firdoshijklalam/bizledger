@@ -32,6 +32,9 @@ type TimeRange = 'yesterday' | '1d' | '2d' | '3d' | '5d' | '7d' | '1m' | '3m' | 
 interface ExtendedDashboardStats extends DashboardStats {
   topCategories?: Array<{ name: string; value: number }>
   topProductsBySales?: Array<{ name: string; value: number }>
+  // §DATA-BINDING-FIX: Top Buyers (customers by purchase volume) + Top Products by units
+  topBuyers?: Array<{ id: string; name: string; value: number }>
+  topProductsByUnits?: Array<{ name: string; value: number; revenue: number }>
   inventoryValue?: number
   inventoryTrend?: Array<{ month: string; value: number }>
   // §LOCALIZED-CARD-FILTERS: range-aware totals (computed over the requested range)
@@ -595,18 +598,27 @@ export function DashboardView() {
           <button onClick={() => {
             saveScrollPos('dashboard')
             // §DYNAMIC-ROUTING: View All routes based on active tab.
-            // Top Debtors → Reports > Outstanding (Receivables tab)
-            // Top Buyers → Reports > Party Ledger (sorted by sales volume)
-            // Others → Khata (default)
-            if (topTab === 'debtors' || topTab === 'defaulters') {
-              setReportsDateRange(null) // no date filter for outstanding
+            if (topTab === 'debtors') {
+              // Top Debtors → Outstanding Payments (Receivables)
               setActiveView('reports')
-              // The reports view defaults to P&L; we need to switch to
-              // 'outstanding' tab. Use a store flag to pre-select it.
               setReportsTab('outstanding')
             } else if (topTab === 'buyers') {
+              // Top Buyers → Party Ledger (sorted by sales volume)
               setActiveView('reports')
               setReportsTab('party')
+            } else if (topTab === 'payments') {
+              // Top Payments → History/Transactions (payments received)
+              setHistoryDateRange('week')
+              setActiveView('history')
+            } else if (topTab === 'products') {
+              // Top Products → Inventory
+              setInventoryFilter('all')
+              setActiveView('inventory')
+            } else if (topTab === 'defaulters') {
+              // Defaulters → Outstanding Payments (Grade D & E)
+              setKhataGradeFilter('D') // pre-filter to D (E also shown in outstanding)
+              setActiveView('reports')
+              setReportsTab('outstanding')
             } else {
               setKhataFilter('all')
               setActiveView('khata')
@@ -641,22 +653,22 @@ export function DashboardView() {
 
         {topTab === 'buyers' && (
           <div className="space-y-2">
-            {data.topProductsBySales && data.topProductsBySales.length > 0 ? (
+            {data.topBuyers && data.topBuyers.length > 0 ? (
               <>
-                {data.topProductsBySales.slice(0, topExpanded ? 10 : 4).map((p, i) => (
-                  <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
+                {data.topBuyers.slice(0, topExpanded ? 10 : 4).map((b, i) => (
+                  <button key={b.id} onClick={() => { saveScrollPos('dashboard'); setOverlayPartyId(b.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
                     <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-xs font-bold text-emerald-600">#{i + 1}</div>
-                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.name}</p><p className="text-[11px] text-muted-foreground">Top selling product</p></div>
-                    <p className="text-sm font-semibold tabular">{formatCurrency(p.value, currency)}</p>
-                  </div>
+                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{b.name}</p><p className="text-[11px] text-muted-foreground">Top buyer</p></div>
+                    <p className="text-sm font-semibold tabular">{formatCurrency(b.value, currency)}</p>
+                  </button>
                 ))}
-                {data.topProductsBySales.length > 4 && (
+                {data.topBuyers.length > 4 && (
                   <button onClick={() => setTopExpanded(!topExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
-                    {topExpanded ? '▲ Show Less' : `▼ Show More (${data.topProductsBySales.length - 4} more)`}
+                    {topExpanded ? '▲ Show Less' : `▼ Show More (${data.topBuyers.length - 4} more)`}
                   </button>
                 )}
               </>
-            ) : <p className="text-sm text-muted-foreground py-4 text-center">No sales data yet</p>}
+            ) : <p className="text-sm text-muted-foreground py-4 text-center">No buyer data yet</p>}
           </div>
         )}
 
@@ -675,22 +687,22 @@ export function DashboardView() {
 
         {topTab === 'products' && (
           <div className="space-y-2">
-            {data.topCategories && data.topCategories.length > 0 ? (
+            {data.topProductsByUnits && data.topProductsByUnits.length > 0 ? (
               <>
-                {data.topCategories.slice(0, topExpanded ? 10 : 4).map((c, i) => (
-                  <div key={c.name} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
+                {data.topProductsByUnits.slice(0, topExpanded ? 10 : 4).map((p, i) => (
+                  <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
                     <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: PIE_COLORS[i % PIE_COLORS.length] + '20', color: PIE_COLORS[i % PIE_COLORS.length] }}>#{i + 1}</div>
-                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{c.name}</p><p className="text-[11px] text-muted-foreground">Category</p></div>
-                    <p className="text-sm font-semibold tabular">{formatCurrency(c.value, currency)}</p>
+                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.name}</p><p className="text-[11px] text-muted-foreground">{p.value} units sold · {formatCurrency(p.revenue, currency)}</p></div>
+                    <p className="text-sm font-semibold tabular">{p.value}</p>
                   </div>
                 ))}
-                {data.topCategories.length > 4 && (
+                {data.topProductsByUnits.length > 4 && (
                   <button onClick={() => setTopExpanded(!topExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
-                    {topExpanded ? '▲ Show Less' : `▼ Show More (${data.topCategories.length - 4} more)`}
+                    {topExpanded ? '▲ Show Less' : `▼ Show More (${data.topProductsByUnits.length - 4} more)`}
                   </button>
                 )}
               </>
-            ) : <p className="text-sm text-muted-foreground py-4 text-center">No category data yet</p>}
+            ) : <p className="text-sm text-muted-foreground py-4 text-center">No product sales data yet</p>}
           </div>
         )}
 
