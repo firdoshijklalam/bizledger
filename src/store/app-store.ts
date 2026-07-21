@@ -102,6 +102,10 @@ interface AppState {
   // Cleared after consumption.
   reportsDateRange: 'today' | 'week' | 'month' | '3months' | 'custom' | null
   setReportsDateRange: (r: 'today' | 'week' | 'month' | '3months' | 'custom' | null) => void
+  // §REPORTS-ROUTING: pre-select a specific report tab (e.g. 'outstanding'
+  // from Top Debtors, 'party' from Top Buyers). Cleared after consumption.
+  reportsTab: string | null
+  setReportsTab: (t: string | null) => void
 
   // §2: Global overlay — party detail / invoice preview can open as overlay
   // above the current view without switching tabs. Preserves scroll state.
@@ -204,6 +208,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   // §REPORTS-ROUTING: date range passed from dashboard Expense/Revenue card → P&L
   reportsDateRange: null,
   setReportsDateRange: (r) => set({ reportsDateRange: r }),
+  reportsTab: null,
+  setReportsTab: (t) => set({ reportsTab: t }),
 
   overlayPartyId: null,
   setOverlayPartyId: (id) => set({ overlayPartyId: id }),

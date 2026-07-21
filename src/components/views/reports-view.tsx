@@ -50,7 +50,7 @@ type OutstandingTab = 'receivables' | 'payables'
 type StockMovement = 'all' | 'fast' | 'slow' | 'non-moving'
 
 export function ReportsView() {
-  const { business, setActiveView, reportsDateRange, setReportsDateRange } = useAppStore()
+  const { business, setActiveView, reportsDateRange, setReportsDateRange, reportsTab, setReportsTab } = useAppStore()
   const { t } = useI18n()
   const { data, loading } = useFetch<ReportData>('/api/reports', [])
   // §HEALTH-BANNER: fetch dashboard stats for the Business Health score context
@@ -58,6 +58,17 @@ export function ReportsView() {
   const [healthBannerDismissed, setHealthBannerDismissed] = useState(false)
   const { data: allProducts } = useFetch<any[]>('/api/products', [])
   const [activeReport, setActiveReport] = useState<'pl' | 'gst' | 'party' | 'outstanding' | 'stock' | 'grade'>('pl')
+
+  // §REPORTS-ROUTING: Auto-select a report tab passed from the dashboard
+  // (e.g. 'outstanding' from Top Debtors, 'party' from Top Buyers).
+  useEffect(() => {
+    if (!reportsTab) return
+    const t = setTimeout(() => {
+      setActiveReport(reportsTab as any)
+      setReportsTab(null)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [reportsTab, setReportsTab, setActiveReport])
 
   // P&L date filter (PRD Part 19 §1)
   const [plRange, setPlRange] = useState<PLRange>('month')
@@ -591,6 +602,10 @@ export function ReportsView() {
                     <div className="text-right shrink-0">
                       <p className={`text-sm font-semibold tabular ${p.balance > 0 ? 'text-emerald-600' : p.balance < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
                         {formatCurrency(Math.abs(p.balance), currency)}
+                      </p>
+                      {/* §UX: Explicit subtitle text — never rely solely on color */}
+                      <p className={`text-[10px] font-medium ${p.balance > 0 ? 'text-emerald-600/70' : p.balance < 0 ? 'text-red-600/70' : 'text-muted-foreground'}`}>
+                        {p.balance > 0 ? 'Due' : p.balance < 0 ? 'Payable' : 'Settled'}
                       </p>
                       <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{p.grade}</span>
                     </div>

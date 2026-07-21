@@ -78,7 +78,7 @@ function mapToReportsRange(r: TimeRange): 'today' | 'week' | 'month' | '3months'
 }
 
 export function DashboardView() {
-  const { business, setActiveView, setKhataFilter, setKhataGradeFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setReportsDateRange } = useAppStore()
+  const { business, setActiveView, setKhataFilter, setKhataGradeFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setReportsDateRange, setReportsTab } = useAppStore()
   const { t } = useI18n()
   const [chartType, setChartType] = useState<ChartType>('revenue')
   const [chartView, setChartView] = useState<ChartView>('line')
@@ -126,7 +126,7 @@ export function DashboardView() {
   // §GRADE-BOTTOM-SHEET: fetch all parties so the grade distribution bottom
   // sheet can show ALL customers in a grade (not just topDebtors which is
   // sliced to 5). Cached by TanStack Query so this is instant on re-open.
-  const { data: allParties } = useFetch<Party[]>('/api/parties', [])
+  const { data: allParties } = useFetch<Party[]>('/api/parties?limit=200', [])
 
   // PRD Part 38 §4.2: Keep scroll position locked during time filter changes.
   // Save scroll before data changes, restore immediately after.
@@ -592,7 +592,26 @@ export function DashboardView() {
               </button>
             ))}
           </div>
-          <button onClick={() => { saveScrollPos('dashboard'); setKhataFilter('receivable'); setActiveView('khata') }} className="text-xs text-primary font-medium flex items-center shrink-0 ml-2">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
+          <button onClick={() => {
+            saveScrollPos('dashboard')
+            // §DYNAMIC-ROUTING: View All routes based on active tab.
+            // Top Debtors → Reports > Outstanding (Receivables tab)
+            // Top Buyers → Reports > Party Ledger (sorted by sales volume)
+            // Others → Khata (default)
+            if (topTab === 'debtors' || topTab === 'defaulters') {
+              setReportsDateRange(null) // no date filter for outstanding
+              setActiveView('reports')
+              // The reports view defaults to P&L; we need to switch to
+              // 'outstanding' tab. Use a store flag to pre-select it.
+              setReportsTab('outstanding')
+            } else if (topTab === 'buyers') {
+              setActiveView('reports')
+              setReportsTab('party')
+            } else {
+              setKhataFilter('all')
+              setActiveView('khata')
+            }
+          }} className="text-xs text-primary font-medium flex items-center shrink-0 ml-2">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
         </div>
 
         {/* Tab content */}

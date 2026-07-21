@@ -46,7 +46,7 @@ export function KhataView() {
     return () => clearTimeout(t)
   }, [khataGradeFilter, setKhataGradeFilter])
 
-  const { data: parties, loading } = useFetch<Party[]>('/api/parties', [])
+  const { data: parties, loading } = useFetch<Party[]>('/api/parties?limit=200', [])
 
   // PRD Part 7 §3: scroll retention
   const { save: saveScrollPos, restore: restoreScrollPos } = useScrollStore()
