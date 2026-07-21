@@ -354,7 +354,7 @@ export function DashboardView() {
       <Card className="p-4">
         <div className="flex items-center justify-between mb-2">
           <div>
-            <h3 className="text-sm font-semibold">{t('dash.salesTrend')}</h3>
+            <h3 className="text-sm font-semibold">{chartOptions.find((o) => o.id === chartType)?.label || 'Business Analytics'}</h3>
             <p className="text-[11px] text-muted-foreground">{TIME_RANGES.find((r) => r.id === timeRange)?.label || '7 Days'}</p>
           </div>
           {chartType !== 'categories' && (
@@ -381,7 +381,7 @@ export function DashboardView() {
                 <defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.4} /><stop offset="100%" stopColor="#10b981" stopOpacity={0} /></linearGradient><linearGradient id="exp" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f87171" stopOpacity={0.3} /><stop offset="100%" stopColor="#f87171" stopOpacity={0} /></linearGradient></defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" />
                 <Area type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} fill="url(#exp)" />
@@ -390,24 +390,28 @@ export function DashboardView() {
               <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Revenue" />
                 <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Expense" />
               </BarChart>
             ) : chartType === 'profit' ? (
-              <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+              // §FIX: Profit vs Loss — two distinct datasets + legend.
+              // Split each bucket: profit (green, only positive values) and
+              // loss (red, negative values shown as positive bars).
+              <BarChart data={data.salesTrend.map((d) => ({ ...d, profitVal: d.profit >= 0 ? d.profit : 0, lossVal: d.profit < 0 ? Math.abs(d.profit) : 0 }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Bar dataKey="profit" radius={[4, 4, 0, 0]}>{data.salesTrend.map((entry, i) => <Cell key={i} fill={entry.profit >= 0 ? '#10b981' : '#f87171'} />)}</Bar>
+                <Bar dataKey="profitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Profit" />
+                <Bar dataKey="lossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Loss" />
               </BarChart>
             ) : chartType === 'cashflow' ? (
               <ComposedChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Cash In" />
                 <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Cash Out" />
@@ -417,7 +421,7 @@ export function DashboardView() {
               <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="collected" fill="#10b981" radius={[3, 3, 0, 0]} name="Collected" />
                 <Bar dataKey="creditGiven" fill="#ef4444" radius={[3, 3, 0, 0]} name="New Credit" />
@@ -430,22 +434,26 @@ export function DashboardView() {
                 <Tooltip formatter={(v: number) => formatCurrency(v, currency)} />
               </PieChart>
             ) : (
-              <AreaChart data={data.inventoryTrend || []} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+              // §FIX: Inventory chart now uses salesTrend data (time-filtered)
+              // instead of inventoryTrend (always 6 months). Shows sales value
+              // per bucket — respects the selected time filter.
+              <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <defs><linearGradient id="inv" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.4} /><stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} /></linearGradient></defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={36} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Area type="monotone" dataKey="value" stroke="#8b5cf6" strokeWidth={2} fill="url(#inv)" name="Stock Value" />
+                <Area type="monotone" dataKey="revenue" stroke="#8b5cf6" strokeWidth={2} fill="url(#inv)" name="Inventory Sales" />
               </AreaChart>
             )}
           </ResponsiveContainer>
         </motion.div>
 
         {/* Legend */}
-        {['revenue', 'cashflow', 'collections'].includes(chartType) && (
+        {['revenue', 'cashflow', 'collections', 'profit'].includes(chartType) && (
           <div className="flex items-center gap-3 mt-2 text-[10px]">
             {chartType === 'revenue' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Revenue</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Expense</span></>)}
+            {chartType === 'profit' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Profit</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Loss</span></>)}
             {chartType === 'cashflow' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />In</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Out</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500" />Net</span></>)}
             {chartType === 'collections' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Collected</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" />New Credit</span></>)}
           </div>
