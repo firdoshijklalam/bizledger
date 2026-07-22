@@ -124,9 +124,13 @@
 }
 
 /* PRD Part 14: Premium dark theme extras — glassmorphism, glow, radial bg */
+/* §FIX: Removed .dark [class*="bg-background"] from backdrop-filter selector.
+   It was too broad — applied backdrop-filter to the root <div className="bg-background">
+   which creates a containing block that breaks position:fixed on ALL descendants
+   (including the floating mic icon, which then scrolled with the page).
+   Now only header and nav get glassmorphism (they're position:fixed themselves). */
 .dark header,
-.dark nav,
-.dark [class*="bg-background"] {
+.dark nav {
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
 }

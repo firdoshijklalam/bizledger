@@ -1,91 +1,27 @@
 'use client'
 
 import React from 'react'
+import { transliterateBengaliToEnglish, transliterateEnglishToBengali } from '@/lib/transliteration'
 
 /**
  * §FUZZY-HIGHLIGHT: Highlight matched characters in search results.
  *
- * Two modes:
- * 1. Exact substring highlight (for .includes() matches):
- *    highlightMatch("Firdosh", "Fi") → <mark>Fi</mark>rdosh
- *    highlightMatch("Firdosh", "dos") → Fir<mark>dos</mark>h
+ * Handles three matching scenarios:
+ * 1. Exact substring (case-insensitive): query "Fi" in "Firdosh" → <mark>Fi</mark>rdosh
+ * 2. Fuzzy subsequence: query "Fidohhi" in "Firdosh" → <mark>Fi</mark>r<mark>do</mark>sh
+ * 3. Cross-lingual phonetic: query "ab" (English) in "আব্দুল্লাহ" (Bengali)
+ *    → highlights the phonetically matching Bengali chars: <mark>আব</mark>্দুল্লাহ
  *
- * 2. Fuzzy character-level highlight (for Fuse.js matches):
- *    highlightFuzzy("Firdosh", [0,1]) → <mark>Fi</mark>rdosh  (positions 0-1)
- *    highlightFuzzy("Firdosh", [3,5]) → Fir<mark>dos</mark>h  (positions 3-5)
- *
- * Supports both English and Bengali characters seamlessly (works on
- * character indices, not byte indices).
+ * Works on character indices (not byte indices) so Bengali multi-byte
+ * characters are handled correctly by JavaScript's string indexing.
  */
 
-/**
- * highlightMatch — highlights exact substring matches (case-insensitive).
- * Used for .includes() and phonetic matches where the query appears verbatim.
- */
-export function highlightMatch(text: string, query: string): React.ReactNode {
-  if (!text || !query || !query.trim()) return text
-
-  const q = query.trim()
-  // Escape regex special chars in query
-  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(`(${escaped})`, 'gi')
-  const parts = text.split(regex)
-
-  return parts.map((part, i) => {
-    if (part.toLowerCase() === q.toLowerCase()) {
-      return (
-        <mark
-          key={i}
-          className="bg-transparent text-primary font-bold"
-          style={{ background: 'transparent' }}
-        >
-          {part}
-        </mark>
-      )
-    }
-    return <React.Fragment key={i}>{part}</React.Fragment>
-  })
+interface HighlightSegment {
+  text: string
+  highlight: boolean
 }
 
-/**
- * highlightFuzzy — highlights specific character positions (from Fuse.js indices).
- * Fuse.js returns matches as { indices: [[start, end], ...] } where each
- * [start, end] is a character range (inclusive) in the matched string.
- *
- * Example: highlightFuzzy("Firdosh", [[0,1], [3,5]])
- * → <mark>Fi</mark>r<mark>dos</mark>h
- */
-export function highlightFuzzy(text: string, indices: Array<[number, number]>): React.ReactNode {
-  if (!text || !indices || indices.length === 0) return text
-
-  // Sort indices by start position
-  const sorted = [...indices].sort((a, b) => a[0] - b[0])
-
-  // Build a set of character positions to highlight
-  const highlightSet = new Set<number>()
-  for (const [start, end] of sorted) {
-    for (let i = start; i <= end && i < text.length; i++) {
-      highlightSet.add(i)
-    }
-  }
-
-  // Split text into highlighted/non-highlighted segments
-  const segments: Array<{ text: string; highlight: boolean }> = []
-  let currentText = ''
-  let currentHighlight = highlightSet.has(0)
-
-  for (let i = 0; i < text.length; i++) {
-    const isHighlight = highlightSet.has(i)
-    if (isHighlight === currentHighlight) {
-      currentText += text[i]
-    } else {
-      if (currentText) segments.push({ text: currentText, highlight: currentHighlight })
-      currentText = text[i]
-      currentHighlight = isHighlight
-    }
-  }
-  if (currentText) segments.push({ text: currentText, highlight: currentHighlight })
-
+function segmentsToReact(segments: HighlightSegment[]): React.ReactNode {
   return segments.map((seg, i) => {
     if (seg.highlight) {
       return (
@@ -103,53 +39,177 @@ export function highlightFuzzy(text: string, indices: Array<[number, number]>): 
 }
 
 /**
- * highlightFuzzyFromQuery — fuzzy highlights based on query characters.
- * When Fuse.js matches but we don't have exact indices, we find the best
- * matching subsequence of the query in the text and highlight those chars.
+ * Build segments from a set of character indices to highlight.
+ */
+function buildSegments(text: string, highlightSet: Set<number>): HighlightSegment[] {
+  if (highlightSet.size === 0) return [{ text, highlight: false }]
+  const segments: HighlightSegment[] = []
+  let currentText = ''
+  let currentHighlight = highlightSet.has(0)
+  for (let i = 0; i < text.length; i++) {
+    const isHighlight = highlightSet.has(i)
+    if (isHighlight === currentHighlight) {
+      currentText += text[i]
+    } else {
+      if (currentText) segments.push({ text: currentText, highlight: currentHighlight })
+      currentText = text[i]
+      currentHighlight = isHighlight
+    }
+  }
+  if (currentText) segments.push({ text: currentText, highlight: currentHighlight })
+  return segments
+}
+
+/**
+ * Find all case-insensitive substring match positions.
+ * Returns a Set of character indices that are part of a match.
+ */
+function findSubstringPositions(text: string, query: string): Set<number> {
+  const result = new Set<number>()
+  const t = text.toLowerCase()
+  const q = query.toLowerCase()
+  let idx = 0
+  while (true) {
+    const found = t.indexOf(q, idx)
+    if (found < 0) break
+    for (let i = found; i < found + q.length; i++) {
+      result.add(i)
+    }
+    idx = found + q.length
+  }
+  return result
+}
+
+/**
+ * Find fuzzy subsequence match positions.
+ * Walks through the text and matches query characters in order (not necessarily
+ * consecutive). Returns positions of matched characters.
+ */
+function findFuzzyPositions(text: string, query: string): Set<number> {
+  const result = new Set<number>()
+  const t = text.toLowerCase()
+  const q = query.toLowerCase()
+  let qi = 0
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) {
+      result.add(ti)
+      qi++
+    }
+  }
+  // Only return if we matched at least 60% of query characters
+  if (result.size < Math.ceil(q.length * 0.6)) return new Set()
+  return result
+}
+
+/**
+ * §CROSS-LINGUAL: Find phonetically matching positions in Bengali text
+ * for an English query (and vice versa).
  *
- * Example: query "Fidohhi" → finds "Fi" + "do" + "h" in "Firdosh" → highlights them.
+ * Strategy: transliterate the text to the query's script, then find
+ * substring/fuzzy matches in the transliterated version, and map those
+ * positions back to the original text.
+ *
+ * Example: query "ab" → text "আব্দুল্লাহ"
+ *   transliterate("আব্দুল্লাহ") → "abdullah" (approximate)
+ *   find "ab" in "abdullah" → positions [0,1]
+ *   map back to original Bengali text → highlight "আব"
+ */
+function findCrossLingualPositions(text: string, query: string): Set<number> {
+  const q = query.toLowerCase().trim()
+  if (!q || !text) return new Set()
+
+  // Try transliterating Bengali text → English
+  const transliterated = transliterateBengaliToEnglish(text)
+  if (transliterated && transliterated.toLowerCase() !== text.toLowerCase()) {
+    // Find substring match in transliterated text
+    const transLower = transliterated.toLowerCase()
+    const idx = transLower.indexOf(q)
+    if (idx >= 0) {
+      // Map transliterated positions back to original text positions.
+      // This is approximate because transliteration can change character count.
+      // We use a simple proportional mapping: if transliteration is N chars and
+      // original is M chars, position i in transliteration → i * M / N in original.
+      const ratio = text.length / transliterated.length
+      const origStart = Math.round(idx * ratio)
+      const origEnd = Math.round((idx + q.length) * ratio)
+      const result = new Set<number>()
+      for (let i = origStart; i < origEnd && i < text.length; i++) {
+        result.add(i)
+      }
+      if (result.size > 0) return result
+    }
+
+    // Also try fuzzy match on transliterated text
+    const fuzzyPositions = findFuzzyPositions(transliterated, q)
+    if (fuzzyPositions.size > 0) {
+      // Map fuzzy positions back to original via ratio
+      const ratio = text.length / transliterated.length
+      const result = new Set<number>()
+      fuzzyPositions.forEach((pos) => {
+        const origPos = Math.round(pos * ratio)
+        if (origPos < text.length) result.add(origPos)
+      })
+      if (result.size > 0) return result
+    }
+  }
+
+  // Try transliterating English query → Bengali, then find in Bengali text
+  const bengaliQuery = transliterateEnglishToBengali(query)
+  if (bengaliQuery && bengaliQuery !== query) {
+    const positions = findSubstringPositions(text, bengaliQuery)
+    if (positions.size > 0) return positions
+    // Also try fuzzy on the Bengali query
+    const fuzzyPos = findFuzzyPositions(text, bengaliQuery)
+    if (fuzzyPos.size > 0) return fuzzyPos
+  }
+
+  return new Set()
+}
+
+/**
+ * highlightFuzzyFromQuery — the main highlighting function.
+ * Handles exact, fuzzy, and cross-lingual matches.
  */
 export function highlightFuzzyFromQuery(text: string, query: string): React.ReactNode {
   if (!text || !query || !query.trim()) return text
 
-  const q = query.trim().toLowerCase()
-  const t = text.toLowerCase()
+  const q = query.trim()
 
-  // First try exact substring match (fast path)
-  const idx = t.indexOf(q)
-  if (idx >= 0) {
-    return highlightMatch(text, query)
+  // 1. Try exact substring match (case-insensitive)
+  let positions = findSubstringPositions(text, q)
+  if (positions.size > 0) {
+    return segmentsToReact(buildSegments(text, positions))
   }
 
-  // Fuzzy: find matching character positions (subsequence match)
-  const highlightPositions: number[] = []
-  let qi = 0
-  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
-    if (t[ti] === q[qi]) {
-      highlightPositions.push(ti)
-      qi++
-    }
+  // 2. Try fuzzy subsequence match
+  positions = findFuzzyPositions(text, q)
+  if (positions.size > 0) {
+    return segmentsToReact(buildSegments(text, positions))
   }
 
-  // If we matched at least 60% of query characters, highlight them
-  if (highlightPositions.length >= Math.ceil(q.length * 0.6)) {
-    // Group consecutive positions into ranges
-    const indices: Array<[number, number]> = []
-    let start = highlightPositions[0]
-    let prev = highlightPositions[0]
-    for (let i = 1; i < highlightPositions.length; i++) {
-      if (highlightPositions[i] === prev + 1) {
-        prev = highlightPositions[i]
-      } else {
-        indices.push([start, prev])
-        start = highlightPositions[i]
-        prev = highlightPositions[i]
-      }
-    }
-    indices.push([start, prev])
-    return highlightFuzzy(text, indices)
+  // 3. Try cross-lingual phonetic match (English query → Bengali text, or vice versa)
+  positions = findCrossLingualPositions(text, q)
+  if (positions.size > 0) {
+    return segmentsToReact(buildSegments(text, positions))
   }
 
-  // Fallback: no highlighting
+  // 4. Fallback: no highlighting
   return text
+}
+
+// Keep highlightMatch for backward compatibility (used by some components)
+export function highlightMatch(text: string, query: string): React.ReactNode {
+  return highlightFuzzyFromQuery(text, query)
+}
+
+// Keep highlightFuzzy for backward compatibility
+export function highlightFuzzy(text: string, indices: Array<[number, number]>): React.ReactNode {
+  if (!text || !indices || indices.length === 0) return text
+  const highlightSet = new Set<number>()
+  for (const [start, end] of indices) {
+    for (let i = start; i <= end && i < text.length; i++) {
+      highlightSet.add(i)
+    }
+  }
+  return segmentsToReact(buildSegments(text, highlightSet))
 }
