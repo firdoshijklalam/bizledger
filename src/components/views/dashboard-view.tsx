@@ -573,7 +573,6 @@ export function DashboardView() {
         )}
       </AnimatePresence>
 
-      {/* PRD Part 38 §2: Dynamic widget tabs + Show More */}
       <Card className="p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-1 overflow-x-auto no-scrollbar -mx-1 px-1">
@@ -631,7 +630,7 @@ export function DashboardView() {
           <div className="space-y-2">
             {data.topDebtors.length === 0 ? <p className="text-sm text-muted-foreground py-4 text-center">No outstanding receivables 🎉</p> : (
               <>
-                {data.topDebtors.slice(0, topExpanded ? 10 : 4).map((d) => {
+                {data.topDebtors.slice(0, 5).map((d) => {
                   const meta = GRADE_META[d.grade]
                   return (
                     <button key={d.id} onClick={() => { saveScrollAndOpenParty(d.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
@@ -641,11 +640,6 @@ export function DashboardView() {
                     </button>
                   )
                 })}
-                {data.topDebtors.length > 4 && (
-                  <button onClick={() => setTopExpanded(!topExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
-                    {topExpanded ? '▲ Show Less' : `▼ Show More (${data.topDebtors.length - 4} more)`}
-                  </button>
-                )}
               </>
             )}
           </div>
@@ -655,18 +649,13 @@ export function DashboardView() {
           <div className="space-y-2">
             {data.topBuyers && data.topBuyers.length > 0 ? (
               <>
-                {data.topBuyers.slice(0, topExpanded ? 10 : 4).map((b, i) => (
+                {data.topBuyers.slice(0, 5).map((b, i) => (
                   <button key={b.id} onClick={() => { saveScrollPos('dashboard'); setOverlayPartyId(b.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
                     <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-xs font-bold text-emerald-600">#{i + 1}</div>
                     <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{b.name}</p><p className="text-[11px] text-muted-foreground">Top buyer</p></div>
                     <p className="text-sm font-semibold tabular">{formatCurrency(b.value, currency)}</p>
                   </button>
                 ))}
-                {data.topBuyers.length > 4 && (
-                  <button onClick={() => setTopExpanded(!topExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
-                    {topExpanded ? '▲ Show Less' : `▼ Show More (${data.topBuyers.length - 4} more)`}
-                  </button>
-                )}
               </>
             ) : <p className="text-sm text-muted-foreground py-4 text-center">No buyer data yet</p>}
           </div>
@@ -674,7 +663,7 @@ export function DashboardView() {
 
         {topTab === 'payments' && (
           <div className="space-y-2">
-            {data.recentTransactions.filter(t => t.type === 'credit').slice(0, topExpanded ? 10 : 4).map((tx) => (
+            {data.recentTransactions.filter(t => t.type === 'credit').slice(0, 5).map((tx) => (
               <div key={tx.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
                 <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center"><ArrowDownRight className="w-4 h-4 text-emerald-600" /></div>
                 <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || 'Payment'}</p><p className="text-[11px] text-muted-foreground">{timeAgo(tx.createdAt)}</p></div>
@@ -689,18 +678,13 @@ export function DashboardView() {
           <div className="space-y-2">
             {data.topProductsByUnits && data.topProductsByUnits.length > 0 ? (
               <>
-                {data.topProductsByUnits.slice(0, topExpanded ? 10 : 4).map((p, i) => (
+                {data.topProductsByUnits.slice(0, 5).map((p, i) => (
                   <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
                     <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: PIE_COLORS[i % PIE_COLORS.length] + '20', color: PIE_COLORS[i % PIE_COLORS.length] }}>#{i + 1}</div>
                     <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.name}</p><p className="text-[11px] text-muted-foreground">{p.value} units sold · {formatCurrency(p.revenue, currency)}</p></div>
                     <p className="text-sm font-semibold tabular">{p.value}</p>
                   </div>
                 ))}
-                {data.topProductsByUnits.length > 4 && (
-                  <button onClick={() => setTopExpanded(!topExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
-                    {topExpanded ? '▲ Show Less' : `▼ Show More (${data.topProductsByUnits.length - 4} more)`}
-                  </button>
-                )}
               </>
             ) : <p className="text-sm text-muted-foreground py-4 text-center">No product sales data yet</p>}
           </div>
@@ -710,7 +694,7 @@ export function DashboardView() {
           <div className="space-y-2">
             {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').length > 0 ? (
               <>
-                {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').slice(0, topExpanded ? 10 : 4).map((d) => {
+                {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').slice(0, 5).map((d) => {
                   const meta = GRADE_META[d.grade]
                   return (
                     <button key={d.id} onClick={() => { saveScrollAndOpenParty(d.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted text-left">
@@ -720,11 +704,6 @@ export function DashboardView() {
                     </button>
                   )
                 })}
-                {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').length > 4 && (
-                  <button onClick={() => setTopExpanded(!topExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
-                    {topExpanded ? '▲ Show Less' : `▼ Show More`}
-                  </button>
-                )}
               </>
             ) : <p className="text-sm text-muted-foreground py-4 text-center">No defaulters 🎉</p>}
           </div>
@@ -763,10 +742,11 @@ export function DashboardView() {
                 setInventoryFilter('low-stock')
                 setActiveView('inventory')
               } else if (hubTab === 'orders') {
-                // Online Orders → Khata (orders are managed in customer orders)
-                // Pass time filter for order date filtering
-                setHistoryDateRange(mapToHistoryRange(timeRange))
-                setActiveView('history')
+                // §FIX: Online Orders → Inventory (orders relate to products/stock).
+                // History doesn't handle order fulfillment states (Pending/Shipped/Delivered).
+                // Inventory view shows product-level order context.
+                setInventoryFilter('all')
+                setActiveView('inventory')
               } else {
                 setKhataFilter('all')
                 setActiveView('khata')
@@ -778,19 +758,20 @@ export function DashboardView() {
         </div>
 
         {/* §FILTER-DROPDOWN: Interactive date range picker for the hub.
-            Transactions + Orders respect this filter. Low Stock ignores it
-            (stock is real-time). */}
-        <div className="flex items-center gap-1 mb-2">
-          <Calendar className="w-3 h-3 text-muted-foreground shrink-0" />
-          <select
-            value={timeRange}
-            onChange={(e) => { const val = e.target.value as TimeRange; setTimeRange(val); if (val === 'custom') setShowCustomPicker(true) }}
-            className="text-[10px] bg-muted rounded-md px-1.5 py-0.5 border-0 outline-none font-medium text-muted-foreground cursor-pointer"
-          >
-            {TIME_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-          </select>
-          {hubTab === 'lowstock' && <span className="text-[9px] text-muted-foreground/60 ml-1">(real-time)</span>}
-        </div>
+            Transactions + Orders respect this filter. Low Stock tab hides
+            it completely (stock is real-time, not historical). */}
+        {hubTab !== 'lowstock' && (
+          <div className="flex items-center gap-1 mb-2">
+            <Calendar className="w-3 h-3 text-muted-foreground shrink-0" />
+            <select
+              value={timeRange}
+              onChange={(e) => { const val = e.target.value as TimeRange; setTimeRange(val); if (val === 'custom') setShowCustomPicker(true) }}
+              className="text-[10px] bg-muted rounded-md px-1.5 py-0.5 border-0 outline-none font-medium text-muted-foreground cursor-pointer"
+            >
+              {TIME_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+            </select>
+          </div>
+        )}
 
         {/* Tab 1: Recent Transactions with Cash Flow Summary */}
         {hubTab === 'transactions' && (
@@ -815,7 +796,7 @@ export function DashboardView() {
               <p className="text-sm text-muted-foreground py-4 text-center">No transactions in this period</p>
             ) : (
               <div className="space-y-1">
-                {data.recentTransactions.slice(0, hubExpanded ? 10 : 5).map((tx) => {
+                {data.recentTransactions.slice(0, 5).map((tx) => {
                   const isCredit = tx.type === 'credit'
                   return (
                     <button key={tx.id} onClick={() => { saveScrollPos('dashboard'); if (tx.invoiceId) { setOverlayInvoiceId(tx.invoiceId) } else if (tx.partyId) { setOverlayPartyId(tx.partyId) } }} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left">
@@ -825,11 +806,6 @@ export function DashboardView() {
                     </button>
                   )
                 })}
-                {data.recentTransactions.length > 5 && (
-                  <button onClick={() => setHubExpanded(!hubExpanded)} className="w-full py-2 text-xs text-primary font-medium hover:bg-muted/50 rounded-lg">
-                    {hubExpanded ? '▲ Show Less' : `▼ Show More (${data.recentTransactions.length - 5} more)`}
-                  </button>
-                )}
               </div>
             )}
           </div>

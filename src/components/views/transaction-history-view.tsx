@@ -149,8 +149,12 @@ export function TransactionHistoryView() {
       else if (range === 'week') { const s = startOfDay(now); const day = s.getDay(); const diff = day===0?6:day-1; s.setDate(s.getDate()-diff); start = s; end = endOfDay(now) }
       else { start = new Date(customStart+'T00:00:00'); end = new Date(customEnd+'T23:59:59.999') }
       out = out.filter((i) => {
+        // §DATA-FIX: Compare using local date components to avoid timezone
+        // mismatch (server UTC vs client local). An invoice created "today"
+        // in server time should still show under "today" in client time.
         const d = new Date(i.date)
-        return d >= start && d <= end
+        const dLocal = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds())
+        return dLocal >= start && dLocal <= end
       })
     }
     // Status filter
