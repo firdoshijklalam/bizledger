@@ -1,29 +1,30 @@
 'use client'
 
 import { useMemo } from 'react'
+import Fuse from 'fuse.js'
 import { phoneticMatch, transliterateBengaliToEnglish, transliterateEnglishToBengali } from '@/lib/transliteration'
 
 /**
- * §1: usePhoneticSearch — SHARED search hook used by ALL screens.
- * 
- * Replaces the fragmented `.includes()` checks with a unified search that:
- * 1. Checks the primary name field (case-insensitive substring)
- * 2. Checks searchTags (JSON array of phonetic aliases — e.g. "Utsab" for "উৎসব")
- * 3. Checks additional fields (phone, sku, category, etc.)
- * 4. Falls back to phoneticMatch (consonant skeleton + transliteration)
- * 
+ * §FUZZY-SEARCH: usePhoneticSearch — SHARED search hook used by ALL screens.
+ *
+ * Now uses Fuse.js for tolerant fuzzy matching (typos, misspellings) PLUS
+ * the existing phonetic + searchTags + substring matching.
+ *
+ * Search priority:
+ * 1. Exact substring match (fast path, .includes())
+ * 2. Fuse.js fuzzy match (tolerant — "Fidohhi" matches "Firdosh")
+ * 3. searchTags (phonetic aliases — "Utsab" for "উৎসব")
+ * 4. Additional fields (phone, sku, category)
+ * 5. Phonetic fallback (cross-lingual consonant skeleton matching)
+ *
  * Usage:
  *   const filtered = usePhoneticSearch(parties, search, {
  *     searchFields: ['name', 'phone'],
  *   })
- * 
- * Every search bar in the app uses this SAME logic → consistent behavior.
  */
 
 interface SearchOptions {
-  // Fields to check with simple .includes() (besides name + searchTags)
   searchFields?: string[]
-  // Whether to use phonetic fallback (default: true)
   phonetic?: boolean
 }
 
@@ -40,39 +41,56 @@ export function usePhoneticSearch<T extends Record<string, any>>(
 
     const q = query.toLowerCase().trim()
 
-    const filtered = data.filter((item) => {
-      // 1. Check primary name field
+    // Phase 1: Fast path — exact substring matches (highest priority)
+    const exactMatches: T[] = []
+    const remaining: T[] = []
+    for (const item of data) {
       const name = (item.name || '').toString().toLowerCase()
-      if (name.includes(q)) return true
-
-      // 2. Check searchTags (JSON array of phonetic aliases)
-      if (item.searchTags) {
+      let matched = name.includes(q)
+      if (!matched && item.searchTags) {
         try {
-          const tags = typeof item.searchTags === 'string'
-            ? JSON.parse(item.searchTags)
-            : item.searchTags
-          if (Array.isArray(tags)) {
-            if (tags.some((tag: string) => tag.toLowerCase().includes(q))) return true
-          }
+          const tags = typeof item.searchTags === 'string' ? JSON.parse(item.searchTags) : item.searchTags
+          if (Array.isArray(tags) && tags.some((tag: string) => tag.toLowerCase().includes(q))) matched = true
         } catch {}
       }
-
-      // 3. Check additional fields (phone, sku, category, etc.)
-      for (const field of searchFields) {
-        const val = (item[field] || '').toString().toLowerCase()
-        if (val.includes(q)) return true
+      if (!matched) {
+        for (const field of searchFields) {
+          if ((item[field] || '').toString().toLowerCase().includes(q)) { matched = true; break }
+        }
       }
+      if (matched) exactMatches.push(item)
+      else remaining.push(item)
+    }
 
-      // 4. Phonetic fallback — cross-lingual matching
-      // "Utsab" matches "উৎসব", "Abdullah" matches "আব্দুল্লাহ"
-      if (phonetic && item.name) {
-        if (phoneticMatch(query, item.name)) return true
-      }
+    // Phase 2: Fuse.js fuzzy match on remaining items (tolerant of typos)
+    const fuseKeys = [
+      { name: 'name', weight: 0.5 },
+      ...searchFields.map((f) => ({ name: f, weight: 0.2 })),
+      { name: 'searchTags', weight: 0.1 },
+    ].filter((k) => k.name)
 
-      return false
+    const fuse = new Fuse(remaining, {
+      keys: fuseKeys,
+      threshold: 0.4, // tolerant but not too loose
+      ignoreLocation: true,
+      minMatchCharLength: 1,
+      includeScore: true,
     })
+    const fuzzyResults = fuse.search(query).map((r) => r.item)
 
-    return filtered
+    // Phase 3: Phonetic fallback on items not yet matched
+    const phoneticResults: T[] = []
+    if (phonetic) {
+      const alreadyMatched = new Set([...exactMatches, ...fuzzyResults])
+      for (const item of remaining) {
+        if (alreadyMatched.has(item)) continue
+        if (item.name && phoneticMatch(query, item.name)) {
+          phoneticResults.push(item)
+        }
+      }
+    }
+
+    return [...exactMatches, ...fuzzyResults, ...phoneticResults]
   }, [data, query, searchFields, phonetic])
 }
 

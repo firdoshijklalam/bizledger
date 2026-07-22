@@ -7,7 +7,7 @@ import { Search, X, User, Package, Receipt, ArrowLeftRight } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { Party, Product, Invoice, Transaction } from '@/lib/types'
 import { formatCurrency, formatDate, getGradeMeta } from '@/lib/utils'
-import { highlightMatch } from '@/lib/highlight'
+import { highlightFuzzyFromQuery } from '@/lib/highlight'
 import { transliterateBengaliToEnglish, phoneticMatch, generateSearchTags } from '@/lib/transliteration'
 import { useVoiceInput } from '@/hooks/use-voice-input'
 import Fuse from 'fuse.js'
@@ -235,8 +235,8 @@ export function SearchOverlay() {
                         <User className="w-4 h-4 text-emerald-600" />
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{highlightMatch(p.name, q)}</p>
-                        <p className="text-xs text-muted-foreground">{highlightMatch(p.phone || 'No phone', q)}</p>
+                        <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(p.name, q)}</p>
+                        <p className="text-xs text-muted-foreground">{highlightFuzzyFromQuery(p.phone || 'No phone', q)}</p>
                       </div>
                       <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color} shrink-0`}>{p.qualityGrade}</span>
                     </button>
@@ -253,7 +253,7 @@ export function SearchOverlay() {
                       <Package className="w-4 h-4 text-amber-600" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{highlightMatch(p.name, q)}</p>
+                      <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(p.name, q)}</p>
                       <p className="text-xs text-muted-foreground">Stock: {p.stock} {p.unit}</p>
                     </div>
                     <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(p.salePrice)}</span>
@@ -272,8 +272,8 @@ export function SearchOverlay() {
                         <User className="w-4 h-4 text-emerald-600" />
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{highlightMatch(p.name, q)}</p>
-                        <p className="text-xs text-muted-foreground">{highlightMatch(p.phone || 'No phone', q)}</p>
+                        <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(p.name, q)}</p>
+                        <p className="text-xs text-muted-foreground">{highlightFuzzyFromQuery(p.phone || 'No phone', q)}</p>
                       </div>
                       <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color} shrink-0`}>{p.qualityGrade}</span>
                     </button>
@@ -290,7 +290,7 @@ export function SearchOverlay() {
                       <Package className="w-4 h-4 text-amber-600" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{highlightMatch(p.name, q)}</p>
+                      <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(p.name, q)}</p>
                       <p className="text-xs text-muted-foreground">Stock: {p.stock} {p.unit}</p>
                     </div>
                     <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(p.salePrice)}</span>
@@ -307,8 +307,8 @@ export function SearchOverlay() {
                       <Receipt className="w-4 h-4 text-orange-600" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{highlightMatch(i.invoiceNumber, q)}</p>
-                      <p className="text-xs text-muted-foreground">{highlightMatch(i.party?.name || 'Walk-in', q)} · {formatDate(i.createdAt)}</p>
+                      <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(i.invoiceNumber, q)}</p>
+                      <p className="text-xs text-muted-foreground">{highlightFuzzyFromQuery(i.party?.name || 'Walk-in', q)} · {formatDate(i.createdAt)}</p>
                     </div>
                     <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(i.grandTotal)}</span>
                   </button>
@@ -324,7 +324,7 @@ export function SearchOverlay() {
                       <ArrowLeftRight className="w-4 h-4 text-teal-600" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{highlightMatch(tx.description || tx.type, q)}</p>
+                      <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(tx.description || tx.type, q)}</p>
                       <p className="text-xs text-muted-foreground">{formatDate(tx.createdAt)}</p>
                     </div>
                     <span className={`text-sm font-semibold tabular shrink-0 ${tx.type === 'credit' ? 'text-emerald-600' : 'text-red-600'}`}>
