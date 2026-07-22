@@ -215,12 +215,16 @@ export function FloatingKeyboardMic() {
       {keyboardActive && (
         <motion.div
           key="floating-keyboard-mic"
-          initial={{ opacity: 0, scale: 0.3, y: 30 }}
-          animate={{ opacity: 1, scale: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 18, mass: 0.8 } }}
-          exit={{ opacity: 0, scale: 0.3, y: 30, transition: { duration: 0.2 } }}
-          // §1: Z-INDEX 9999 — highest possible, always on top
+          initial={{ opacity: 0, scale: 0.3 }}
+          animate={{ opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 300, damping: 18, mass: 0.8 } }}
+          exit={{ opacity: 0, scale: 0.3, transition: { duration: 0.2 } }}
+          // §FIX: position:fixed via inline style (className 'fixed' alone can be
+          // overridden by ancestor transforms/will-change). Explicit inline style
+          // guarantees fixed positioning regardless of CSS context. Removed y:30
+          // from initial/exit (was a transform that could interfere with fixed top).
+          // Z-INDEX 9999 — highest possible, always on top of everything.
           className="fixed z-[9999] select-none"
-          style={{ left: `${position.x}px`, top: `${position.y}px`, width: MIC_SIZE, height: MIC_SIZE, pointerEvents: 'auto' }}
+          style={{ position: 'fixed', left: `${position.x}px`, top: `${position.y}px`, width: MIC_SIZE, height: MIC_SIZE, pointerEvents: 'auto' }}
         >
           {/* Premium pulse/ripple idle animation */}
           {!listening && (
