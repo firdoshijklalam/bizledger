@@ -16,6 +16,7 @@
 import { motion, useAnimationControls } from 'framer-motion'
 import { Mic, MicOff, X } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import { useVoiceInputStore } from '@/store/voice-input-store'
 import { useI18n } from '@/store/i18n-store'
@@ -213,12 +214,14 @@ export function FloatingKeyboardMic() {
   }, [listening, keyboardActive, micControls])
 
   // Strict keyboard sync
-  if (!keyboardActive) return null
+  if (!keyboardActive || typeof document === 'undefined') return null
 
-  // §CRITICAL-FIX: NO AnimatePresence wrapper — it can introduce its own
-  // DOM wrapper with transform that breaks position:fixed. Just render the
-  // fixed div directly with a simple CSS transition for opacity.
-  return (
+  // §CRITICAL-FIX: Use createPortal to render the mic DIRECTLY on document.body.
+  // This completely bypasses ALL ancestor elements (app-shell, main, motion.div,
+  // SearchOverlay, ThemeProvider, QueryProvider, etc.). No ancestor can have
+  // transform/will-change/backdrop-filter that creates a containing block and
+  // breaks position:fixed. The mic is a direct child of <body> — truly floating.
+  return createPortal(
     <div
       key="floating-keyboard-mic-wrapper"
       style={{
@@ -283,6 +286,7 @@ export function FloatingKeyboardMic() {
             </button>
           )}
         </motion.div>
-    </div>
+    </div>,
+    document.body
   )
 }
