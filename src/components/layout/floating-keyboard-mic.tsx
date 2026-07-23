@@ -13,7 +13,7 @@
  *     does NOT unregister the callback when mic is tapped.
  */
 
-import { AnimatePresence, motion, useAnimationControls } from 'framer-motion'
+import { motion, useAnimationControls } from 'framer-motion'
 import { Mic, MicOff, X } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { toast } from 'sonner'
@@ -70,7 +70,12 @@ export function FloatingKeyboardMic() {
   useEffect(() => { languageRef.current = language }, [language])
 
   const [keyboardHeight, setKeyboardHeight] = useState(0)
-  const [position, setPosition] = useState<MicPos>(loadPos)
+  // §FIX: If loadPos returns DEFAULT_POS (-999,-999), use getDefault() instead
+  const [position, setPosition] = useState<MicPos>(() => {
+    const saved = loadPos()
+    if (saved.x === -999 || saved.y === -999) return getDefault(0)
+    return saved
+  })
   const [isDragging, setIsDragging] = useState(false)
   const [listening, setListening] = useState(false)
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false, dragging: false })
@@ -210,35 +215,29 @@ export function FloatingKeyboardMic() {
   // Strict keyboard sync
   if (!keyboardActive) return null
 
+  // §CRITICAL-FIX: NO AnimatePresence wrapper — it can introduce its own
+  // DOM wrapper with transform that breaks position:fixed. Just render the
+  // fixed div directly with a simple CSS transition for opacity.
   return (
-    <AnimatePresence>
-      {keyboardActive && (
-        <div
-          key="floating-keyboard-mic-wrapper"
-          // §CRITICAL-FIX: position:fixed on a PLAIN div (no framer-motion
-          // transform/scale/opacity). framer-motion's animate={{ scale }} sets
-          // transform:scale() which creates a containing block that breaks
-          // position:fixed. The wrapper div has NO transform ever — just pure
-          // fixed positioning. The animated motion.div is a CHILD inside the
-          // wrapper, so its transform doesn't affect the parent's fixed position.
-          style={{
-            position: 'fixed',
-            left: `${position.x}px`,
-            top: `${position.y}px`,
-            width: MIC_SIZE,
-            height: MIC_SIZE,
-            zIndex: 9999,
-            pointerEvents: 'auto',
-          }}
-        >
-        <motion.div
-          key="floating-keyboard-mic"
-          initial={{ opacity: 0, scale: 0.3 }}
-          animate={{ opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 300, damping: 18, mass: 0.8 } }}
-          exit={{ opacity: 0, scale: 0.3, transition: { duration: 0.2 } }}
-          className="select-none"
-          style={{ width: MIC_SIZE, height: MIC_SIZE }}
-        >
+    <div
+      key="floating-keyboard-mic-wrapper"
+      style={{
+        position: 'fixed',
+        left: `${position.x}px`,
+        top: `${position.y}px`,
+        width: MIC_SIZE,
+        height: MIC_SIZE,
+        zIndex: 9999,
+        pointerEvents: 'auto',
+      }}
+    >
+      <motion.div
+        key="floating-keyboard-mic"
+        initial={{ opacity: 0, scale: 0.3 }}
+        animate={{ opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 300, damping: 18, mass: 0.8 } }}
+        className="select-none"
+        style={{ width: MIC_SIZE, height: MIC_SIZE, position: 'relative' }}
+      >
           {/* Premium pulse/ripple idle animation */}
           {!listening && (
             <>
@@ -284,8 +283,6 @@ export function FloatingKeyboardMic() {
             </button>
           )}
         </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
+    </div>
   )
 }
