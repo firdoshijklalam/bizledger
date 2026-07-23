@@ -213,18 +213,31 @@ export function FloatingKeyboardMic() {
   return (
     <AnimatePresence>
       {keyboardActive && (
+        <div
+          key="floating-keyboard-mic-wrapper"
+          // §CRITICAL-FIX: position:fixed on a PLAIN div (no framer-motion
+          // transform/scale/opacity). framer-motion's animate={{ scale }} sets
+          // transform:scale() which creates a containing block that breaks
+          // position:fixed. The wrapper div has NO transform ever — just pure
+          // fixed positioning. The animated motion.div is a CHILD inside the
+          // wrapper, so its transform doesn't affect the parent's fixed position.
+          style={{
+            position: 'fixed',
+            left: `${position.x}px`,
+            top: `${position.y}px`,
+            width: MIC_SIZE,
+            height: MIC_SIZE,
+            zIndex: 9999,
+            pointerEvents: 'auto',
+          }}
+        >
         <motion.div
           key="floating-keyboard-mic"
           initial={{ opacity: 0, scale: 0.3 }}
           animate={{ opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 300, damping: 18, mass: 0.8 } }}
           exit={{ opacity: 0, scale: 0.3, transition: { duration: 0.2 } }}
-          // §FIX: position:fixed via inline style (className 'fixed' alone can be
-          // overridden by ancestor transforms/will-change). Explicit inline style
-          // guarantees fixed positioning regardless of CSS context. Removed y:30
-          // from initial/exit (was a transform that could interfere with fixed top).
-          // Z-INDEX 9999 — highest possible, always on top of everything.
-          className="fixed z-[9999] select-none"
-          style={{ position: 'fixed', left: `${position.x}px`, top: `${position.y}px`, width: MIC_SIZE, height: MIC_SIZE, pointerEvents: 'auto' }}
+          className="select-none"
+          style={{ width: MIC_SIZE, height: MIC_SIZE }}
         >
           {/* Premium pulse/ripple idle animation */}
           {!listening && (
@@ -271,6 +284,7 @@ export function FloatingKeyboardMic() {
             </button>
           )}
         </motion.div>
+        </div>
       )}
     </AnimatePresence>
   )
