@@ -2,19 +2,22 @@
  * §AUTO-DEPLOY: Next.js instrumentation hook.
  *
  * SANDBOX-ONLY: This hook auto-pushes git commits to GitHub from the sandbox.
- * On Vercel (production), it does NOTHING — Vercel doesn't have git installed
- * in serverless functions, and the auto-push is only needed in the sandbox.
+ * On Vercel (production), it does NOTHING.
  *
- * The VERCEL env var is automatically set by Vercel. When it's '1', we skip
- * all instrumentation logic entirely.
+ * §WEBPACK-FIX: Webpack statically analyzes `await import('fs')` and
+ * `await import('child_process')` even if they're behind a runtime check.
+ * We use string concatenation to prevent static analysis:
+ *   await import('f' + 's')         — Webpack can't resolve this at build time
+ *   await import('child_p' + 'rocess')  — same trick
+ * This is the standard workaround for dynamic imports of Node.js builtins
+ * in Next.js/Webpack environments.
  */
 
 export async function register() {
   // Only run on the server (Node.js runtime), never in Edge
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
 
-  // §CRITICAL: Skip entirely on Vercel production — no git, no filesystem access,
-  // no persistent process. This prevents build/runtime errors on Vercel.
+  // §CRITICAL: Skip entirely on Vercel production
   if (process.env.VERCEL === '1' || process.env.VERCEL_ENV) return
 
   // Skip in production (non-sandbox)
@@ -32,8 +35,14 @@ export async function register() {
   const PROJECT_DIR = '/home/z/my-project'
   const LOG_FILE = '/home/z/my-project/auto-deploy.log'
   const INTERVAL_MS = 30_000
-  const fs = await import('fs')
-  const { execSync } = await import('child_process')
+
+  // §WEBPACK-FIX: String concatenation prevents Webpack from statically
+  // analyzing these imports. Without this, the Vercel build fails because
+  // Webpack tries to bundle 'fs' and 'child_process' for the serverless
+  // environment where they don't exist.
+  const fs = await import('f' + 's')
+  const childProcess = await import('child_' + 'process')
+  const execSync = childProcess.execSync
 
   const log = (msg: string) => {
     const ts = new Date().toISOString().replace('T', ' ').slice(0, 19)
@@ -70,7 +79,6 @@ export async function register() {
   }
 
   log('auto-deploy instrumentation started (interval=30s, running inside next-server)')
-  // Initial check after a short delay (let server fully boot)
   g.__autoDeployTimeout = setTimeout(checkAndPush, 5_000)
   g.__autoDeployInterval = setInterval(checkAndPush, INTERVAL_MS)
 }
