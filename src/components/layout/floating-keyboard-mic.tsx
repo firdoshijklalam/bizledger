@@ -3,16 +3,18 @@
 /**
  * FloatingKeyboardMic — GLOBAL draggable microphone button.
  *
- * §FIX (scroll + drag):
- * 1. SCROLL: Render via createPortal to document.body with position:fixed.
- *    NO ancestor transform/will-change/backdrop-filter can break it.
- *    NO visualViewport listeners — the mic's position is pure CSS + user drag.
- * 2. DRAG: Full 2D drag (X AND Y). User can drag the mic anywhere on screen.
- *    Position saved to localStorage. Snap-to-edge on release (horizontal only,
- *    vertical stays where dropped).
- * 3. KEYBOARD: When keyboard opens, the mic adjusts its Y position to stay
- *    above the keyboard using visualViewport — but ONLY once when keyboard
- *    opens, NOT on every scroll event.
+ * §MOBILE FIX: On iOS Safari and some Android browsers, position:fixed
+ * elements SCROLL WITH THE PAGE when the virtual keyboard is open.
+ * This is a known browser bug — position:fixed is not truly fixed when
+ * the keyboard is visible.
+ *
+ * FIX: Instead of position:fixed, use position:absolute and manually
+ * offset by window.scrollY + visualViewport.offsetTop. This gives us
+ * full control over the mic's position relative to the SCREEN, not the
+ * document. Updated on every scroll and resize event — but efficiently
+ * (requestAnimationFrame throttled).
+ *
+ * Also: full 2D drag (X AND Y), position saved to localStorage.
  */
 
 import { motion, useAnimationControls } from 'framer-motion'
@@ -26,15 +28,15 @@ import { useI18n } from '@/store/i18n-store'
 const MIC_SIZE = 52
 const EDGE_MARGIN = 12
 const TOP_LIMIT = 60
-const BOTTOM_LIMIT = 80
 
 interface MicPos { x: number; y: number }
 
 function getDefaultPos(): MicPos {
   if (typeof window === 'undefined') return { x: 0, y: 0 }
+  const vh = window.visualViewport?.height ?? window.innerHeight
   return {
     x: window.innerWidth - MIC_SIZE - EDGE_MARGIN,
-    y: window.innerHeight - MIC_SIZE - BOTTOM_LIMIT,
+    y: vh - MIC_SIZE - 80,
   }
 }
 
@@ -60,25 +62,67 @@ export function FloatingKeyboardMic() {
   const languageRef = useRef(language)
   useEffect(() => { languageRef.current = language }, [language])
 
-  // §FIX: Full 2D position (X AND Y) — user can drag anywhere
-  const [pos, setPos] = useState<MicPos>(loadPos)
+  // User's saved position (relative to viewport — where they dragged it)
+  const [savedPos, setSavedPos] = useState<MicPos>(loadPos)
+  // Actual render position (offset by scroll to keep it fixed on screen)
+  const [renderPos, setRenderPos] = useState<MicPos>(savedPos)
   const [isDragging, setIsDragging] = useState(false)
   const [listening, setListening] = useState(false)
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false, dragging: false })
   const recognitionRef = useRef<any>(null)
   const micControls = useAnimationControls()
+  const rafRef = useRef<number | null>(null)
 
-  // §FIX: When keyboard opens, push mic UP if it would be hidden by keyboard.
-  // Only fires ONCE on keyboard open (keyboardActive goes false→true), NOT on scroll.
+  // §MOBILE FIX: On mobile with keyboard open, position:fixed doesn't work.
+  // Use position:absolute and manually compute the screen position by adding
+  // scrollY + visualViewport.offsetTop. This keeps the mic truly fixed on
+  // screen regardless of scroll, keyboard, or viewport changes.
+  useEffect(() => {
+    if (!keyboardActive) return
+
+    const updatePosition = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      rafRef.current = requestAnimationFrame(() => {
+        const vv = window.visualViewport
+        const scrollOffset = (vv?.offsetTop ?? 0) + window.scrollY
+        setRenderPos({
+          x: savedPos.x,
+          y: savedPos.y + scrollOffset,
+        })
+      })
+    }
+
+    // Update immediately
+    updatePosition()
+
+    // Update on scroll, resize, and visualViewport changes
+    window.addEventListener('scroll', updatePosition, { passive: true })
+    window.addEventListener('resize', updatePosition)
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updatePosition)
+      window.visualViewport.addEventListener('scroll', updatePosition)
+    }
+
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      window.removeEventListener('scroll', updatePosition)
+      window.removeEventListener('resize', updatePosition)
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', updatePosition)
+        window.visualViewport.removeEventListener('scroll', updatePosition)
+      }
+    }
+  }, [keyboardActive, savedPos])
+
+  // When keyboard opens, adjust Y if mic would be hidden
   const prevKbActive = useRef(false)
   useEffect(() => {
     if (keyboardActive && !prevKbActive.current) {
-      // Keyboard just opened — adjust Y if mic is in the bottom half
       const vv = window.visualViewport
       if (vv) {
         const visibleBottom = vv.height
         const t = setTimeout(() => {
-          setPos((p) => {
+          setSavedPos((p) => {
             if (p.y + MIC_SIZE > visibleBottom - 20) {
               const newY = Math.max(TOP_LIMIT, visibleBottom - MIC_SIZE - 20)
               return { ...p, y: newY }
@@ -165,21 +209,23 @@ export function FloatingKeyboardMic() {
     else startListening()
   }, [listening, startListening, stopListening])
 
-  // §FIX: Full 2D drag — X AND Y
+  // Full 2D drag — X AND Y. Uses clientX/clientY (viewport-relative) so
+  // dragging works correctly even when scrolled.
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
     const ds = dragRef.current
     ds.startX = e.clientX
     ds.startY = e.clientY
-    ds.startPosX = pos.x
-    ds.startPosY = pos.y
+    ds.startPosX = savedPos.x
+    ds.startPosY = savedPos.y
     ds.moved = false
     ds.dragging = false
 
     const vv = window.visualViewport
+    const vh = vv?.height ?? window.innerHeight
     const maxX = window.innerWidth - MIC_SIZE
-    const maxY = (vv?.height ?? window.innerHeight) - MIC_SIZE - 10
+    const maxY = vh - MIC_SIZE - 10
 
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - ds.startX
@@ -190,10 +236,9 @@ export function FloatingKeyboardMic() {
         setIsDragging(true)
       }
       if (ds.dragging) {
-        setPos({
-          x: Math.max(0, Math.min(maxX, ds.startPosX + dx)),
-          y: Math.max(TOP_LIMIT, Math.min(maxY, ds.startPosY + dy)),
-        })
+        const newX = Math.max(0, Math.min(maxX, ds.startPosX + dx))
+        const newY = Math.max(TOP_LIMIT, Math.min(maxY, ds.startPosY + dy))
+        setSavedPos({ x: newX, y: newY })
       }
     }
     const onUp = () => {
@@ -201,8 +246,7 @@ export function FloatingKeyboardMic() {
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
       if (ds.dragging) {
-        // Snap X to nearest edge, keep Y where dropped
-        setPos((cur) => {
+        setSavedPos((cur) => {
           const cx = cur.x + MIC_SIZE / 2
           const snappedX = cx < window.innerWidth / 2 ? EDGE_MARGIN : window.innerWidth - MIC_SIZE - EDGE_MARGIN
           const final = { x: snappedX, y: cur.y }
@@ -221,7 +265,7 @@ export function FloatingKeyboardMic() {
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
-  }, [pos, handleToggleMic])
+  }, [savedPos, handleToggleMic])
 
   // Animations
   useEffect(() => {
@@ -236,17 +280,19 @@ export function FloatingKeyboardMic() {
 
   if (!keyboardActive || typeof document === 'undefined') return null
 
-  // §CRITICAL: createPortal to document.body + position:fixed with X,Y.
-  // NO visualViewport listeners for scroll — the position is set once by
-  // the user (drag) and adjusted once when keyboard opens. Scroll does NOT
-  // trigger any repositioning.
+  // §MOBILE FIX: Use position:absolute (NOT fixed) and manually offset by
+  // scrollY + visualViewport.offsetTop. This is the ONLY reliable way to
+  // keep an element truly fixed on screen when the virtual keyboard is open
+  // on iOS Safari / Android Chrome.
+  //
+  // renderPos = savedPos + scrollOffset (computed in the scroll effect above)
   return createPortal(
     <div
       key="floating-keyboard-mic-wrapper"
       style={{
-        position: 'fixed',
-        left: `${pos.x}px`,
-        top: `${pos.y}px`,
+        position: 'absolute',
+        left: `${renderPos.x}px`,
+        top: `${renderPos.y}px`,
         width: MIC_SIZE,
         height: MIC_SIZE,
         zIndex: 9999,
