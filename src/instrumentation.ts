@@ -1,22 +1,24 @@
 /**
  * §AUTO-DEPLOY: Next.js instrumentation hook.
  *
- * Runs when the Next.js server starts (the persistent next-server process
- * managed by the platform). Starts a background interval that watches for
- * unpushed commits and pushes them to GitHub every 30s. Vercel (connected to
- * the GitHub repo) then auto-deploys on each push.
+ * SANDBOX-ONLY: This hook auto-pushes git commits to GitHub from the sandbox.
+ * On Vercel (production), it does NOTHING — Vercel doesn't have git installed
+ * in serverless functions, and the auto-push is only needed in the sandbox.
  *
- * This is the most reliable persistence mechanism in this sandbox because the
- * next-server process is the only one the platform keeps alive. Standalone
- * background shell/bun processes get reaped by sandbox cleanup.
- *
- * HMR-safe: stores the interval ID in globalThis and clears any stale interval
- * before starting a new one, so hot-reloads don't spawn duplicates.
+ * The VERCEL env var is automatically set by Vercel. When it's '1', we skip
+ * all instrumentation logic entirely.
  */
 
 export async function register() {
   // Only run on the server (Node.js runtime), never in Edge
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+
+  // §CRITICAL: Skip entirely on Vercel production — no git, no filesystem access,
+  // no persistent process. This prevents build/runtime errors on Vercel.
+  if (process.env.VERCEL === '1' || process.env.VERCEL_ENV) return
+
+  // Skip in production (non-sandbox)
+  if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) return
 
   const g = globalThis as unknown as {
     __autoDeployInterval?: ReturnType<typeof setInterval>

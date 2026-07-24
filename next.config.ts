@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // §VERCEL-FIX: Removed output: "standalone" — Vercel has its own build system
+  // and doesn't need standalone output. standalone is for Docker/self-hosting
+  // and can cause issues on Vercel (missing files, incorrect server path).
   typescript: {
     ignoreBuildErrors: true,
   },
