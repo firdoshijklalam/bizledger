@@ -83,17 +83,39 @@ export function FloatingKeyboardMic() {
   const recognitionRef = useRef<any>(null)
   const micControls = useAnimationControls()
 
-  // §2: VisualViewport API — reposition mic when keyboard opens/closes
+  // §2: VisualViewport API — reposition mic ONLY when keyboard height changes.
+  // §FIX: visualViewport 'resize' AND 'scroll' events both fire when scrolling
+  // with keyboard open. The 'resize' event fires because visualViewport.height
+  // fluctuates slightly during scroll. The 'scroll' event fires because
+  // visualViewport.pageTop changes. Both caused the mic to jump around.
+  //
+  // FIX: Only reposition when keyboard height changes by >10px (actual keyboard
+  // open/close, not scroll fluctuation). Completely IGNORE the 'scroll' event —
+  // the mic is position:fixed via createPortal to document.body, so it stays
+  // put regardless of scroll.
+  const lastKbHeightRef = useRef(0)
   useEffect(() => {
     if (!window.visualViewport) return
+    const vv = window.visualViewport
     const onResize = () => {
-      const kbHeight = Math.max(0, window.innerHeight - window.visualViewport!.height)
-      setKeyboardHeight(kbHeight)
-      // §2: ALWAYS reposition to sit above keyboard top edge
-      setPosition(getDefault(kbHeight))
+      const kbHeight = Math.max(0, window.innerHeight - vv.height)
+      // §FIX: Only reposition if keyboard height actually changed by >10px.
+      if (Math.abs(kbHeight - lastKbHeightRef.current) > 10) {
+        lastKbHeightRef.current = kbHeight
+        setKeyboardHeight(kbHeight)
+        setPosition(getDefault(kbHeight))
+      }
     }
-    window.visualViewport.addEventListener('resize', onResize)
-    return () => window.visualViewport!.removeEventListener('resize', onResize)
+    // §FIX: visualViewport 'scroll' event — do NOTHING. The mic is position:fixed
+    // on document.body via createPortal, so it stays put. We must NOT
+    // reposition on scroll.
+    const onScroll = () => { /* intentionally empty — mic stays fixed */ }
+    vv.addEventListener('resize', onResize)
+    vv.addEventListener('scroll', onScroll)
+    return () => {
+      vv.removeEventListener('resize', onResize)
+      vv.removeEventListener('scroll', onScroll)
+    }
   }, [])
 
   const stopListening = useCallback(() => {
