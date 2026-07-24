@@ -294,6 +294,8 @@ export function PartyDetail({ partyId }: { partyId: string }) {
             className="flex flex-col items-center gap-1 h-auto py-2.5"
             onClick={() => {
               useAppStore.getState().setPendingNewCustomer(data.id, data.name)
+              // §FIX: Clear overlay so sale-pad is visible (overlay z-80 would cover it)
+              setOverlayPartyId(null)
               setReturnToView('khata')
               setActiveView('sale-pad')
             }}
@@ -417,7 +419,12 @@ export function PartyDetail({ partyId }: { partyId: string }) {
             {data.invoices.map((inv) => (
               <button
                 key={inv.id}
-                onClick={() => { setOverlayInvoiceId(inv.id) }}
+                onClick={() => {
+                  // §FIX: Close party overlay first so invoice overlay (z-70) is visible
+                  // (party overlay z-80 would cover invoice overlay z-70)
+                  setOverlayPartyId(null)
+                  setOverlayInvoiceId(inv.id)
+                }}
                 className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 text-left"
               >
                 <Receipt className="w-4 h-4 text-muted-foreground shrink-0" />
