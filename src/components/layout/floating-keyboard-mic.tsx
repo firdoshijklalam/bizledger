@@ -3,18 +3,21 @@
 /**
  * FloatingKeyboardMic — GLOBAL draggable microphone button.
  *
- * §MOBILE FIX: On iOS Safari and some Android browsers, position:fixed
- * elements SCROLL WITH THE PAGE when the virtual keyboard is open.
- * This is a known browser bug — position:fixed is not truly fixed when
- * the keyboard is visible.
+ * §JITTER-FIX: Previous approach used position:absolute + JS scroll listener
+ * to manually offset by scrollY — this caused jitter/shaking on every scroll
+ * event because React state updates (setRenderPos) lag behind the actual
+ * scroll position by one frame.
  *
- * FIX: Instead of position:fixed, use position:absolute and manually
- * offset by window.scrollY + visualViewport.offsetTop. This gives us
- * full control over the mic's position relative to the SCREEN, not the
- * document. Updated on every scroll and resize event — but efficiently
- * (requestAnimationFrame throttled).
+ * NEW APPROACH: Pure CSS position:fixed + transform:translate3d for GPU-
+ * accelerated movement. NO scroll event listeners. NO position recalculation.
+ * The mic is fixed to the viewport via CSS — it CANNOT jitter because there
+ * is zero JS involvement in its screen position.
  *
- * Also: full 2D drag (X AND Y), position saved to localStorage.
+ * transform:translate3d(x, y, 0) is used instead of top/left for the drag
+ * position — this uses the GPU compositor (no layout thrashing).
+ *
+ * §KEYBOARD-DISMISS: The X button now calls document.activeElement?.blur()
+ * to dismiss the virtual keyboard natively before unregistering.
  */
 
 import { motion, useAnimationControls } from 'framer-motion'
@@ -28,6 +31,8 @@ import { useI18n } from '@/store/i18n-store'
 const MIC_SIZE = 52
 const EDGE_MARGIN = 12
 const TOP_LIMIT = 60
+const BOTTOM_LIMIT = 80
+const DRAG_THRESH = 6
 
 interface MicPos { x: number; y: number }
 
@@ -36,7 +41,7 @@ function getDefaultPos(): MicPos {
   const vh = window.visualViewport?.height ?? window.innerHeight
   return {
     x: window.innerWidth - MIC_SIZE - EDGE_MARGIN,
-    y: vh - MIC_SIZE - 80,
+    y: vh - MIC_SIZE - BOTTOM_LIMIT,
   }
 }
 
@@ -62,59 +67,17 @@ export function FloatingKeyboardMic() {
   const languageRef = useRef(language)
   useEffect(() => { languageRef.current = language }, [language])
 
-  // User's saved position (relative to viewport — where they dragged it)
-  const [savedPos, setSavedPos] = useState<MicPos>(loadPos)
-  // Actual render position (offset by scroll to keep it fixed on screen)
-  const [renderPos, setRenderPos] = useState<MicPos>(savedPos)
+  // §JITTER-FIX: Single position state. NO renderPos, NO scroll offset.
+  // position:fixed + transform:translate3d — pure CSS, zero JS scroll handling.
+  const [pos, setPos] = useState<MicPos>(loadPos)
   const [isDragging, setIsDragging] = useState(false)
   const [listening, setListening] = useState(false)
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false, dragging: false })
   const recognitionRef = useRef<any>(null)
   const micControls = useAnimationControls()
-  const rafRef = useRef<number | null>(null)
 
-  // §MOBILE FIX: On mobile with keyboard open, position:fixed doesn't work.
-  // Use position:absolute and manually compute the screen position by adding
-  // scrollY + visualViewport.offsetTop. This keeps the mic truly fixed on
-  // screen regardless of scroll, keyboard, or viewport changes.
-  useEffect(() => {
-    if (!keyboardActive) return
-
-    const updatePosition = () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      rafRef.current = requestAnimationFrame(() => {
-        const vv = window.visualViewport
-        const scrollOffset = (vv?.offsetTop ?? 0) + window.scrollY
-        setRenderPos({
-          x: savedPos.x,
-          y: savedPos.y + scrollOffset,
-        })
-      })
-    }
-
-    // Update immediately
-    updatePosition()
-
-    // Update on scroll, resize, and visualViewport changes
-    window.addEventListener('scroll', updatePosition, { passive: true })
-    window.addEventListener('resize', updatePosition)
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', updatePosition)
-      window.visualViewport.addEventListener('scroll', updatePosition)
-    }
-
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      window.removeEventListener('scroll', updatePosition)
-      window.removeEventListener('resize', updatePosition)
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', updatePosition)
-        window.visualViewport.removeEventListener('scroll', updatePosition)
-      }
-    }
-  }, [keyboardActive, savedPos])
-
-  // When keyboard opens, adjust Y if mic would be hidden
+  // When keyboard opens, adjust Y if mic would be hidden by keyboard.
+  // Only fires ONCE on keyboard open, NOT on scroll.
   const prevKbActive = useRef(false)
   useEffect(() => {
     if (keyboardActive && !prevKbActive.current) {
@@ -122,10 +85,9 @@ export function FloatingKeyboardMic() {
       if (vv) {
         const visibleBottom = vv.height
         const t = setTimeout(() => {
-          setSavedPos((p) => {
+          setPos((p) => {
             if (p.y + MIC_SIZE > visibleBottom - 20) {
-              const newY = Math.max(TOP_LIMIT, visibleBottom - MIC_SIZE - 20)
-              return { ...p, y: newY }
+              return { ...p, y: Math.max(TOP_LIMIT, visibleBottom - MIC_SIZE - 20) }
             }
             return p
           })
@@ -209,16 +171,17 @@ export function FloatingKeyboardMic() {
     else startListening()
   }, [listening, startListening, stopListening])
 
-  // Full 2D drag — X AND Y. Uses clientX/clientY (viewport-relative) so
-  // dragging works correctly even when scrolled.
+  // §JITTER-FIX: Full 2D drag using transform:translate3d for GPU acceleration.
+  // Updates the `pos` state — the wrapper div uses transform (not top/left)
+  // for rendering, so there's no layout thrashing.
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
     const ds = dragRef.current
     ds.startX = e.clientX
     ds.startY = e.clientY
-    ds.startPosX = savedPos.x
-    ds.startPosY = savedPos.y
+    ds.startPosX = pos.x
+    ds.startPosY = pos.y
     ds.moved = false
     ds.dragging = false
 
@@ -230,15 +193,16 @@ export function FloatingKeyboardMic() {
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - ds.startX
       const dy = ev.clientY - ds.startY
-      if (!ds.moved && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
+      if (!ds.moved && (Math.abs(dx) > DRAG_THRESH || Math.abs(dy) > DRAG_THRESH)) {
         ds.moved = true
         ds.dragging = true
         setIsDragging(true)
       }
       if (ds.dragging) {
-        const newX = Math.max(0, Math.min(maxX, ds.startPosX + dx))
-        const newY = Math.max(TOP_LIMIT, Math.min(maxY, ds.startPosY + dy))
-        setSavedPos({ x: newX, y: newY })
+        setPos({
+          x: Math.max(0, Math.min(maxX, ds.startPosX + dx)),
+          y: Math.max(TOP_LIMIT, Math.min(maxY, ds.startPosY + dy)),
+        })
       }
     }
     const onUp = () => {
@@ -246,7 +210,7 @@ export function FloatingKeyboardMic() {
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
       if (ds.dragging) {
-        setSavedPos((cur) => {
+        setPos((cur) => {
           const cx = cur.x + MIC_SIZE / 2
           const snappedX = cx < window.innerWidth / 2 ? EDGE_MARGIN : window.innerWidth - MIC_SIZE - EDGE_MARGIN
           const final = { x: snappedX, y: cur.y }
@@ -265,7 +229,7 @@ export function FloatingKeyboardMic() {
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
-  }, [savedPos, handleToggleMic])
+  }, [pos, handleToggleMic])
 
   // Animations
   useEffect(() => {
@@ -278,25 +242,47 @@ export function FloatingKeyboardMic() {
     }
   }, [listening, keyboardActive, micControls])
 
+  // §KEYBOARD-DISMISS: Close button — blur active element to dismiss keyboard
+  const handleClose = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    // §FIX: Force-dismiss the virtual keyboard by blurring the active input.
+    // This is required on mobile — without it, the keyboard stays open
+    // even after the mic UI disappears.
+    if (document.activeElement && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
+    // Also blur via the stored ref (fallback)
+    const el = useVoiceInputStore.getState().activeInputRef.current
+    if (el) el.blur()
+    unregisterInput()
+  }, [unregisterInput])
+
   if (!keyboardActive || typeof document === 'undefined') return null
 
-  // §MOBILE FIX: Use position:absolute (NOT fixed) and manually offset by
-  // scrollY + visualViewport.offsetTop. This is the ONLY reliable way to
-  // keep an element truly fixed on screen when the virtual keyboard is open
-  // on iOS Safari / Android Chrome.
+  // §JITTER-FIX: Pure CSS position:fixed + transform:translate3d.
+  // NO scroll listeners. NO JS position recalculation. NO renderPos state.
+  // The mic is fixed to the viewport via CSS — it CANNOT jitter because
+  // there is zero JS involvement in its screen position during scroll.
   //
-  // renderPos = savedPos + scrollOffset (computed in the scroll effect above)
+  // transform:translate3d(x, y, 0) uses the GPU compositor — no layout
+  // thrashing, no reflow, butter-smooth drag.
+  //
+  // createPortal to document.body — no ancestor containing block.
   return createPortal(
     <div
       key="floating-keyboard-mic-wrapper"
       style={{
-        position: 'absolute',
-        left: `${renderPos.x}px`,
-        top: `${renderPos.y}px`,
+        position: 'fixed',
+        left: '0',
+        top: '0',
         width: MIC_SIZE,
         height: MIC_SIZE,
         zIndex: 9999,
         pointerEvents: 'auto',
+        // §JITTER-FIX: Use transform (GPU-accelerated) instead of top/left.
+        // translate3d forces hardware acceleration — no jitter, no layout thrashing.
+        transform: `translate3d(${pos.x}px, ${pos.y}px, 0)`,
+        willChange: 'transform',
       }}
     >
       <motion.div
@@ -335,7 +321,7 @@ export function FloatingKeyboardMic() {
 
         {!listening && (
           <button
-            onClick={(e) => { e.stopPropagation(); unregisterInput(); }}
+            onClick={handleClose}
             tabIndex={-1}
             onMouseDown={(e) => e.preventDefault()}
             data-mic-button="true"
