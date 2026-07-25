@@ -4,6 +4,7 @@ import { useI18n } from '@/store/i18n-store'
 import { AnimatePresence, motion, useAnimationControls } from 'framer-motion'
 import { Plus, UserPlus, PackagePlus, ArrowLeftRight, Zap, X } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 
 const ACTIONS = [
   { id: 'quick-sale', icon: Zap, labelKey: 'qa.quickSale', color: 'text-emerald-600', primary: true },
@@ -210,7 +211,13 @@ export function SideDrawerFab() {
   // Peek offset — nudge FAB towards center by 35px while peeking
   const peekOffset = peekMode ? (isOnLeft ? 35 : -35) : 0
 
-  return (
+  // §FIX: Use createPortal to render the FAB DIRECTLY on document.body.
+  // This completely bypasses ALL ancestor elements (app-shell, main, motion.div,
+  // etc.). No ancestor can have transform/will-change/backdrop-filter that
+  // creates a containing block and breaks position:fixed.
+  // Both the FAB and the Mic now use createPortal to document.body.
+  if (typeof document === 'undefined') return null
+  return createPortal(
     <>
       {/* Backdrop — fade in/out over 200ms */}
       <AnimatePresence>
@@ -331,6 +338,7 @@ export function SideDrawerFab() {
           </motion.div>
         </motion.button>
       </div>
-    </>
+    </>,
+    document.body
   )
 }
