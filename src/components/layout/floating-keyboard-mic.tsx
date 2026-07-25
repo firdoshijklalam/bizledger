@@ -27,9 +27,20 @@
  *   5. Default position uses visualViewport.height (not window.innerHeight),
  *      so it works even when the mic first mounts with keyboard already open.
  *
- * §JITTER-FIX: transform:translate3d uses the GPU compositor — no layout
- * thrashing, no jitter. The visualViewport listener is throttled via
- * requestAnimationFrame.
+ * §JITTER-FIX (v2): The previous approach called setVV + setPos inside
+ * a requestAnimationFrame on EVERY visualViewport scroll event. This
+ * triggered a React re-render that lagged one frame behind the actual
+ * scroll position, causing a visible "slight shaking" during scroll.
+ *
+ * THE FIX: Split visualViewport handling into two paths:
+ *   - SCROLL events (frequent, 60+ fps): Update the DOM transform DIRECTLY
+ *     via wrapperRef.current.style.transform — NO rAF, NO setState. This
+ *     is synchronous with the scroll, so there is ZERO lag and ZERO jitter.
+ *   - RESIZE events (infrequent, keyboard open/close): Use setState to
+ *     update vv + clamp pos. The re-render is acceptable here because
+ *     resize is rare.
+ *
+ * transform:translate3d uses the GPU compositor — no layout thrashing.
  *
  * §KEYBOARD-DISMISS: The X button blurs the active element to dismiss
  * the virtual keyboard natively.
@@ -104,45 +115,58 @@ export function FloatingKeyboardMic() {
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false, dragging: false })
   const recognitionRef = useRef<any>(null)
   const micControls = useAnimationControls()
-  const rafRef = useRef<number | null>(null)
   const vvRef = useRef(vv)
   useEffect(() => { vvRef.current = vv }, [vv])
+  // §JITTER-FIX: wrapperRef for direct DOM transform updates on scroll.
+  // posRef mirrors `pos` so the scroll handler can read the latest pos
+  // without re-subscribing (the useEffect has [] deps).
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const posRef = useRef(pos)
+  useEffect(() => { posRef.current = pos }, [pos])
 
-  // §KEYBOARD-VIEWPORT-FIX: Listen to visualViewport resize/scroll.
-  // On every change, update vv state AND clamp pos.y so the mic stays
-  // inside the visible area. This runs ALWAYS (not just when keyboard
-  // is open) — though the mic only renders when keyboardActive.
+  // §JITTER-FIX: Two separate visualViewport handlers:
+  //   onScroll → direct DOM transform update (NO setState, NO rAF)
+  //   onResize → setState for clamping + direct DOM transform
   useEffect(() => {
     const winVV = window.visualViewport
     if (!winVV) return
 
-    const update = () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      rafRef.current = requestAnimationFrame(() => {
-        const nextVV = { w: winVV.width, h: winVV.height, ox: winVV.offsetLeft, oy: winVV.offsetTop }
-        setVV(nextVV)
-        // Clamp pos so the mic stays inside the visible area.
-        // If the mic was at the bottom of the full screen and the keyboard
-        // just opened (shrinking vv.h), slide it up to sit above the keyboard.
-        setPos((p) => {
-          const maxY = Math.max(TOP_LIMIT, nextVV.h - MIC_SIZE - 10)
-          const minY = TOP_LIMIT
-          if (p.y > maxY || p.y < minY) {
-            const clamped = { ...p, y: Math.max(minY, Math.min(maxY, p.y)) }
-            return clamped
-          }
-          return p
-        })
-      })
+    // Synchronously update the wrapper's transform. This runs inside the
+    // scroll event handler — BEFORE the browser paints — so the mic moves
+    // in the SAME frame as the scroll. Zero lag = zero jitter.
+    const applyTransform = () => {
+      const el = wrapperRef.current
+      if (!el) return
+      const p = posRef.current
+      el.style.transform = `translate3d(${p.x + winVV.offsetLeft}px, ${p.y + winVV.offsetTop}px, 0)`
     }
 
-    update()
-    winVV.addEventListener('resize', update)
-    winVV.addEventListener('scroll', update)
+    // SCROLL: direct DOM only — no setState → no re-render → no jitter
+    const onScroll = () => applyTransform()
+
+    // RESIZE: keyboard open/close — clamp pos + apply transform immediately
+    const onResize = () => {
+      const nextH = winVV.height
+      const nextW = winVV.width
+      const nextOX = winVV.offsetLeft
+      const nextOY = winVV.offsetTop
+      setVV({ w: nextW, h: nextH, ox: nextOX, oy: nextOY })
+      setPos((p) => {
+        const maxY = Math.max(TOP_LIMIT, nextH - MIC_SIZE - 10)
+        if (p.y > maxY || p.y < TOP_LIMIT) {
+          return { ...p, y: Math.max(TOP_LIMIT, Math.min(maxY, p.y)) }
+        }
+        return p
+      })
+      // Apply transform immediately (don't wait for re-render)
+      applyTransform()
+    }
+
+    winVV.addEventListener('resize', onResize)
+    winVV.addEventListener('scroll', onScroll)
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      winVV.removeEventListener('resize', update)
-      winVV.removeEventListener('scroll', update)
+      winVV.removeEventListener('resize', onResize)
+      winVV.removeEventListener('scroll', onScroll)
     }
   }, [])
 
@@ -310,6 +334,7 @@ export function FloatingKeyboardMic() {
   return createPortal(
     <div
       key="floating-keyboard-mic-wrapper"
+      ref={wrapperRef}
       style={{
         position: 'fixed',
         left: '0',
@@ -321,8 +346,12 @@ export function FloatingKeyboardMic() {
         // ADD visualViewport offset (do NOT subtract — that was the bug).
         // pos is in visual-viewport coords; adding vv.ox/oy converts to
         // layout-viewport coords (which is what position:fixed anchors to).
+        // §JITTER-FIX: This React-rendered transform is the INITIAL value.
+        // During scroll, the onScroll handler updates the DOM transform
+        // DIRECTLY via wrapperRef — bypassing React entirely for zero lag.
         transform: `translate3d(${pos.x + vv.ox}px, ${pos.y + vv.oy}px, 0)`,
         willChange: 'transform',
+        backfaceVisibility: 'hidden',
       }}
     >
       <motion.div

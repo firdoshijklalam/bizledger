@@ -84,44 +84,60 @@ export function SideDrawerFab() {
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false, dragging: false })
   const vvRef = useRef(vv)
   useEffect(() => { vvRef.current = vv }, [vv])
+  // §JITTER-FIX: wrapperRef for direct DOM transform updates on scroll.
+  // posRef mirrors `position` so the scroll handler can read the latest
+  // pos without re-subscribing. peekRef mirrors peekOffset.
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const posRef = useRef(position)
+  useEffect(() => { posRef.current = position }, [position])
+  const peekValRef = useRef(0)
 
-  // §KEYBOARD-VIEWPORT-FIX: Listen to visualViewport resize/scroll.
-  // On every change:
-  //   1. Update vv state (width, height, offsetLeft, offsetTop).
-  //   2. Clamp position.y so the FAB stays inside the visible area.
-  //      If the keyboard opened and shrunk vv.h, slide the FAB up.
-  //   3. If position is still the placeholder (-999), initialize it.
-  // The listener is throttled via requestAnimationFrame to avoid jitter.
-  const rafRef = useRef<number | null>(null)
+  // §JITTER-FIX: Two separate visualViewport handlers:
+  //   onScroll → direct DOM transform update (NO setState, NO rAF)
+  //   onResize → setState for clamping + direct DOM transform
   useEffect(() => {
     const winVV = window.visualViewport
     if (!winVV) return
 
-    const update = () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      rafRef.current = requestAnimationFrame(() => {
-        const nextVV = { w: winVV.width, h: winVV.height, ox: winVV.offsetLeft, oy: winVV.offsetTop }
-        setVV(nextVV)
-        setPosition((prev) => {
-          if (prev.x === -999) return getDefault(nextVV)
-          // Clamp Y so FAB stays inside the visible area.
-          const maxY = Math.max(TOP_BAR + 8, nextVV.h - FAB_SIZE - 8)
-          const minY = TOP_BAR + 8
-          if (prev.y > maxY || prev.y < minY) {
-            return { ...prev, y: Math.max(minY, Math.min(maxY, prev.y)) }
-          }
-          return prev
-        })
-      })
+    // Synchronously update the wrapper's transform. Runs inside the scroll
+    // event handler BEFORE paint — same frame as scroll = zero lag.
+    const applyTransform = () => {
+      const el = wrapperRef.current
+      if (!el) return
+      const p = posRef.current
+      const peek = peekValRef.current
+      el.style.transform = `translate3d(${p.x + peek + winVV.offsetLeft}px, ${p.y + winVV.offsetTop}px, 0)`
     }
 
-    update()
-    winVV.addEventListener('resize', update)
-    winVV.addEventListener('scroll', update)
+    // SCROLL: direct DOM only — no setState → no re-render → no jitter
+    const onScroll = () => applyTransform()
+
+    // RESIZE: keyboard open/close — clamp position + apply transform
+    const onResize = () => {
+      const nextH = winVV.height
+      const nextW = winVV.width
+      const nextOX = winVV.offsetLeft
+      const nextOY = winVV.offsetTop
+      const nextVV = { w: nextW, h: nextH, ox: nextOX, oy: nextOY }
+      setVV(nextVV)
+      setPosition((prev) => {
+        if (prev.x === -999) return getDefault(nextVV)
+        const maxY = Math.max(TOP_BAR + 8, nextH - FAB_SIZE - 8)
+        const minY = TOP_BAR + 8
+        if (prev.y > maxY || prev.y < minY) {
+          return { ...prev, y: Math.max(minY, Math.min(maxY, prev.y)) }
+        }
+        return prev
+      })
+      // Apply transform immediately (don't wait for re-render)
+      applyTransform()
+    }
+
+    winVV.addEventListener('resize', onResize)
+    winVV.addEventListener('scroll', onScroll)
     return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      winVV.removeEventListener('resize', update)
-      winVV.removeEventListener('scroll', update)
+      winVV.removeEventListener('resize', onResize)
+      winVV.removeEventListener('scroll', onScroll)
     }
   }, [])
 
@@ -261,6 +277,9 @@ export function SideDrawerFab() {
 
   // Peek offset — nudge FAB towards center by 35px while peeking
   const peekOffset = peekMode ? (isOnLeft ? 35 : -35) : 0
+  // §JITTER-FIX: mirror peekOffset into a ref so the scroll handler can
+  // read it without re-subscribing the effect.
+  useEffect(() => { peekValRef.current = peekOffset }, [peekOffset])
 
   // §FIX: createPortal to document.body — no ancestor containing block.
   if (typeof document === 'undefined') return null
@@ -358,14 +377,18 @@ export function SideDrawerFab() {
           anchors to layout viewport, so adding the offset keeps the FAB
           visually anchored to the visible screen even when keyboard
           scrolls the layout viewport. */}
-      <div className="fixed z-50 select-none" style={{
+      <div className="fixed z-50 select-none" ref={wrapperRef} style={{
         left: '0',
         top: '0',
         width: FAB_SIZE,
         height: FAB_SIZE,
         // ADD visualViewport offset (do NOT subtract — that was the bug).
+        // §JITTER-FIX: This React-rendered transform is the INITIAL value.
+        // During scroll, the onScroll handler updates the DOM transform
+        // DIRECTLY via wrapperRef — bypassing React entirely for zero lag.
         transform: `translate3d(${position.x + peekOffset + vv.ox}px, ${position.y + vv.oy}px, 0)`,
         willChange: 'transform',
+        backfaceVisibility: 'hidden',
       }}>
         {!interacted && !fabOpen && (
           <>
