@@ -67,14 +67,48 @@ export function FloatingKeyboardMic() {
   const languageRef = useRef(language)
   useEffect(() => { languageRef.current = language }, [language])
 
-  // §JITTER-FIX: Single position state. NO renderPos, NO scroll offset.
-  // position:fixed + transform:translate3d — pure CSS, zero JS scroll handling.
+  // §ANDROID-FIX: On Android Chrome with keyboard open, position:fixed
+  // elements scroll with the body. This is a known browser bug.
+  // FIX: Use visualViewport API to compensate. On every visualViewport
+  // scroll/resize event, recalculate the transform offset to keep the
+  // mic truly fixed on screen. Uses transform (GPU-accelerated) — no jitter.
   const [pos, setPos] = useState<MicPos>(loadPos)
+  const [viewportOffset, setViewportOffset] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [listening, setListening] = useState(false)
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false, dragging: false })
   const recognitionRef = useRef<any>(null)
   const micControls = useAnimationControls()
+  const rafRef = useRef<number | null>(null)
+
+  // §ANDROID-FIX: Track visualViewport offset to compensate for scroll.
+  // On desktop: offsetTop/offsetLeft are always 0 — no effect.
+  // On Android Chrome with keyboard: offsetTop changes on scroll — we
+  // subtract it from our position to keep the mic fixed on screen.
+  useEffect(() => {
+    if (!keyboardActive) return
+    const vv = window.visualViewport
+    if (!vv) return
+
+    const update = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      rafRef.current = requestAnimationFrame(() => {
+        setViewportOffset({
+          x: vv.offsetLeft,
+          y: vv.offsetTop,
+        })
+      })
+    }
+
+    update()
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+    }
+  }, [keyboardActive])
 
   // When keyboard opens, adjust Y if mic would be hidden by keyboard.
   // Only fires ONCE on keyboard open, NOT on scroll.
@@ -281,7 +315,12 @@ export function FloatingKeyboardMic() {
         pointerEvents: 'auto',
         // §JITTER-FIX: Use transform (GPU-accelerated) instead of top/left.
         // translate3d forces hardware acceleration — no jitter, no layout thrashing.
-        transform: `translate3d(${pos.x}px, ${pos.y}px, 0)`,
+        // §ANDROID-FIX: Subtract visualViewport offset to compensate for
+        // Android Chrome's position:fixed-with-keyboard bug. On desktop,
+        // viewportOffset is {0,0} — no effect. On Android with keyboard,
+        // viewportOffset.y = visualViewport.offsetTop which changes on scroll.
+        // Subtracting it keeps the mic truly fixed on screen.
+        transform: `translate3d(${pos.x - viewportOffset.x}px, ${pos.y - viewportOffset.y}px, 0)`,
         willChange: 'transform',
       }}
     >

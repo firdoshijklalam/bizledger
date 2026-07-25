@@ -70,6 +70,29 @@ export function SideDrawerFab() {
   const [vh, setVh] = useState(() => (typeof window !== 'undefined' ? window.innerHeight : 700))
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false, dragging: false })
 
+  // §ANDROID-FIX: visualViewport offset compensation for position:fixed
+  // breaking on Android Chrome with keyboard open.
+  const [vpOffset, setVpOffset] = useState({ x: 0, y: 0 })
+  const rafRef = useRef<number | null>(null)
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      rafRef.current = requestAnimationFrame(() => {
+        setVpOffset({ x: vv.offsetLeft, y: vv.offsetTop })
+      })
+    }
+    update()
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+    }
+  }, [])
+
   // §1: Icon rotation controller — drives the infinite idle spin + open/close transitions
   const iconControls = useAnimationControls()
   // Ref to guard against stale callbacks if user rapidly toggles open/close.
@@ -289,8 +312,11 @@ export function SideDrawerFab() {
         )}
       </AnimatePresence>
 
-      {/* FAB container with idle ripple halo */}
-      <div className="fixed z-50 select-none" style={{ left: `${position.x + peekOffset}px`, top: `${position.y}px`, width: FAB_SIZE, height: FAB_SIZE }}>
+      {/* FAB container with idle ripple halo.
+          §FIX: Use transform:translate3d instead of top/left for GPU-accelerated
+          positioning. position:fixed anchors to viewport, transform offsets from there.
+          NO layout thrashing, NO jitter. */}
+      <div className="fixed z-50 select-none" style={{ left: '0', top: '0', width: FAB_SIZE, height: FAB_SIZE, transform: `translate3d(${position.x + peekOffset - vpOffset.x}px, ${position.y - vpOffset.y}px, 0)`, willChange: 'transform' }}>
         {/* Idle Ripple Halo — two offset pulses, infinite (only when not interacted & closed) */}
         {!interacted && !fabOpen && (
           <>
@@ -316,7 +342,8 @@ export function SideDrawerFab() {
           style={{
             backgroundColor: 'color-mix(in oklch, var(--primary) 45%, transparent)',
             touchAction: 'none',
-            transition: isDragging ? 'none' : 'left 0.3s cubic-bezier(0.4,0,0.2,1), top 0.3s cubic-bezier(0.4,0,0.2,1)',
+            // §FIX: Removed left/top transition — now using transform on parent.
+            // No layout transition needed since the parent div handles position via transform.
           }}
           animate={{
             scale: isDragging ? 1.15 : (peekMode ? [1, 1.12, 1] : 1),

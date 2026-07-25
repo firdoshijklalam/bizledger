@@ -171,7 +171,7 @@ export function AppShell() {
 
   if (!businessLoaded) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background">
+      <div className="flex flex-col items-center justify-center gap-3 bg-background" style={{ minHeight: '100dvh' }}>
         <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center">
           <Loader2 className="w-7 h-7 text-primary-foreground animate-spin" />
         </div>
@@ -182,7 +182,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="flex flex-col bg-background" style={{ minHeight: '100dvh' }}>
       <TopAppBar />
       <main
         className="flex-1 w-full max-w-2xl mx-auto px-3 sm:px-4 pb-28 pt-3"
