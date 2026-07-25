@@ -34,7 +34,16 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-};
+  // §KEYBOARD-VIEWPORT-FIX: W3C VirtualKeyboard API — tell the browser to
+  // ONLY resize the VISUAL viewport (not the LAYOUT viewport) when the soft
+  // keyboard opens. This is THE modern standard for making position:fixed
+  // elements (FAB, mic, bottom nav) stay anchored to the visible screen
+  // instead of scrolling with the document when the keyboard pushes content.
+  // Supported in Chrome 108+ (Android). Older browsers ignore it gracefully.
+  interactiveWidget: "resizes-visual",
+  // §SAFE-AREA: respect notches / dynamic island / home indicator
+  viewportFit: "cover",
+} as Viewport;
 
 export default function RootLayout({
   children,
