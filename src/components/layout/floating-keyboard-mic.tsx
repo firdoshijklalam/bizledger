@@ -3,21 +3,39 @@
 /**
  * FloatingKeyboardMic — GLOBAL draggable microphone button.
  *
- * §JITTER-FIX: Previous approach used position:absolute + JS scroll listener
- * to manually offset by scrollY — this caused jitter/shaking on every scroll
- * event because React state updates (setRenderPos) lag behind the actual
- * scroll position by one frame.
+ * §KEYBOARD-VIEWPORT-FIX (Android Chrome PWA):
+ * The classic bug: on Android Chrome, when the soft keyboard opens, the
+ * VISUAL viewport shrinks (height decreases) and may scroll independently
+ * of the LAYOUT viewport. CSS `position: fixed` anchors to the LAYOUT
+ * viewport — so a fixed element with `top: <some-Y>` ends up either:
+ *   (a) below the visible area (hidden under the keyboard), or
+ *   (b) scrolling with the page (if the layout viewport itself scrolled).
  *
- * NEW APPROACH: Pure CSS position:fixed + transform:translate3d for GPU-
- * accelerated movement. NO scroll event listeners. NO position recalculation.
- * The mic is fixed to the viewport via CSS — it CANNOT jitter because there
- * is zero JS involvement in its screen position.
+ * THE FIX — anchor to the VISUAL viewport dynamically:
+ *   1. Store `pos` in VISUAL-VIEWPORT coords (relative to the top-left of
+ *      what the user actually sees on screen). This means "middle of the
+ *      screen" stays "middle of the screen" regardless of keyboard state.
+ *   2. Track `visualViewport` ({width, height, offsetLeft, offsetTop}).
+ *   3. On render, CONVERT visual-viewport coords → layout-viewport coords
+ *      by ADDING the visualViewport offset:
+ *        transform: translate3d(pos.x + vv.ox, pos.y + vv.oy, 0)
+ *      (Previous code SUBTRACTED — that was the bug. Subtracting pushes
+ *       the element ABOVE the visible area, off-screen.)
+ *   4. On every visualViewport resize, CLAMP pos.y so the mic always
+ *      stays within the visible area (if it would be hidden under the
+ *      keyboard, slide it up to sit just above the keyboard).
+ *   5. Default position uses visualViewport.height (not window.innerHeight),
+ *      so it works even when the mic first mounts with keyboard already open.
  *
- * transform:translate3d(x, y, 0) is used instead of top/left for the drag
- * position — this uses the GPU compositor (no layout thrashing).
+ * §JITTER-FIX: transform:translate3d uses the GPU compositor — no layout
+ * thrashing, no jitter. The visualViewport listener is throttled via
+ * requestAnimationFrame.
  *
- * §KEYBOARD-DISMISS: The X button now calls document.activeElement?.blur()
- * to dismiss the virtual keyboard natively before unregistering.
+ * §KEYBOARD-DISMISS: The X button blurs the active element to dismiss
+ * the virtual keyboard natively.
+ *
+ * §PORTAL: createPortal(document.body) — no ancestor containing block
+ * can break position:fixed (transform/will-change/backdrop-filter).
  */
 
 import { motion, useAnimationControls } from 'framer-motion'
@@ -35,26 +53,35 @@ const BOTTOM_LIMIT = 80
 const DRAG_THRESH = 6
 
 interface MicPos { x: number; y: number }
+interface VVState { w: number; h: number; ox: number; oy: number }
 
-function getDefaultPos(): MicPos {
-  if (typeof window === 'undefined') return { x: 0, y: 0 }
-  const vh = window.visualViewport?.height ?? window.innerHeight
+function getInitialVV(): VVState {
+  if (typeof window === 'undefined' || !window.visualViewport) {
+    return { w: typeof window !== 'undefined' ? window.innerWidth : 375, h: typeof window !== 'undefined' ? window.innerHeight : 700, ox: 0, oy: 0 }
+  }
+  const vv = window.visualViewport
+  return { w: vv.width, h: vv.height, ox: vv.offsetLeft, oy: vv.offsetTop }
+}
+
+function getDefaultPos(vv: VVState): MicPos {
   return {
-    x: window.innerWidth - MIC_SIZE - EDGE_MARGIN,
-    y: vh - MIC_SIZE - BOTTOM_LIMIT,
+    x: vv.w - MIC_SIZE - EDGE_MARGIN,
+    y: vv.h - MIC_SIZE - BOTTOM_LIMIT,
   }
 }
 
-function loadPos(): MicPos {
-  if (typeof window === 'undefined') return getDefaultPos()
+function loadPos(vv: VVState): MicPos {
+  if (typeof window === 'undefined') return getDefaultPos(vv)
   try {
     const s = localStorage.getItem('bizledger-mic-pos-2d')
     if (s) {
       const p = JSON.parse(s)
-      if (p.x >= 0 && p.x <= window.innerWidth && p.y >= 0 && p.y <= window.innerHeight) return p
+      // Validate against visual viewport dimensions (so a stale position
+      // saved when keyboard was closed doesn't end up off-screen).
+      if (p.x >= 0 && p.x <= vv.w - MIC_SIZE && p.y >= 0 && p.y <= vv.h - MIC_SIZE) return p
     }
   } catch {}
-  return getDefaultPos()
+  return getDefaultPos(vv)
 }
 
 function savePos(p: MicPos) {
@@ -67,70 +94,57 @@ export function FloatingKeyboardMic() {
   const languageRef = useRef(language)
   useEffect(() => { languageRef.current = language }, [language])
 
-  // §ANDROID-FIX: On Android Chrome with keyboard open, position:fixed
-  // elements scroll with the body. This is a known browser bug.
-  // FIX: Use visualViewport API to compensate. On every visualViewport
-  // scroll/resize event, recalculate the transform offset to keep the
-  // mic truly fixed on screen. Uses transform (GPU-accelerated) — no jitter.
-  const [pos, setPos] = useState<MicPos>(loadPos)
-  const [viewportOffset, setViewportOffset] = useState({ x: 0, y: 0 })
+  // §KEYBOARD-VIEWPORT-FIX: Track the VISUAL viewport state.
+  // pos is stored in visual-viewport coords (relative to top-left of
+  // the visible screen, NOT the layout viewport).
+  const [vv, setVV] = useState<VVState>(getInitialVV)
+  const [pos, setPos] = useState<MicPos>(() => loadPos(getInitialVV()))
   const [isDragging, setIsDragging] = useState(false)
   const [listening, setListening] = useState(false)
   const dragRef = useRef({ startX: 0, startY: 0, startPosX: 0, startPosY: 0, moved: false, dragging: false })
   const recognitionRef = useRef<any>(null)
   const micControls = useAnimationControls()
   const rafRef = useRef<number | null>(null)
+  const vvRef = useRef(vv)
+  useEffect(() => { vvRef.current = vv }, [vv])
 
-  // §ANDROID-FIX: Track visualViewport offset to compensate for scroll.
-  // On desktop: offsetTop/offsetLeft are always 0 — no effect.
-  // On Android Chrome with keyboard: offsetTop changes on scroll — we
-  // subtract it from our position to keep the mic fixed on screen.
+  // §KEYBOARD-VIEWPORT-FIX: Listen to visualViewport resize/scroll.
+  // On every change, update vv state AND clamp pos.y so the mic stays
+  // inside the visible area. This runs ALWAYS (not just when keyboard
+  // is open) — though the mic only renders when keyboardActive.
   useEffect(() => {
-    if (!keyboardActive) return
-    const vv = window.visualViewport
-    if (!vv) return
+    const winVV = window.visualViewport
+    if (!winVV) return
 
     const update = () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       rafRef.current = requestAnimationFrame(() => {
-        setViewportOffset({
-          x: vv.offsetLeft,
-          y: vv.offsetTop,
+        const nextVV = { w: winVV.width, h: winVV.height, ox: winVV.offsetLeft, oy: winVV.offsetTop }
+        setVV(nextVV)
+        // Clamp pos so the mic stays inside the visible area.
+        // If the mic was at the bottom of the full screen and the keyboard
+        // just opened (shrinking vv.h), slide it up to sit above the keyboard.
+        setPos((p) => {
+          const maxY = Math.max(TOP_LIMIT, nextVV.h - MIC_SIZE - 10)
+          const minY = TOP_LIMIT
+          if (p.y > maxY || p.y < minY) {
+            const clamped = { ...p, y: Math.max(minY, Math.min(maxY, p.y)) }
+            return clamped
+          }
+          return p
         })
       })
     }
 
     update()
-    vv.addEventListener('resize', update)
-    vv.addEventListener('scroll', update)
+    winVV.addEventListener('resize', update)
+    winVV.addEventListener('scroll', update)
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      vv.removeEventListener('resize', update)
-      vv.removeEventListener('scroll', update)
+      winVV.removeEventListener('resize', update)
+      winVV.removeEventListener('scroll', update)
     }
-  }, [keyboardActive])
-
-  // When keyboard opens, adjust Y if mic would be hidden by keyboard.
-  // Only fires ONCE on keyboard open, NOT on scroll.
-  const prevKbActive = useRef(false)
-  useEffect(() => {
-    if (keyboardActive && !prevKbActive.current) {
-      const vv = window.visualViewport
-      if (vv) {
-        const visibleBottom = vv.height
-        const t = setTimeout(() => {
-          setPos((p) => {
-            if (p.y + MIC_SIZE > visibleBottom - 20) {
-              return { ...p, y: Math.max(TOP_LIMIT, visibleBottom - MIC_SIZE - 20) }
-            }
-            return p
-          })
-        }, 0)
-        return () => clearTimeout(t)
-      }
-    }
-    prevKbActive.current = keyboardActive
-  }, [keyboardActive])
+  }, [])
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
@@ -205,9 +219,11 @@ export function FloatingKeyboardMic() {
     else startListening()
   }, [listening, startListening, stopListening])
 
-  // §JITTER-FIX: Full 2D drag using transform:translate3d for GPU acceleration.
-  // Updates the `pos` state — the wrapper div uses transform (not top/left)
-  // for rendering, so there's no layout thrashing.
+  // §KEYBOARD-VIEWPORT-FIX: Full 2D drag. Pointer events return clientX/Y
+  // in LAYOUT-viewport coords. We convert to VISUAL-viewport coords by
+  // subtracting vv.ox/oy so the stored pos is "where on the visible screen
+  // the user wants the mic". On render we add vv.ox/oy back to convert
+  // to layout-viewport coords for the transform.
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -219,10 +235,9 @@ export function FloatingKeyboardMic() {
     ds.moved = false
     ds.dragging = false
 
-    const vv = window.visualViewport
-    const vh = vv?.height ?? window.innerHeight
-    const maxX = window.innerWidth - MIC_SIZE
-    const maxY = vh - MIC_SIZE - 10
+    const curVV = vvRef.current
+    const maxX = Math.max(0, curVV.w - MIC_SIZE)
+    const maxY = Math.max(TOP_LIMIT, curVV.h - MIC_SIZE - 10)
 
     const onMove = (ev: PointerEvent) => {
       const dx = ev.clientX - ds.startX
@@ -246,7 +261,7 @@ export function FloatingKeyboardMic() {
       if (ds.dragging) {
         setPos((cur) => {
           const cx = cur.x + MIC_SIZE / 2
-          const snappedX = cx < window.innerWidth / 2 ? EDGE_MARGIN : window.innerWidth - MIC_SIZE - EDGE_MARGIN
+          const snappedX = cx < vvRef.current.w / 2 ? EDGE_MARGIN : vvRef.current.w - MIC_SIZE - EDGE_MARGIN
           const final = { x: snappedX, y: cur.y }
           savePos(final)
           return final
@@ -279,13 +294,9 @@ export function FloatingKeyboardMic() {
   // §KEYBOARD-DISMISS: Close button — blur active element to dismiss keyboard
   const handleClose = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    // §FIX: Force-dismiss the virtual keyboard by blurring the active input.
-    // This is required on mobile — without it, the keyboard stays open
-    // even after the mic UI disappears.
     if (document.activeElement && document.activeElement instanceof HTMLElement) {
       document.activeElement.blur()
     }
-    // Also blur via the stored ref (fallback)
     const el = useVoiceInputStore.getState().activeInputRef.current
     if (el) el.blur()
     unregisterInput()
@@ -293,15 +304,9 @@ export function FloatingKeyboardMic() {
 
   if (!keyboardActive || typeof document === 'undefined') return null
 
-  // §JITTER-FIX: Pure CSS position:fixed + transform:translate3d.
-  // NO scroll listeners. NO JS position recalculation. NO renderPos state.
-  // The mic is fixed to the viewport via CSS — it CANNOT jitter because
-  // there is zero JS involvement in its screen position during scroll.
-  //
-  // transform:translate3d(x, y, 0) uses the GPU compositor — no layout
-  // thrashing, no reflow, butter-smooth drag.
-  //
-  // createPortal to document.body — no ancestor containing block.
+  // §KEYBOARD-VIEWPORT-FIX: Convert visual-viewport coords → layout-viewport
+  // coords by ADDING vv.ox/oy. This anchors the mic to the VISIBLE screen,
+  // not the scrolling document.
   return createPortal(
     <div
       key="floating-keyboard-mic-wrapper"
@@ -313,14 +318,10 @@ export function FloatingKeyboardMic() {
         height: MIC_SIZE,
         zIndex: 9999,
         pointerEvents: 'auto',
-        // §JITTER-FIX: Use transform (GPU-accelerated) instead of top/left.
-        // translate3d forces hardware acceleration — no jitter, no layout thrashing.
-        // §ANDROID-FIX: Subtract visualViewport offset to compensate for
-        // Android Chrome's position:fixed-with-keyboard bug. On desktop,
-        // viewportOffset is {0,0} — no effect. On Android with keyboard,
-        // viewportOffset.y = visualViewport.offsetTop which changes on scroll.
-        // Subtracting it keeps the mic truly fixed on screen.
-        transform: `translate3d(${pos.x - viewportOffset.x}px, ${pos.y - viewportOffset.y}px, 0)`,
+        // ADD visualViewport offset (do NOT subtract — that was the bug).
+        // pos is in visual-viewport coords; adding vv.ox/oy converts to
+        // layout-viewport coords (which is what position:fixed anchors to).
+        transform: `translate3d(${pos.x + vv.ox}px, ${pos.y + vv.oy}px, 0)`,
         willChange: 'transform',
       }}
     >
