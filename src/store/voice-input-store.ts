@@ -10,22 +10,28 @@ import { create } from 'zustand'
  * its text-update callback via useVoiceInputStore().registerInput() on focus,
  * and unregisters on blur.
  *
- * §2: Keyboard sync — keyboardActive tracks whether the soft keyboard is visible.
- * The mic shows ONLY when keyboardActive is true.
+ * §GLOBAL-KEYBOARD-SYNC: keyboardActive is now managed by a GLOBAL focusin/
+ * focusout listener (useKeyboardVisibility hook) — NOT by registerInput/
+ * unregisterInput. This ensures the mic appears for ANY text input/textarea
+ * that receives focus, even those that don't use the useVoiceInput hook.
+ * registerInput/unregisterInput only manage the callback + element ref.
  */
 
 interface VoiceInputState {
-  // The callback the mic fires with transcribed text
+  // The callback the mic fires with transcribed text (for React state integration)
   activeInputCallback: ((text: string) => void) | null
-  // A ref to the actual DOM input element (for focus restoration)
+  // A ref to the actual DOM input element (for focus restoration + native injection)
   activeInputRef: { current: HTMLInputElement | HTMLTextAreaElement | null }
-  // Whether keyboard is visible (mic shows only when true)
+  // Whether keyboard is visible (mic shows only when true).
+  // §GLOBAL-KEYBOARD-SYNC: Set by useKeyboardVisibility hook, NOT by register/unregister.
   keyboardActive: boolean
-  // Register an input's callback (called on input focus)
+  // Register an input's callback (called on input focus).
+  // §NOTE: Does NOT set keyboardActive — that's handled by the global focus listener.
   registerInput: (callback: (text: string) => void, inputEl: HTMLInputElement | HTMLTextAreaElement) => void
-  // Unregister (called on input blur)
+  // Unregister (called on input blur).
+  // §NOTE: Does NOT clear keyboardActive — that's handled by the global focus listener.
   unregisterInput: () => void
-  // Set keyboard active state
+  // Set keyboard active state (called by useKeyboardVisibility hook)
   setKeyboardActive: (active: boolean) => void
 }
 
@@ -38,7 +44,6 @@ export const useVoiceInputStore = create<VoiceInputState>((set) => ({
     set({
       activeInputCallback: callback,
       activeInputRef: { current: inputEl },
-      keyboardActive: true,
     })
   },
 
@@ -46,7 +51,6 @@ export const useVoiceInputStore = create<VoiceInputState>((set) => ({
     set({
       activeInputCallback: null,
       activeInputRef: { current: null },
-      keyboardActive: false,
     })
   },
 

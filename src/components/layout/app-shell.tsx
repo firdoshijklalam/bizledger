@@ -27,6 +27,7 @@ import { MoreShopsView } from '@/components/views/more-shops-view'
 import { VisitedShopsDeck } from '@/components/views/visited-shops-deck'
 import { useBackButton } from '@/hooks/use-back-button'
 import { useAntiTamper } from '@/hooks/use-anti-tamper'
+import { useKeyboardVisibility } from '@/hooks/use-keyboard-visibility'
 import { FloatingInvoiceModal } from '@/components/shared/floating-invoice-modal'
 import { BiometricGateModal } from '@/components/shared/biometric-gate-modal'
 import { FloatingCustomerWidget } from '@/components/shared/floating-customer-widget'
@@ -76,6 +77,11 @@ export function AppShell() {
 
   // Android back button navigation with history back-stack (PRD Part 3 §4)
   useBackButton()
+
+  // §GLOBAL-KEYBOARD-SYNC: Track focusin/focusout globally to sync mic
+  // visibility with the virtual keyboard. The mic appears for ANY text
+  // input/textarea that receives focus, not just those with useVoiceInput.
+  useKeyboardVisibility()
 
   // PRD Part 38 §4.2: Manual scroll restoration — prevent browser from jumping to top
   useEffect(() => {

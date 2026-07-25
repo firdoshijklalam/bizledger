@@ -186,8 +186,14 @@ export function FloatingKeyboardMic() {
     }
     if (recognitionRef.current) { try { recognitionRef.current.stop() } catch {} }
 
-    const currentCallback = useVoiceInputStore.getState().activeInputCallback
-    if (!currentCallback) {
+    // §GLOBAL-BINDING: Check if there's ANY target input to inject text into.
+    // Priority: document.activeElement (the truly focused field) > registered ref.
+    // This allows the mic to work with ANY input, even those without useVoiceInput.
+    const activeEl = document.activeElement
+    const isInput = (el: Element | null): el is HTMLInputElement | HTMLTextAreaElement =>
+      !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
+    const hasTarget = isInput(activeEl) || !!useVoiceInputStore.getState().activeInputRef.current
+    if (!hasTarget) {
       toast.error('কোনো ইনপুট ফিল্ড নির্বাচিত নয়')
       return
     }
@@ -203,23 +209,64 @@ export function FloatingKeyboardMic() {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript
       }
-      const cb = useVoiceInputStore.getState().activeInputCallback
-      if (cb) {
+
+      // §GLOBAL-BINDING: Inject text into WHICHEVER input is currently active.
+      // Priority: document.activeElement (the truly focused field) > registered ref.
+      // This makes the mic work with ANY input/textarea on the page, even those
+      // that don't use the useVoiceInput hook (e.g., native HTML inputs,
+      // third-party components, dynamically rendered forms).
+      const liveActiveEl = document.activeElement
+      const isInput = (el: Element | null): el is HTMLInputElement | HTMLTextAreaElement =>
+        !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
+
+      // Determine the target element.
+      // If document.activeElement is an input, use it (the user may have tapped
+      // the mic without losing input focus, or focus was restored on speech end).
+      // Otherwise, fall back to the registered ref (stored on input focus).
+      const store = useVoiceInputStore.getState()
+      const targetEl = isInput(liveActiveEl)
+        ? (liveActiveEl as HTMLInputElement | HTMLTextAreaElement)
+        : store.activeInputRef.current
+
+      if (!targetEl) {
+        toast.error('কোনো ইনপুট ফিল্ড নির্বাচিত নয়')
+        return
+      }
+
+      // If this exact element has a registered callback (from useVoiceInput),
+      // use it for clean React state integration (e.g., setName(text)).
+      const cb = store.activeInputCallback
+      const registeredEl = store.activeInputRef.current
+      if (cb && registeredEl === targetEl) {
         cb(transcript)
         toast.success(`"${transcript.substring(0, 30)}" ইনজেক্ট হয়েছে`)
-      } else {
-        const activeEl = useVoiceInputStore.getState().activeInputRef.current
-        if (activeEl) {
-          const nativeSetter = Object.getOwnPropertyDescriptor(
-            activeEl.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
-            'value'
-          )?.set
-          if (nativeSetter) {
-            nativeSetter.call(activeEl, transcript)
-            activeEl.dispatchEvent(new Event('input', { bubbles: true }))
-            toast.success(`"${transcript.substring(0, 30)}" ইনজেক্ট হয়েছে`)
-          }
-        }
+        return
+      }
+
+      // §NATIVE-INJECTION: For inputs WITHOUT useVoiceInput, use the native
+      // value setter + dispatch 'input' event. This triggers React's onChange
+      // handler (React listens for 'input' events on controlled inputs), so
+      // React state stays in sync with the DOM.
+      // We INSERT at cursor position (replacing any selection), which is more
+      // natural than replacing the entire value — the user can position their
+      // cursor mid-text and speak to insert.
+      const proto = targetEl.tagName === 'TEXTAREA'
+        ? window.HTMLTextAreaElement.prototype
+        : window.HTMLInputElement.prototype
+      const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+      if (nativeSetter) {
+        const start = targetEl.selectionStart ?? targetEl.value.length
+        const end = targetEl.selectionEnd ?? targetEl.value.length
+        const newValue =
+          targetEl.value.substring(0, start) +
+          transcript +
+          targetEl.value.substring(end)
+        nativeSetter.call(targetEl, newValue)
+        targetEl.dispatchEvent(new Event('input', { bubbles: true }))
+        // Move cursor to just after the inserted text
+        const newPos = start + transcript.length
+        try { targetEl.setSelectionRange(newPos, newPos) } catch {}
+        toast.success(`"${transcript.substring(0, 30)}" ইনজেক্ট হয়েছে`)
       }
     }
     recognition.onerror = (e: any) => {
@@ -229,7 +276,13 @@ export function FloatingKeyboardMic() {
     recognition.onend = () => {
       setListening(false)
       recognitionRef.current = null
-      const el = useVoiceInputStore.getState().activeInputRef.current
+      // §GLOBAL-BINDING: Restore focus to document.activeElement if it's an input,
+      // otherwise fall back to the registered ref. This keeps the keyboard open
+      // so the user can continue typing after voice input.
+      const liveEl = document.activeElement
+      const isInput = (el: Element | null): el is HTMLInputElement | HTMLTextAreaElement =>
+        !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
+      const el = isInput(liveEl) ? liveEl : useVoiceInputStore.getState().activeInputRef.current
       if (el) setTimeout(() => el.focus(), 100)
     }
     recognitionRef.current = recognition
@@ -315,7 +368,10 @@ export function FloatingKeyboardMic() {
     }
   }, [listening, keyboardActive, micControls])
 
-  // §KEYBOARD-DISMISS: Close button — blur active element to dismiss keyboard
+  // §KEYBOARD-DISMISS: Close button — blur active element to dismiss keyboard.
+  // §GLOBAL-KEYBOARD-SYNC: Directly set keyboardActive=false for instant hide
+  // (the global focusout listener would also catch this after ~150ms, but
+  // calling it here makes the mic disappear immediately on tap).
   const handleClose = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
     if (document.activeElement && document.activeElement instanceof HTMLElement) {
@@ -324,6 +380,7 @@ export function FloatingKeyboardMic() {
     const el = useVoiceInputStore.getState().activeInputRef.current
     if (el) el.blur()
     unregisterInput()
+    useVoiceInputStore.getState().setKeyboardActive(false)
   }, [unregisterInput])
 
   if (!keyboardActive || typeof document === 'undefined') return null
