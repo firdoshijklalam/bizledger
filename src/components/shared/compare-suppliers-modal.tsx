@@ -5,6 +5,7 @@ import { X, Award, Truck, Hammer, Package, ShoppingCart, Star } from 'lucide-rea
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import type { SourcingCompareResult, SourcingMatch } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
 interface Props { productId?: string | null; name?: string | null; category?: string | null; quantity?: number; open: boolean; onOpenChange: (open: boolean) => void; onSelectSupplier?: (supplierId: string, supplierName: string) => void }
@@ -13,9 +14,9 @@ export function CompareSuppliersModal({ productId, name, category, quantity = 1,
   const { data, loading } = useFetch<any>(open ? `/api/sourcing/compare?${query}&quantity=${quantity}` : null, [open, productId, name, category, quantity])
   useEffect(() => { if (open && !loading && data && data.matches.length === 0) { const t = setTimeout(() => { toast.info('No suppliers currently stock this item'); onOpenChange(false) }, 1500); return () => clearTimeout(t) } }, [open, loading, data, onOpenChange])
   const handleOrder = (m: any) => { if (onSelectSupplier) { onSelectSupplier(m.supplierId, m.supplierName) } else { toast.success(`Ordering from ${m.supplierName}…`) }; onOpenChange(false) }
-  return (
+  return createPortal(
     <AnimatePresence>{open && (
-      <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={()=>onOpenChange(false)} className="fixed inset-0 z-[90] bg-black/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center">
+      <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onClick={()=>onOpenChange(false)} className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center">
         <motion.div initial={{y:'100%'}} animate={{y:0}} exit={{y:'100%'}} transition={{type:'spring',stiffness:400,damping:32}} onClick={(e)=>e.stopPropagation()} className="bg-card rounded-t-3xl sm:rounded-3xl border-t sm:border border-border w-full max-w-lg max-h-[88vh] flex flex-col">
           <div className="flex items-center justify-between p-4 border-b border-border"><div className="min-w-0 flex-1"><p className="text-sm font-bold flex items-center gap-1.5"><Award className="w-4 h-4 text-emerald-600" /> Compare Suppliers</p><p className="text-[11px] text-muted-foreground truncate">{data?.productName || name || 'Product'} · Qty: {quantity}</p></div><button onClick={()=>onOpenChange(false)} className="text-muted-foreground p-1"><X className="w-4 h-4" /></button></div>
           <div className="flex-1 overflow-y-auto scroll-area p-4 space-y-3">
@@ -34,6 +35,7 @@ export function CompareSuppliersModal({ productId, name, category, quantity = 1,
           </div>
         </motion.div>
       </motion.div>
-    )}</AnimatePresence>
+    )}</AnimatePresence>,
+    document.body
   )
 }

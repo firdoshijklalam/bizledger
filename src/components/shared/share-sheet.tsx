@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MessageCircle, Send, FileText, Smartphone, X, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { createPortal } from 'react-dom'
 
 interface ShareSheetProps {
   open: boolean
@@ -123,7 +124,7 @@ export function ShareSheet({ open, onClose, customerName, customerPhone, shareTe
     onClose()
   }
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {open && (
         <>
@@ -132,14 +133,14 @@ export function ShareSheet({ open, onClose, customerName, customerPhone, shareTe
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-[2px]"
+            className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-[2px]"
           />
           <motion.div
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-            className="fixed bottom-0 inset-x-0 z-[90] bg-card rounded-t-3xl border-t border-border p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]"
+            className="fixed bottom-0 inset-x-0 z-[200] bg-card rounded-t-3xl border-t border-border p-5 pb-[calc(env(safe-area-inset-bottom)+20px)]"
           >
             {/* Handle */}
             <div className="w-10 h-1 rounded-full bg-muted mx-auto mb-4" />
@@ -237,6 +238,7 @@ export function ShareSheet({ open, onClose, customerName, customerPhone, shareTe
           </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   )
 }
