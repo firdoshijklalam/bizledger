@@ -6,7 +6,7 @@ import { useFetch, apiPost } from '@/hooks/use-fetch'
 import type { Party, Product } from '@/lib/types'
 import { formatCurrency, GRADE_META, getGradeMeta } from '@/lib/utils'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -259,8 +259,8 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="max-w-md max-h-[92vh] overflow-y-auto scroll-area"
+      <FormDialogContent
+        className="max-w-md"
         // When a child picker is open, allow pointer events to pass through to the picker portal
         onPointerDownOutside={(e) => {
           if (showCustSearch || showProdSearch) e.preventDefault()
@@ -476,7 +476,7 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
             {saving ? 'Saving…' : t('bill.save')}
           </Button>
         </DialogFooter>
-      </DialogContent>
+      </FormDialogContent>
 
       {/* Customer search picker (portal — escapes Radix focus trap) */}
       <FullScreenPicker

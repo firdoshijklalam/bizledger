@@ -20,7 +20,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { useState, useMemo, useEffect } from 'react'
@@ -1216,7 +1216,7 @@ export function SettingsView() {
 
       {/* PRD Part 30 §1.2: PIN Re-authentication Modal for Reset */}
       <Dialog open={showResetModal} onOpenChange={setShowResetModal}>
-        <DialogContent className="max-w-md">
+        <FormDialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Lock className="w-4 h-4 text-destructive" /> রিসেট অথেন্টিকেশন
@@ -1266,8 +1266,13 @@ export function SettingsView() {
               {resetting ? 'রিসেট হচ্ছে…' : 'রিসেট নিশ্চিত করুন'}
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </FormDialogContent>
       </Dialog>
+
+      {/* §KEYBOARD-AWARE: Bottom spacer so the Save button (and any form field
+          at the bottom) can be scrolled above the virtual keyboard.
+          Uses 50vh — enough to clear any mobile keyboard height. */}
+      <div className="h-[50vh] shrink-0" aria-hidden="true" />
     </div>
   )
 }

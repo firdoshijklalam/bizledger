@@ -19,7 +19,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -258,7 +258,7 @@ export function ProductProfile({ productId }: { productId: string }) {
 
       {/* Restock dialog */}
       <Dialog open={showRestock} onOpenChange={setShowRestock}>
-        <DialogContent className="max-w-md">
+        <FormDialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Restock — {product.name}</DialogTitle>
           </DialogHeader>
@@ -319,7 +319,7 @@ export function ProductProfile({ productId }: { productId: string }) {
               <Plus className="w-4 h-4 mr-1.5" /> Add to Stock
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </FormDialogContent>
       </Dialog>
 
       {/* Delete confirmation */}

@@ -5,7 +5,7 @@ import { useI18n } from '@/store/i18n-store'
 import { apiPost } from '@/hooks/use-fetch'
 import type { Party, TransactionType } from '@/lib/types'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -58,7 +58,7 @@ export function TransactionForm({ open, onOpenChange, party }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <FormDialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{t('khata.addTransaction')}</DialogTitle>
           {party && <p className="text-xs text-muted-foreground">{party.name}</p>}
@@ -122,7 +122,7 @@ export function TransactionForm({ open, onOpenChange, party }: Props) {
             {saving ? 'Saving…' : t('common.save')}
           </Button>
         </DialogFooter>
-      </DialogContent>
+      </FormDialogContent>
     </Dialog>
   )
 }

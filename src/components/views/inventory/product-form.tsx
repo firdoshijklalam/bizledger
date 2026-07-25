@@ -5,7 +5,7 @@ import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost, apiPut, apiDelete } from '@/hooks/use-fetch'
 import type { Product, Party } from '@/lib/types'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -279,7 +279,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto scroll-area">
+      <FormDialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{productId ? 'Edit Product' : t('inv.addProduct')}</DialogTitle>
         </DialogHeader>
@@ -661,7 +661,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
             {saving ? 'Saving…' : t('common.save')}
           </Button>
         </DialogFooter>
-      </DialogContent>
+      </FormDialogContent>
     </Dialog>
   )
 }

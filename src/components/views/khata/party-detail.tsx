@@ -23,7 +23,7 @@ import { PartnerAgentManager } from '@/components/shared/partner-agent-manager'
 import { TrustScoreCard } from '@/components/shared/trust-score-card'
 import { DefaulterAlertBanner } from '@/components/shared/defaulter-alert-banner'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -562,7 +562,7 @@ function FingerprintRegisterDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <FormDialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Fingerprint className="w-5 h-5 text-emerald-600" />
@@ -648,7 +648,7 @@ function FingerprintRegisterDialog({
             )}
           </Button>
         </DialogFooter>
-      </DialogContent>
+      </FormDialogContent>
     </Dialog>
   )
 }
@@ -663,7 +663,7 @@ function SettleUpDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <FormDialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Settle Up</DialogTitle>
         </DialogHeader>
@@ -687,7 +687,7 @@ function SettleUpDialog({
             Confirm Settlement
           </Button>
         </DialogFooter>
-      </DialogContent>
+      </FormDialogContent>
     </Dialog>
   )
 }

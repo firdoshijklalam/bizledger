@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { LoadingState, EmptyState } from '@/components/shared/states'
 import { toast } from 'sonner'
@@ -275,7 +275,7 @@ export function StaffManagementView() {
 
       {/* PRD Part 31 §1: Add Staff Modal with AI Permission Grid */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <FormDialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserPlus className="w-4 h-4" /> Add New Staff
@@ -336,7 +336,7 @@ export function StaffManagementView() {
               {saving ? 'যোগ হচ্ছে…' : 'যোগ করুন + QR জেনারেট করুন'}
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </FormDialogContent>
       </Dialog>
 
       {/* PRD Part 31 §1: QR Code Modal */}

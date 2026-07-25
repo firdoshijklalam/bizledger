@@ -16,7 +16,7 @@ import { ShareSheet } from '@/components/shared/share-sheet'
 import { toast } from 'sonner'
 import { useState, useEffect } from 'react'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 
 interface Reminder {
@@ -216,7 +216,7 @@ export function RemindersView() {
 
       {/* Edit Template Modal (PRD Part 22 §2) */}
       <Dialog open={!!editingFor} onOpenChange={(o) => !o && setEditingFor(null)}>
-        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto scroll-area">
+        <FormDialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="w-4 h-4" /> Edit Reminder Template — {editingFor?.name}
@@ -254,7 +254,7 @@ export function RemindersView() {
               <Send className="w-4 h-4 mr-1.5" /> Send Now
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </FormDialogContent>
       </Dialog>
 
       {/* Share Sheet (PRD Part 22 §3) */}

@@ -5,7 +5,7 @@ import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost, apiPut } from '@/hooks/use-fetch'
 import type { Party, PartyType, QualityGrade } from '@/lib/types'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -110,7 +110,7 @@ export function PartyForm({ open, onOpenChange, partyId }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto scroll-area">
+      <FormDialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{partyId ? 'Edit Party' : t('khata.addParty')}</DialogTitle>
         </DialogHeader>
@@ -252,7 +252,7 @@ export function PartyForm({ open, onOpenChange, partyId }: Props) {
             {saving ? 'Saving…' : t('common.save')}
           </Button>
         </DialogFooter>
-      </DialogContent>
+      </FormDialogContent>
     </Dialog>
   )
 }
