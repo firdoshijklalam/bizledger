@@ -28,6 +28,7 @@ import { VisitedShopsDeck } from '@/components/views/visited-shops-deck'
 import { useBackButton } from '@/hooks/use-back-button'
 import { useAntiTamper } from '@/hooks/use-anti-tamper'
 import { useKeyboardVisibility } from '@/hooks/use-keyboard-visibility'
+import { useAutoScrollToFocus } from '@/hooks/use-auto-scroll-to-focus'
 import { FloatingInvoiceModal } from '@/components/shared/floating-invoice-modal'
 import { BiometricGateModal } from '@/components/shared/biometric-gate-modal'
 import { FloatingCustomerWidget } from '@/components/shared/floating-customer-widget'
@@ -82,6 +83,12 @@ export function AppShell() {
   // visibility with the virtual keyboard. The mic appears for ANY text
   // input/textarea that receives focus, not just those with useVoiceInput.
   useKeyboardVisibility()
+
+  // §AUTO-SCROLL-TO-FOCUS: When any input/textarea receives focus, scroll
+  // it to the center of the visible viewport so it's not hidden by the
+  // keyboard. Works for both dialogs (FormDialogContent) and full-screen
+  // views. Finds the nearest scrollable ancestor and scrolls THAT.
+  useAutoScrollToFocus()
 
   // PRD Part 38 §4.2: Manual scroll restoration — prevent browser from jumping to top
   useEffect(() => {
@@ -230,7 +237,7 @@ export function AppShell() {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 30 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed inset-0 z-[70] bg-background overflow-y-auto"
+            className="fixed inset-0 z-[70] bg-background overflow-y-auto pb-[50vh]"
           >
             <InvoicePreview invoiceId={overlayInvoiceId} />
           </motion.div>
@@ -244,7 +251,7 @@ export function AppShell() {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 30 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed inset-0 z-[80] bg-background overflow-y-auto"
+            className="fixed inset-0 z-[80] bg-background overflow-y-auto pb-[50vh]"
           >
             <PartyDetail partyId={overlayPartyId} />
           </motion.div>
