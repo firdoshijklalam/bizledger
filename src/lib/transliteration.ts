@@ -337,8 +337,10 @@ export function generateSearchTags(name: string): string[] {
   if (bengaliReverse && bengaliReverse.trim() && bengaliReverse !== name) {
     tags.add(bengaliReverse)
     // §1: Generate Bengali variants by swapping শ↔স, ই↔এ, ও↔ঔ, etc.
+    // §FIX: Removed the স→শ swap because it creates accidental number words.
+    // "Das" → "দস" (correct), but স→শ swap creates "দশ" which means "10" in Bengali.
+    // This caused the "Das → 10" semantic bug. Now we only do শ→স (not the reverse).
     tags.add(bengaliReverse.replace(/শ/g, 'স'))
-    tags.add(bengaliReverse.replace(/স/g, 'শ'))
     tags.add(bengaliReverse.replace(/ি/g, 'ে')) // িি → ে (i-sound → e-sound)
     tags.add(bengaliReverse.replace(/ে/g, 'ি')) // ে → িি
     tags.add(bengaliReverse.replace(/ো/g, 'ৌ')) // ো → ৌ (o → ou)

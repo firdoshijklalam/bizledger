@@ -112,9 +112,19 @@ export function usePhoneticSearch<T extends Record<string, any>>(
 
     const fuse = new Fuse(fuseData, {
       keys: fuseKeys,
-      threshold: 0.4, // tolerant but not too loose
-      ignoreLocation: true,
-      minMatchCharLength: 1,
+      // §STRICT: Lowered threshold from 0.4 to 0.25 to prevent false positives.
+      // 0.4 was too loose — it matched scattered characters (e.g., "Das"
+      // matching "Maa Lakshmi Bhandar" because 'd' and 's' appear somewhere).
+      // 0.25 requires a much closer match (typo tolerance only, not scattered chars).
+      threshold: 0.25,
+      // §STRICT: ignoreLocation: false means Fuse considers WHERE the match
+      // occurs. With ignoreLocation: true, Fuse matches anywhere in a long
+      // string, causing false positives. Setting to false requires the match
+      // to be near the start or in a reasonable location.
+      ignoreLocation: false,
+      // §STRICT: minMatchCharLength: 2 means at least 2 consecutive characters
+      // must match. This prevents single-character scattered matches.
+      minMatchCharLength: 2,
       includeScore: true,
     })
     const fuzzyResults = fuse.search(query).map((r) => {

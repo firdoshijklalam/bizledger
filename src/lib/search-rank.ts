@@ -321,19 +321,19 @@ export function rankByPosition<T>(
       if (found) continue
     }
 
-    // 4. §FUZZY-FALLBACK: This item was found by usePhoneticSearch (the caller)
-    //    via fuzzy/phonetic matching, but rankByPosition couldn't determine
-    //    an exact match position. Include it with the lowest priority so it's
-    //    not lost. The highlightWeighted function will still try to highlight
-    //    the best matching portion via consonant-skeleton matching.
-    ranked.push({
-      item,
-      position: 'none' as MatchPosition,
-      matchIndex: -1,
-      matchLength: 0,
-      matchedText: '',
-      score: 3, // lowest priority (below suffix)
-    })
+    // 4. §NO-FUZZY-FALLBACK: Previously, items found by usePhoneticSearch
+    //    via fuzzy/phonetic matching but without an exact match position
+    //    were included here with score 3. This caused FALSE POSITIVES —
+    //    items like "Maa Lakshmi Bhandar" showing up for query "Das"
+    //    just because Fuse.js matched scattered characters.
+    //
+    //    §RULE: If an item doesn't have an exact substring match, cross-lingual
+    //    match, or secondary field match, IT IS FILTERED OUT. Only items
+    //    that can be highlighted (consecutive match >= 2 chars) are returned.
+    //    Do NOT return unhighlighted, irrelevant results.
+    //
+    //    The fuzzy consonant-skeleton matching is still used for HIGHLIGHTING
+    //    (in highlightSubstring), but not for INCLUDING items in results.
   }
 
   // Sort by score (ascending), then by matchIndex (ascending)
@@ -545,12 +545,20 @@ export function findAllHighlightRanges(text: string, query: string): Array<{ sta
 /**
  * §FUZZY-HIGHLIGHT-RANGE: Find the best matching range in text for a query
  * using consonant-skeleton matching. Strips vowels from both and finds the
- * longest consecutive consonant match, then maps it back to the original
+ * longest CONSECUTIVE consonant match, then maps it back to the original
  * text positions.
+ *
+ * §STRICT: Only matches CONSECUTIVE consonants (no scattered subsequence
+ * matching). This prevents false positives like "Das" matching "Bhandar"
+ * just because 'd' and 's' appear somewhere in the text.
  *
  * Example: text="Firdosh Alam", query="Firdaus"
  *   → skeletons: text="frdshlm", query="frds"
- *   → match at index 0, length 4 → highlight "Firdo" in original (grapheme-safe)
+ *   → CONSECUTIVE match "frds" at index 0 → highlight "Firdo" in original
+ *
+ * Example: text="Maa Lakshmi Bhandar", query="Das"
+ *   → skeletons: text="mlkshmbhndr", query="ds"
+ *   → NO consecutive match (d and s are not adjacent in the text) → null
  */
 function findFuzzyHighlightRange(text: string, query: string): { start: number; end: number } | null {
   if (!text || !query || query.length < 2) return null
@@ -559,34 +567,46 @@ function findFuzzyHighlightRange(text: string, query: string): { start: number; 
   const queryConsonants = getGraphemeStrings(query).filter((g) => !isVowelGrapheme(g))
   if (queryConsonants.length < 2) return null
 
-  // Find the best starting position in text where consonants match in order
-  let bestStart = -1
-  let bestEnd = -1
-  let bestMatchCount = 0
+  // §STRICT: We require CONSECUTIVE consonant matches.
+  // Slide a window of the same length as queryConsonants through the text.
+  // All consonants in the window must match in order.
+  const windowSize = queryConsonants.length
 
-  for (let start = 0; start < textGraphemes.length; start++) {
+  for (let start = 0; start <= textGraphemes.length - windowSize; start++) {
+    // Extract consonants from the window [start, start+windowSize)
+    // (skipping vowels in the text, but requiring all query consonants
+    //  to appear CONSECUTIVELY in the text's consonant sequence)
     let qi = 0
     let end = start
     let matchCount = 0
+    let consecutive = true
+
     for (let ti = start; ti < textGraphemes.length && qi < queryConsonants.length; ti++) {
-      if (graphemesMatch(textGraphemes[ti], queryConsonants[qi])) {
+      const tg = textGraphemes[ti]
+      // Skip vowels in the text (they don't break consecutiveness for consonants)
+      if (isVowelGrapheme(tg)) {
+        continue
+      }
+      // This is a consonant — it must match the next query consonant
+      if (graphemesMatch(tg, queryConsonants[qi])) {
         qi++
         end = ti + 1
         matchCount++
+      } else {
+        // Consonant mismatch → this window doesn't work
+        consecutive = false
+        break
       }
     }
-    // Require at least 2 consonant matches for a valid highlight
-    if (matchCount >= 2 && matchCount > bestMatchCount) {
-      bestMatchCount = matchCount
-      bestStart = start
-      bestEnd = end
+
+    // All query consonants must be matched, and they must be consecutive
+    // (no non-matching consonants between them in the text)
+    if (consecutive && matchCount === queryConsonants.length) {
+      const charStart = graphemeIndexToCharIndex(text, start)
+      const charEnd = graphemeIndexToCharIndex(text, end)
+      return { start: charStart, end: charEnd }
     }
   }
 
-  if (bestStart < 0) return null
-
-  // Convert grapheme indices to character indices
-  const charStart = graphemeIndexToCharIndex(text, bestStart)
-  const charEnd = graphemeIndexToCharIndex(text, bestEnd)
-  return { start: charStart, end: charEnd }
+  return null
 }
