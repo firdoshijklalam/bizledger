@@ -320,6 +320,20 @@ export function rankByPosition<T>(
       }
       if (found) continue
     }
+
+    // 4. §FUZZY-FALLBACK: This item was found by usePhoneticSearch (the caller)
+    //    via fuzzy/phonetic matching, but rankByPosition couldn't determine
+    //    an exact match position. Include it with the lowest priority so it's
+    //    not lost. The highlightWeighted function will still try to highlight
+    //    the best matching portion via consonant-skeleton matching.
+    ranked.push({
+      item,
+      position: 'none' as MatchPosition,
+      matchIndex: -1,
+      matchLength: 0,
+      matchedText: '',
+      score: 3, // lowest priority (below suffix)
+    })
   }
 
   // Sort by score (ascending), then by matchIndex (ascending)
@@ -343,15 +357,27 @@ function positionToScore(position: MatchPosition): number {
 // ─── Highlighting (grapheme-safe, cross-lingual) ──────────────────────────
 
 /**
- * §HIGHLIGHT: Highlight the matching substring in the text.
+ * §HIGHLIGHT: Highlight the matching substring(s) in the text.
  *
  * For same-script matches: highlights the exact substring.
  * For cross-lingual matches: highlights the corresponding substring in the
  * original text (found via transliteration + grapheme mapping).
+ * For fuzzy/phonetic matches: highlights the best-matching portion of the
+ * text using subsequence matching (e.g., "Firdaus" highlights "Firdo" in
+ * "Firdosh" because the consonant skeleton "frd" matches).
+ *
+ * §MULTI-WORD: For multi-word queries like "Firdaus Alam", ALL matching
+ * words are highlighted. Each word is matched independently — exact
+ * substring first, then cross-lingual, then consonant-skeleton fuzzy.
  *
  * §MIN-2-CHARS: Only highlights if the query is 2+ characters.
  * §GRAPHENE-SAFE: Uses Intl.Segmenter so Bengali combining characters
  * (virama, vowel marks) are never split.
+ *
+ * Returns { before, match, after, matched } where `match` is a single
+ * highlighted segment. For multi-word queries, this returns the FIRST
+ * match — but the caller (highlightWeighted) handles multi-segment
+ * highlighting by calling this function for each word.
  */
 export function highlightSubstring(text: string, query: string): {
   before: string
@@ -359,13 +385,13 @@ export function highlightSubstring(text: string, query: string): {
   after: string
   matched: boolean
 } {
-  if (!text || !query || query.trim().length < 2) {
+  if (!text || !query || !query.trim().length < 2) {
     return { before: text || '', match: '', after: '', matched: false }
   }
 
   const q = query.trim()
 
-  // 1. Try exact substring match (same script)
+  // 1. Try exact substring match (same script) for the FULL query
   const exact = findMatchPosition(text, q)
   if (exact.index >= 0) {
     return {
@@ -376,7 +402,7 @@ export function highlightSubstring(text: string, query: string): {
     }
   }
 
-  // 2. Try cross-lingual match
+  // 2. Try cross-lingual match for the FULL query
   const cross = findCrossLingualMatch(text, q)
   if (cross) {
     return {
@@ -387,6 +413,180 @@ export function highlightSubstring(text: string, query: string): {
     }
   }
 
-  // 3. No match — return text as-is (no highlighting)
+  // 3. §MULTI-WORD: Try each word separately.
+  // For "Firdaus Alam", try "Firdaus" and "Alam" independently.
+  // Collect ALL highlight ranges, then merge them.
+  const words = q.split(/\s+/).filter((w) => w.length >= 2)
+  if (words.length > 0) {
+    const ranges: Array<{ start: number; end: number }> = []
+
+    for (const word of words) {
+      // 3a. Try exact substring match for this word
+      const wordExact = findMatchPosition(text, word)
+      if (wordExact.index >= 0) {
+        ranges.push({ start: wordExact.index, end: wordExact.index + wordExact.length })
+        continue
+      }
+      // 3b. Try cross-lingual match for this word
+      const wordCross = findCrossLingualMatch(text, word)
+      if (wordCross) {
+        ranges.push({ start: wordCross.start, end: wordCross.end })
+        continue
+      }
+      // 3c. Try consonant-skeleton fuzzy match for this word
+      const fuzzy = findFuzzyHighlightRange(text, word)
+      if (fuzzy) {
+        ranges.push(fuzzy)
+        continue
+      }
+    }
+
+    if (ranges.length > 0) {
+      // Sort ranges by start position
+      ranges.sort((a, b) => a.start - b.start)
+      // Merge overlapping/adjacent ranges
+      const merged: Array<{ start: number; end: number }> = []
+      for (const r of ranges) {
+        if (merged.length > 0 && r.start <= merged[merged.length - 1].end) {
+          merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, r.end)
+        } else {
+          merged.push({ ...r })
+        }
+      }
+      // Build the result with ALL highlighted segments
+      // Return the first segment as before/match/after — the caller
+      // (highlightWeighted) handles rendering multiple segments.
+      // Actually, for multiple segments we need a different approach.
+      // Let's return a combined result where `match` contains all
+      // highlighted text with markers. But the return type is
+      // { before, match, after } — so for multiple ranges, we'll
+      // return the first range and let highlightWeighted handle the rest.
+      // 
+      // Actually, the simplest fix: return ALL ranges via a custom format.
+      // But since the return type is fixed, let's return the first range
+      // for backward compat. The highlightWeighted function will be updated
+      // to handle multi-range highlighting directly.
+      const first = merged[0]
+      return {
+        before: text.substring(0, first.start),
+        match: text.substring(first.start, first.end),
+        after: text.substring(first.end),
+        matched: true,
+      }
+    }
+  }
+
+  // 4. No match — return text as-is (no highlighting)
   return { before: text, match: '', after: '', matched: false }
+}
+
+/**
+ * §MULTI-RANGE-HIGHLIGHT: Find ALL highlight ranges in the text for a query.
+ * Returns an array of { start, end } ranges that should be highlighted.
+ * Used by highlightWeighted to render multiple highlighted segments.
+ */
+export function findAllHighlightRanges(text: string, query: string): Array<{ start: number; end: number }> {
+  if (!text || !query || query.trim().length < 2) return []
+
+  const q = query.trim()
+  const ranges: Array<{ start: number; end: number }> = []
+
+  // 1. Try exact substring match for the FULL query
+  const exact = findMatchPosition(text, q)
+  if (exact.index >= 0) {
+    ranges.push({ start: exact.index, end: exact.index + exact.length })
+    return ranges
+  }
+
+  // 2. Try cross-lingual match for the FULL query
+  const cross = findCrossLingualMatch(text, q)
+  if (cross) {
+    ranges.push({ start: cross.start, end: cross.end })
+    return ranges
+  }
+
+  // 3. Try each word separately
+  const words = q.split(/\s+/).filter((w) => w.length >= 2)
+  for (const word of words) {
+    // 3a. Exact substring
+    const wordExact = findMatchPosition(text, word)
+    if (wordExact.index >= 0) {
+      ranges.push({ start: wordExact.index, end: wordExact.index + wordExact.length })
+      continue
+    }
+    // 3b. Cross-lingual
+    const wordCross = findCrossLingualMatch(text, word)
+    if (wordCross) {
+      ranges.push({ start: wordCross.start, end: wordCross.end })
+      continue
+    }
+    // 3c. Consonant-skeleton fuzzy
+    const fuzzy = findFuzzyHighlightRange(text, word)
+    if (fuzzy) {
+      ranges.push(fuzzy)
+      continue
+    }
+  }
+
+  // Sort and merge overlapping ranges
+  if (ranges.length === 0) return []
+  ranges.sort((a, b) => a.start - b.start)
+  const merged: Array<{ start: number; end: number }> = []
+  for (const r of ranges) {
+    if (merged.length > 0 && r.start <= merged[merged.length - 1].end) {
+      merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, r.end)
+    } else {
+      merged.push({ ...r })
+    }
+  }
+  return merged
+}
+
+/**
+ * §FUZZY-HIGHLIGHT-RANGE: Find the best matching range in text for a query
+ * using consonant-skeleton matching. Strips vowels from both and finds the
+ * longest consecutive consonant match, then maps it back to the original
+ * text positions.
+ *
+ * Example: text="Firdosh Alam", query="Firdaus"
+ *   → skeletons: text="frdshlm", query="frds"
+ *   → match at index 0, length 4 → highlight "Firdo" in original (grapheme-safe)
+ */
+function findFuzzyHighlightRange(text: string, query: string): { start: number; end: number } | null {
+  if (!text || !query || query.length < 2) return null
+
+  const textGraphemes = getGraphemeStrings(text)
+  const queryConsonants = getGraphemeStrings(query).filter((g) => !isVowelGrapheme(g))
+  if (queryConsonants.length < 2) return null
+
+  // Find the best starting position in text where consonants match in order
+  let bestStart = -1
+  let bestEnd = -1
+  let bestMatchCount = 0
+
+  for (let start = 0; start < textGraphemes.length; start++) {
+    let qi = 0
+    let end = start
+    let matchCount = 0
+    for (let ti = start; ti < textGraphemes.length && qi < queryConsonants.length; ti++) {
+      if (graphemesMatch(textGraphemes[ti], queryConsonants[qi])) {
+        qi++
+        end = ti + 1
+        matchCount++
+      }
+    }
+    // Require at least 2 consonant matches for a valid highlight
+    if (matchCount >= 2 && matchCount > bestMatchCount) {
+      bestMatchCount = matchCount
+      bestStart = start
+      bestEnd = end
+    }
+  }
+
+  if (bestStart < 0) return null
+
+  // Convert grapheme indices to character indices
+  const charStart = graphemeIndexToCharIndex(text, bestStart)
+  const charEnd = graphemeIndexToCharIndex(text, bestEnd)
+  return { start: charStart, end: charEnd }
 }

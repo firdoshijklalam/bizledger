@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { highlightSubstring } from './search-rank'
+import { highlightSubstring, findAllHighlightRanges } from './search-rank'
 
 /**
  * §FUZZY-HIGHLIGHT: Highlight matched characters in search results.
@@ -186,22 +186,57 @@ export function highlightFuzzyFromQuery(text: string, query: string): React.Reac
 export function highlightWeighted(text: string, query: string): React.ReactNode {
   if (!text || !query || !query.trim()) return text
 
-  const { before, match, after, matched } = highlightSubstring(text, query)
+  // §MULTI-RANGE: Find ALL highlight ranges (exact, cross-lingual, fuzzy)
+  // and render each as a <mark> element. This handles multi-word queries
+  // like "Firdaus Alam" where "Firdo" is fuzzy-matched and "Alam" is
+  // exact-matched — both get highlighted.
+  const ranges = findAllHighlightRanges(text, query)
 
-  if (!matched) return text
+  if (ranges.length === 0) {
+    // Fallback to single-range highlightSubstring (backward compat)
+    const { before, match, after, matched } = highlightSubstring(text, query)
+    if (!matched) return text
+    return (
+      <>
+        {before}
+        <mark
+          className="bg-transparent text-primary font-bold"
+          style={{ background: 'transparent' }}
+        >
+          {match}
+        </mark>
+        {after}
+      </>
+    )
+  }
 
-  return (
-    <>
-      {before}
+  // Render multiple highlighted segments
+  const segments: React.ReactNode[] = []
+  let lastEnd = 0
+  for (let i = 0; i < ranges.length; i++) {
+    const r = ranges[i]
+    // Text before this range
+    if (r.start > lastEnd) {
+      segments.push(<React.Fragment key={`t${i}`}>{text.substring(lastEnd, r.start)}</React.Fragment>)
+    }
+    // The highlighted range
+    segments.push(
       <mark
+        key={`m${i}`}
         className="bg-transparent text-primary font-bold"
         style={{ background: 'transparent' }}
       >
-        {match}
+        {text.substring(r.start, r.end)}
       </mark>
-      {after}
-    </>
-  )
+    )
+    lastEnd = r.end
+  }
+  // Trailing text
+  if (lastEnd < text.length) {
+    segments.push(<React.Fragment key="trail">{text.substring(lastEnd)}</React.Fragment>)
+  }
+
+  return <>{segments}</>
 }
 
 // Keep highlightMatch for backward compatibility

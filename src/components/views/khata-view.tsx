@@ -10,6 +10,7 @@ import { BookOpen, Plus, Users, Filter, Phone, ChevronRight } from 'lucide-react
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState, LoadingState } from '@/components/shared/states'
+import { highlightWeighted } from '@/lib/highlight'
 import { toast } from 'sonner'
 import { useEffect, useMemo, useState } from 'react'
 import { PartyForm } from './khata/party-form'
@@ -267,7 +268,7 @@ export function KhataView() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <p className="text-sm font-semibold truncate">{p.name}</p>
+                          <p className="text-sm font-semibold truncate">{highlightWeighted(p.name, search)}</p>
                           {/* §SUPPLIER-EXCLUSION: Grade badges are ONLY for customers
                               (and 'both'). Suppliers never show a grade badge. */}
                           {(p.type === 'customer' || p.type === 'both') && (

@@ -11,6 +11,7 @@ import { highlightWeighted } from '@/lib/highlight'
 import { transliterateBengaliToEnglish, phoneticMatch, generateSearchTags } from '@/lib/transliteration'
 import { rankByPosition } from '@/lib/search-rank'
 import { useVoiceInput } from '@/hooks/use-voice-input'
+import { usePhoneticSearch } from '@/hooks/use-phonetic-search'
 import Fuse from 'fuse.js'
 
 export function SearchOverlay() {
@@ -95,79 +96,68 @@ export function SearchOverlay() {
     minMatchCharLength: 1,
   }), [txns])
 
-  // §WEIGHTED-SORT: Rank results by positional weighting.
+  // §SEARCH-CONSISTENCY: Use the SAME usePhoneticSearch hook as local search
+  // (khata-view, inventory-view). This guarantees global and local search use
+  // the EXACT SAME fuzzy/phonetic algorithm — no more inconsistency.
+  // The hook returns matched items in priority order:
+  //   1. Exact substring matches
+  //   2. Fuse.js fuzzy matches (tolerant — "Firdaus" matches "Firdosh")
+  //   3. Phonetic matches (cross-lingual consonant skeleton)
+  const partyMatches = usePhoneticSearch(parties, q, { searchFields: ['phone'] })
+  const productMatches = usePhoneticSearch(products, q, { searchFields: ['sku', 'category', 'subCategory'] })
+  const invoiceMatches = usePhoneticSearch(invoices, q, { searchFields: ['invoiceNumber'] })
+  const txnMatches = usePhoneticSearch(txns, q, { searchFields: ['description', 'category'] })
+
+  // §WEIGHTED-SORT: Rank the matched results by positional weighting.
   // Priority: prefix (index 0) > infix (middle) > suffix (end).
-  // §CROSS-LINGUAL: rankByPosition also handles cross-lingual matches
-  // (English query → Bengali name) via transliteration + grapheme mapping.
-  // This replaces the previous Fuse-only search with a deterministic
-  // positional sort that matches the client's spec exactly.
+  // rankByPosition is applied ON TOP of the matched results from
+  // usePhoneticSearch — it doesn't filter, it only sorts.
   const rankedResults = useMemo(() => {
     if (!q.trim() || q.trim().length < 2) return { parties: [], products: [], invoices: [], txns: [] }
 
-    // §PARTIES: rank by name (primary) + phone (secondary)
+    // Rank parties by position (prefix > infix > suffix)
     const partyRanked = rankByPosition(
-      parties,
+      partyMatches,
       q,
       (p) => p.name,
       (p) => [p.phone || '']
     )
-    // Also include phonetic-only matches (items not caught by rankByPosition)
-    const partyIds = new Set(partyRanked.map((r) => r.item.id))
-    const phoneticParties = parties
-      .filter((p) => !partyIds.has(p.id) && phoneticMatch(q, p.name))
-      .map((p) => ({
-        item: p,
-        position: 'none' as const,
-        matchIndex: -1,
-        matchLength: 0,
-        matchedText: '',
-        score: 3.5,
-      }))
-    const allParties = [...partyRanked, ...phoneticParties].sort((a, b) => a.score - b.score).slice(0, 6)
+    const allParties = partyRanked.map((r) => r.item)
 
-    // §PRODUCTS: rank by name (primary) + sku/category (secondary)
+    // Rank products by position
     const productRanked = rankByPosition(
-      products,
+      productMatches,
       q,
       (p) => p.name,
       (p) => [p.sku || '', p.category || '', p.subCategory || '']
     )
-    const productIds = new Set(productRanked.map((r) => r.item.id))
-    const phoneticProducts = products
-      .filter((p) => !productIds.has(p.id) && phoneticMatch(q, p.name))
-      .map((p) => ({
-        item: p,
-        position: 'none' as const,
-        matchIndex: -1,
-        matchLength: 0,
-        matchedText: '',
-        score: 3.5,
-      }))
-    const allProducts = [...productRanked, ...phoneticProducts].sort((a, b) => a.score - b.score).slice(0, 6)
+    const allProducts = productRanked.map((r) => r.item)
 
-    // §INVOICES: rank by invoiceNumber (primary) + party.name (secondary)
+    // Rank invoices by position
     const invoiceRanked = rankByPosition(
-      invoices,
+      invoiceMatches,
       q,
       (i) => i.invoiceNumber,
       (i) => [i.party?.name || '']
-    ).slice(0, 4)
+    )
+    const allInvoices = invoiceRanked.map((r) => r.item)
 
-    // §TXNS: rank by description (primary) + category/party.name (secondary)
+    // Rank txns by position
     const txnRanked = rankByPosition(
-      txns,
+      txnMatches,
       q,
       (t) => t.description || t.type,
       (t) => [t.category || '', t.party?.name || '']
-    ).slice(0, 4)
+    )
+    const allTxns = txnRanked.map((r) => r.item)
 
     return {
-      parties: allParties.map((r) => r.item),
-      products: allProducts.map((r) => r.item),
-      invoices: invoiceRanked.map((r) => r.item),
-      txns: txnRanked.map((r) => r.item),
+      parties: allParties.slice(0, 6),
+      products: allProducts.slice(0, 6),
+      invoices: allInvoices.slice(0, 4),
+      txns: allTxns.slice(0, 4),
     }
-  }, [q, parties, products, invoices, txns])
+  }, [q, partyMatches, productMatches, invoiceMatches, txnMatches])
 
   // §3: Cross-lingual phonetic results — English query matches Bengali names.
   // §NOTE: Now merged into rankedResults via rankByPosition + phoneticMatch.
