@@ -80,14 +80,49 @@ export function KhataView() {
     searchFields: ['phone'],
   })
 
+  // §DYNAMIC-GRADES: Extract unique grades from CUSTOMERS only (not suppliers).
+  // Suppliers don't have quality grades, so they're excluded from grade
+  // generation AND from the grade filter. Only grades that actually exist
+  // in the customer list are shown as filter chips.
+  const availableGrades = useMemo(() => {
+    if (!parties) return []
+    const grades = new Set<string>()
+    for (const p of parties) {
+      // §SUPPLIER-EXCLUSION: Only customers (and 'both') have quality grades
+      if ((p.type === 'customer' || p.type === 'both') && p.qualityGrade) {
+        grades.add(p.qualityGrade)
+      }
+    }
+    // Sort grades in natural order: A, B, C, D, E
+    return Array.from(grades).sort()
+  }, [parties])
+
+  // §DYNAMIC-GRADES: Effective grade filter — if the selected grade no longer
+  // exists in the customer list, fall back to 'all'. This avoids an empty
+  // filtered list without calling setState in an effect (which lint disallows).
+  const effectiveGradeFilter = (gradeFilter !== 'all' && availableGrades.includes(gradeFilter))
+    ? gradeFilter
+    : 'all'
+
   const filtered = useMemo(() => {
     let list = phoneticFiltered
     if (khataFilter === 'receivable') list = list.filter((p) => p.balance > 0)
     if (khataFilter === 'payable') list = list.filter((p) => p.balance < 0)
-    // PRD Part 38 §3.2: Grade filter bar
-    if (gradeFilter !== 'all') list = list.filter((p) => p.qualityGrade === gradeFilter)
+    // PRD Part 38 §3.2: Grade filter bar — §SUPPLIER-EXCLUSION:
+    // Grade filter applies ONLY to customers. When a grade filter is active:
+    //   - Customers are filtered to that grade.
+    //   - Suppliers are ALWAYS shown (they don't have grades, so the filter
+    //     is irrelevant for them).
+    // §DYNAMIC-GRADES: Uses effectiveGradeFilter which falls back to 'all'
+    // if the selected grade no longer exists in the customer list.
+    if (effectiveGradeFilter !== 'all') list = list.filter((p) => {
+      // Suppliers are grade-agnostic — always show them
+      if (p.type === 'supplier') return true
+      // Customers must match the selected grade
+      return p.qualityGrade === effectiveGradeFilter
+    })
     return list.sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance))
-  }, [phoneticFiltered, khataFilter, gradeFilter])
+  }, [phoneticFiltered, khataFilter, effectiveGradeFilter])
 
   const totals = useMemo(() => {
     if (!parties) return { receivable: 0, payable: 0 }
@@ -159,14 +194,17 @@ export function KhataView() {
         </div>
       </div>
 
-      {/* PRD Part 38 §3.2: Horizontal Grade Filter Bar */}
+      {/* PRD Part 38 §3.2: Horizontal Grade Filter Bar
+          §DYNAMIC-GRADES: Only render chips for grades that ACTUALLY EXIST
+          in the current customer list. Hides empty grades to save UI space.
+          §SUPPLIER-EXCLUSION: Grades are extracted from customers only. */}
       <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
-        {['all', 'A', 'B', 'C', 'D', 'E'].map((g) => (
+        {['all', ...availableGrades].map((g) => (
           <button
             key={g}
             onClick={() => setGradeFilter(g)}
             className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all min-h-[30px] ${
-              gradeFilter === g
+              effectiveGradeFilter === g
                 ? g === 'A' ? 'bg-emerald-500 text-white'
                   : g === 'B' ? 'bg-teal-500 text-white'
                   : g === 'C' ? 'bg-amber-500 text-white'
@@ -230,9 +268,13 @@ export function KhataView() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <p className="text-sm font-semibold truncate">{p.name}</p>
-                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color} shrink-0`}>
-                            {p.qualityGrade}
-                          </span>
+                          {/* §SUPPLIER-EXCLUSION: Grade badges are ONLY for customers
+                              (and 'both'). Suppliers never show a grade badge. */}
+                          {(p.type === 'customer' || p.type === 'both') && (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color} shrink-0`}>
+                              {p.qualityGrade}
+                            </span>
+                          )}
                         </div>
                         <p className="text-[11px] text-muted-foreground truncate">
                           {p.phone || 'No phone'} · {t(`common.${p.type}`)}

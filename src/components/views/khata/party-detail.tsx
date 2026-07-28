@@ -241,9 +241,13 @@ export function PartyDetail({ partyId }: { partyId: string }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-base font-semibold truncate">{data.name}</h3>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>
-                {data.qualityGrade} · {meta.desc}
-              </span>
+              {/* §SUPPLIER-EXCLUSION: Grade badges are ONLY for customers
+                  (and 'both'). Suppliers never show a grade badge. */}
+              {isCustomer && (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>
+                  {data.qualityGrade} · {meta.desc}
+                </span>
+              )}
             </div>
             <p className="text-xs text-muted-foreground capitalize">{t(`common.${data.type}`)}</p>
             {data.phone && (
