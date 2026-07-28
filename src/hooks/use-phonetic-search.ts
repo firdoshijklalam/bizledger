@@ -130,7 +130,7 @@ export function usePhoneticSearch<T extends Record<string, any>>(
     const fuzzyResults = fuse.search(query).map((r) => {
       // Strip the virtual fields before returning
       const { __searchName, __searchValues, ...rest } = r.item
-      return rest as T
+      return rest as unknown as T
     })
 
     // Phase 3: Phonetic fallback on items not yet matched

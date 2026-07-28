@@ -385,7 +385,7 @@ export function highlightSubstring(text: string, query: string): {
   after: string
   matched: boolean
 } {
-  if (!text || !query || !query.trim().length < 2) {
+  if (!text || !query || query.trim().length < 2) {
     return { before: text || '', match: '', after: '', matched: false }
   }
 

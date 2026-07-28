@@ -8,11 +8,9 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Party, Product, Invoice, Transaction } from '@/lib/types'
 import { formatCurrency, formatDate, getGradeMeta } from '@/lib/utils'
 import { highlightWeighted } from '@/lib/highlight'
-import { transliterateBengaliToEnglish, phoneticMatch, generateSearchTags } from '@/lib/transliteration'
 import { rankByPosition } from '@/lib/search-rank'
 import { useVoiceInput } from '@/hooks/use-voice-input'
 import { usePhoneticSearch } from '@/hooks/use-phonetic-search'
-import Fuse from 'fuse.js'
 
 export function SearchOverlay() {
   const { showSearch, setShowSearch, setActiveView, setSelectedPartyId, setSelectedProductId, setSelectedInvoiceId } = useAppStore()
@@ -48,53 +46,6 @@ export function SearchOverlay() {
       setTxns(Array.isArray(tx) ? tx : (tx?.items || []))
     })
   }, [showSearch])
-
-  // §2: Fuse.js fuzzy search instances with phonetic search_tags included
-  const partyFuse = useMemo(() => new Fuse(parties, {
-    keys: [
-      { name: 'name', weight: 0.5 },
-      { name: 'phone', weight: 0.3 },
-      { name: 'searchTags', weight: 0.2 }, // §3: phonetic tags
-    ],
-    // §1: Increased threshold to 0.5 for highly tolerant fuzzy search (typos + phonetic)
-    threshold: 0.5, // 0 = exact, 1 = matches anything
-    ignoreLocation: true,
-    minMatchCharLength: 1,
-  }), [parties])
-
-  const productFuse = useMemo(() => new Fuse(products, {
-    keys: [
-      { name: 'name', weight: 0.5 },
-      { name: 'sku', weight: 0.2 },
-      { name: 'category', weight: 0.1 },
-      { name: 'subCategory', weight: 0.1 },
-      { name: 'searchTags', weight: 0.1 }, // §3: phonetic tags
-    ],
-    threshold: 0.5, // §1: tolerant fuzzy
-    ignoreLocation: true,
-    minMatchCharLength: 1,
-  }), [products])
-
-  const invoiceFuse = useMemo(() => new Fuse(invoices, {
-    keys: [
-      { name: 'invoiceNumber', weight: 0.6 },
-      { name: 'party.name', weight: 0.4 },
-    ],
-    threshold: 0.5, // §1: tolerant fuzzy
-    ignoreLocation: true,
-    minMatchCharLength: 1,
-  }), [invoices])
-
-  const txnFuse = useMemo(() => new Fuse(txns, {
-    keys: [
-      { name: 'description', weight: 0.6 },
-      { name: 'category', weight: 0.2 },
-      { name: 'party.name', weight: 0.2 },
-    ],
-    threshold: 0.5, // §1: tolerant fuzzy
-    ignoreLocation: true,
-    minMatchCharLength: 1,
-  }), [txns])
 
   // §SEARCH-CONSISTENCY: Use the SAME usePhoneticSearch hook as local search
   // (khata-view, inventory-view). This guarantees global and local search use
@@ -162,7 +113,7 @@ export function SearchOverlay() {
       txnMatches,
       q,
       (t) => t.description || t.type,
-      (t) => [t.category || '', t.party?.name || '']
+      (t) => [t.category || '', (t as any).party?.name || '']
     )
     const allTxns = txnRanked.map((r) => r.item)
 
@@ -173,14 +124,6 @@ export function SearchOverlay() {
       txns: allTxns.slice(0, 4),
     }
   }, [q, partyMatches, productMatches, invoiceMatches, txnMatches])
-
-  // §3: Cross-lingual phonetic results — English query matches Bengali names.
-  // §NOTE: Now merged into rankedResults via rankByPosition + phoneticMatch.
-  // Kept for backward compat (hasAnyResults check). Returns empty since all
-  // phonetic matches are now in the main results sections.
-  const phoneticResults = useMemo(() => {
-    return { parties: [], products: [] }
-  }, [])
 
   const close = () => {
     setQ('')
@@ -240,25 +183,13 @@ export function SearchOverlay() {
             </button>
           </div>
 
-          {/* §4: keyboardShouldPersistTaps="handled" + keyboardDismissMode="on-drag" equivalents:
-              - onScroll: dismiss keyboard when user drags the list (keyboardDismissMode="on-drag")
-              - onMouseDown capture: prevent tap from blurring input before onClick fires (keyboardShouldPersistTaps="handled") */}
           <div
             className="flex-1 overflow-y-auto scroll-area p-3 space-y-4 max-w-2xl w-full mx-auto"
-            onScroll={(e) => {
+            onScroll={() => {
               // §4: keyboardDismissMode="on-drag" — dismiss keyboard when user scrolls
               const active = document.activeElement
               if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
                 (active as HTMLElement).blur()
-              }
-            }}
-            onMouseDownCapture={(e) => {
-              // §4: keyboardShouldPersistTaps="handled" — allow taps on results without
-              // dismissing keyboard prematurely. We preventDefault only on non-input elements
-              // so the focused search input keeps focus while scrolling/tapping results.
-              const target = e.target as HTMLElement
-              if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA' && target.tagName !== 'BUTTON') {
-                // Don't blur — let the tap propagate to the button's onClick
               }
             }}
           >

@@ -27,14 +27,18 @@ export function useVoiceInput<T extends HTMLInputElement | HTMLTextAreaElement>(
   const unregisterInput = useVoiceInputStore((s) => s.unregisterInput)
 
   // §3: Store the LATEST callback in a ref so it never goes stale.
-  // The callback passed to useVoiceInput changes on every render (it's a new
-  // arrow function), but the ref always points to the latest one.
   const callbackRef = useRef(onVoiceText)
   useEffect(() => { callbackRef.current = onVoiceText }, [onVoiceText])
 
+  // §FIX: Track the blur timeout so we can clean it up on unmount.
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const handleFocus = useCallback((e: React.FocusEvent<T>) => {
-    // §3: Register a STABLE wrapper function that reads from the ref.
-    // This ensures the mic always calls the LATEST setter, not a stale one.
+    // Clear any pending blur timeout (e.g., rapid focus transfer)
+    if (blurTimerRef.current) {
+      clearTimeout(blurTimerRef.current)
+      blurTimerRef.current = null
+    }
     const stableCallback = (text: string) => {
       callbackRef.current(text)
     }
@@ -43,9 +47,11 @@ export function useVoiceInput<T extends HTMLInputElement | HTMLTextAreaElement>(
 
   const handleBlur = useCallback(() => {
     // Delay unregister to allow focus to transfer to mic or another input
-    setTimeout(() => {
+    if (blurTimerRef.current) clearTimeout(blurTimerRef.current)
+    blurTimerRef.current = setTimeout(() => {
+      blurTimerRef.current = null
       const active = document.activeElement
-      // §3: Don't unregister if focus moved to the mic button itself
+      // Don't unregister if focus moved to the mic button itself
       if (active && active.getAttribute('data-mic-button') === 'true') {
         return
       }
@@ -54,6 +60,13 @@ export function useVoiceInput<T extends HTMLInputElement | HTMLTextAreaElement>(
       }
     }, 200)
   }, [unregisterInput])
+
+  // §FIX: Clean up the blur timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (blurTimerRef.current) clearTimeout(blurTimerRef.current)
+    }
+  }, [])
 
   return {
     onFocus: handleFocus,

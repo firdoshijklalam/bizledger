@@ -286,9 +286,15 @@ export function FloatingKeyboardMic() {
       if (el) setTimeout(() => el.focus(), 100)
     }
     recognitionRef.current = recognition
-    recognition.start()
-    setListening(true)
-    toast.info(lang === 'bn' ? 'বলুন...' : lang === 'hi' ? 'बोलिए...' : 'Speak...', { duration: 1500 })
+    try {
+      recognition.start()
+      setListening(true)
+      toast.info(lang === 'bn' ? 'বলুন...' : lang === 'hi' ? 'बोलिए...' : 'Speak...', { duration: 1500 })
+    } catch (e: any) {
+      // recognition.start() can throw if already started or permission denied
+      recognitionRef.current = null
+      toast.error('ভয়েস শুরু করা যায়নি: ' + (e?.message || 'unknown error'))
+    }
   }, [])
 
   const handleToggleMic = useCallback(() => {
@@ -367,6 +373,28 @@ export function FloatingKeyboardMic() {
       micControls.start({ scale: 1, transition: { duration: 0.2 } })
     }
   }, [listening, keyboardActive, micControls])
+
+  // §CLEANUP-1: Stop listening when keyboard closes (mic hides).
+  // Without this, if the user is listening and the keyboard closes (e.g.,
+  // Android back button, scroll-blur, focusout), the recognition keeps
+  // running in the background with no UI to stop it.
+  useEffect(() => {
+    if (!keyboardActive && listening) {
+      // Use a microtask to avoid setState-in-effect lint error
+      const t = setTimeout(() => stopListening(), 0)
+      return () => clearTimeout(t)
+    }
+  }, [keyboardActive, listening, stopListening])
+
+  // §CLEANUP-2: Stop listening on unmount (e.g., navigating to a public page).
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop() } catch {}
+        recognitionRef.current = null
+      }
+    }
+  }, [])
 
   // §KEYBOARD-DISMISS: Close button — blur active element to dismiss keyboard.
   // §GLOBAL-KEYBOARD-SYNC: Directly set keyboardActive=false for instant hide

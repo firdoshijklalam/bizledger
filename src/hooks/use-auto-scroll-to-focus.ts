@@ -59,6 +59,9 @@ export function useAutoScrollToFocus() {
   useEffect(() => {
     let scrollTimer: ReturnType<typeof setTimeout> | null = null
     let vvResizeTimer: ReturnType<typeof setTimeout> | null = null
+    // §FIX: Track the current VV resize handler so we can remove the previous
+    // one before adding a new one. Prevents stale listeners from accumulating.
+    let currentVVHandler: (() => void) | null = null
 
     const scrollToCenter = (el: HTMLElement) => {
       // Find the nearest scrollable ancestor.
@@ -100,15 +103,25 @@ export function useAutoScrollToFocus() {
       // visualViewport shrinks.
       const vv = window.visualViewport
       if (vv) {
+        // §FIX: Remove any previous VV resize listener before adding a new one.
+        // This prevents stale listeners from firing when focus changes rapidly.
+        if (currentVVHandler) {
+          vv.removeEventListener('resize', currentVVHandler)
+        }
         const onVVResize = () => {
           vvResizeTimer = setTimeout(() => {
             scrollToCenter(target as HTMLElement)
           }, 100)
           vv.removeEventListener('resize', onVVResize)
+          currentVVHandler = null
         }
+        currentVVHandler = onVVResize
         vv.addEventListener('resize', onVVResize)
         // Fallback: if visualViewport never fires (desktop), clean up.
-        setTimeout(() => vv.removeEventListener('resize', onVVResize), 1000)
+        setTimeout(() => {
+          vv.removeEventListener('resize', onVVResize)
+          if (currentVVHandler === onVVResize) currentVVHandler = null
+        }, 1000)
       }
     }
 
