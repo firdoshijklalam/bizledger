@@ -1,6 +1,7 @@
 'use client'
 
 import React from 'react'
+import { highlightSubstring } from './search-rank'
 
 /**
  * §FUZZY-HIGHLIGHT: Highlight matched characters in search results.
@@ -165,6 +166,42 @@ export function highlightFuzzyFromQuery(text: string, query: string): React.Reac
   // The search still works (Fuse.js + phonetic found the result),
   // but we don't highlight to avoid breaking Bengali combining characters.
   return text
+}
+
+/**
+ * §CROSS-LINGUAL-HIGHLIGHT: highlightWeighted — the NEW highlighting function
+ * that supports cross-lingual (English ↔ Bengali) highlighting.
+ *
+ * Uses `highlightSubstring` from search-rank.ts which:
+ * 1. Finds exact substring match (same script) — highlights it.
+ * 2. Finds cross-lingual match (English query → Bengali text or vice versa)
+ *    via transliteration + grapheme-safe mapping — highlights the
+ *    corresponding substring in the original text.
+ * 3. Returns text as-is if no match.
+ *
+ * §MIN-2-CHARS: Only highlights if query is 2+ characters.
+ * §GRAPHENE-SAFE: Bengali combining characters (virama, vowel marks) are
+ * never split — Intl.Segmenter is used for all grapheme mapping.
+ */
+export function highlightWeighted(text: string, query: string): React.ReactNode {
+  if (!text || !query || !query.trim()) return text
+
+  const { before, match, after, matched } = highlightSubstring(text, query)
+
+  if (!matched) return text
+
+  return (
+    <>
+      {before}
+      <mark
+        className="bg-transparent text-primary font-bold"
+        style={{ background: 'transparent' }}
+      >
+        {match}
+      </mark>
+      {after}
+    </>
+  )
 }
 
 // Keep highlightMatch for backward compatibility

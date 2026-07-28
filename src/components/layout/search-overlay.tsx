@@ -7,8 +7,9 @@ import { Search, X, User, Package, Receipt, ArrowLeftRight } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { Party, Product, Invoice, Transaction } from '@/lib/types'
 import { formatCurrency, formatDate, getGradeMeta } from '@/lib/utils'
-import { highlightFuzzyFromQuery } from '@/lib/highlight'
+import { highlightWeighted } from '@/lib/highlight'
 import { transliterateBengaliToEnglish, phoneticMatch, generateSearchTags } from '@/lib/transliteration'
+import { rankByPosition } from '@/lib/search-rank'
 import { useVoiceInput } from '@/hooks/use-voice-input'
 import Fuse from 'fuse.js'
 
@@ -94,44 +95,87 @@ export function SearchOverlay() {
     minMatchCharLength: 1,
   }), [txns])
 
-  // §3: Cross-lingual phonetic results — English query matches Bengali names
-  const phoneticResults = useMemo(() => {
-    if (!q.trim() || q.trim().length < 2) return { parties: [], products: [] }
-    const query = q.toLowerCase().trim()
+  // §WEIGHTED-SORT: Rank results by positional weighting.
+  // Priority: prefix (index 0) > infix (middle) > suffix (end).
+  // §CROSS-LINGUAL: rankByPosition also handles cross-lingual matches
+  // (English query → Bengali name) via transliteration + grapheme mapping.
+  // This replaces the previous Fuse-only search with a deterministic
+  // positional sort that matches the client's spec exactly.
+  const rankedResults = useMemo(() => {
+    if (!q.trim() || q.trim().length < 2) return { parties: [], products: [], invoices: [], txns: [] }
 
-    // Find parties where phonetic transliteration of name matches the query
-    const phoneticParties = parties.filter((p) => {
-      // Skip if already an exact substring match (those show in main results)
-      if (p.name.toLowerCase().includes(query) || (p.phone || '').includes(query)) return false
-      // Check phonetic match: does "Utsab" match "উৎসব"?
-      return phoneticMatch(query, p.name)
-    }).slice(0, 3)
+    // §PARTIES: rank by name (primary) + phone (secondary)
+    const partyRanked = rankByPosition(
+      parties,
+      q,
+      (p) => p.name,
+      (p) => [p.phone || '']
+    )
+    // Also include phonetic-only matches (items not caught by rankByPosition)
+    const partyIds = new Set(partyRanked.map((r) => r.item.id))
+    const phoneticParties = parties
+      .filter((p) => !partyIds.has(p.id) && phoneticMatch(q, p.name))
+      .map((p) => ({
+        item: p,
+        position: 'none' as const,
+        matchIndex: -1,
+        matchLength: 0,
+        matchedText: '',
+        score: 3.5,
+      }))
+    const allParties = [...partyRanked, ...phoneticParties].sort((a, b) => a.score - b.score).slice(0, 6)
 
-    const phoneticProducts = products.filter((p) => {
-      if (p.name.toLowerCase().includes(query) || (p.sku || '').toLowerCase().includes(query)) return false
-      return phoneticMatch(query, p.name)
-    }).slice(0, 3)
+    // §PRODUCTS: rank by name (primary) + sku/category (secondary)
+    const productRanked = rankByPosition(
+      products,
+      q,
+      (p) => p.name,
+      (p) => [p.sku || '', p.category || '', p.subCategory || '']
+    )
+    const productIds = new Set(productRanked.map((r) => r.item.id))
+    const phoneticProducts = products
+      .filter((p) => !productIds.has(p.id) && phoneticMatch(q, p.name))
+      .map((p) => ({
+        item: p,
+        position: 'none' as const,
+        matchIndex: -1,
+        matchLength: 0,
+        matchedText: '',
+        score: 3.5,
+      }))
+    const allProducts = [...productRanked, ...phoneticProducts].sort((a, b) => a.score - b.score).slice(0, 6)
 
-    return { parties: phoneticParties, products: phoneticProducts }
-  }, [q, parties, products])
+    // §INVOICES: rank by invoiceNumber (primary) + party.name (secondary)
+    const invoiceRanked = rankByPosition(
+      invoices,
+      q,
+      (i) => i.invoiceNumber,
+      (i) => [i.party?.name || '']
+    ).slice(0, 4)
 
-  const results = useMemo(() => {
-    if (!q.trim()) return { parties: [], products: [], invoices: [], txns: [] }
-    const query = q.trim()
-
-    // §2: Use Fuse.js for fuzzy matching
-    const partyResults = partyFuse.search(query).slice(0, 4).map((r) => r.item)
-    const productResults = productFuse.search(query).slice(0, 4).map((r) => r.item)
-    const invoiceResults = invoiceFuse.search(query).slice(0, 4).map((r) => r.item)
-    const txnResults = txnFuse.search(query).slice(0, 4).map((r) => r.item)
+    // §TXNS: rank by description (primary) + category/party.name (secondary)
+    const txnRanked = rankByPosition(
+      txns,
+      q,
+      (t) => t.description || t.type,
+      (t) => [t.category || '', t.party?.name || '']
+    ).slice(0, 4)
 
     return {
-      parties: partyResults,
-      products: productResults,
-      invoices: invoiceResults,
-      txns: txnResults,
+      parties: allParties.map((r) => r.item),
+      products: allProducts.map((r) => r.item),
+      invoices: invoiceRanked.map((r) => r.item),
+      txns: txnRanked.map((r) => r.item),
     }
-  }, [q, partyFuse, productFuse, invoiceFuse, txnFuse])
+  }, [q, parties, products, invoices, txns])
+
+  // §3: Cross-lingual phonetic results — English query matches Bengali names.
+  // §NOTE: Now merged into rankedResults via rankByPosition + phoneticMatch.
+  // Kept for backward compat (hasAnyResults check). Returns empty since all
+  // phonetic matches are now in the main results sections.
+  const phoneticResults = useMemo(() => {
+    return { parties: [], products: [] }
+  }, [])
 
   const close = () => {
     setQ('')
@@ -154,7 +198,7 @@ export function SearchOverlay() {
     close()
   }
 
-  const hasAnyResults = results.parties.length > 0 || results.products.length > 0 || results.invoices.length > 0 || results.txns.length > 0 || phoneticResults.parties.length > 0 || phoneticResults.products.length > 0
+  const hasAnyResults = rankedResults.parties.length > 0 || rankedResults.products.length > 0 || rankedResults.invoices.length > 0 || rankedResults.txns.length > 0
 
   return (
     <AnimatePresence>
@@ -224,47 +268,13 @@ export function SearchOverlay() {
               <p className="text-sm text-muted-foreground text-center py-12">No results for &ldquo;{q}&rdquo;.</p>
             )}
 
-            {/* §3: Phonetic search results — English query matches Bengali names */}
-            {phoneticResults.parties.length > 0 && (
-              <Section title="Parties (phonetic match 🔊)">
-                {phoneticResults.parties.map((p) => {
-                  const meta = getGradeMeta(p.qualityGrade)
-                  return (
-                    <button key={p.id} onClick={() => openParty(p.id)} className="w-full flex items-center gap-3 p-3 hover:bg-muted text-left">
-                      <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center shrink-0">
-                        <User className="w-4 h-4 text-emerald-600" />
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(p.name, q)}</p>
-                        <p className="text-xs text-muted-foreground">{highlightFuzzyFromQuery(p.phone || 'No phone', q)}</p>
-                      </div>
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color} shrink-0`}>{p.qualityGrade}</span>
-                    </button>
-                  )
-                })}
-              </Section>
-            )}
+            {/* §3: Phonetic sections removed — phonetic matches are now merged into
+                the main results via rankByPosition + phoneticMatch. The ranking is:
+                prefix > infix > suffix > cross-lingual > phonetic-only. */}
 
-            {phoneticResults.products.length > 0 && (
-              <Section title="Products (phonetic match 🔊)">
-                {phoneticResults.products.map((p) => (
-                  <button key={p.id} onClick={() => openProduct(p.id)} className="w-full flex items-center gap-3 p-3 hover:bg-muted text-left">
-                    <span className="w-9 h-9 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
-                      <Package className="w-4 h-4 text-amber-600" />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(p.name, q)}</p>
-                      <p className="text-xs text-muted-foreground">Stock: {p.stock} {p.unit}</p>
-                    </div>
-                    <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(p.salePrice)}</span>
-                  </button>
-                ))}
-              </Section>
-            )}
-
-            {results.parties.length > 0 && (
+            {rankedResults.parties.length > 0 && (
               <Section title="Parties">
-                {results.parties.map((p) => {
+                {rankedResults.parties.map((p) => {
                   const meta = getGradeMeta(p.qualityGrade)
                   return (
                     <button key={p.id} onClick={() => openParty(p.id)} className="w-full flex items-center gap-3 p-3 hover:bg-muted text-left">
@@ -272,8 +282,8 @@ export function SearchOverlay() {
                         <User className="w-4 h-4 text-emerald-600" />
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(p.name, q)}</p>
-                        <p className="text-xs text-muted-foreground">{highlightFuzzyFromQuery(p.phone || 'No phone', q)}</p>
+                        <p className="text-sm font-medium truncate">{highlightWeighted(p.name, q)}</p>
+                        <p className="text-xs text-muted-foreground">{highlightWeighted(p.phone || 'No phone', q)}</p>
                       </div>
                       <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color} shrink-0`}>{p.qualityGrade}</span>
                     </button>
@@ -282,15 +292,15 @@ export function SearchOverlay() {
               </Section>
             )}
 
-            {results.products.length > 0 && (
+            {rankedResults.products.length > 0 && (
               <Section title="Products">
-                {results.products.map((p) => (
+                {rankedResults.products.map((p) => (
                   <button key={p.id} onClick={() => openProduct(p.id)} className="w-full flex items-center gap-3 p-3 hover:bg-muted text-left">
                     <span className="w-9 h-9 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center shrink-0">
                       <Package className="w-4 h-4 text-amber-600" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(p.name, q)}</p>
+                      <p className="text-sm font-medium truncate">{highlightWeighted(p.name, q)}</p>
                       <p className="text-xs text-muted-foreground">Stock: {p.stock} {p.unit}</p>
                     </div>
                     <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(p.salePrice)}</span>
@@ -299,16 +309,16 @@ export function SearchOverlay() {
               </Section>
             )}
 
-            {results.invoices.length > 0 && (
+            {rankedResults.invoices.length > 0 && (
               <Section title="Invoices">
-                {results.invoices.map((i) => (
+                {rankedResults.invoices.map((i) => (
                   <button key={i.id} onClick={() => openInvoice(i.id)} className="w-full flex items-center gap-3 p-3 hover:bg-muted text-left">
                     <span className="w-9 h-9 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
                       <Receipt className="w-4 h-4 text-orange-600" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(i.invoiceNumber, q)}</p>
-                      <p className="text-xs text-muted-foreground">{highlightFuzzyFromQuery(i.party?.name || 'Walk-in', q)} · {formatDate(i.createdAt)}</p>
+                      <p className="text-sm font-medium truncate">{highlightWeighted(i.invoiceNumber, q)}</p>
+                      <p className="text-xs text-muted-foreground">{highlightWeighted(i.party?.name || 'Walk-in', q)} · {formatDate(i.createdAt)}</p>
                     </div>
                     <span className="text-sm font-semibold tabular shrink-0">{formatCurrency(i.grandTotal)}</span>
                   </button>
@@ -316,15 +326,15 @@ export function SearchOverlay() {
               </Section>
             )}
 
-            {results.txns.length > 0 && (
+            {rankedResults.txns.length > 0 && (
               <Section title="Transactions">
-                {results.txns.map((tx) => (
+                {rankedResults.txns.map((tx) => (
                   <div key={tx.id} className="w-full flex items-center gap-3 p-3">
                     <span className="w-9 h-9 rounded-full bg-teal-100 dark:bg-teal-900/30 flex items-center justify-center shrink-0">
                       <ArrowLeftRight className="w-4 h-4 text-teal-600" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{highlightFuzzyFromQuery(tx.description || tx.type, q)}</p>
+                      <p className="text-sm font-medium truncate">{highlightWeighted(tx.description || tx.type, q)}</p>
                       <p className="text-xs text-muted-foreground">{formatDate(tx.createdAt)}</p>
                     </div>
                     <span className={`text-sm font-semibold tabular shrink-0 ${tx.type === 'credit' ? 'text-emerald-600' : 'text-red-600'}`}>
