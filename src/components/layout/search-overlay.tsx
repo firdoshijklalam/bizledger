@@ -103,10 +103,25 @@ export function SearchOverlay() {
   //   1. Exact substring matches
   //   2. Fuse.js fuzzy matches (tolerant — "Firdaus" matches "Firdosh")
   //   3. Phonetic matches (cross-lingual consonant skeleton)
+  //
+  // §ALL-CATEGORIES: Each category uses getName/getSearchValues to ensure
+  // ALL relevant fields are searched:
+  //   - Parties: name + phone
+  //   - Products: name + sku + category + subCategory
+  //   - Invoices: invoiceNumber + party.name (so searching "Amit" finds
+  //     invoices for Amit Trading)
+  //   - Transactions: description + category + party.name (so searching
+  //     "Amit" finds transactions for Amit Trading)
   const partyMatches = usePhoneticSearch(parties, q, { searchFields: ['phone'] })
   const productMatches = usePhoneticSearch(products, q, { searchFields: ['sku', 'category', 'subCategory'] })
-  const invoiceMatches = usePhoneticSearch(invoices, q, { searchFields: ['invoiceNumber'] })
-  const txnMatches = usePhoneticSearch(txns, q, { searchFields: ['description', 'category'] })
+  const invoiceMatches = usePhoneticSearch(invoices, q, {
+    getName: (i: any) => i.invoiceNumber || '',
+    getSearchValues: (i: any) => [i.party?.name || ''],
+  })
+  const txnMatches = usePhoneticSearch(txns, q, {
+    getName: (t: any) => t.description || t.type || '',
+    getSearchValues: (t: any) => [t.category || '', t.party?.name || ''],
+  })
 
   // §WEIGHTED-SORT: Rank the matched results by positional weighting.
   // Priority: prefix (index 0) > infix (middle) > suffix (end).
