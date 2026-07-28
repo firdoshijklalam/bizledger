@@ -18,8 +18,6 @@ import { TransactionForm } from './transaction-form'
 import { PartyForm } from './party-form'
 import { ShareSheet } from '@/components/shared/share-sheet'
 import { CompareSuppliersModal } from '@/components/shared/compare-suppliers-modal'
-import { FamilyMemberManager } from '@/components/shared/family-member-manager'
-import { PartnerAgentManager } from '@/components/shared/partner-agent-manager'
 import { TrustScoreCard } from '@/components/shared/trust-score-card'
 import { DefaulterAlertBanner } from '@/components/shared/defaulter-alert-banner'
 import {
@@ -37,7 +35,15 @@ interface PartyDetailData extends Party {
 }
 
 export function PartyDetail({ partyId }: { partyId: string }) {
-  const { setSelectedPartyId, setActiveView, setShowInvoiceForm, business, setSelectedInvoiceId, setEditingPartyId, editingPartyId, returnToView, setReturnToView, overlayPartyId, setOverlayPartyId, setOverlayInvoiceId } = useAppStore()
+  const {
+    setSelectedPartyId, setActiveView, setShowInvoiceForm, business,
+    setSelectedInvoiceId, setEditingPartyId, editingPartyId, returnToView,
+    setReturnToView, overlayPartyId, setOverlayPartyId, setOverlayInvoiceId,
+    // §GLOBAL-MODALS: Use global modal store instead of local state.
+    // This ensures modals render at app-shell root (via createPortal) and
+    // escape the nested overlay stacking context.
+    openFamilyModal, openPartnerModal, openFingerprintModal,
+  } = useAppStore()
   const { t } = useI18n()
   const { data, loading, error, refetch } = useFetch<PartyDetailData>(`/api/parties/${partyId}`, [partyId])
   const [showTxn, setShowTxn] = useState(false)
@@ -45,10 +51,6 @@ export function PartyDetail({ partyId }: { partyId: string }) {
   const [showNote, setShowNote] = useState(false)
   const [showCompare, setShowCompare] = useState(false)
   const [compareProduct, setCompareProduct] = useState<string>('')
-  // PRD Part 32 §4: family/partner manager modals + fingerprint registration
-  const [showFamily, setShowFamily] = useState(false)
-  const [showPartner, setShowPartner] = useState(false)
-  const [showFingerprintRegister, setShowFingerprintRegister] = useState(false)
 
   // PRD Part 7 §3: restore scroll on back button (party detail → khata)
   const { restore: restoreScrollPos } = useScrollStore()
@@ -298,8 +300,13 @@ export function PartyDetail({ partyId }: { partyId: string }) {
             className="flex flex-col items-center gap-1 h-auto py-2.5"
             onClick={() => {
               useAppStore.getState().setPendingNewCustomer(data.id, data.name)
-              // §FIX: Clear overlay so sale-pad is visible (overlay z-80 would cover it)
+              // §FIX: Clear BOTH overlays so sale-pad is visible.
+              // When the user navigated Dashboard → Invoice → Profile, both
+              // overlayPartyId (z-80) and overlayInvoiceId (z-70) are set.
+              // If we only clear the party overlay, the invoice overlay (z-70)
+              // remains on top of the sale-pad view, hiding it.
               setOverlayPartyId(null)
+              setOverlayInvoiceId(null)
               setReturnToView('khata')
               setActiveView('sale-pad')
             }}
@@ -322,7 +329,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
           <Button
             variant="outline"
             className="flex items-center justify-center gap-1.5 h-9 text-[11px]"
-            onClick={() => setShowFingerprintRegister(true)}
+            onClick={() => openFingerprintModal(data.id, data.name)}
           >
             <Fingerprint className="w-3.5 h-3.5 text-emerald-600" /> Fingerprint
           </Button>
@@ -330,7 +337,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
             <Button
               variant="outline"
               className="flex items-center justify-center gap-1.5 h-9 text-[11px]"
-              onClick={() => setShowFamily(true)}
+              onClick={() => openFamilyModal(data.id, data.name)}
             >
               <Users className="w-3.5 h-3.5 text-cyan-600" /> Family
             </Button>
@@ -339,7 +346,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
             <Button
               variant="outline"
               className="flex items-center justify-center gap-1.5 h-9 text-[11px]"
-              onClick={() => setShowPartner(true)}
+              onClick={() => openPartnerModal(data.id, data.name)}
             >
               <Briefcase className="w-3.5 h-3.5 text-purple-600" /> Partner
             </Button>
@@ -501,161 +508,16 @@ export function PartyDetail({ partyId }: { partyId: string }) {
         name={compareProduct}
       />
 
-      {/* PRD Part 32 §4: Family / Partner / Fingerprint modals */}
-      <FamilyMemberManager
-        partyId={partyId}
-        partyName={data.name}
-        open={showFamily}
-        onOpenChange={setShowFamily}
-      />
-      <PartnerAgentManager
-        partyId={partyId}
-        partyName={data.name}
-        open={showPartner}
-        onOpenChange={setShowPartner}
-      />
-      <FingerprintRegisterDialog
-        open={showFingerprintRegister}
-        onOpenChange={setShowFingerprintRegister}
-        partyId={partyId}
-        partyName={data.name}
-        onDone={refetch}
-      />
+      {/* §GLOBAL-MODALS: Family / Partner / Fingerprint modals have been
+          MOVED to app-shell root. They are now triggered via global state
+          (openFamilyModal, openPartnerModal, openFingerprintModal) and
+          rendered at the app root via createPortal. This ensures they
+          always render on top of ALL overlays (party z-80, invoice z-70)
+          regardless of how deep the user navigated to get to this profile. */}
     </motion.div>
   )
 }
 
-// PRD Part 32 §2.1: Primary fingerprint registration dialog (native or external USB OTG sim)
-function FingerprintRegisterDialog({
-  open, onOpenChange, partyId, partyName, onDone,
-}: {
-  open: boolean
-  onOpenChange: (o: boolean) => void
-  partyId: string
-  partyName: string
-  onDone: () => void
-}) {
-  const [scanning, setScanning] = useState(false)
-  const [hand, setHand] = useState('right')
-  const [finger, setFinger] = useState('thumb')
-  const [scannerType, setScannerType] = useState<'native' | 'external'>('native')
-
-  const handleScan = async () => {
-    setScanning(true)
-    // simulate scan delay
-    await new Promise((r) => setTimeout(r, 1400))
-    try {
-      await apiPost('/api/fingerprints', {
-        partyId,
-        role: 'primary',
-        hand,
-        finger,
-        scannerType,
-      })
-      toast.success(`Fingerprint registered for ${partyName}`, {
-        description: `${hand} ${finger} · ${scannerType === 'external' ? 'USB OTG (MFS100)' : 'Native sensor'}`,
-      })
-      onOpenChange(false)
-      onDone()
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to register fingerprint')
-    } finally {
-      setScanning(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <FormDialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Fingerprint className="w-5 h-5 text-emerald-600" />
-            Register Fingerprint
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 py-2">
-          <p className="text-xs text-muted-foreground">
-            Map {partyName}'s fingerprint to their account for one-touch khata & billing access.
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Hand</Label>
-              <select
-                value={hand}
-                onChange={(e) => setHand(e.target.value)}
-                className="w-full h-10 rounded-lg border border-border bg-background px-3 text-sm"
-              >
-                <option value="right">Right</option>
-                <option value="left">Left</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Finger</Label>
-              <select
-                value={finger}
-                onChange={(e) => setFinger(e.target.value)}
-                className="w-full h-10 rounded-lg border border-border bg-background px-3 text-sm"
-              >
-                <option value="thumb">Thumb</option>
-                <option value="index">Index</option>
-                <option value="middle">Middle</option>
-                <option value="ring">Ring</option>
-                <option value="pinky">Pinky</option>
-              </select>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Scanner Type</Label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setScannerType('native')}
-                className={`h-10 rounded-lg border text-xs font-medium flex items-center justify-center gap-1.5 ${
-                  scannerType === 'native' ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600' : 'border-border bg-background'
-                }`}
-              >
-                <Fingerprint className="w-3.5 h-3.5" /> Native Sensor
-              </button>
-              <button
-                onClick={() => setScannerType('external')}
-                className={`h-10 rounded-lg border text-xs font-medium flex items-center justify-center gap-1.5 ${
-                  scannerType === 'external' ? 'border-purple-500 bg-purple-500/10 text-purple-600' : 'border-border bg-background'
-                }`}
-              >
-                <ShieldAlert className="w-3.5 h-3.5" /> USB OTG (MFS100)
-              </button>
-            </div>
-          </div>
-          {/* Animated fingerprint scan visualization */}
-          <div className="flex flex-col items-center gap-2 py-2">
-            <div className="relative w-24 h-24 rounded-full bg-emerald-500/10 flex items-center justify-center">
-              <Fingerprint className={`w-12 h-12 text-emerald-600 ${scanning ? 'animate-pulse' : ''}`} />
-              {scanning && (
-                <motion.div
-                  className="absolute inset-0 rounded-full border-2 border-emerald-500"
-                  animate={{ scale: [1, 1.15, 1], opacity: [1, 0, 1] }}
-                  transition={{ duration: 1.4, repeat: Infinity }}
-                />
-              )}
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              {scanning ? 'Scanning fingerprint...' : 'Ready to scan'}
-            </p>
-          </div>
-        </div>
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="h-11" disabled={scanning}>Cancel</Button>
-          <Button onClick={handleScan} className="h-11 flex-1" disabled={scanning}>
-            {scanning ? (
-              <><Fingerprint className="w-4 h-4 mr-1.5 animate-pulse" /> Scanning...</>
-            ) : (
-              <><Fingerprint className="w-4 h-4 mr-1.5" /> Scan & Register</>
-            )}
-          </Button>
-        </DialogFooter>
-      </FormDialogContent>
-    </Dialog>
-  )
-}
 
 function SettleUpDialog({
   open, onOpenChange, party, onConfirm,

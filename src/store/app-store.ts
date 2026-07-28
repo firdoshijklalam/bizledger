@@ -113,6 +113,23 @@ interface AppState {
   setOverlayPartyId: (id: string | null) => void
   overlayInvoiceId: string | null
   setOverlayInvoiceId: (id: string | null) => void
+
+  // §GLOBAL-MODALS: Global modal state for modals that must render at the
+  // app root (via createPortal) to escape nested overlay stacking contexts.
+  // When a modal is opened from inside a nested route (e.g., Dashboard →
+  // Invoice → Profile), local modal state would render the modal INSIDE the
+  // party overlay (z-80), which can cause z-index/stacking issues.
+  // By storing the modal state globally and rendering the modal at app-shell
+  // root, the modal always portals to document.body with the highest z-index.
+  globalFamilyModal: { partyId: string; partyName: string } | null
+  openFamilyModal: (partyId: string, partyName: string) => void
+  closeFamilyModal: () => void
+  globalPartnerModal: { partyId: string; partyName: string } | null
+  openPartnerModal: (partyId: string, partyName: string) => void
+  closePartnerModal: () => void
+  globalFingerprintModal: { partyId: string; partyName: string } | null
+  openFingerprintModal: (partyId: string, partyName: string) => void
+  closeFingerprintModal: () => void
 }
 
 export const useAppStore = create<AppState>()((set, get) => ({
@@ -215,4 +232,17 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setOverlayPartyId: (id) => set({ overlayPartyId: id }),
   overlayInvoiceId: null,
   setOverlayInvoiceId: (id) => set({ overlayInvoiceId: id }),
+
+  // §GLOBAL-MODALS: Implementations for global modal state.
+  // These modals render at app-shell root (not inside party-detail) so they
+  // always escape nested overlay stacking contexts.
+  globalFamilyModal: null,
+  openFamilyModal: (partyId, partyName) => set({ globalFamilyModal: { partyId, partyName } }),
+  closeFamilyModal: () => set({ globalFamilyModal: null }),
+  globalPartnerModal: null,
+  openPartnerModal: (partyId, partyName) => set({ globalPartnerModal: { partyId, partyName } }),
+  closePartnerModal: () => set({ globalPartnerModal: null }),
+  globalFingerprintModal: null,
+  openFingerprintModal: (partyId, partyName) => set({ globalFingerprintModal: { partyId, partyName } }),
+  closeFingerprintModal: () => set({ globalFingerprintModal: null }),
 }))

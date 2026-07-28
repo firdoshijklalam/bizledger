@@ -33,6 +33,7 @@ import { FloatingInvoiceModal } from '@/components/shared/floating-invoice-modal
 import { BiometricGateModal } from '@/components/shared/biometric-gate-modal'
 import { FloatingCustomerWidget } from '@/components/shared/floating-customer-widget'
 import { ExternalScannerSimulator } from '@/components/shared/external-scanner-simulator'
+import { GlobalModalProvider } from '@/components/shared/global-modal-provider'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Loader2 } from 'lucide-react'
 import { PartyDetail } from '@/components/views/khata/party-detail'
@@ -262,6 +263,13 @@ export function AppShell() {
       <BiometricGateModal />
       <FloatingCustomerWidget />
       <ExternalScannerSimulator />
+
+      {/* §GLOBAL-MODALS: Family / Partner / Fingerprint modals rendered at
+          app root. These modals are triggered via global state (Zustand)
+          and render via Radix Dialog portals to document.body with z-[200].
+          This ensures they ALWAYS appear on top of ALL overlays (party z-80,
+          invoice z-70) regardless of how deep the user navigated. */}
+      <GlobalModalProvider />
     </div>
   )
 }
