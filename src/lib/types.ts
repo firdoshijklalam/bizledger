@@ -12,6 +12,7 @@ export type ViewId =
   | 'sale-pad'
   | 'sourcing'
   | 'history'
+  | 'online-orders'
 
 export type PartyType = 'customer' | 'supplier' | 'both'
 export type QualityGrade = 'A' | 'B' | 'C' | 'D' | 'E'

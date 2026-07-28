@@ -21,6 +21,7 @@ import { PaymentLandingPage } from '@/components/views/payment-landing-page'
 import { SalePadView } from '@/components/views/sale-pad-view'
 import { SourcingView } from '@/components/views/sourcing-view'
 import { StaffManagementView } from '@/components/views/staff-management-view'
+import { OnlineOrdersView } from '@/components/views/online-orders-view'
 import { StoreCatalogView } from '@/components/views/store-catalog-view'
 import { CentralCatalogView } from '@/components/views/central-catalog-view'  // Part 36
 import { MoreShopsView } from '@/components/views/more-shops-view'
@@ -297,6 +298,8 @@ function renderView(view: string) {
     // §1: sale-pad is rendered separately (always mounted) — not here
     case 'sourcing':
       return <SourcingView />
+    case 'online-orders':
+      return <OnlineOrdersView />
     case 'staff':
       return <StaffManagementView />
     default:
