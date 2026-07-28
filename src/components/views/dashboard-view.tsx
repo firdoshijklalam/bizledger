@@ -23,6 +23,7 @@ import {
 import { LoadingState, EmptyState } from '@/components/shared/states'
 import { useScrollRetention } from '@/hooks/use-scroll-retention'
 import { useScrollStore } from '@/store/scroll-store'
+import { useRealtimeOrders } from '@/hooks/use-realtime-orders'
 import { useMemo, useState, useEffect, useRef } from 'react'
 
 type ChartType = 'revenue' | 'profit' | 'cashflow' | 'collections' | 'categories' | 'inventory'
@@ -922,10 +923,23 @@ function LowStockList({ currency, onNavigate }: { currency: string; onNavigate: 
 }
 
 // PRD Part 38: Online Orders List component for Multi-Tab Hub
+// §REAL-TIME: Uses useRealtimeOrders hook for instant WebSocket notifications.
+// When a customer places an order on the external Quick-Commerce frontend,
+// the order appears here instantly + plays a notification sound.
 function OnlineOrdersList({ currency, onNavigate }: { currency: string; onNavigate: () => void }) {
-  const { data: orders } = useFetch<any[]>('/api/customer-orders', [])
+  const { business } = useAppStore()
+  const { orders, isConnected } = useRealtimeOrders(business?.id)
   if (!orders) return <p className="text-sm text-muted-foreground py-4 text-center">Loading...</p>
-  if (orders.length === 0) return <p className="text-sm text-muted-foreground py-4 text-center">No online orders yet 🛒</p>
+  if (orders.length === 0) return (
+    <div className="py-4 text-center space-y-1">
+      <p className="text-sm text-muted-foreground">No online orders yet 🛒</p>
+      {/* §REAL-TIME: Show WebSocket connection status */}
+      <p className="text-[10px] text-muted-foreground/60 flex items-center justify-center gap-1">
+        <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
+        {isConnected ? 'Live — waiting for orders' : 'Reconnecting...'}
+      </p>
+    </div>
+  )
   return (
     <div className="space-y-1">
       {orders.slice(0, 5).map((order) => (
