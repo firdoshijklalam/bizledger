@@ -50,7 +50,21 @@ export function InventoryView() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [activeCategory, setActiveCategory] = useState<string>('All')
 
-  const { data: products, loading, refetch } = useFetch<Product[]>('/api/products', [])
+  const { data: rawProducts, loading, refetch } = useFetch<Product[]>('/api/products', [])
+
+  // §SEARCH-CONSISTENCY: Parse searchTags JSON string → array, same as the
+  // Global Search overlay does. Ensures usePhoneticSearch hook works consistently.
+  const products = useMemo(() => {
+    if (!rawProducts) return []
+    return rawProducts.map((p: any) => ({
+      ...p,
+      searchTags: p.searchTags
+        ? (typeof p.searchTags === 'string'
+            ? (() => { try { return JSON.parse(p.searchTags) } catch { return [] } })()
+            : p.searchTags)
+        : [],
+    }))
+  }, [rawProducts])
 
   useEffect(() => {
     if (pendingQuickAction?.type === 'add-product') {

@@ -47,7 +47,23 @@ export function KhataView() {
     return () => clearTimeout(t)
   }, [khataGradeFilter, setKhataGradeFilter])
 
-  const { data: parties, loading } = useFetch<Party[]>('/api/parties?limit=200', [])
+  const { data: rawParties, loading } = useFetch<Party[]>('/api/parties?limit=200', [])
+
+  // §SEARCH-CONSISTENCY: Parse searchTags JSON string → array, same as the
+  // Global Search overlay does. This ensures the usePhoneticSearch hook can
+  // access the tags as an array (not a raw JSON string) for consistent
+  // fuzzy/phonetic matching across global and local search.
+  const parties = useMemo(() => {
+    if (!rawParties) return []
+    return rawParties.map((p: any) => ({
+      ...p,
+      searchTags: p.searchTags
+        ? (typeof p.searchTags === 'string'
+            ? (() => { try { return JSON.parse(p.searchTags) } catch { return [] } })()
+            : p.searchTags)
+        : [],
+    }))
+  }, [rawParties])
 
   // PRD Part 7 §3: scroll retention
   const { save: saveScrollPos, restore: restoreScrollPos } = useScrollStore()
