@@ -80,6 +80,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         notes: body.notes,
         qualityGrade: body.qualityGrade,
         gradeOverrideReason: body.gradeOverrideReason || null,
+        // §GROUP-MEMBERS: Allow updating buyerGroup for tiered pricing
+        buyerGroup: body.buyerGroup !== undefined ? body.buyerGroup : undefined,
         ...(searchTags ? { searchTags } : {}),
       },
     })

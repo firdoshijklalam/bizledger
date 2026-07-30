@@ -715,6 +715,9 @@ function DynamicPricingManager({ productId }: { productId: string }) {
   // §EDIT: Track which row is being edited
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editPrice, setEditPrice] = useState('')
+  // §GROUP-MEMBERS: Selected customer IDs for group membership
+  const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(new Set())
+  const [showMemberList, setShowMemberList] = useState(false)
 
   const handleAdd = async () => {
     const price = Number(newPrice)
@@ -728,11 +731,28 @@ function DynamicPricingManager({ productId }: { productId: string }) {
         customPrice: price,
         buyerName: mode === 'buyer' ? parties?.find((p) => p.id === selectedBuyerId)?.name : groupName.trim(),
       })
-      toast.success('Custom price set · Buyer notified')
+      // §GROUP-MEMBERS: If creating a group price, assign the selected members
+      // to this group by setting their buyerGroup field.
+      if (mode === 'group' && selectedMemberIds.size > 0) {
+        await Promise.all(
+          Array.from(selectedMemberIds).map((pid) =>
+            fetch(`/api/parties/${pid}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ buyerGroup: groupName.trim() }),
+            })
+          )
+        )
+        toast.success(`Group "${groupName.trim()}" created with ${selectedMemberIds.size} member${selectedMemberIds.size > 1 ? 's' : ''} · Custom price set`)
+      } else {
+        toast.success('Custom price set · Buyer notified')
+      }
       setShowAdd(false)
       setNewPrice('')
       setSelectedBuyerId('')
       setGroupName('')
+      setSelectedMemberIds(new Set())
+      setShowMemberList(false)
       triggerRefresh()
     } catch (e) {
       toast.error('Failed to set custom price')
@@ -896,12 +916,82 @@ function DynamicPricingManager({ productId }: { productId: string }) {
                   ))}
                 </select>
               ) : (
-                <Input
-                  value={groupName}
-                  onChange={(e) => setGroupName(e.target.value)}
-                  placeholder="e.g. Wholesalers, VIP Retailers"
-                  className="h-10 text-sm"
-                />
+                <div className="space-y-2">
+                  <Input
+                    value={groupName}
+                    onChange={(e) => setGroupName(e.target.value)}
+                    placeholder="e.g. Wholesalers, VIP Retailers"
+                    className="h-10 text-sm"
+                  />
+                  {/* §GROUP-MEMBERS: Multi-select customer checklist */}
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setShowMemberList(!showMemberList)}
+                      className="w-full flex items-center justify-between p-2.5 text-left hover:bg-muted/50"
+                    >
+                      <span className="text-xs font-medium">
+                        {selectedMemberIds.size > 0
+                          ? `${selectedMemberIds.size} member${selectedMemberIds.size > 1 ? 's' : ''} selected`
+                          : 'Select Customers +'}
+                      </span>
+                      <ChevronRight className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${showMemberList ? 'rotate-90' : ''}`} />
+                    </button>
+                    {showMemberList && (
+                      <div className="max-h-40 overflow-y-auto scroll-area border-t border-border">
+                        {(parties || []).map((p) => (
+                          <label
+                            key={p.id}
+                            className="flex items-center gap-2 p-2 hover:bg-muted/30 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedMemberIds.has(p.id)}
+                              onChange={(e) => {
+                                setSelectedMemberIds((prev) => {
+                                  const next = new Set(prev)
+                                  if (e.target.checked) next.add(p.id)
+                                  else next.delete(p.id)
+                                  return next
+                                })
+                              }}
+                              className="w-4 h-4 rounded accent-violet-600"
+                            />
+                            <span className="text-xs flex-1 truncate">{p.name}</span>
+                            {p.phone && <span className="text-[10px] text-muted-foreground">{p.phone}</span>}
+                          </label>
+                        ))}
+                        {(!parties || parties.length === 0) && (
+                          <p className="text-[10px] text-muted-foreground text-center py-3">No customers found</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {selectedMemberIds.size > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {Array.from(selectedMemberIds).slice(0, 5).map((id) => {
+                        const p = parties?.find((x) => x.id === id)
+                        return (
+                          <span key={id} className="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 flex items-center gap-1">
+                            {p?.name || 'Unknown'}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedMemberIds((prev) => { const n = new Set(prev); n.delete(id); return n })}
+                              className="hover:text-red-600"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </span>
+                        )
+                      })}
+                      {selectedMemberIds.size > 5 && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                          +{selectedMemberIds.size - 5} more
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
               <div className="flex items-center gap-2">
                 <Input
