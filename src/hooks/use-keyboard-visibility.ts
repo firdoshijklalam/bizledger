@@ -46,6 +46,13 @@ export function useKeyboardVisibility() {
 
   useEffect(() => {
     let focusOutTimer: ReturnType<typeof setTimeout> | null = null
+    // §VIEWPORT-RESIZE: Track the previous visualViewport height to detect
+    // keyboard open/close. When the keyboard opens, vv.height shrinks.
+    // When it closes (even without a focusout event — e.g., user dismisses
+    // via system gesture), vv.height grows back. We detect this growth
+    // and hide the mic.
+    let prevVvHeight = window.visualViewport?.height ?? window.innerHeight
+    let keyboardWasOpen = false
 
     const onFocusIn = (e: FocusEvent) => {
       // Cancel any pending hide (focus moved directly from one input to another)
@@ -56,12 +63,8 @@ export function useKeyboardVisibility() {
       const target = e.target as Element
       if (isTextInput(target)) {
         setKeyboardActive(true)
+        keyboardWasOpen = true
         // §GLOBAL-BINDING: Update the active input ref to the newly focused input.
-        // If it's a DIFFERENT input than what was previously registered, clear
-        // any stale callback from the previous input.
-        // (useVoiceInput's handleFocus will run AFTER this — React synthetic
-        // events fire after DOM events — and will set the callback for inputs
-        // that use the hook.)
         const store = useVoiceInputStore.getState()
         const targetEl = target as HTMLInputElement | HTMLTextAreaElement
         if (store.activeInputRef.current !== targetEl) {
@@ -79,18 +82,14 @@ export function useKeyboardVisibility() {
 
     const onFocusOut = () => {
       // Delay the check to allow focus to transfer to the next element
-      // (e.g., from an input to the mic button, or from input A to input B).
       if (focusOutTimer) clearTimeout(focusOutTimer)
       focusOutTimer = setTimeout(() => {
         const active = document.activeElement
-        // §MIC-BUTTON: Don't hide if focus moved to the mic button itself
-        // (the user tapped the mic to start voice input).
         if (active && active.getAttribute('data-mic-button') === 'true') return
-        // §ANOTHER-INPUT: Don't hide if focus moved to another text input.
         if (isTextInput(active)) return
         // Focus is now on body / non-text element → keyboard is closed.
         setKeyboardActive(false)
-        // Clear the active input ref + any stale callback.
+        keyboardWasOpen = false
         useVoiceInputStore.setState({
           activeInputCallback: null,
           activeInputRef: { current: null },
@@ -98,12 +97,43 @@ export function useKeyboardVisibility() {
       }, 150)
     }
 
+    // §VIEWPORT-RESIZE: Detect keyboard close via visualViewport.
+    // On mobile, when the user dismisses the keyboard via system gesture
+    // (swipe down, back button), the visualViewport resizes (grows) but
+    // no focusout event fires. This listener catches that case.
+    const onVVResize = () => {
+      const vv = window.visualViewport
+      if (!vv) return
+      const currentHeight = vv.height
+      // If the viewport GREW significantly (>100px) and we had the keyboard
+      // open, the keyboard just closed → hide the mic.
+      if (keyboardWasOpen && currentHeight > prevVvHeight + 100) {
+        // Verify no text input is still focused (user might have switched apps)
+        const active = document.activeElement
+        if (!isTextInput(active)) {
+          setKeyboardActive(false)
+          keyboardWasOpen = false
+          useVoiceInputStore.setState({
+            activeInputCallback: null,
+            activeInputRef: { current: null },
+          })
+        }
+      }
+      // If the viewport SHRANK significantly, the keyboard opened
+      if (currentHeight < prevVvHeight - 100) {
+        keyboardWasOpen = true
+      }
+      prevVvHeight = currentHeight
+    }
+
     document.addEventListener('focusin', onFocusIn)
     document.addEventListener('focusout', onFocusOut)
+    window.visualViewport?.addEventListener('resize', onVVResize)
 
     return () => {
       document.removeEventListener('focusin', onFocusIn)
       document.removeEventListener('focusout', onFocusOut)
+      window.visualViewport?.removeEventListener('resize', onVVResize)
       if (focusOutTimer) clearTimeout(focusOutTimer)
     }
   }, [setKeyboardActive])

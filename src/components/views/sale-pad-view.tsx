@@ -182,7 +182,7 @@ const CartRow = memo(function CartRow({
 })
 
 export function SalePadView() {
-  const { business, setActiveView, setSelectedInvoiceId, triggerRefresh, showPartyForm, setShowPartyForm } = useAppStore()
+  const { business, setActiveView, setSelectedInvoiceId, triggerRefresh, showPartyForm, setShowPartyForm, pendingNewCustomerId, pendingNewCustomerName } = useAppStore()
   const { t } = useI18n()
   const { speak: soundBoxSpeak } = useSoundBox()
   const { data: products } = useFetch<Product[]>('/api/products', [])
@@ -344,6 +344,23 @@ export function SalePadView() {
   const setCart = (items: CartItem[]) => updateActiveCartCb((c) => ({ ...c, items }))
   const setCustomer = (p: Party | null) => updateActiveCartCb((c) => ({ ...c, customer: p }))
   const setPaymentMode = (m: PaymentMode) => updateActiveCartCb((c) => ({ ...c, paymentMode: m }))
+
+  // §QUICK-SALE-CUSTOMER: When navigating from Party Profile → Quick Sale,
+  // pendingNewCustomerId/Name is set in the store. Read it on mount and
+  // auto-select the customer so the sale-pad doesn't open blank.
+  useEffect(() => {
+    if (!pendingNewCustomerId) return
+    // Try to find the full party object from the fetched parties list
+    const found = parties?.find((p) => p.id === pendingNewCustomerId)
+    if (found) {
+      setCustomer(found)
+    } else if (pendingNewCustomerName) {
+      // Fallback: create a minimal party object if not found in the list
+      setCustomer({ id: pendingNewCustomerId, name: pendingNewCustomerName } as Party)
+    }
+    // Clear the pending state so it doesn't re-apply on later visits
+    useAppStore.getState().setPendingNewCustomer(null, null)
+  }, [pendingNewCustomerId, pendingNewCustomerName, parties])
 
   const [chequeNo, setChequeNo] = useState('')
   // §5: Fulfillment status from global store
