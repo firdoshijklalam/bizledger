@@ -70,22 +70,80 @@ export function usePhoneticSearch<T extends Record<string, any>>(
       return values
     }
 
-    // Phase 1: Fast path — exact substring matches (highest priority)
+    // Phase 1: Fast path — exact substring + cross-lingual word matches
+    // §CROSS-LINGUAL: Transliterate the query to the other script. If the
+    // query is Bengali, transliterate to English. If English, to Bengali.
+    // Then check if ANY word from the transliterated query matches as a
+    // substring in the item's name or searchTags.
+    const isQueryBengali = /[\u0980-\u09FF]/.test(q)
+    const queryTransliterated = isQueryBengali
+      ? transliterateBengaliToEnglish(query)
+      : transliterateEnglishToBengali(query)
+    const queryTransliteratedLower = queryTransliterated.toLowerCase().trim()
+    // Split both original and transliterated query into words for word-level matching
+    const queryWords = q.split(/\s+/).filter((w) => w.length >= 2)
+    const transliteratedWords = queryTransliteratedLower.split(/\s+/).filter((w) => w.length >= 2)
+
     const exactMatches: T[] = []
     const remaining: T[] = []
     for (const item of data) {
       const name = extractName(item)
       let matched = name.includes(q)
+
+      // §CROSS-LINGUAL: Check if transliterated query matches as substring
+      if (!matched && queryTransliteratedLower) {
+        if (name.includes(queryTransliteratedLower)) matched = true
+      }
+
+      // §WORD-LEVEL: Check if ANY word (original or transliterated) matches
+      // as a substring in the name. This handles cases like "দাস" → "das"
+      // matching "Das & Sons" even though the full transliterated query
+      // "das end sans" doesn't match.
+      if (!matched) {
+        const allWords = [...queryWords, ...transliteratedWords]
+        for (const word of allWords) {
+          if (name.includes(word)) { matched = true; break }
+        }
+      }
+
+      // §3-CHAR-SUBSTRING: If no word match, check if any 3+ char consecutive
+      // substring from the query exists in the name. This catches typos where
+      // the first letter is wrong but the rest matches.
+      if (!matched) {
+        const allWords3 = [...queryWords, ...transliteratedWords]
+        for (const word of allWords3) {
+          if (word.length >= 4) {
+            // Check 3-char substrings of the word against the name
+            for (let i = 0; i <= word.length - 3; i++) {
+              const sub = word.substring(i, i + 3)
+              if (name.includes(sub)) { matched = true; break }
+            }
+            if (matched) break
+          }
+        }
+      }
+
       if (!matched && item.searchTags) {
         try {
           const tags = typeof item.searchTags === 'string' ? JSON.parse(item.searchTags) : item.searchTags
-          if (Array.isArray(tags) && tags.some((tag: string) => tag.toLowerCase().includes(q))) matched = true
+          if (Array.isArray(tags) && tags.some((tag: string) => {
+            const tagLower = tag.toLowerCase()
+            if (tagLower.includes(q)) return true
+            if (queryTransliteratedLower && tagLower.includes(queryTransliteratedLower)) return true
+            // Word-level tag matching
+            const allWords = [...queryWords, ...transliteratedWords]
+            return allWords.some((w) => tagLower.includes(w))
+          })) matched = true
         } catch {}
       }
       if (!matched) {
         // Check searchFields + getSearchValues
         for (const val of extractSearchValues(item)) {
           if (val.includes(q)) { matched = true; break }
+          if (queryTransliteratedLower && val.includes(queryTransliteratedLower)) { matched = true; break }
+          // Word-level field matching
+          const allWords = [...queryWords, ...transliteratedWords]
+          if (allWords.some((w) => val.includes(w))) { matched = true; break }
         }
       }
       if (matched) exactMatches.push(item)
