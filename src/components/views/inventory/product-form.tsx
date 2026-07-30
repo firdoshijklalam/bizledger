@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
 import { useGateTrigger } from '@/store/biometric-gate-store'
-import { Package, Tag, Boxes, AlertTriangle, X, Plus, Upload, Camera, Sparkles, Loader2, ChevronRight, Globe, CheckCircle2 } from 'lucide-react'
+import { Package, Tag, Boxes, AlertTriangle, X, Plus, Upload, Camera, Sparkles, Loader2, ChevronRight, Globe, CheckCircle2, FileEdit, Trash2 } from 'lucide-react'
 import { BadgePercent } from 'lucide-react'
 import { useVoiceInput } from '@/hooks/use-voice-input'
 import { Switch } from '@/components/ui/switch'
@@ -712,6 +712,9 @@ function DynamicPricingManager({ productId }: { productId: string }) {
   const [selectedBuyerId, setSelectedBuyerId] = useState('')
   const [groupName, setGroupName] = useState('')
   const [newPrice, setNewPrice] = useState('')
+  // §EDIT: Track which row is being edited
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editPrice, setEditPrice] = useState('')
 
   const handleAdd = async () => {
     const price = Number(newPrice)
@@ -734,6 +737,30 @@ function DynamicPricingManager({ productId }: { productId: string }) {
     } catch (e) {
       toast.error('Failed to set custom price')
     }
+  }
+
+  // §EDIT: Update an existing custom price
+  const handleEdit = async (priceId: string) => {
+    const price = Number(editPrice)
+    if (isNaN(price) || price < 0) { toast.error('Invalid price'); return }
+    try {
+      await fetch(`/api/products/${productId}/custom-prices/${priceId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customPrice: price }),
+      })
+      toast.success('Price updated')
+      setEditingId(null)
+      setEditPrice('')
+      triggerRefresh()
+    } catch (e) {
+      toast.error('Failed to update price')
+    }
+  }
+
+  const startEdit = (row: CustomPriceRow) => {
+    setEditingId(row.id)
+    setEditPrice(String(row.customPrice))
   }
 
   const handleDelete = async (priceId: string) => {
@@ -775,22 +802,68 @@ function DynamicPricingManager({ productId }: { productId: string }) {
             <div className="space-y-1.5">
               {rows.map((row) => (
                 <div key={row.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-card border border-border">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-xs font-medium truncate">
                       {row.buyer ? `👤 ${row.buyer.name}` : `👥 ${row.buyerGroupName}`}
                     </p>
                     {row.buyer?.phone && <p className="text-[10px] text-muted-foreground">{row.buyer.phone}</p>}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-sm font-bold tabular text-violet-600">₹{row.customPrice.toFixed(2)}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(row.id)}
-                      className="w-6 h-6 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center text-muted-foreground hover:text-red-600"
-                      aria-label="Remove custom price"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {editingId === row.id ? (
+                      // §EDIT-MODE: Inline price editing
+                      <>
+                        <input
+                          type="number"
+                          value={editPrice}
+                          onChange={(e) => setEditPrice(e.target.value)}
+                          className="w-20 h-7 px-1.5 text-xs rounded border border-violet-300 bg-background text-right tabular"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleEdit(row.id)
+                            if (e.key === 'Escape') { setEditingId(null); setEditPrice('') }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(row.id)}
+                          className="w-6 h-6 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center justify-center text-emerald-600"
+                          aria-label="Save price"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setEditingId(null); setEditPrice('') }}
+                          className="w-6 h-6 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground"
+                          aria-label="Cancel edit"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    ) : (
+                      // §VIEW-MODE: Price + edit/delete buttons
+                      <>
+                        <span className="text-sm font-bold tabular text-violet-600">₹{row.customPrice.toFixed(2)}</span>
+                        {/* §EDIT: Pen icon for inline price editing */}
+                        <button
+                          type="button"
+                          onClick={() => startEdit(row)}
+                          className="w-6 h-6 rounded-md hover:bg-violet-50 dark:hover:bg-violet-950/30 flex items-center justify-center text-muted-foreground hover:text-violet-600"
+                          aria-label="Edit price"
+                        >
+                          <FileEdit className="w-3.5 h-3.5" />
+                        </button>
+                        {/* §DELETE: Trash icon for removing custom price */}
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(row.id)}
+                          className="w-6 h-6 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center text-muted-foreground hover:text-red-600"
+                          aria-label="Remove custom price"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}

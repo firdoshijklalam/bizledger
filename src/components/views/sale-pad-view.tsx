@@ -431,8 +431,57 @@ export function SalePadView() {
     return list
   }, [products, mode, activeCategory, effectiveSubCategory])
 
+  // §TIERED-PRICING: Fetch custom/tiered prices for the selected customer.
+  // When a customer is selected, we fetch ALL custom prices for that buyer
+  // and store them in a map: productId → { price, source }.
+  // The getPrice function checks this map first before falling back to defaults.
+  const [customPriceMap, setCustomPriceMap] = useState<Record<string, { price: number; source: string }>>({})
+
+  useEffect(() => {
+    if (!customer?.id || !products) {
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        // Batch fetch resolved prices for all products
+        const productIds = products.map((p) => p.id)
+        const entries = await Promise.all(productIds.map(async (pid) => {
+          const res = await fetch(`/api/products/${pid}/resolved-price?buyerId=${encodeURIComponent(customer.id)}`)
+          if (!res.ok) return null
+          const data = await res.json()
+          // Only store if the price is different from the fallback (non-default)
+          if (data && typeof data.price === 'number' && data.source !== 'default') {
+            return [pid, { price: data.price, source: data.source }] as [string, { price: number; source: string }]
+          }
+          return null
+        }))
+        if (cancelled) return
+        const map: Record<string, { price: number; source: string }> = {}
+        for (const entry of entries) {
+          if (entry) map[entry[0]] = entry[1]
+        }
+        setCustomPriceMap(map)
+      } catch {}
+    })()
+    return () => { cancelled = true }
+  }, [customer?.id, products, mode])
+
+  // Clear custom prices when customer is deselected
+  useEffect(() => {
+    if (!customer?.id) {
+      const t = setTimeout(() => setCustomPriceMap({}), 0)
+      return () => clearTimeout(t)
+    }
+  }, [customer?.id])
+
   // §2: Price display per mode — STRICT, no mixing
+  // §TIERED-PRICING: Check custom price map first (Specific Buyer > Group > Default)
   const getPrice = (p: Product): number => {
+    // §TIERED: If we have a custom price for this product+customer, use it
+    const custom = customPriceMap[p.id]
+    if (custom) return custom.price
+
     if (mode === 'retail') return (p as any).retailSalePrice || 0
     if (mode === 'wholesale') return p.wholesalePrice || p.salePrice
     return p.salePrice // 'full' mode = bulk price
@@ -1459,6 +1508,12 @@ export function SalePadView() {
                     {formatCurrency(price, currency)}
                     <span className="text-[9px] text-muted-foreground font-normal">/{unit}</span>
                   </p>
+                  {/* §TIERED-PRICING: Show badge when a custom/tiered price is applied */}
+                  {customPriceMap[p.id] && (
+                    <span className="absolute top-1 left-1 px-1 py-0.5 rounded text-[8px] font-bold bg-emerald-500 text-white">
+                      {customPriceMap[p.id].source === 'buyer' ? 'CUSTOM' : 'TIER'}
+                    </span>
+                  )}
                   {inCart && (
                     <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
                       {inCart.quantity}
