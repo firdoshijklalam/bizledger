@@ -2,7 +2,8 @@
 
 import { createPortal } from 'react-dom'
 import { Search, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
+import { transliterateBengaliToEnglish, transliterateEnglishToBengali } from '@/lib/transliteration'
 
 export interface PickerItem {
   id: string
@@ -71,9 +72,36 @@ export function FullScreenPicker({ open, onClose, onSelect, items, placeholder =
 
   if (!open || typeof document === 'undefined') return null
 
-  const q = query.toLowerCase()
+  // §CROSS-LINGUAL: Apply the same cross-lingual transliteration + token-based
+  // matching as the global search. This ensures "Abdullah" (English) finds
+  // "আব্দুল্লাহ" (Bengali) and vice versa.
+  const q = query.toLowerCase().trim()
+  const normalizeSymbols = (s: string) => s.replace(/&/g, ' and ').replace(/@/g, ' at ').replace(/\s+/g, ' ').trim()
+  const normalizedQ = q ? normalizeSymbols(q) : ''
+  const isQueryBengali = /[\u0980-\u09FF]/.test(q)
+  const queryTransliterated = q
+    ? (isQueryBengali
+        ? normalizeSymbols(transliterateBengaliToEnglish(query).toLowerCase().trim())
+        : normalizeSymbols(transliterateEnglishToBengali(query).toLowerCase().trim()))
+    : ''
+  const queryTokens = normalizedQ ? normalizedQ.split(/\s+/).filter((w) => w.length >= 2) : []
+  const transliteratedTokens = queryTransliterated ? queryTransliterated.split(/\s+/).filter((w) => w.length >= 2) : []
+  const allTokens = Array.from(new Set([...queryTokens, ...transliteratedTokens]))
+
   const filtered = q
-    ? items.filter((i) => i.title.toLowerCase().includes(q) || (i.subtitle || '').toLowerCase().includes(q))
+    ? items.filter((i) => {
+        const title = normalizeSymbols(i.title.toLowerCase())
+        const subtitle = normalizeSymbols((i.subtitle || '').toLowerCase())
+
+        // Exact substring match
+        if (title.includes(normalizedQ) || subtitle.includes(normalizedQ)) return true
+        // Cross-lingual full-string match
+        if (queryTransliterated && (title.includes(queryTransliterated) || subtitle.includes(queryTransliterated))) return true
+        // Token-based match (any token)
+        if (allTokens.some((t) => title.includes(t) || subtitle.includes(t))) return true
+
+        return false
+      })
     : items
 
   return createPortal(

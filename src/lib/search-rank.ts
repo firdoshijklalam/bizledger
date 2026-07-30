@@ -606,11 +606,14 @@ export function findAllHighlightRanges(text: string, query: string): Array<{ sta
  *   → NO consecutive match (d and s are not adjacent in the text) → null
  */
 function findFuzzyHighlightRange(text: string, query: string): { start: number; end: number } | null {
-  if (!text || !query || query.length < 2) return null
+  if (!text || !query || query.length < 4) return null
 
   const textGraphemes = getGraphemeStrings(text)
   const queryConsonants = getGraphemeStrings(query).filter((g) => !isVowelGrapheme(g))
-  if (queryConsonants.length < 2) return null
+  // §STRICT: Require at least 3 consonants to prevent false positives.
+  // 2-consonant matches like "nd" (from "and") match too many words.
+  // 3+ consonants like "frds" (from "Firdaus") are specific enough.
+  if (queryConsonants.length < 3) return null
 
   // §STRICT: We require CONSECUTIVE consonant matches.
   // Slide a window of the same length as queryConsonants through the text.

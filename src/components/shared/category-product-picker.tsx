@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { Search, X, ChevronRight, Package } from 'lucide-react'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { formatCurrency } from '@/lib/utils'
+import { transliterateBengaliToEnglish, transliterateEnglishToBengali } from '@/lib/transliteration'
 
 interface ProductItem {
   id: string
@@ -54,6 +55,32 @@ export function CategoryProductPicker({ open, onClose, onSelect, items, categori
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
+  // §CROSS-LINGUAL: Search results with transliteration + token matching.
+  // Ensures "Abdullah" (English) finds "আব্দুল্লাহ" (Bengali) and vice versa.
+  const searchResults = useMemo(() => {
+    const q = query.toLowerCase().trim()
+    if (!q) return []
+    const normalizeSymbols = (s: string) => s.replace(/&/g, ' and ').replace(/@/g, ' at ').replace(/\s+/g, ' ').trim()
+    const normalizedQ = normalizeSymbols(q)
+    const isQueryBengali = /[\u0980-\u09FF]/.test(q)
+    const queryTransliterated = isQueryBengali
+      ? normalizeSymbols(transliterateBengaliToEnglish(query).toLowerCase().trim())
+      : normalizeSymbols(transliterateEnglishToBengali(query).toLowerCase().trim())
+    const allTokens = Array.from(new Set([
+      ...normalizedQ.split(/\s+/).filter((w) => w.length >= 2),
+      ...queryTransliterated.split(/\s+/).filter((w) => w.length >= 2),
+    ]))
+
+    return items.filter((i) => {
+      const name = normalizeSymbols(i.name.toLowerCase())
+      const subtitle = normalizeSymbols((i.subtitle || '').toLowerCase())
+      if (name.includes(normalizedQ) || subtitle.includes(normalizedQ)) return true
+      if (queryTransliterated && (name.includes(queryTransliterated) || subtitle.includes(queryTransliterated))) return true
+      if (allTokens.some((t) => name.includes(t) || subtitle.includes(t))) return true
+      return false
+    })
+  }, [query, items])
+
   if (!open || typeof document === 'undefined') return null
 
   // Filter items by category — items have category in subtitle like "Electronics · Stock: 240 pcs"
@@ -61,11 +88,6 @@ export function CategoryProductPicker({ open, onClose, onSelect, items, categori
     if (!selectedCategory) return false
     return (i.subtitle || '').toLowerCase().includes(selectedCategory.toLowerCase())
   })
-
-  // Search results override category flow
-  const searchResults = query.trim()
-    ? items.filter((i) => i.name.toLowerCase().includes(query.toLowerCase()) || (i.subtitle || '').toLowerCase().includes(query.toLowerCase()))
-    : []
 
   const handleSelect = (item: ProductItem) => {
     onSelect(item)
