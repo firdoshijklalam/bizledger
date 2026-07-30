@@ -83,6 +83,10 @@ export function usePhoneticSearch<T extends Record<string, any>>(
       return values
     }
 
+    // §STOP-WORDS: Filter out common conjunctions/prepositions that cause
+    // false positive matches. "and" matches "Bhandar" which is irrelevant.
+    const STOP_WORDS = new Set(['and', 'or', 'the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'is', 'are', 'was', 'were', 'end', 'sans'])
+
     // Phase 1: Fast path — exact substring + cross-lingual + token-based matches
     // §CROSS-LINGUAL: Transliterate the query to the other script.
     // §SYMBOL-NORMALIZATION: Normalize both query and name so '&' → 'and'.
@@ -97,51 +101,76 @@ export function usePhoneticSearch<T extends Record<string, any>>(
     const transliteratedTokens = queryTransliteratedNormalized.split(/\s+/).filter((w) => w.length >= 2)
     // Unique tokens from both original and transliterated
     const allTokens = Array.from(new Set([...queryTokens, ...transliteratedTokens]))
+    // §STOP-WORDS: Filter out stop words from token matching.
+    // These tokens are too common and cause false positives (e.g., "and" in "Bhandar").
+    const significantTokens = allTokens.filter((t) => !STOP_WORDS.has(t))
 
-    const exactMatches: T[] = []
+    // §SCORED-MATCHES: Each item gets a score based on how well it matches.
+    // Higher score = better match = appears higher in results.
+    // Scoring hierarchy:
+    //   1000+ = Full query exact substring match
+    //   900+  = Full transliterated query match
+    //   500+  = Prefix match (token at index 0 of name)
+    //   300+  = Infix match (token in the middle of name)
+    //   100+  = Suffix match (token at end of name)
+    //   50+   = Search tag match
+    //   10+   = Search field match
+    //   1+    = 3-char substring fallback
+    const scoredMatches: Array<{ item: T; score: number }> = []
     const remaining: T[] = []
+
     for (const item of data) {
       const name = extractName(item)
       let matched = false
-      let matchScore = 0 // number of tokens that matched
+      let score = 0
 
       // §EXACT-SUBSTRING: Full query as substring (highest priority)
       if (name.includes(normalizedQuery)) {
         matched = true
-        matchScore = allTokens.length
+        score = 1000
+        // Bonus: if it's a prefix match (starts at index 0)
+        if (name.startsWith(normalizedQuery)) score += 500
       }
 
       // §CROSS-LINGUAL-SUBSTRING: Full transliterated query as substring
       if (!matched && queryTransliteratedNormalized) {
         if (name.includes(queryTransliteratedNormalized)) {
           matched = true
-          matchScore = allTokens.length
+          score = 900
+          if (name.startsWith(queryTransliteratedNormalized)) score += 400
         }
       }
 
-      // §TOKEN-BASED: Check each token against the name. If at least 1 token
-      // matches, the item is included. This handles multi-word queries where
-      // one word doesn't match (e.g., "end" vs "&") but others do ("das", "sons").
-      // We check BOTH the original tokens AND the transliterated tokens.
-      // §NOTE: We don't require majority because transliteration is imperfect —
-      // "সন্স" → "sans" doesn't match "sons", but "দাস" → "das" does. Requiring
-      // majority would reject valid matches where only 1 out of 3 transliterated
-      // words matches. Instead, ANY token match is sufficient — the fuzzy fallback
-      // in rankByPosition handles filtering out irrelevant results.
-      if (!matched) {
-        for (const token of allTokens) {
-          if (name.includes(token)) { matched = true; matchScore = 1; break }
+      // §TOKEN-BASED: Check each SIGNIFICANT token (stop words filtered out).
+      // Prefix matches score much higher than infix matches.
+      if (!matched || score < 500) {
+        for (const token of significantTokens) {
+          const idx = name.indexOf(token)
+          if (idx >= 0) {
+            matched = true
+            if (idx === 0) {
+              // Prefix match — highest token score
+              score = Math.max(score, 500 + token.length * 10)
+            } else if (idx + token.length === name.length) {
+              // Suffix match — lower score
+              score = Math.max(score, 100 + token.length * 5)
+            } else {
+              // Infix match — middle score
+              score = Math.max(score, 300 + token.length * 5)
+            }
+          }
         }
       }
 
       // §3-CHAR-SUBSTRING: If no token match, check if any 3+ char consecutive
       // substring from the query exists in the name. This catches typos.
+      // Very low score — these are fuzzy fallbacks.
       if (!matched) {
         for (const token of allTokens) {
-          if (token.length >= 4) {
+          if (token.length >= 4 && !STOP_WORDS.has(token)) {
             for (let i = 0; i <= token.length - 3; i++) {
               const sub = token.substring(i, i + 3)
-              if (name.includes(sub)) { matched = true; break }
+              if (name.includes(sub)) { matched = true; score = 10; break }
             }
             if (matched) break
           }
@@ -154,9 +183,9 @@ export function usePhoneticSearch<T extends Record<string, any>>(
           const tags = typeof item.searchTags === 'string' ? JSON.parse(item.searchTags) : item.searchTags
           if (Array.isArray(tags) && tags.some((tag: string) => {
             const tagNormalized = normalizeSymbols(tag.toLowerCase())
-            if (tagNormalized.includes(normalizedQuery)) return true
-            if (queryTransliteratedNormalized && tagNormalized.includes(queryTransliteratedNormalized)) return true
-            return allTokens.some((w) => tagNormalized.includes(w))
+            if (tagNormalized.includes(normalizedQuery)) { score = Math.max(score, 50); return true }
+            if (queryTransliteratedNormalized && tagNormalized.includes(queryTransliteratedNormalized)) { score = Math.max(score, 45); return true }
+            return significantTokens.some((w) => { if (tagNormalized.includes(w)) { score = Math.max(score, 40); return true }; return false })
           })) matched = true
         } catch {}
       }
@@ -164,15 +193,19 @@ export function usePhoneticSearch<T extends Record<string, any>>(
       // §SEARCH-FIELDS: Check searchFields + getSearchValues with token logic
       if (!matched) {
         for (const val of extractSearchValues(item)) {
-          if (val.includes(normalizedQuery)) { matched = true; break }
-          if (queryTransliteratedNormalized && val.includes(queryTransliteratedNormalized)) { matched = true; break }
-          if (allTokens.some((w) => val.includes(w))) { matched = true; break }
+          if (val.includes(normalizedQuery)) { matched = true; score = Math.max(score, 20); break }
+          if (queryTransliteratedNormalized && val.includes(queryTransliteratedNormalized)) { matched = true; score = Math.max(score, 15); break }
+          if (significantTokens.some((w) => { if (val.includes(w)) { score = Math.max(score, 10); return true }; return false })) { matched = true; break }
         }
       }
 
-      if (matched) exactMatches.push(item)
+      if (matched) scoredMatches.push({ item, score })
       else remaining.push(item)
     }
+
+    // §SORT: Sort by score DESCENDING — highest score (best match) first.
+    scoredMatches.sort((a, b) => b.score - a.score)
+    const exactMatches = scoredMatches.map((s) => s.item)
 
     // Phase 2: Fuse.js fuzzy match on remaining items (tolerant of typos)
     // §CUSTOM-NAME: If getName is provided, we add a virtual `__searchName` field
