@@ -13,7 +13,7 @@ import { useVoiceInput } from '@/hooks/use-voice-input'
 import { usePhoneticSearch } from '@/hooks/use-phonetic-search'
 
 export function SearchOverlay() {
-  const { showSearch, setShowSearch, setActiveView, setSelectedPartyId, setSelectedProductId, setSelectedInvoiceId } = useAppStore()
+  const { showSearch, setShowSearch, setActiveView, setSelectedPartyId, setSelectedProductId, setSelectedInvoiceId, setOverlayInvoiceId } = useAppStore()
   const { t } = useI18n()
   const [q, setQ] = useState('')
   // §3: Register this search input with the global mic
@@ -265,7 +265,21 @@ export function SearchOverlay() {
             {rankedResults.txns.length > 0 && (
               <Section title="Transactions">
                 {rankedResults.txns.map((tx) => (
-                  <div key={tx.id} className="w-full flex items-center gap-3 p-3">
+                  <button
+                    key={tx.id}
+                    onClick={() => {
+                      // §CLICKABLE: If the transaction has a linked invoice, open it.
+                      // Otherwise, navigate to the party's khata if we have a partyId.
+                      if ((tx as any).invoiceId) {
+                        setOverlayInvoiceId((tx as any).invoiceId)
+                      } else if ((tx as any).partyId) {
+                        setSelectedPartyId((tx as any).partyId)
+                        setActiveView('khata')
+                      }
+                      close()
+                    }}
+                    className="w-full flex items-center gap-3 p-3 hover:bg-muted text-left"
+                  >
                     <span className="w-9 h-9 rounded-full bg-teal-100 dark:bg-teal-900/30 flex items-center justify-center shrink-0">
                       <ArrowLeftRight className="w-4 h-4 text-teal-600" />
                     </span>
@@ -276,7 +290,7 @@ export function SearchOverlay() {
                     <span className={`text-sm font-semibold tabular shrink-0 ${tx.type === 'credit' ? 'text-emerald-600' : 'text-red-600'}`}>
                       {tx.type === 'credit' ? '+' : '-'}{formatCurrency(tx.amount)}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </Section>
             )}

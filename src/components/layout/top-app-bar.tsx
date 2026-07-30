@@ -22,6 +22,7 @@ const VIEW_TITLES: Record<string, string> = {
   sourcing: 'B2B Sourcing',
   staff: 'Staff Management',
   history: 'History & Reports',
+  'online-orders': 'Online Orders',
 }
 
 export function TopAppBar() {

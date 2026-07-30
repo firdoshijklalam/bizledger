@@ -13,6 +13,7 @@ export type ViewId =
   | 'sourcing'
   | 'history'
   | 'online-orders'
+  | 'staff'
 
 export type PartyType = 'customer' | 'supplier' | 'both'
 export type QualityGrade = 'A' | 'B' | 'C' | 'D' | 'E'

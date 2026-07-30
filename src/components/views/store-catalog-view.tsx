@@ -6,7 +6,7 @@ import { addVisitedShop } from '@/components/views/visited-shops-deck'
 import {
   ShoppingCart, MapPin, Search, Plus, Minus, Trash2, X, Package,
   Store, Smartphone, ChevronRight, CheckCircle2, AlertTriangle,
-  ShoppingBag, Phone, Navigation, Home, Sparkles,
+  ShoppingBag, Phone, Navigation, Home, Sparkles, ArrowLeft,
 } from 'lucide-react'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -330,6 +330,14 @@ export function StoreCatalogView({ slug, invoiceToken }: StoreCatalogViewProps) 
       {/* ============================ STICKY HEADER ============================ */}
       <header className="sticky top-0 z-30 bg-card/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+          {/* §BACK-BUTTON: Allow user to return to previous page (More Shops, etc.) */}
+          <button
+            onClick={() => window.history.length > 1 ? window.history.back() : window.location.href = '/?more-shops=1'}
+            className="w-9 h-9 rounded-full hover:bg-muted flex items-center justify-center shrink-0"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
           {/* Logo / Avatar */}
           {store.logoUrl ? (
             <img

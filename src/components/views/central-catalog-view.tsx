@@ -1275,6 +1275,14 @@ export function CentralCatalogView() {
       {/* ============================ STICKY HEADER ============================ */}
       <header className="sticky top-0 z-30 bg-card/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-2.5">
+          {/* §BACK-BUTTON: Return to previous page */}
+          <button
+            onClick={() => window.history.length > 1 ? window.history.back() : window.location.href = '/'}
+            className="w-9 h-9 rounded-full hover:bg-muted flex items-center justify-center shrink-0"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
           {/* Brand */}
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-sm shrink-0">
             <Sparkles className="w-5 h-5" />

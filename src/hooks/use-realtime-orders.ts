@@ -52,6 +52,9 @@ export function useRealtimeOrders(businessId: string | null | undefined) {
   // §REALTIME-ORDERS: realtimeOrders holds orders received via WebSocket.
   // Combined with initialOrders (from REST), deduped by id.
   const [realtimeOrders, setRealtimeOrders] = useState<RealtimeOrder[]>([])
+  // §OVERRIDE: Status overrides applied locally (e.g., after status update API call).
+  // Keyed by orderId → { status, ...extra }
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, any>>({})
   const [isConnected, setIsConnected] = useState(false)
   const socketRef = useRef<Socket | null>(null)
 
@@ -130,13 +133,25 @@ export function useRealtimeOrders(businessId: string | null | undefined) {
 
   // §MERGE: Combine REST orders with realtime orders, dedupe by id.
   // Realtime orders take priority (they're newer).
+  // Apply status overrides (from local updateOrderStatus calls).
   const allOrderIds = new Set(realtimeOrders.map((o) => o.id))
   const restOrders = (initialOrders || []).filter((o) => !allOrderIds.has(o.id))
-  const orders = [...realtimeOrders, ...restOrders]
+  const orders = [...realtimeOrders, ...restOrders].map((o: any) =>
+    statusOverrides[o.id] ? { ...o, ...statusOverrides[o.id] } : o
+  )
 
   const manualRefetch = useCallback(async () => {
     await refetch()
   }, [refetch])
 
-  return { orders, isConnected, refetch: manualRefetch }
+  // §SPA-UPDATE: Update an order's status in local state without a full reload.
+  // This is used after a status update API call succeeds.
+  const updateOrderStatus = useCallback((orderId: string, status: string, extra?: any) => {
+    setStatusOverrides((prev) => ({
+      ...prev,
+      [orderId]: { status, ...extra },
+    }))
+  }, [])
+
+  return { orders, isConnected, refetch: manualRefetch, updateOrderStatus }
 }

@@ -42,7 +42,7 @@ const TABS = [
 
 export function OnlineOrdersView() {
   const { business } = useAppStore()
-  const { orders, isConnected } = useRealtimeOrders(business?.id)
+  const { orders, isConnected, updateOrderStatus } = useRealtimeOrders(business?.id)
   const [activeTab, setActiveTab] = useState<string>('pending')
   const [updatingId, setUpdatingId] = useState<string | null>(null)
 
@@ -82,8 +82,17 @@ export function OnlineOrdersView() {
         toast.success(labels[status] || `Status updated to ${status}`)
       }
 
-      // Refresh the orders list
-      window.location.reload()
+      // §FIX: Update the local order status instead of window.location.reload().
+      // reload() causes a full page refresh (loses scroll, breaks SPA).
+      // Instead, use the hook's updateOrderStatus for a smooth SPA update.
+      if (status === 'completed' && data.synced) {
+        updateOrderStatus(orderId, status, {
+          syncedTransactionId: data.synced.transactionId,
+          syncedInvoiceId: data.synced.invoiceId,
+        })
+      } else {
+        updateOrderStatus(orderId, status)
+      }
     } catch (e: any) {
       toast.error(e.message || 'Failed to update order status')
     } finally {

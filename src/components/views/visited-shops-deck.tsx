@@ -11,6 +11,7 @@ import {
   Compass,
   Smartphone,
   MapPin,
+  ArrowLeft,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useMounted } from '@/hooks/use-mounted'
@@ -296,6 +297,14 @@ export function VisitedShopsDeck() {
           transition={{ duration: 0.25 }}
           className="flex items-start gap-3"
         >
+          {/* §BACK-BUTTON: Return to previous page */}
+          <button
+            onClick={() => window.history.length > 1 ? window.history.back() : window.location.href = '/'}
+            className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center shrink-0 mt-1"
+            aria-label="Back"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md">
             <History className="h-6 w-6" />
           </div>

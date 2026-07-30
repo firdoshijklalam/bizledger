@@ -743,11 +743,8 @@ export function DashboardView() {
                 setInventoryFilter('low-stock')
                 setActiveView('inventory')
               } else if (hubTab === 'orders') {
-                // §FIX: Online Orders → Inventory (orders relate to products/stock).
-                // History doesn't handle order fulfillment states (Pending/Shipped/Delivered).
-                // Inventory view shows product-level order context.
-                setInventoryFilter('all')
-                setActiveView('inventory')
+                // §FIX: Online Orders → dedicated Online Orders view.
+                setActiveView('online-orders')
               } else {
                 setKhataFilter('all')
                 setActiveView('khata')
