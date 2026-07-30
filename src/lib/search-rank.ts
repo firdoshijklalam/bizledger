@@ -321,19 +321,64 @@ export function rankByPosition<T>(
       if (found) continue
     }
 
-    // 4. §NO-FUZZY-FALLBACK: Previously, items found by usePhoneticSearch
-    //    via fuzzy/phonetic matching but without an exact match position
-    //    were included here with score 3. This caused FALSE POSITIVES —
-    //    items like "Maa Lakshmi Bhandar" showing up for query "Das"
-    //    just because Fuse.js matched scattered characters.
-    //
-    //    §RULE: If an item doesn't have an exact substring match, cross-lingual
-    //    match, or secondary field match, IT IS FILTERED OUT. Only items
-    //    that can be highlighted (consecutive match >= 2 chars) are returned.
-    //    Do NOT return unhighlighted, irrelevant results.
-    //
-    //    The fuzzy consonant-skeleton matching is still used for HIGHLIGHTING
-    //    (in highlightSubstring), but not for INCLUDING items in results.
+    // 4. §SMART-FUZZY-FALLBACK: Items found by usePhoneticSearch via fuzzy
+    //    matching but without an exact substring/cross-lingual/field match.
+    //    We include them ONLY if they can be highlighted — i.e., at least
+    //    one word in the query has a consecutive consonant match OR an exact
+    //    word match in the primary text. This prevents false positives like
+    //    "Das" matching "Maa Lakshmi Bhandar" (no consecutive consonant match)
+    //    while allowing "Firdaus Alam" to match "Firdosh Alam" (Alam is exact,
+    //    Fird is a consonant match).
+    const words = q.split(/\s+/).filter((w) => w.length >= 2)
+    let hasHighlightableMatch = false
+
+    for (const word of words) {
+      // 4a. Exact word match in primary text
+      const wordExact = findMatchPosition(primaryText, word)
+      if (wordExact.index >= 0) {
+        hasHighlightableMatch = true
+        break
+      }
+      // 4b. Cross-lingual word match
+      const wordCross = findCrossLingualMatch(primaryText, word)
+      if (wordCross) {
+        hasHighlightableMatch = true
+        break
+      }
+      // 4c. Consonant-skeleton fuzzy match (consecutive consonants)
+      const fuzzy = findFuzzyHighlightRange(primaryText, word)
+      if (fuzzy) {
+        hasHighlightableMatch = true
+        break
+      }
+    }
+
+    // Also check secondary search fields for word matches
+    if (!hasHighlightableMatch && getSearchFields) {
+      const fields = getSearchFields(item)
+      for (const field of fields) {
+        if (!field) continue
+        for (const word of words) {
+          if (field.toLowerCase().includes(word.toLowerCase())) {
+            hasHighlightableMatch = true
+            break
+          }
+        }
+        if (hasHighlightableMatch) break
+      }
+    }
+
+    if (hasHighlightableMatch) {
+      ranked.push({
+        item,
+        position: 'none' as MatchPosition,
+        matchIndex: -1,
+        matchLength: 0,
+        matchedText: '',
+        score: 3, // lowest priority (below suffix)
+      })
+    }
+    // If no highlightable match, the item is FILTERED OUT — not returned.
   }
 
   // Sort by score (ascending), then by matchIndex (ascending)

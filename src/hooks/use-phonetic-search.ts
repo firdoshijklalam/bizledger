@@ -112,18 +112,20 @@ export function usePhoneticSearch<T extends Record<string, any>>(
 
     const fuse = new Fuse(fuseData, {
       keys: fuseKeys,
-      // §STRICT: Lowered threshold from 0.4 to 0.25 to prevent false positives.
-      // 0.4 was too loose — it matched scattered characters (e.g., "Das"
-      // matching "Maa Lakshmi Bhandar" because 'd' and 's' appear somewhere).
-      // 0.25 requires a much closer match (typo tolerance only, not scattered chars).
-      threshold: 0.25,
-      // §STRICT: ignoreLocation: false means Fuse considers WHERE the match
-      // occurs. With ignoreLocation: true, Fuse matches anywhere in a long
-      // string, causing false positives. Setting to false requires the match
-      // to be near the start or in a reasonable location.
-      ignoreLocation: false,
-      // §STRICT: minMatchCharLength: 2 means at least 2 consecutive characters
-      // must match. This prevents single-character scattered matches.
+      // §BALANCED: threshold 0.35 — sweet spot between too loose (0.5, false
+      // positives like "Das" matching "Maa Lakshmi Bhandar") and too strict
+      // (0.25, rejects "Firdaus" vs "Firdosh" which is a common typo).
+      // At 0.35, Fuse tolerates 1-2 character differences (typos) but
+      // requires the majority of characters to match in order.
+      threshold: 0.35,
+      // §BALANCED: ignoreLocation: true allows matches anywhere in the string.
+      // This is needed because "Alam" at the end of "Firdosh Alam" must match
+      // even though it's far from the start. Without this, multi-word queries
+      // that match at the end would be missed.
+      ignoreLocation: true,
+      // §BALANCED: minMatchCharLength: 2 — at least 2 consecutive chars must
+      // match. Prevents single-char scattered matches but allows 2-char
+      // substrings like "Fi" or "Al" to contribute to the score.
       minMatchCharLength: 2,
       includeScore: true,
     })
