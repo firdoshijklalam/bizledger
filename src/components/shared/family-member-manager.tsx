@@ -144,6 +144,7 @@ export function FamilyMemberManager({
 
   const [name, setName] = useState('')
   const [relation, setRelation] = useState<string>('Son')
+  const [customRelation, setCustomRelation] = useState('')
   const [hand, setHand] = useState<string>('right')
   const [finger, setFinger] = useState<string>('thumb')
   const [scanning, setScanning] = useState(false)
@@ -156,6 +157,7 @@ export function FamilyMemberManager({
   const resetForm = useCallback(() => {
     setName('')
     setRelation('Son')
+    setCustomRelation('')
     setHand('right')
     setFinger('thumb')
   }, [])
@@ -169,6 +171,16 @@ export function FamilyMemberManager({
       return
     }
 
+    // §OTHER-RELATION: If relation is 'Other', require a custom specification.
+    // Save the custom string (not 'Other') so the merchant can identify the person.
+    const effectiveRelation = relation === 'Other' ? customRelation.trim() : relation
+    if (relation === 'Other' && !effectiveRelation) {
+      toast.error('Please specify the relationship', {
+        description: 'Enter what relation the family member has (e.g. Nephew, Cousin).',
+      })
+      return
+    }
+
     setScanning(true)
     // Simulated fingerprint scan (web cannot reach native scanner SDK).
     await new Promise((r) => setTimeout(r, SCAN_DURATION_MS))
@@ -178,13 +190,13 @@ export function FamilyMemberManager({
         partyId,
         role: 'family',
         linkedName: trimmed,
-        relation,
+        relation: effectiveRelation,
         hand,
         finger,
         scannerType: 'native',
       })
       toast.success(`Fingerprint linked for ${trimmed}`, {
-        description: `${cap(hand)} ${cap(finger)} finger • Relation: ${relation}`,
+        description: `${cap(hand)} ${cap(finger)} finger • Relation: ${effectiveRelation}`,
       })
       resetForm()
       await refetch()
@@ -194,7 +206,7 @@ export function FamilyMemberManager({
     } finally {
       setScanning(false)
     }
-  }, [name, relation, hand, finger, partyId, refetch, resetForm])
+  }, [name, relation, customRelation, hand, finger, partyId, refetch, resetForm])
 
   const handleDelete = useCallback(
     async (fp: FingerprintRecord) => {
@@ -305,6 +317,22 @@ export function FamilyMemberManager({
                 </Select>
               </div>
             </div>
+
+            {/* §OTHER-RELATION: Conditional input when 'Other' is selected.
+                The custom string is saved to the DB instead of 'Other' so the
+                merchant can identify the person later. */}
+            {relation === 'Other' && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Specify Relationship</Label>
+                <Input
+                  value={customRelation}
+                  onChange={(e) => setCustomRelation(e.target.value)}
+                  placeholder="e.g. Nephew, Cousin, Grandson"
+                  disabled={scanning}
+                  className="h-9"
+                />
+              </div>
+            )}
 
             <Button
               type="button"

@@ -2047,10 +2047,20 @@ export function SalePadView() {
       />
 
       {/* §1: PartyForm — rendered here so [+] icon can trigger customer registration
-          directly from Quick Sale without navigating away. */}
+          directly from Quick Sale without navigating away.
+          §AUTO-SELECT: onSuccess callback auto-selects the newly created customer
+          so the user doesn't have to manually search for them. */}
       <PartyForm
         open={showPartyForm}
         onOpenChange={(o) => setShowPartyForm(o)}
+        onSuccess={(party) => {
+          // §AUTO-SELECT: Instantly set the newly created customer as the
+          // active cart's customer. No manual search needed.
+          if (party.type === 'customer' || party.type === 'both') {
+            setCustomer(party)
+            setCustomerBlockKey((k) => k + 1) // replay entrance animation
+          }
+        }}
       />
 
       {/* §1: Cart Close Prompt — Wipe or Send to Held Queue */}

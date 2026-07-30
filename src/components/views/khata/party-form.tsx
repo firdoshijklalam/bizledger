@@ -21,9 +21,12 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   partyId?: string | null
+  // §ON-SUCCESS: Called when a party is created or updated. Passes the full
+  // party object so callers (e.g. SalePadView) can auto-select the customer.
+  onSuccess?: (party: Party) => void
 }
 
-export function PartyForm({ open, onOpenChange, partyId }: Props) {
+export function PartyForm({ open, onOpenChange, partyId, onSuccess }: Props) {
   const { triggerRefresh, setSelectedPartyId } = useAppStore()
   const { t } = useI18n()
   const { data: existing } = useFetch<Party>(partyId ? `/api/parties/${partyId}` : null, [partyId, open])
@@ -94,10 +97,12 @@ export function PartyForm({ open, onOpenChange, partyId }: Props) {
         const updated = await apiPut(`/api/parties/${partyId}`, payload)
         toast.success('Party updated')
         setSelectedPartyId(updated.id)
+        if (onSuccess) onSuccess(updated)
       } else {
         const created = await apiPost('/api/parties', payload)
         toast.success('Party added')
         setSelectedPartyId(created.id)
+        if (onSuccess) onSuccess(created)
       }
       triggerRefresh()
       onOpenChange(false)
