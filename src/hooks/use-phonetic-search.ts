@@ -49,73 +49,98 @@ export function usePhoneticSearch<T extends Record<string, any>>(
 
     const q = query.toLowerCase().trim()
 
+    // §SYMBOL-NORMALIZATION: Normalize symbols like '&' → 'and', '@' → 'at'
+    // in both the query and the target strings. This ensures that
+    // "দাস এন্ড সন্স" (→ "das end sans") matches "Das & Sons" because
+    // after normalization, both become "das and sons".
+    const normalizeSymbols = (s: string): string => {
+      return s
+        .replace(/&/g, ' and ')
+        .replace(/@/g, ' at ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    }
+
     // Helper: extract the "name" from an item (uses custom getName if provided)
+    // §SYMBOL-NORMALIZATION: Apply symbol normalization to the name.
     const extractName = (item: any): string => {
-      if (getName) return getName(item).toLowerCase()
-      return (item.name || '').toString().toLowerCase()
+      if (getName) return normalizeSymbols(getName(item).toLowerCase())
+      return normalizeSymbols((item.name || '').toString().toLowerCase())
     }
 
     // Helper: extract all searchable values from an item
     const extractSearchValues = (item: any): string[] => {
       const values: string[] = []
       for (const field of searchFields) {
-        const val = (item[field] || '').toString().toLowerCase()
+        const val = normalizeSymbols((item[field] || '').toString().toLowerCase())
         if (val) values.push(val)
       }
       if (getSearchValues) {
         for (const v of getSearchValues(item)) {
-          if (v) values.push(v.toLowerCase())
+          if (v) values.push(normalizeSymbols(v.toLowerCase()))
         }
       }
       return values
     }
 
-    // Phase 1: Fast path — exact substring + cross-lingual word matches
-    // §CROSS-LINGUAL: Transliterate the query to the other script. If the
-    // query is Bengali, transliterate to English. If English, to Bengali.
-    // Then check if ANY word from the transliterated query matches as a
-    // substring in the item's name or searchTags.
+    // Phase 1: Fast path — exact substring + cross-lingual + token-based matches
+    // §CROSS-LINGUAL: Transliterate the query to the other script.
+    // §SYMBOL-NORMALIZATION: Normalize both query and name so '&' → 'and'.
+    const normalizedQuery = normalizeSymbols(q)
     const isQueryBengali = /[\u0980-\u09FF]/.test(q)
     const queryTransliterated = isQueryBengali
-      ? transliterateBengaliToEnglish(query)
-      : transliterateEnglishToBengali(query)
-    const queryTransliteratedLower = queryTransliterated.toLowerCase().trim()
-    // Split both original and transliterated query into words for word-level matching
-    const queryWords = q.split(/\s+/).filter((w) => w.length >= 2)
-    const transliteratedWords = queryTransliteratedLower.split(/\s+/).filter((w) => w.length >= 2)
+      ? normalizeSymbols(transliterateBengaliToEnglish(query).toLowerCase().trim())
+      : transliterateEnglishToBengali(query).toLowerCase().trim()
+    const queryTransliteratedNormalized = normalizeSymbols(queryTransliterated)
+    // Split both original and transliterated query into tokens
+    const queryTokens = normalizedQuery.split(/\s+/).filter((w) => w.length >= 2)
+    const transliteratedTokens = queryTransliteratedNormalized.split(/\s+/).filter((w) => w.length >= 2)
+    // Unique tokens from both original and transliterated
+    const allTokens = Array.from(new Set([...queryTokens, ...transliteratedTokens]))
 
     const exactMatches: T[] = []
     const remaining: T[] = []
     for (const item of data) {
       const name = extractName(item)
-      let matched = name.includes(q)
+      let matched = false
+      let matchScore = 0 // number of tokens that matched
 
-      // §CROSS-LINGUAL: Check if transliterated query matches as substring
-      if (!matched && queryTransliteratedLower) {
-        if (name.includes(queryTransliteratedLower)) matched = true
+      // §EXACT-SUBSTRING: Full query as substring (highest priority)
+      if (name.includes(normalizedQuery)) {
+        matched = true
+        matchScore = allTokens.length
       }
 
-      // §WORD-LEVEL: Check if ANY word (original or transliterated) matches
-      // as a substring in the name. This handles cases like "দাস" → "das"
-      // matching "Das & Sons" even though the full transliterated query
-      // "das end sans" doesn't match.
-      if (!matched) {
-        const allWords = [...queryWords, ...transliteratedWords]
-        for (const word of allWords) {
-          if (name.includes(word)) { matched = true; break }
+      // §CROSS-LINGUAL-SUBSTRING: Full transliterated query as substring
+      if (!matched && queryTransliteratedNormalized) {
+        if (name.includes(queryTransliteratedNormalized)) {
+          matched = true
+          matchScore = allTokens.length
         }
       }
 
-      // §3-CHAR-SUBSTRING: If no word match, check if any 3+ char consecutive
-      // substring from the query exists in the name. This catches typos where
-      // the first letter is wrong but the rest matches.
+      // §TOKEN-BASED: Check each token against the name. If at least 1 token
+      // matches, the item is included. This handles multi-word queries where
+      // one word doesn't match (e.g., "end" vs "&") but others do ("das", "sons").
+      // We check BOTH the original tokens AND the transliterated tokens.
+      // §NOTE: We don't require majority because transliteration is imperfect —
+      // "সন্স" → "sans" doesn't match "sons", but "দাস" → "das" does. Requiring
+      // majority would reject valid matches where only 1 out of 3 transliterated
+      // words matches. Instead, ANY token match is sufficient — the fuzzy fallback
+      // in rankByPosition handles filtering out irrelevant results.
       if (!matched) {
-        const allWords3 = [...queryWords, ...transliteratedWords]
-        for (const word of allWords3) {
-          if (word.length >= 4) {
-            // Check 3-char substrings of the word against the name
-            for (let i = 0; i <= word.length - 3; i++) {
-              const sub = word.substring(i, i + 3)
+        for (const token of allTokens) {
+          if (name.includes(token)) { matched = true; matchScore = 1; break }
+        }
+      }
+
+      // §3-CHAR-SUBSTRING: If no token match, check if any 3+ char consecutive
+      // substring from the query exists in the name. This catches typos.
+      if (!matched) {
+        for (const token of allTokens) {
+          if (token.length >= 4) {
+            for (let i = 0; i <= token.length - 3; i++) {
+              const sub = token.substring(i, i + 3)
               if (name.includes(sub)) { matched = true; break }
             }
             if (matched) break
@@ -123,29 +148,28 @@ export function usePhoneticSearch<T extends Record<string, any>>(
         }
       }
 
+      // §SEARCH-TAGS: Check searchTags with same token-based logic
       if (!matched && item.searchTags) {
         try {
           const tags = typeof item.searchTags === 'string' ? JSON.parse(item.searchTags) : item.searchTags
           if (Array.isArray(tags) && tags.some((tag: string) => {
-            const tagLower = tag.toLowerCase()
-            if (tagLower.includes(q)) return true
-            if (queryTransliteratedLower && tagLower.includes(queryTransliteratedLower)) return true
-            // Word-level tag matching
-            const allWords = [...queryWords, ...transliteratedWords]
-            return allWords.some((w) => tagLower.includes(w))
+            const tagNormalized = normalizeSymbols(tag.toLowerCase())
+            if (tagNormalized.includes(normalizedQuery)) return true
+            if (queryTransliteratedNormalized && tagNormalized.includes(queryTransliteratedNormalized)) return true
+            return allTokens.some((w) => tagNormalized.includes(w))
           })) matched = true
         } catch {}
       }
+
+      // §SEARCH-FIELDS: Check searchFields + getSearchValues with token logic
       if (!matched) {
-        // Check searchFields + getSearchValues
         for (const val of extractSearchValues(item)) {
-          if (val.includes(q)) { matched = true; break }
-          if (queryTransliteratedLower && val.includes(queryTransliteratedLower)) { matched = true; break }
-          // Word-level field matching
-          const allWords = [...queryWords, ...transliteratedWords]
-          if (allWords.some((w) => val.includes(w))) { matched = true; break }
+          if (val.includes(normalizedQuery)) { matched = true; break }
+          if (queryTransliteratedNormalized && val.includes(queryTransliteratedNormalized)) { matched = true; break }
+          if (allTokens.some((w) => val.includes(w))) { matched = true; break }
         }
       }
+
       if (matched) exactMatches.push(item)
       else remaining.push(item)
     }
