@@ -536,7 +536,9 @@ export function BiometricGateModal() {
                             Enter your 6-digit PIN
                           </p>
                           <p className="mt-1 text-center text-xs text-muted-foreground">
-                            Set in Settings → Security if you haven&apos;t yet.
+                            Default testing PIN: <span className="font-bold text-foreground">123456</span>
+                            <br />
+                            Change it in Settings → Security.
                           </p>
                         </motion.div>
 
@@ -548,6 +550,12 @@ export function BiometricGateModal() {
                             onChange={(v) => setPin(v)}
                             onComplete={handlePinComplete}
                             disabled={verifying}
+                            // §AUTO-FOCUS: Focus the first slot when PIN mode opens
+                            // so the numeric keyboard appears automatically on mobile.
+                            autoFocus
+                            // §NUMERIC-KEYBOARD: inputMode=numeric opens the numeric
+                            // keypad on mobile devices.
+                            inputMode="numeric"
                           >
                             <InputOTPGroup>
                               <InputOTPSlot index={0} className="h-11 w-11" />

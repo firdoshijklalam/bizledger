@@ -86,7 +86,15 @@ export async function POST(req: NextRequest) {
 
     // 2. PIN verification path.
     if (method === 'pin') {
-      if (!settings.pinEnabled || !settings.pinHash) {
+      // §DEFAULT-PIN: If no PIN is set, use '123456' as the default testing PIN.
+      // This allows the client to test the wholesale/inventory gate flows without
+      // first configuring a PIN in Settings → Security. Once they set a custom PIN,
+      // this fallback is no longer used.
+      const DEFAULT_TEST_PIN = '123456'
+      const effectivePinHash = settings.pinHash || hashPin(DEFAULT_TEST_PIN)
+      const isPinEnabled = settings.pinEnabled || !settings.pinHash // enabled if explicitly set OR if no pin set yet (use default)
+
+      if (!isPinEnabled) {
         await logGate({
           businessId: business.id,
           gateType,
@@ -102,7 +110,7 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      if (!pin || hashPin(pin) !== settings.pinHash) {
+      if (!pin || hashPin(pin) !== effectivePinHash) {
         // Threat 4: Exponential backoff brute-force protection
         const { recordFailedPINAttempt, getLockoutMessage, getClientIP } = await import('@/lib/security')
         const clientIP = getClientIP(req)
