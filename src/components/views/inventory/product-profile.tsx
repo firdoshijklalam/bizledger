@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { CompareSuppliersModal } from '@/components/shared/compare-suppliers-modal'
 import { AIReconstructStudio } from '@/components/shared/ai-reconstruct-studio'
+import { CustomerInsights } from '@/components/shared/customer-insights'
 
 interface ProductWithImages extends Product {
   images?: ProductImage[]
@@ -321,6 +322,9 @@ export function ProductProfile({ productId }: { productId: string }) {
           </DialogFooter>
         </FormDialogContent>
       </Dialog>
+
+      {/* §CUSTOMER-INSIGHTS: Product-level CRM analytics — top buyers, churned, refill prediction */}
+      <CustomerInsights productId={productId} />
 
       {/* Delete confirmation */}
       <AlertDialog open={showDelete} onOpenChange={setShowDelete}>
