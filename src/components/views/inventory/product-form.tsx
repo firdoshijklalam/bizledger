@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
 import { useGateTrigger } from '@/store/biometric-gate-store'
-import { Package, Tag, Boxes, AlertTriangle, X, Plus, Upload, Camera, Sparkles, Loader2, ChevronRight, Globe, CheckCircle2, FileEdit, Trash2 } from 'lucide-react'
+import { Package, Tag, Boxes, AlertTriangle, X, Plus, Upload, Camera, Sparkles, Loader2, ChevronRight, Globe, CheckCircle2, FileEdit, Trash2, Calculator } from 'lucide-react'
 import { BadgePercent } from 'lucide-react'
 import { useVoiceInput } from '@/hooks/use-voice-input'
 import { Switch } from '@/components/ui/switch'
@@ -31,7 +31,15 @@ interface Props {
   productId?: string | null
 }
 
-const UNITS = ['pcs', 'kg', 'bag', 'box', 'ltr', 'meter']
+// §UNIT-SCALABILITY: Comprehensive unit list organized by category.
+// Includes "+ Add Custom Unit" for local units (Peti, Basta, Tin, etc.)
+const UNIT_CATEGORIES = [
+  { label: 'Weight', units: ['gm', 'kg', 'quintal', 'ton'] },
+  { label: 'Count', units: ['pcs', 'dozen', 'pair', 'pack', 'bundle', 'carton', 'roll'] },
+  { label: 'Volume', units: ['ml', 'ltr', 'gallon'] },
+  { label: 'Length', units: ['inch', 'foot', 'meter', 'yard'] },
+]
+const DEFAULT_UNITS = UNIT_CATEGORIES.flatMap((c) => c.units)
 
 export function ProductForm({ open, onOpenChange, productId }: Props) {
   const { triggerRefresh, setEditingProductId } = useAppStore()
@@ -42,7 +50,37 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   const [sku, setSku] = useState('')
   const [category, setCategory] = useState('')
   const [unit, setUnit] = useState('pcs')
+  // §CUSTOM-UNITS: User-defined units persisted in localStorage
+  const [customUnits, setCustomUnits] = useState<string[]>([])
+  const [showCustomUnitInput, setShowCustomUnitInput] = useState(false)
+  const [customUnitText, setCustomUnitText] = useState('')
+
+  // Load custom units from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('bizledger-custom-units')
+      if (saved) setCustomUnits(JSON.parse(saved))
+    } catch {}
+  }, [])
+
+  const allUnits = [...DEFAULT_UNITS, ...customUnits]
+
+  const addCustomUnit = () => {
+    const trimmed = customUnitText.trim().toLowerCase()
+    if (!trimmed) return
+    if (allUnits.includes(trimmed)) { toast.error('Unit already exists'); return }
+    const updated = [...customUnits, trimmed]
+    setCustomUnits(updated)
+    setCustomUnitText('')
+    setShowCustomUnitInput(false)
+    try { localStorage.setItem('bizledger-custom-units', JSON.stringify(updated)) } catch {}
+    setUnit(trimmed)
+    toast.success(`Custom unit "${trimmed}" added`)
+  }
   const [purchasePrice, setPurchasePrice] = useState('')
+  // §LANDED-COST: Supplier price + transport cost = actual purchase price
+  const [supplierPrice, setSupplierPrice] = useState('')
+  const [transportCost, setTransportCost] = useState('')
   const [salePrice, setSalePrice] = useState('')
   const [mrp, setMrp] = useState('')
   const [wholesalePrice, setWholesalePrice] = useState('')
@@ -173,7 +211,12 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
       setSku(existing.sku || '')
       setCategory(existing.category || '')
       setUnit(existing.unit)
-      setPurchasePrice(String(existing.purchasePrice))
+      // §LANDED-COST: Try to split existing purchasePrice into supplier + transport
+      // If no split data stored, put everything in supplierPrice
+      const pp = existing.purchasePrice || 0
+      setSupplierPrice(String(pp))
+      setTransportCost('0')
+      setPurchasePrice(String(pp))
       setSalePrice(String(existing.salePrice))
       setMrp(existing.mrp ? String(existing.mrp) : '')
       setWholesalePrice(existing.wholesalePrice ? String(existing.wholesalePrice) : '')
@@ -190,7 +233,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
       setSubCategory((existing as any).subCategory || '')
     } else if (!productId) {
       setName(''); setSku(''); setCategory(''); setUnit('pcs')
-      setPurchasePrice(''); setSalePrice(''); setMrp(''); setWholesalePrice('')
+      setSupplierPrice(''); setTransportCost(''); setPurchasePrice(''); setSalePrice(''); setMrp(''); setWholesalePrice('')
       setGstRate('0'); setStock(''); setLowStockThreshold('5'); setSupplierId('')
       setRetailEnabled(false); setRetailUnit('kg'); setConversionFactor(''); setRetailSalePrice(''); setRetailMrp(''); setLooseStock('')
       setSubCategory('')
@@ -229,7 +272,8 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
         sku: sku.trim(),
         category: category.trim(),
         unit,
-        purchasePrice: Number(purchasePrice) || 0,
+        // §LANDED-COST: Actual purchase price = supplier price + transport cost
+        purchasePrice: (Number(supplierPrice) || 0) + (Number(transportCost) || 0),
         salePrice: Number(salePrice) || 0,
         mrp: mrp ? Number(mrp) : null,
         wholesalePrice: wholesalePrice ? Number(wholesalePrice) : null,
@@ -289,21 +333,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <FormDialogContent className="max-w-md">
         <DialogHeader>
-          <div className="flex items-center justify-between">
-            <DialogTitle>{productId ? 'Edit Product' : t('inv.addProduct')}</DialogTitle>
-            {/* §DELETE-SAFETY: Trash icon in top-right, far from Save/Cancel.
-                Opens a separate confirmation dialog (double confirmation). */}
-            {productId && (
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-                className="w-8 h-8 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center text-muted-foreground hover:text-red-600 transition-colors"
-                aria-label="Delete product"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            )}
-          </div>
+          <DialogTitle>{productId ? 'Edit Product' : t('inv.addProduct')}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
@@ -587,26 +617,113 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
 
           <div>
             <Label className="text-xs mb-1.5 block">Unit</Label>
-            <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
-              {UNITS.map((u) => (
-                <button
-                  key={u}
-                  onClick={() => setUnit(u)}
-                  className={`px-3 py-2 rounded-lg text-xs font-medium shrink-0 min-h-[40px] ${
-                    unit === u ? 'bg-primary text-primary-foreground' : 'bg-muted'
-                  }`}
-                >
-                  {u}
-                </button>
+            <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
+              {UNIT_CATEGORIES.map((cat) => (
+                <div key={cat.label} className="shrink-0">
+                  <p className="text-[8px] text-muted-foreground uppercase tracking-wide mb-1 px-1">{cat.label}</p>
+                  <div className="flex gap-1">
+                    {cat.units.map((u) => (
+                      <button
+                        key={u}
+                        type="button"
+                        onClick={() => setUnit(u)}
+                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium min-h-[32px] ${
+                          unit === u ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                        }`}
+                      >
+                        {u}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
+              {/* Custom units from localStorage */}
+              {customUnits.length > 0 && (
+                <div className="shrink-0">
+                  <p className="text-[8px] text-muted-foreground uppercase tracking-wide mb-1 px-1">Custom</p>
+                  <div className="flex gap-1">
+                    {customUnits.map((u) => (
+                      <button
+                        key={u}
+                        type="button"
+                        onClick={() => setUnit(u)}
+                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium min-h-[32px] ${
+                          unit === u ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                        }`}
+                      >
+                        {u}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* §ADD-CUSTOM-UNIT: Inline input for adding custom units */}
+            {showCustomUnitInput ? (
+              <div className="flex gap-1.5 mt-2">
+                <Input
+                  value={customUnitText}
+                  onChange={(e) => setCustomUnitText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addCustomUnit() }}
+                  placeholder="e.g. peti, basta, tin"
+                  className="h-9 text-xs flex-1"
+                  autoFocus
+                />
+                <Button type="button" size="sm" onClick={addCustomUnit} className="h-9 text-xs">Add</Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => { setShowCustomUnitInput(false); setCustomUnitText('') }} className="h-9 text-xs">Cancel</Button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowCustomUnitInput(true)}
+                className="mt-2 text-[10px] text-primary hover:underline flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" /> Add Custom Unit
+              </button>
+            )}
+          </div>
+
+          {/* §LANDED-COST: Refactored purchase price into Landed Cost calculation.
+              Supplier Price + Transport & Labor = Actual Purchase Price (auto-calculated).
+              The actual purchase price is what gets saved to the DB for profit margins. */}
+          <div className="rounded-xl border border-border p-3 space-y-2 bg-muted/30">
+            <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+              <Calculator className="w-3.5 h-3.5" /> Landed Cost Calculation
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label htmlFor="sp-base" className="text-[10px]">Supplier Price ₹</Label>
+                <Input
+                  id="sp-base"
+                  value={supplierPrice}
+                  onChange={(e) => setSupplierPrice(e.target.value)}
+                  className="h-10 text-sm"
+                  inputMode="numeric"
+                  placeholder="0"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="sp-transport" className="text-[10px]">Transport & Labor ₹</Label>
+                <Input
+                  id="sp-transport"
+                  value={transportCost}
+                  onChange={(e) => setTransportCost(e.target.value)}
+                  className="h-10 text-sm"
+                  inputMode="numeric"
+                  placeholder="0"
+                />
+              </div>
+            </div>
+            {/* Auto-calculated actual purchase price */}
+            <div className="flex items-center justify-between p-2 rounded-lg bg-card border border-border">
+              <span className="text-[10px] text-muted-foreground">Actual Purchase Price (auto)</span>
+              <span className="text-sm font-bold tabular text-orange-600">
+                ₹{(Number(supplierPrice) || 0) + (Number(transportCost) || 0)}
+              </span>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="pp" className="text-xs">Purchase ₹</Label>
-              <Input id="pp" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} className="h-11" inputMode="numeric" />
-            </div>
             <div className="space-y-1.5">
               <Label htmlFor="sp" className="text-xs">Sale ₹</Label>
               <Input id="sp" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} className="h-11" inputMode="numeric" />
@@ -670,6 +787,20 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
             <Label htmlFor="lst" className="text-xs">Low Stock Alert Threshold</Label>
             <Input id="lst" value={lowStockThreshold} onChange={(e) => setLowStockThreshold(e.target.value)} className="h-11" inputMode="numeric" />
           </div>
+
+          {/* §DELETE-SAFETY: Delete button at the VERY BOTTOM of the form,
+              far from Save/Cancel. Red text, not a red button — less likely
+              to be accidentally tapped. Opens a confirmation modal. */}
+          {productId && (
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="w-full py-2.5 mt-4 text-xs font-medium text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition-colors border border-transparent hover:border-red-200 dark:hover:border-red-900/50"
+            >
+              <Trash2 className="w-3.5 h-3.5 inline mr-1" />
+              Delete Product
+            </button>
+          )}
         </div>
 
         <DialogFooter className="gap-2">
