@@ -1162,9 +1162,7 @@ export function SalePadView() {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h2 className="text-base font-semibold flex-1">Quick Sale</h2>
-        {/* §SECRET-COST-REVEAL: Eye toggle for cost price reveal feature.
-            When enabled, long-pressing a product card temporarily shows
-            the purchase price. When disabled, the gesture does nothing. */}
+        {/* §SECRET-COST-REVEAL: Eye toggle for cost price reveal feature. */}
         <button
           onClick={() => setIsCostRevealEnabled((v) => !v)}
           className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-colors ${
@@ -1178,6 +1176,57 @@ export function SalePadView() {
           {isCostRevealEnabled ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
         </button>
       </div>
+
+      {/* §SECRET-COST-REVEAL: Cost display bar — appears in the HEADER area
+          (not inside the product card) when long-pressing a product.
+          This ensures the customer can't see the cost by looking at the card.
+          When the merchant releases the press, this bar disappears instantly. */}
+      <AnimatePresence>
+        {revealedCostProductId && (() => {
+          const rp = products?.find((p) => p.id === revealedCostProductId)
+          if (!rp) return null
+          const sellPrice = getPrice(rp)
+          const unit = getPriceUnit(rp)
+          // §RETAIL-COST: For retail mode, divide purchase price by conversion factor
+          const baseCost = (rp as any).purchasePrice || 0
+          const convFactor = (rp as any).conversionFactor || 1
+          const costPrice = mode === 'retail' && (rp as any).retailEnabled && convFactor > 0
+            ? baseCost / convFactor
+            : baseCost
+          const profit = sellPrice - costPrice
+          const profitPct = costPrice > 0 ? Math.round((profit / costPrice) * 100) : 0
+          return (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.15 }}
+              className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-900/50"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <Package className="w-4 h-4 text-orange-600 shrink-0" />
+                <p className="text-xs font-medium truncate">{rp.name}</p>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="text-right">
+                  <p className="text-[9px] text-muted-foreground">Cost</p>
+                  <p className="text-sm font-bold tabular text-orange-600">
+                    {formatCurrency(costPrice, currency)}
+                    <span className="text-[9px] font-normal text-muted-foreground">/{unit}</span>
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[9px] text-muted-foreground">Profit</p>
+                  <p className={`text-sm font-bold tabular ${profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {formatCurrency(profit, currency)}
+                    <span className="text-[9px] font-normal text-muted-foreground"> ({profitPct}%)</span>
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )
+        })()}
+      </AnimatePresence>
 
       {/* §1: Customer Input Bar — pinned to absolute TOP of Quick Sale */}
       <div className="flex items-center gap-2">
@@ -1492,18 +1541,13 @@ export function SalePadView() {
               const price = getPrice(p)
               const unit = getPriceUnit(p)
               const inCart = cart.find((i) => i.cartKey === getCartKey(p.id, mode))
-              // §SECRET-COST-REVEAL: Check if this card's cost is currently revealed
-              const isCostRevealed = isCostRevealEnabled && revealedCostProductId === p.id
-              const costPrice = (p as any).purchasePrice || 0
-              // Calculate profit margin for display
-              const profit = price - costPrice
-              const profitPct = costPrice > 0 ? Math.round((profit / costPrice) * 100) : 0
               return (
                 <motion.button
                   key={p.id}
                   whileTap={{ scale: 0.96 }}
                   onClick={() => addToCart(p)}
-                  // §SECRET-COST-REVEAL: Long-press gesture to temporarily reveal cost price.
+                  // §SECRET-COST-REVEAL: Long-press gesture to reveal cost in the HEADER bar.
+                  // The product card itself stays 100% unchanged — customer can't see the cost.
                   // Only works when isCostRevealEnabled is true (master toggle).
                   onPointerDown={() => {
                     if (!isCostRevealEnabled) return
@@ -1528,7 +1572,7 @@ export function SalePadView() {
                   }}
                   className={`relative p-3 rounded-2xl border text-left transition-all ${
                     inCart ? 'border-primary bg-primary/5' : 'border-border bg-card hover:border-primary/30'
-                  } ${isCostRevealed ? 'ring-2 ring-orange-400' : ''}`}
+                  }`}
                 >
                   <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mb-2">
                     <Package className="w-4 h-4 text-amber-600" />
@@ -1539,32 +1583,18 @@ export function SalePadView() {
                       ? `${(p as any).looseStock} ${unit}`
                       : `${p.stock} ${p.unit}`} স্টকে
                   </p>
-                  {/* §SECRET-COST-REVEAL: When revealed, show cost price instead of selling price.
-                      Shown in orange with "Cost:" label. When not revealed, show normal price. */}
-                  {isCostRevealed ? (
-                    <div>
-                      <p className="text-sm font-bold tabular text-orange-600 mt-0.5">
-                        <span className="text-[9px] font-normal text-orange-500">Cost: </span>
-                        {formatCurrency(costPrice, currency)}
-                        <span className="text-[9px] text-muted-foreground font-normal">/{unit}</span>
-                      </p>
-                      <p className="text-[9px] text-muted-foreground">
-                        Profit: <span className="font-bold text-emerald-600">{formatCurrency(profit, currency)}</span> ({profitPct}%)
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-sm font-bold tabular text-primary mt-0.5">
-                      {formatCurrency(price, currency)}
-                      <span className="text-[9px] text-muted-foreground font-normal">/{unit}</span>
-                    </p>
-                  )}
+                  {/* Product card always shows the selling price — cost is shown in the header bar */}
+                  <p className="text-sm font-bold tabular text-primary mt-0.5">
+                    {formatCurrency(price, currency)}
+                    <span className="text-[9px] text-muted-foreground font-normal">/{unit}</span>
+                  </p>
                   {/* §TIERED-PRICING: Show badge when a custom/tiered price is applied */}
-                  {customPriceMap[p.id] && !isCostRevealed && (
+                  {customPriceMap[p.id] && (
                     <span className="absolute top-1 left-1 px-1 py-0.5 rounded text-[8px] font-bold bg-emerald-500 text-white">
                       {customPriceMap[p.id].source === 'buyer' ? 'CUSTOM' : 'TIER'}
                     </span>
                   )}
-                  {inCart && !isCostRevealed && (
+                  {inCart && (
                     <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
                       {inCart.quantity}
                     </span>

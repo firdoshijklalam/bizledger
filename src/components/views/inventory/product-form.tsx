@@ -765,7 +765,7 @@ interface CustomPriceRow {
 
 function TieredPricingPage({ productId, open, onOpenChange }: { productId: string; open: boolean; onOpenChange: (o: boolean) => void }) {
   const { triggerRefresh } = useAppStore()
-  const { data: customPrices, setData } = useFetch<CustomPriceRow[]>(`/api/products/${productId}/custom-prices`, [productId])
+  const { data: customPrices, refetch: refetchPrices } = useFetch<CustomPriceRow[]>(`/api/products/${productId}/custom-prices`, [productId])
   const { data: parties } = useFetch<Party[]>('/api/parties?type=customer', [])
   const [showAdd, setShowAdd] = useState(false)
   const [mode, setMode] = useState<'buyer' | 'group'>('buyer')
@@ -813,7 +813,8 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
       setGroupName('')
       setSelectedMemberIds(new Set())
       setShowMemberList(false)
-      triggerRefresh()
+      // §FIX: refetch the custom prices list so the UI updates immediately
+      await refetchPrices()
     } catch (e) {
       toast.error('Failed to set custom price')
     }
@@ -832,7 +833,7 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
       toast.success('Price updated')
       setEditingId(null)
       setEditPrice('')
-      triggerRefresh()
+      await refetchPrices()
     } catch (e) {
       toast.error('Failed to update price')
     }
@@ -847,7 +848,7 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
     try {
       await apiDelete(`/api/products/${productId}/custom-prices/${priceId}`)
       toast.success('Custom price removed')
-      triggerRefresh()
+      await refetchPrices()
     } catch (e) {
       toast.error('Failed to remove')
     }
