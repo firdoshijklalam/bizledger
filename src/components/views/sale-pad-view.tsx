@@ -217,6 +217,13 @@ export function SalePadView() {
   const [mode, setMode] = useState<SaleMode>('retail')
   const [wholesaleUnlocked, setWholesaleUnlocked] = useState(false)
   const triggerGate = useGateTrigger()
+  // §SECRET-COST-REVEAL: Master toggle for the secret purchase price feature.
+  // When enabled, long-pressing a product card temporarily shows the cost price.
+  // When disabled, the long-press does nothing — safe to hand phone to staff/customer.
+  const [isCostRevealEnabled, setIsCostRevealEnabled] = useState(false)
+  // Track which product card is currently being long-pressed (for cost reveal)
+  const [revealedCostProductId, setRevealedCostProductId] = useState<string | null>(null)
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // §2 Cloaked Wholesale: only reveal via explicit left-swipe from right edge
   const [wholesaleRevealed, setWholesaleRevealed] = useState(false)
   const swipeStartX = useRef<number | null>(null)
@@ -1155,6 +1162,21 @@ export function SalePadView() {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h2 className="text-base font-semibold flex-1">Quick Sale</h2>
+        {/* §SECRET-COST-REVEAL: Eye toggle for cost price reveal feature.
+            When enabled, long-pressing a product card temporarily shows
+            the purchase price. When disabled, the gesture does nothing. */}
+        <button
+          onClick={() => setIsCostRevealEnabled((v) => !v)}
+          className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+            isCostRevealEnabled
+              ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600'
+              : 'hover:bg-muted text-muted-foreground'
+          }`}
+          aria-label={isCostRevealEnabled ? 'Disable cost reveal' : 'Enable cost reveal'}
+          title={isCostRevealEnabled ? 'Cost reveal ON — long-press products to see purchase price' : 'Enable cost reveal'}
+        >
+          {isCostRevealEnabled ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+        </button>
       </div>
 
       {/* §1: Customer Input Bar — pinned to absolute TOP of Quick Sale */}
@@ -1469,18 +1491,44 @@ export function SalePadView() {
             {filteredProducts.map((p) => {
               const price = getPrice(p)
               const unit = getPriceUnit(p)
-              // §3: Use mode-suffixed cartKey so highlight only shows for the CURRENT mode.
-              // Switching from Retail to Full will NOT show the product as "in cart" if it
-              // was only added in Retail mode.
               const inCart = cart.find((i) => i.cartKey === getCartKey(p.id, mode))
+              // §SECRET-COST-REVEAL: Check if this card's cost is currently revealed
+              const isCostRevealed = isCostRevealEnabled && revealedCostProductId === p.id
+              const costPrice = (p as any).purchasePrice || 0
+              // Calculate profit margin for display
+              const profit = price - costPrice
+              const profitPct = costPrice > 0 ? Math.round((profit / costPrice) * 100) : 0
               return (
                 <motion.button
                   key={p.id}
                   whileTap={{ scale: 0.96 }}
                   onClick={() => addToCart(p)}
+                  // §SECRET-COST-REVEAL: Long-press gesture to temporarily reveal cost price.
+                  // Only works when isCostRevealEnabled is true (master toggle).
+                  onPointerDown={() => {
+                    if (!isCostRevealEnabled) return
+                    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
+                    longPressTimerRef.current = setTimeout(() => {
+                      setRevealedCostProductId(p.id)
+                    }, 400) // 400ms = long press threshold
+                  }}
+                  onPointerUp={() => {
+                    if (longPressTimerRef.current) {
+                      clearTimeout(longPressTimerRef.current)
+                      longPressTimerRef.current = null
+                    }
+                    setRevealedCostProductId(null)
+                  }}
+                  onPointerLeave={() => {
+                    if (longPressTimerRef.current) {
+                      clearTimeout(longPressTimerRef.current)
+                      longPressTimerRef.current = null
+                    }
+                    setRevealedCostProductId(null)
+                  }}
                   className={`relative p-3 rounded-2xl border text-left transition-all ${
                     inCart ? 'border-primary bg-primary/5' : 'border-border bg-card hover:border-primary/30'
-                  }`}
+                  } ${isCostRevealed ? 'ring-2 ring-orange-400' : ''}`}
                 >
                   <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mb-2">
                     <Package className="w-4 h-4 text-amber-600" />
@@ -1491,17 +1539,32 @@ export function SalePadView() {
                       ? `${(p as any).looseStock} ${unit}`
                       : `${p.stock} ${p.unit}`} স্টকে
                   </p>
-                  <p className="text-sm font-bold tabular text-primary mt-0.5">
-                    {formatCurrency(price, currency)}
-                    <span className="text-[9px] text-muted-foreground font-normal">/{unit}</span>
-                  </p>
+                  {/* §SECRET-COST-REVEAL: When revealed, show cost price instead of selling price.
+                      Shown in orange with "Cost:" label. When not revealed, show normal price. */}
+                  {isCostRevealed ? (
+                    <div>
+                      <p className="text-sm font-bold tabular text-orange-600 mt-0.5">
+                        <span className="text-[9px] font-normal text-orange-500">Cost: </span>
+                        {formatCurrency(costPrice, currency)}
+                        <span className="text-[9px] text-muted-foreground font-normal">/{unit}</span>
+                      </p>
+                      <p className="text-[9px] text-muted-foreground">
+                        Profit: <span className="font-bold text-emerald-600">{formatCurrency(profit, currency)}</span> ({profitPct}%)
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm font-bold tabular text-primary mt-0.5">
+                      {formatCurrency(price, currency)}
+                      <span className="text-[9px] text-muted-foreground font-normal">/{unit}</span>
+                    </p>
+                  )}
                   {/* §TIERED-PRICING: Show badge when a custom/tiered price is applied */}
-                  {customPriceMap[p.id] && (
+                  {customPriceMap[p.id] && !isCostRevealed && (
                     <span className="absolute top-1 left-1 px-1 py-0.5 rounded text-[8px] font-bold bg-emerald-500 text-white">
                       {customPriceMap[p.id].source === 'buyer' ? 'CUSTOM' : 'TIER'}
                     </span>
                   )}
-                  {inCart && (
+                  {inCart && !isCostRevealed && (
                     <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
                       {inCart.quantity}
                     </span>
