@@ -859,7 +859,7 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
   // Replaces the inline accordion that was too cluttered.
   if (!open || typeof document === 'undefined') return null
   return createPortal(
-    <div className="fixed inset-0 z-[100] bg-background flex flex-col">
+    <div className="fixed inset-0 z-[300] bg-background flex flex-col">
       {/* Header */}
       <div className="flex items-center gap-2 p-3 border-b border-border">
         <button
