@@ -1,5 +1,6 @@
 'use client'
 
+import { createPortal } from 'react-dom'
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost, apiPut, apiDelete } from '@/hooks/use-fetch'
@@ -7,6 +8,10 @@ import type { Product, Party } from '@/lib/types'
 import {
   Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -72,6 +77,8 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   // PRD Part 35 §2: Nested category tree
   const [categoryTree, setCategoryTree] = useState<any[]>([])
   const [showCategoryTree, setShowCategoryTree] = useState(false)
+  const [showPricingPage, setShowPricingPage] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [newSubCategories, setNewSubCategories] = useState<{ name: string; level: number }[]>([])
   const { data: treeData, refetch: refetchTree } = useFetch<any[]>('/api/category-tree', [])
 
@@ -278,10 +285,25 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <FormDialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{productId ? 'Edit Product' : t('inv.addProduct')}</DialogTitle>
+          <div className="flex items-center justify-between">
+            <DialogTitle>{productId ? 'Edit Product' : t('inv.addProduct')}</DialogTitle>
+            {/* §DELETE-SAFETY: Trash icon in top-right, far from Save/Cancel.
+                Opens a separate confirmation dialog (double confirmation). */}
+            {productId && (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="w-8 h-8 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center text-muted-foreground hover:text-red-600 transition-colors"
+                aria-label="Delete product"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
@@ -602,11 +624,25 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
             </div>
           </div>
 
-          {/* §DYNAMIC-PRICING: Tiered pricing manager — set per-buyer/per-group
-              custom prices that override the default wholesale price.
-              Resolution: Specific Buyer > Group > Default Wholesale. */}
+          {/* §DYNAMIC-PRICING: Clickable tile that opens a dedicated full-screen
+              pricing manager. No more inline accordion — too cluttered. */}
           {productId && (
-            <DynamicPricingManager productId={productId} />
+            <button
+              type="button"
+              onClick={() => setShowPricingPage(true)}
+              className="w-full flex items-center justify-between p-3 rounded-xl border border-violet-200 dark:border-violet-900/50 bg-violet-50/50 dark:bg-violet-950/20 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center">
+                  <Tag className="w-4 h-4 text-violet-600" />
+                </div>
+                <div className="text-left">
+                  <p className="text-xs font-semibold">Tiered / Custom Pricing</p>
+                  <p className="text-[10px] text-muted-foreground">Per-buyer & per-group rates</p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </button>
           )}
 
           {/* Auto discount display */}
@@ -637,23 +673,6 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
         </div>
 
         <DialogFooter className="gap-2">
-          {productId && (
-            <Button
-              variant="destructive"
-              onClick={async () => {
-                if (confirm(t('inv.deleteConfirm'))) {
-                  await fetch(`/api/products/${productId}`, { method: 'DELETE' })
-                  toast.success('Product deleted')
-                  triggerRefresh()
-                  onOpenChange(false)
-                  setEditingProductId(null)
-                }
-              }}
-              className="h-11"
-            >
-              {t('common.delete')}
-            </Button>
-          )}
           <Button variant="outline" onClick={() => onOpenChange(false)} className="h-11">
             {t('common.cancel')}
           </Button>
@@ -663,6 +682,48 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
         </DialogFooter>
       </FormDialogContent>
     </Dialog>
+
+    {/* §DEDICATED-PRICING-PAGE: Full-screen modal for managing tiered/custom
+        pricing. Separate from the product form to avoid clutter. */}
+    {productId && (
+      <TieredPricingPage
+        productId={productId}
+        open={showPricingPage}
+        onOpenChange={setShowPricingPage}
+      />
+    )}
+
+    {/* §DELETE-SAFETY: Product delete is now a separate dialog with double
+        confirmation, NOT in the main footer next to Save. */}
+    <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-destructive" /> Delete Product?
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently delete this product and all its custom prices.
+            This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="h-11">{t('common.cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={async () => {
+              await fetch(`/api/products/${productId}`, { method: 'DELETE' })
+              toast.success('Product deleted')
+              triggerRefresh()
+              onOpenChange(false)
+              setEditingProductId(null)
+            }}
+            className="h-11 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {t('common.delete')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }
 
@@ -702,11 +763,10 @@ interface CustomPriceRow {
   buyer?: { id: string; name: string; phone?: string | null; buyerGroup?: string | null } | null
 }
 
-function DynamicPricingManager({ productId }: { productId: string }) {
+function TieredPricingPage({ productId, open, onOpenChange }: { productId: string; open: boolean; onOpenChange: (o: boolean) => void }) {
   const { triggerRefresh } = useAppStore()
   const { data: customPrices, setData } = useFetch<CustomPriceRow[]>(`/api/products/${productId}/custom-prices`, [productId])
   const { data: parties } = useFetch<Party[]>('/api/parties?type=customer', [])
-  const [expanded, setExpanded] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [mode, setMode] = useState<'buyer' | 'group'>('buyer')
   const [selectedBuyerId, setSelectedBuyerId] = useState('')
@@ -795,29 +855,35 @@ function DynamicPricingManager({ productId }: { productId: string }) {
 
   const rows = customPrices || []
 
-  return (
-    <div className="rounded-xl border border-violet-200 dark:border-violet-900/50 bg-violet-50/50 dark:bg-violet-950/20 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-3 text-left"
-      >
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center">
-            <Tag className="w-3.5 h-3.5 text-violet-600" />
+  // §FULL-SCREEN-MODAL: Dedicated pricing page with full real estate.
+  // Replaces the inline accordion that was too cluttered.
+  if (!open || typeof document === 'undefined') return null
+  return createPortal(
+    <div className="fixed inset-0 z-[100] bg-background flex flex-col">
+      {/* Header */}
+      <div className="flex items-center gap-2 p-3 border-b border-border">
+        <button
+          onClick={() => onOpenChange(false)}
+          className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-muted shrink-0"
+          aria-label="Close"
+        >
+          <X className="w-5 h-5" />
+        </button>
+        <div className="flex items-center gap-2 flex-1">
+          <div className="w-8 h-8 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center">
+            <Tag className="w-4 h-4 text-violet-600" />
           </div>
           <div>
-            <p className="text-xs font-semibold">Tiered / Custom Pricing</p>
+            <h2 className="text-sm font-semibold">Tiered / Custom Pricing</h2>
             <p className="text-[10px] text-muted-foreground">
               {rows.length > 0 ? `${rows.length} custom price${rows.length > 1 ? 's' : ''} set` : 'Per-buyer & per-group rates'}
             </p>
           </div>
         </div>
-        <ChevronRight className={`w-4 h-4 text-muted-foreground transition-transform ${expanded ? 'rotate-90' : ''}`} />
-      </button>
+      </div>
 
-      {expanded && (
-        <div className="px-3 pb-3 space-y-2">
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto scroll-area p-4 space-y-3 max-w-2xl w-full mx-auto">
           {rows.length > 0 && (
             <div className="space-y-1.5">
               {rows.map((row) => (
@@ -1013,8 +1079,8 @@ function DynamicPricingManager({ productId }: { productId: string }) {
           <p className="text-[9px] text-muted-foreground leading-tight">
             Hierarchy: Specific Buyer &gt; Group &gt; Default Wholesale. Buyers get a push notification when a price is set for them.
           </p>
-        </div>
-      )}
-    </div>
+      </div>
+    </div>,
+    document.body
   )
 }
