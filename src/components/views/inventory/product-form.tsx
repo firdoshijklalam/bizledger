@@ -330,7 +330,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
 
   return (
     <>
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
       <FormDialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{productId ? 'Edit Product' : t('inv.addProduct')}</DialogTitle>
@@ -615,72 +615,55 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
             )}
           </div>
 
-          <div>
-            <Label className="text-xs mb-1.5 block">Unit</Label>
-            <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
-              {UNIT_CATEGORIES.map((cat) => (
-                <div key={cat.label} className="shrink-0">
-                  <p className="text-[8px] text-muted-foreground uppercase tracking-wide mb-1 px-1">{cat.label}</p>
-                  <div className="flex gap-1">
+          {/* §UNIT-SELECT: Compact dropdown instead of cluttered chip block.
+              Shows "Unit: kg ▼" — clicking opens a native select. */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Unit</Label>
+              <select
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+                className="w-full h-11 px-3 rounded-lg border border-border bg-card text-sm"
+              >
+                {UNIT_CATEGORIES.map((cat) => (
+                  <optgroup key={cat.label} label={cat.label}>
                     {cat.units.map((u) => (
-                      <button
-                        key={u}
-                        type="button"
-                        onClick={() => setUnit(u)}
-                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium min-h-[32px] ${
-                          unit === u ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                        }`}
-                      >
-                        {u}
-                      </button>
+                      <option key={u} value={u}>{u}</option>
                     ))}
-                  </div>
-                </div>
-              ))}
-              {/* Custom units from localStorage */}
-              {customUnits.length > 0 && (
-                <div className="shrink-0">
-                  <p className="text-[8px] text-muted-foreground uppercase tracking-wide mb-1 px-1">Custom</p>
-                  <div className="flex gap-1">
+                  </optgroup>
+                ))}
+                {customUnits.length > 0 && (
+                  <optgroup label="Custom">
                     {customUnits.map((u) => (
-                      <button
-                        key={u}
-                        type="button"
-                        onClick={() => setUnit(u)}
-                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium min-h-[32px] ${
-                          unit === u ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                        }`}
-                      >
-                        {u}
-                      </button>
+                      <option key={u} value={u}>{u}</option>
                     ))}
-                  </div>
+                  </optgroup>
+                )}
+              </select>
+            </div>
+            <div className="space-y-1.5 flex flex-col justify-end">
+              {showCustomUnitInput ? (
+                <div className="flex gap-1.5">
+                  <Input
+                    value={customUnitText}
+                    onChange={(e) => setCustomUnitText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') addCustomUnit() }}
+                    placeholder="e.g. peti, basta"
+                    className="h-11 text-sm flex-1"
+                    autoFocus
+                  />
+                  <Button type="button" size="sm" onClick={addCustomUnit} className="h-11">+</Button>
                 </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowCustomUnitInput(true)}
+                  className="h-11 text-[11px] text-primary border border-dashed border-primary/30 rounded-lg hover:bg-primary/5 flex items-center justify-center gap-1"
+                >
+                  <Plus className="w-3 h-3" /> Custom Unit
+                </button>
               )}
             </div>
-            {/* §ADD-CUSTOM-UNIT: Inline input for adding custom units */}
-            {showCustomUnitInput ? (
-              <div className="flex gap-1.5 mt-2">
-                <Input
-                  value={customUnitText}
-                  onChange={(e) => setCustomUnitText(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') addCustomUnit() }}
-                  placeholder="e.g. peti, basta, tin"
-                  className="h-9 text-xs flex-1"
-                  autoFocus
-                />
-                <Button type="button" size="sm" onClick={addCustomUnit} className="h-9 text-xs">Add</Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => { setShowCustomUnitInput(false); setCustomUnitText('') }} className="h-9 text-xs">Cancel</Button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setShowCustomUnitInput(true)}
-                className="mt-2 text-[10px] text-primary hover:underline flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" /> Add Custom Unit
-              </button>
-            )}
           </div>
 
           {/* §LANDED-COST: Refactored purchase price into Landed Cost calculation.
