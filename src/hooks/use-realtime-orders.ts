@@ -57,6 +57,8 @@ export function useRealtimeOrders(businessId: string | null | undefined) {
   const [statusOverrides, setStatusOverrides] = useState<Record<string, any>>({})
   const [isConnected, setIsConnected] = useState(false)
   const socketRef = useRef<Socket | null>(null)
+  // §FIX: Singleton AudioContext to prevent browser cap exhaustion
+  const audioCtxRef = useRef<AudioContext | null>(null)
 
   // WebSocket connection
   useEffect(() => {
@@ -110,8 +112,13 @@ export function useRealtimeOrders(businessId: string | null | undefined) {
       })
 
       // §SOUND: Play a notification sound (simple beep via Web Audio API)
+      // §FIX: Reuse a single AudioContext instead of creating a new one
+      // per event. Browsers cap AudioContext instances (~6).
       try {
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+        if (!audioCtxRef.current) {
+          audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+        }
+        const audioContext = audioCtxRef.current
         const oscillator = audioContext.createOscillator()
         const gain = audioContext.createGain()
         oscillator.connect(gain)

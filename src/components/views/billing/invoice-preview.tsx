@@ -14,7 +14,7 @@ import { toPng } from 'html-to-image'
 import { apiDelete, apiPut } from '@/hooks/use-fetch'
 
 export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
-  const { setSelectedInvoiceId, business, setSelectedPartyId, setActiveView, overlayInvoiceId, setOverlayInvoiceId, setOverlayPartyId } = useAppStore()
+  const { setSelectedInvoiceId, business, setSelectedPartyId, setActiveView, overlayInvoiceId, setOverlayInvoiceId, setOverlayPartyId, triggerRefresh, selectedInvoiceId } = useAppStore()
   const { t } = useI18n()
   const { data: invoice, loading, error } = useFetch<Invoice>(`/api/invoices/${invoiceId}`, [invoiceId])
   const printRef = useRef<HTMLDivElement>(null)
@@ -242,10 +242,12 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
     try {
       await apiPut(`/api/invoices/${invoice.id}`, { deliveryStatus: 'handed' })
       toast.success('মাল বুঝিয়ে দেওয়া হয়েছে ✓')
-      // Update local state
-      ;(invoice as any).deliveryStatus = 'handed'
-      // Force re-render
-      window.location.reload()
+      // §FIX: Use triggerRefresh instead of window.location.reload().
+      // reload() causes full SPA refresh (loses scroll, reloads everything).
+      triggerRefresh()
+      // Close the overlay to return to the invoice list
+      if (overlayInvoiceId) setOverlayInvoiceId(null)
+      else if (selectedInvoiceId) setSelectedInvoiceId(null)
     } catch (e) {
       toast.error('আপডেট ব্যর্থ')
     } finally {

@@ -301,13 +301,12 @@ export function PartyDetail({ partyId }: { partyId: string }) {
             onClick={() => {
               useAppStore.getState().setPendingNewCustomer(data.id, data.name)
               // §FIX: Clear BOTH overlays so sale-pad is visible.
-              // When the user navigated Dashboard → Invoice → Profile, both
-              // overlayPartyId (z-80) and overlayInvoiceId (z-70) are set.
-              // If we only clear the party overlay, the invoice overlay (z-70)
-              // remains on top of the sale-pad view, hiding it.
               setOverlayPartyId(null)
               setOverlayInvoiceId(null)
-              setReturnToView('khata')
+              // §FIX: Use current activeView as return target instead of
+              // hardcoding 'khata'. If the user came from Dashboard or Billing,
+              // they should return there, not always to Khata.
+              setReturnToView(useAppStore.getState().activeView || 'khata')
               setActiveView('sale-pad')
             }}
           >

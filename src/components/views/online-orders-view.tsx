@@ -42,7 +42,7 @@ const TABS = [
 
 export function OnlineOrdersView() {
   const { business } = useAppStore()
-  const { orders, isConnected, updateOrderStatus } = useRealtimeOrders(business?.id)
+  const { orders, isConnected, updateOrderStatus, refetch } = useRealtimeOrders(business?.id)
   const [activeTab, setActiveTab] = useState<string>('pending')
   const [updatingId, setUpdatingId] = useState<string | null>(null)
 
@@ -82,9 +82,9 @@ export function OnlineOrdersView() {
         toast.success(labels[status] || `Status updated to ${status}`)
       }
 
-      // §FIX: Update the local order status instead of window.location.reload().
-      // reload() causes a full page refresh (loses scroll, breaks SPA).
-      // Instead, use the hook's updateOrderStatus for a smooth SPA update.
+      // §FIX: Update local state AND refetch from server to keep cache in sync.
+      // Without refetch, navigating away and back would show stale status
+      // (statusOverrides is component-local and lost on unmount).
       if (status === 'completed' && data.synced) {
         updateOrderStatus(orderId, status, {
           syncedTransactionId: data.synced.transactionId,
@@ -93,6 +93,9 @@ export function OnlineOrdersView() {
       } else {
         updateOrderStatus(orderId, status)
       }
+      // §CACHE-SYNC: Refetch from server so TanStack Query cache is updated.
+      // This ensures the status persists across navigation (unmount/remount).
+      refetch()
     } catch (e: any) {
       toast.error(e.message || 'Failed to update order status')
     } finally {

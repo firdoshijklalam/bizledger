@@ -263,25 +263,10 @@ export function SalePadView() {
     return () => clearTimeout(t)
   }, [activeCartId])
 
-  // §3: Hardware back button interception — same as UI back button
-  useEffect(() => {
-    const handlePopState = (e: PopStateEvent) => {
-      // Check if we're on the sale-pad view
-      if (useAppStore.getState().activeView === 'sale-pad') {
-        e.preventDefault()
-        // Go to Billing page (same as UI back button)
-        useAppStore.getState().setActiveView('billing')
-        // Push state back so browser doesn't actually navigate away
-        window.history.pushState(null, '', window.location.href)
-      }
-    }
-    // Push a state so back button triggers popstate
-    window.history.pushState(null, '', window.location.href)
-    window.addEventListener('popstate', handlePopState)
-    return () => {
-      window.removeEventListener('popstate', handlePopState)
-    }
-  }, [])
+  // §FIX: Removed duplicate popstate handler — useBackButton (in app-shell)
+  // now handles sale-pad navigation properly. The old handler here competed
+  // with useBackButton, causing inconsistent back navigation (sometimes
+  // going to Dashboard, sometimes to Billing).
 
   // §4: Discount from global store + live Grand Total
   const discountMode = storeDiscountMode
@@ -646,8 +631,10 @@ export function SalePadView() {
           }
         }))
         if (cancelled || Object.keys(updates).length === 0) return
-        // Apply only where the resolved price differs from current price
-        setCart(cart.map((i) => {
+        // §FIX: Use functional setCart(prev => ...) to avoid stale closure.
+        // The old code captured `cart` at effect-run time; if the user added
+        // items while fetches were in-flight, they'd be silently dropped.
+        setCart(prev => prev.map((i) => {
           const u = updates[i.cartKey]
           if (!u || u.price === i.price) return i
           return { ...i, price: u.price, total: u.price * i.quantity }

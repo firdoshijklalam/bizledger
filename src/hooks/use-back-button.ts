@@ -4,102 +4,123 @@ import { useEffect, useRef } from 'react'
 import { useAppStore } from '@/store/app-store'
 
 /**
- * Android back button navigation with history back-stack (PRD Part 3 §4).
- * Maintains a stack of previous views. When the browser back button is pressed:
- * - If a sub-view (party detail, product profile, invoice preview) is open, go back to the parent view
- * - If a dialog/form is open, close it
- * - On dashboard, push a hash so back button shows "Exit App" confirmation
+ * Android back button navigation with history back-stack.
+ *
+ * §FIX: Completely rewritten to properly handle overlays and dialogs.
+ * The previous version only pushed state when `activeView` changed —
+ * opening overlays (party/invoice) didn't push state, so pressing back
+ * skipped steps and landed on Dashboard.
+ *
+ * §NEW-APPROACH:
+ * 1. Push an initial state on mount.
+ * 2. Push state whenever ANY overlay/dialog opens (not just view changes).
+ * 3. On popstate, close the topmost overlay/dialog in priority order.
+ * 4. After closing via popstate, re-push state so the user can press
+ *    back again to go further (doesn't exit the app prematurely).
+ * 5. Use a ref-based handler that reads latest state via getState()
+ *    so the effect doesn't re-run on every state change.
  */
+
 export function useBackButton() {
-  const {
-    activeView, setActiveView,
-    selectedPartyId, setSelectedPartyId,
-    selectedProductId, setSelectedProductId,
-    selectedInvoiceId, setSelectedInvoiceId,
-    showPartyForm, setShowPartyForm,
-    showProductForm, setShowProductForm,
-    showInvoiceForm, setShowInvoiceForm,
-    showSearch, setShowSearch,
-    fabOpen, setFabOpen,
-    // §OVERLAYS: Global overlay state — must be closed BEFORE sub-views.
-    overlayPartyId, setOverlayPartyId,
-    overlayInvoiceId, setOverlayInvoiceId,
-    // §GLOBAL-MODALS: Global modal state — must be closed BEFORE view navigation.
-    globalFamilyModal, closeFamilyModal,
-    globalPartnerModal, closePartnerModal,
-    globalFingerprintModal, closeFingerprintModal,
-  } = useAppStore()
+  const prevView = useRef<string>('')
 
-  const prevView = useRef(activeView)
-
-  // Push hash state on navigation (enables back button interception)
+  // Push initial state on mount
   useEffect(() => {
     if (typeof window === 'undefined') return
-    // Push a state entry whenever the view changes
-    if (activeView !== prevView.current) {
-      window.history.pushState({ view: activeView }, '')
-      prevView.current = activeView
-    }
-  }, [activeView])
+    window.history.pushState({ view: 'dashboard', initial: true }, '')
+    prevView.current = useAppStore.getState().activeView
+  }, [])
 
+  // Watch for overlay/dialog state changes and push history entries
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    const handlePopState = (e: PopStateEvent) => {
-      // Priority 1: Close global modals first (they're on top of everything)
-      if (globalFingerprintModal) { closeFingerprintModal(); return }
-      if (globalFamilyModal) { closeFamilyModal(); return }
-      if (globalPartnerModal) { closePartnerModal(); return }
+    const unsub = useAppStore.subscribe((state, prev) => {
+      // Push state when any overlay/dialog opens (null → non-null)
+      const openedOverlays: string[] = []
+      if (!prev.overlayPartyId && state.overlayPartyId) openedOverlays.push('party-overlay')
+      if (!prev.overlayInvoiceId && state.overlayInvoiceId) openedOverlays.push('invoice-overlay')
+      if (!prev.showSearch && state.showSearch) openedOverlays.push('search')
+      if (!prev.showPartyForm && state.showPartyForm) openedOverlays.push('party-form')
+      if (!prev.showProductForm && state.showProductForm) openedOverlays.push('product-form')
+      if (!prev.showInvoiceForm && state.showInvoiceForm) openedOverlays.push('invoice-form')
+      if (!prev.fabOpen && state.fabOpen) openedOverlays.push('fab')
+      if (!prev.globalFamilyModal && state.globalFamilyModal) openedOverlays.push('family-modal')
+      if (!prev.globalPartnerModal && state.globalPartnerModal) openedOverlays.push('partner-modal')
+      if (!prev.globalFingerprintModal && state.globalFingerprintModal) openedOverlays.push('fingerprint-modal')
 
-      // Priority 2: Close open dialogs/overlays
-      if (fabOpen) { setFabOpen(false); return }
-      if (showSearch) { setShowSearch(false); return }
-      if (showInvoiceForm) { setShowInvoiceForm(false); return }
-      if (showPartyForm) { setShowPartyForm(false); return }
-      if (showProductForm) { setShowProductForm(false); return }
-
-      // Priority 3: Close global overlays (z-80 party, z-70 invoice)
-      if (overlayPartyId) { setOverlayPartyId(null); return }
-      if (overlayInvoiceId) { setOverlayInvoiceId(null); return }
-
-      // Priority 4: Close sub-views
-      if (selectedInvoiceId) { setSelectedInvoiceId(null); return }
-      if (selectedProductId) { setSelectedProductId(null); return }
-      if (selectedPartyId) { setSelectedPartyId(null); return }
-
-      // If on dashboard, ask to exit
-      if (activeView === 'dashboard') {
-        if (confirm('Exit BizLedger?')) {
-          window.history.back()
-        } else {
-          // Re-push state so back button works next time
-          window.history.pushState({ view: 'dashboard' }, '')
-        }
-        return
+      // Push state when view changes
+      if (state.activeView !== prevView.current) {
+        window.history.pushState({ view: state.activeView }, '')
+        prevView.current = state.activeView
       }
 
-      // Otherwise go back to dashboard
-      setActiveView('dashboard')
-      // Re-push state to prevent immediate exit
-      window.history.pushState({ view: 'dashboard' }, '')
+      // Push state for each overlay that opened
+      for (const overlay of openedOverlays) {
+        window.history.pushState({ overlay }, '')
+      }
+    })
+
+    return () => unsub()
+  }, [])
+
+  // Popstate handler — uses getState() so it always reads latest state
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    let isExiting = false
+
+    const handlePopState = () => {
+      // §SKIP: If we just confirmed exit, let the browser handle it
+      if (isExiting) return
+
+      const state = useAppStore.getState()
+
+      // Priority 1: Close global modals first
+      if (state.globalFingerprintModal) { state.closeFingerprintModal(); rePush(); return }
+      if (state.globalFamilyModal) { state.closeFamilyModal(); rePush(); return }
+      if (state.globalPartnerModal) { state.closePartnerModal(); rePush(); return }
+
+      // Priority 2: Close dialogs
+      if (state.fabOpen) { state.setFabOpen(false); rePush(); return }
+      if (state.showSearch) { state.setShowSearch(false); rePush(); return }
+      if (state.showInvoiceForm) { state.setShowInvoiceForm(false); rePush(); return }
+      if (state.showPartyForm) { state.setShowPartyForm(false); rePush(); return }
+      if (state.showProductForm) { state.setShowProductForm(false); rePush(); return }
+
+      // Priority 3: Close global overlays (party z-80, then invoice z-70)
+      if (state.overlayPartyId) { state.setOverlayPartyId(null); rePush(); return }
+      if (state.overlayInvoiceId) { state.setOverlayInvoiceId(null); rePush(); return }
+
+      // Priority 4: Close sub-views
+      if (state.selectedInvoiceId) { state.setSelectedInvoiceId(null); rePush(); return }
+      if (state.selectedProductId) { state.setSelectedProductId(null); rePush(); return }
+      if (state.selectedPartyId) { state.setSelectedPartyId(null); rePush(); return }
+
+      // Priority 5: On dashboard, ask to exit
+      if (state.activeView === 'dashboard') {
+        if (confirm('Exit BizLedger?')) {
+          isExiting = true
+          // Let the browser go back naturally — don't re-push
+          return
+        } else {
+          rePush()
+          return
+        }
+      }
+
+      // Priority 6: Go back to dashboard
+      state.setActiveView('dashboard')
+      rePush()
+    }
+
+    // §RE-PUSH: After closing an overlay via popstate, re-push state so
+    // the user can press back again without exiting the app.
+    const rePush = () => {
+      window.history.pushState({ view: useAppStore.getState().activeView }, '')
     }
 
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [
-    activeView, setActiveView,
-    selectedPartyId, setSelectedPartyId,
-    selectedProductId, setSelectedProductId,
-    selectedInvoiceId, setSelectedInvoiceId,
-    showPartyForm, setShowPartyForm,
-    showProductForm, setShowProductForm,
-    showInvoiceForm, setShowInvoiceForm,
-    showSearch, setShowSearch,
-    fabOpen, setFabOpen,
-    overlayPartyId, setOverlayPartyId,
-    overlayInvoiceId, setOverlayInvoiceId,
-    globalFamilyModal, closeFamilyModal,
-    globalPartnerModal, closePartnerModal,
-    globalFingerprintModal, closeFingerprintModal,
-  ])
+  }, [])
 }
