@@ -281,12 +281,28 @@ function BuyerRow({
   currency: string
   unit: string
 }) {
+  // §WHATSAPP-QUICK-ACTION: Open a direct WhatsApp chat with this buyer,
+  // pre-filled with a product-specific restock/discount message.
+  const handleWhatsApp = () => {
+    if (!buyer.partyPhone) return
+    const phone = buyer.partyPhone.replace(/[^0-9]/g, '')
+    const msg = encodeURIComponent(
+      `Hi ${buyer.partyName}, regarding your purchase of this product —\n\n` +
+      (tab === 'refill'
+        ? `It's been a while since your last order. New stock available! Would you like to restock?`
+        : tab === 'churned'
+        ? `We miss you! Here's a special discount on your next order.`
+        : `Thank you for being a valued customer!`)
+    )
+    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank')
+  }
+
   return (
     <div className="flex items-center gap-3 p-3 border-b border-border/50 hover:bg-muted/30">
       {/* Rank / VIP badge */}
-      <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold ${
+      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold ${
         buyer.isVIP ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-muted text-muted-foreground'
-      }">
+      }`}>
         {buyer.isVIP ? <Crown className="w-3.5 h-3.5" /> : rank}
       </div>
 
@@ -300,13 +316,20 @@ function BuyerRow({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 mt-0.5">
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           <span className="text-[10px] text-muted-foreground">
             {buyer.purchaseCount} order{buyer.purchaseCount > 1 ? 's' : ''} · {buyer.totalQuantity} {unit}
           </span>
-          {tab === 'churned' && buyer.lastBoughtLabel && (
-            <span className="text-[10px] text-red-500 flex items-center gap-0.5">
-              <Clock className="w-2.5 h-2.5" /> {buyer.lastBoughtLabel}
+          {/* §LAST-BOUGHT: Show when the buyer last purchased this product */}
+          {buyer.lastBoughtLabel && (
+            <span className="text-[10px] text-muted-foreground/70">
+              · last: {buyer.lastBoughtLabel}
+            </span>
+          )}
+          {/* §REFILL-INFO: Show avg cycle on refill tab */}
+          {tab === 'refill' && buyer.avgCycleDays && (
+            <span className="text-[10px] text-blue-600 dark:text-blue-400">
+              · avg {buyer.avgCycleDays}d cycle
             </span>
           )}
           {tab === 'refill' && buyer.status && (
@@ -317,20 +340,42 @@ function BuyerRow({
               {buyer.status === 'overdue' ? 'Overdue' : buyer.status === 'due-soon' ? `Due in ${buyer.expectedInDays}d` : `In ${buyer.expectedInDays}d`}
             </span>
           )}
+          {/* §CHURNED-INFO: Show how long since last purchase */}
+          {tab === 'churned' && buyer.lastBoughtLabel && (
+            <span className="text-[10px] text-red-500 flex items-center gap-0.5">
+              <Clock className="w-2.5 h-2.5" /> {buyer.lastBoughtLabel}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Total spend + phone */}
-      <div className="text-right shrink-0">
+      {/* Total spend + quick actions */}
+      <div className="text-right shrink-0 flex flex-col items-end gap-1">
         <p className="text-xs font-bold tabular text-foreground">{formatCurrency(buyer.totalSpend, currency)}</p>
-        {buyer.partyPhone && (
-          <a
-            href={`tel:${buyer.partyPhone}`}
-            className="text-[10px] text-primary hover:underline flex items-center justify-end gap-0.5 mt-0.5"
-          >
-            <Phone className="w-2.5 h-2.5" /> {buyer.partyPhone}
-          </a>
-        )}
+        <div className="flex items-center gap-1">
+          {/* §WHATSAPP: Quick-action button to message this buyer directly */}
+          {buyer.partyPhone && (
+            <button
+              onClick={handleWhatsApp}
+              className="w-6 h-6 rounded-md flex items-center justify-center text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
+              aria-label={`WhatsApp ${buyer.partyName}`}
+              title={`WhatsApp ${buyer.partyName}`}
+            >
+              <MessageCircle className="w-3 h-3" />
+            </button>
+          )}
+          {/* §CALL: Quick-action to call the buyer */}
+          {buyer.partyPhone && (
+            <a
+              href={`tel:${buyer.partyPhone}`}
+              className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
+              aria-label={`Call ${buyer.partyName}`}
+              title={`Call ${buyer.partyName}`}
+            >
+              <Phone className="w-3 h-3" />
+            </a>
+          )}
+        </div>
       </div>
     </div>
   )
