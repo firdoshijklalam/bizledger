@@ -331,7 +331,17 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
-      <FormDialogContent className="max-w-md">
+      <FormDialogContent
+        className="max-w-md"
+        // §PORTAL-CLICK-FIX: When the TieredPricingPage portal (createPortal)
+        // is open, Radix Dialog with modal={false} treats clicks inside that
+        // portal as "outside" the dialog content and closes the entire dialog
+        // on pointer-down — BEFORE the button's onClick can fire. This makes
+        // every button in the pricing page appear "dead". Suppress the
+        // outside-close while the pricing page (or any child portal) is open.
+        onPointerDownOutside={(e) => { if (showPricingPage || showDeleteConfirm) e.preventDefault() }}
+        onInteractOutside={(e) => { if (showPricingPage || showDeleteConfirm) e.preventDefault() }}
+      >
         <DialogHeader>
           <DialogTitle>{productId ? 'Edit Product' : t('inv.addProduct')}</DialogTitle>
         </DialogHeader>
