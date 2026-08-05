@@ -273,13 +273,18 @@ export function rankByPosition<T>(
     // 1. Try exact substring match in the primary field
     const exact = findMatchPosition(primaryText, q)
     if (exact.index >= 0) {
+      // §EXACT-NAME-BONUS: If the query equals the ENTIRE name (case-insensitive),
+      // give a -0.5 bonus so it ranks above other prefix matches.
+      // Example: query "Alam" → "Alam" (exact name) ranks above "Alam Khan" (prefix).
+      const isExactName = primaryText.toLowerCase().trim() === q.toLowerCase().trim()
+      const exactNameBonus = isExactName ? -0.5 : 0
       ranked.push({
         item,
         position: exact.position,
         matchIndex: exact.index,
         matchLength: exact.length,
         matchedText: primaryText.substring(exact.index, exact.index + exact.length),
-        score: positionToScore(exact.position),
+        score: positionToScore(exact.position) + exactNameBonus,
       })
       continue
     }
@@ -366,16 +371,28 @@ export function rankByPosition<T>(
         wordIdx = wordExact.index
       }
 
-      // 4b. Cross-lingual word match (slight penalty)
+      // 4b. Cross-lingual word match (small penalty — preserves position hierarchy)
+      // §POSITION-DOMINATES: Penalty is 0.3 (not 0.5) so cross-lingual prefix (2.3)
+      // still ranks above exact infix (3.0). This ensures the user's rule
+      // (prefix > infix > suffix) is NEVER violated by match type.
       if (wordScore === null) {
         const wordCross = findCrossLingualMatch(primaryText, word)
         if (wordCross) {
-          wordScore = STEP4_BASE + positionToScore(wordCross.position) + 0.5
+          wordScore = STEP4_BASE + positionToScore(wordCross.position) + 0.3
           wordIdx = wordCross.start
         }
       }
 
-      // 4c. Consonant-skeleton fuzzy match (heavier penalty)
+      // 4c. Consonant-skeleton fuzzy match (small penalty — preserves position hierarchy)
+      // §POSITION-DOMINATES: Penalty is 0.5 (not 1.0) so fuzzy prefix (2.5)
+      // still ranks above exact infix (3.0). This ensures the user's rule
+      // (prefix > infix > suffix) is NEVER violated by match type.
+      //
+      // Full hierarchy within step 4:
+      //   exact prefix (2.0) < cross-lingual prefix (2.3) < fuzzy prefix (2.5)
+      //   < exact infix (3.0) < cross-lingual infix (3.3) < fuzzy infix (3.5)
+      //   < exact suffix (4.0) < cross-lingual suffix (4.3) < fuzzy suffix (4.5)
+      //   < secondary field (4.5+)
       if (wordScore === null) {
         const fuzzy = findFuzzyHighlightRange(primaryText, word)
         if (fuzzy) {
@@ -385,7 +402,7 @@ export function rankByPosition<T>(
           if (fuzzy.start === 0) fuzzyPos = 'prefix'
           else if (fuzzyEnd === primaryText.length) fuzzyPos = 'suffix'
           else fuzzyPos = 'infix'
-          wordScore = STEP4_BASE + positionToScore(fuzzyPos) + 1.0 // penalty for fuzzy
+          wordScore = STEP4_BASE + positionToScore(fuzzyPos) + 0.5 // small penalty for fuzzy
           wordIdx = fuzzy.start
         }
       }
@@ -408,7 +425,7 @@ export function rankByPosition<T>(
         for (const word of words) {
           if (field.toLowerCase().includes(word.toLowerCase())) {
             hasHighlightableMatch = true
-            bestWordScore = STEP4_BASE + 2.5 // secondary field match — worst priority
+            bestWordScore = STEP4_BASE + 2.7 // secondary field — worst (above fuzzy suffix 4.5)
             tokenMatchCount++
             break
           }
@@ -419,9 +436,13 @@ export function rankByPosition<T>(
 
     if (hasHighlightableMatch) {
       // §MULTI-TOKEN-BONUS: Each additional matching token improves the score.
-      // 0.5 bonus per extra token — enough to separate "2 tokens" from "1 token"
-      // but not enough to override a full-query exact match (score 0).
-      const multiTokenBonus = tokenMatchCount > 1 ? (tokenMatchCount - 1) * 0.5 : 0
+      // §POSITION-DOMINATES: Bonus is 0.25 per extra token — deliberately SMALL
+      // so it can NEVER override a position tier (which are 1.0 apart).
+      // Max bonus for 4 tokens = 0.75 < 1.0 tier gap.
+      // This ensures the user's rule is strictly followed:
+      //   prefix highlight → infix highlight → suffix highlight
+      // Token count only breaks ties WITHIN the same position tier.
+      const multiTokenBonus = tokenMatchCount > 1 ? (tokenMatchCount - 1) * 0.25 : 0
       const finalScore = bestWordScore - multiTokenBonus
       ranked.push({
         item,
@@ -435,10 +456,21 @@ export function rankByPosition<T>(
     // If no highlightable match, the item is FILTERED OUT — not returned.
   }
 
-  // Sort by score (ascending), then by matchIndex (ascending)
+  // §SORT-PRIORITY (user's rule):
+  // 1. score (ascending) — prefix (0) < infix (1) < suffix (2) < step4 (2+)
+  // 2. matchIndex (ascending) — earlier match in the name wins
+  // 3. matchedText LENGTH (descending) — longer match wins (more specific)
+  // 4. name LENGTH (ascending) — shorter name wins (more concise match)
+  //    e.g., "Alam" ranks above "Alam Khan" at the same position
   ranked.sort((a, b) => {
     if (a.score !== b.score) return a.score - b.score
-    return a.matchIndex - b.matchIndex
+    if (a.matchIndex !== b.matchIndex) return a.matchIndex - b.matchIndex
+    const aLen = (a.matchedText || '').length
+    const bLen = (b.matchedText || '').length
+    if (aLen !== bLen) return bLen - aLen // longer match first
+    const aNameLen = (a.item as any)?.name?.length || 0
+    const bNameLen = (b.item as any)?.name?.length || 0
+    return aNameLen - bNameLen // shorter name first
   })
 
   return ranked
