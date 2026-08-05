@@ -891,81 +891,141 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
   const { triggerRefresh } = useAppStore()
   const { data: customPrices, refetch: refetchPrices } = useFetch<CustomPriceRow[]>(`/api/products/${productId}/custom-prices`, [productId])
   const { data: parties } = useFetch<Party[]>('/api/parties?type=customer', [])
-  const [showAdd, setShowAdd] = useState(false)
+
+  // §UNIFIED-FORM: A single form state used for BOTH "Add" and "Edit".
+  // When `editingId` is null → Add mode (empty form).
+  // When `editingId` is set   → Edit mode (form pre-filled with the row's data).
+  // The user can edit BOTH the target entity (buyer/group) AND the price.
+  const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [mode, setMode] = useState<'buyer' | 'group'>('buyer')
   const [selectedBuyerId, setSelectedBuyerId] = useState('')
   const [groupName, setGroupName] = useState('')
   const [newPrice, setNewPrice] = useState('')
-  // §EDIT: Track which row is being edited
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editPrice, setEditPrice] = useState('')
   // §GROUP-MEMBERS: Selected customer IDs for group membership
   const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(new Set())
   const [showMemberList, setShowMemberList] = useState(false)
 
-  const handleAdd = async () => {
+  const isEditMode = editingId !== null
+
+  // §OPEN-FORM-ADD: Open the form in Add mode (empty).
+  const openAddForm = () => {
+    setEditingId(null)
+    setMode('buyer')
+    setSelectedBuyerId('')
+    setGroupName('')
+    setNewPrice('')
+    setSelectedMemberIds(new Set())
+    setShowMemberList(false)
+    setShowForm(true)
+  }
+
+  // §OPEN-FORM-EDIT: Open the form in Edit mode, pre-filled with the row's data.
+  // The user can change the buyer/group AND the price — full editability.
+  const openEditForm = (row: CustomPriceRow) => {
+    setEditingId(row.id)
+    if (row.buyerId && row.buyer) {
+      setMode('buyer')
+      setSelectedBuyerId(row.buyerId)
+      setGroupName('')
+    } else if (row.buyerGroupName) {
+      setMode('group')
+      setGroupName(row.buyerGroupName)
+      setSelectedBuyerId('')
+      // §PRE-FILL-MEMBERS: When editing a group, pre-select all customers
+      // who are currently in that group.
+      const membersInGroup = (parties || [])
+        .filter((p) => p.buyerGroup === row.buyerGroupName)
+        .map((p) => p.id)
+      setSelectedMemberIds(new Set(membersInGroup))
+    } else {
+      // Fallback: default to buyer mode
+      setMode('buyer')
+      setSelectedBuyerId('')
+      setGroupName('')
+    }
+    setNewPrice(String(row.customPrice))
+    setShowMemberList(false)
+    setShowForm(true)
+  }
+
+  // §CLOSE-FORM: Close the form and reset state.
+  const closeForm = () => {
+    setShowForm(false)
+    setEditingId(null)
+    setSelectedBuyerId('')
+    setGroupName('')
+    setNewPrice('')
+    setSelectedMemberIds(new Set())
+    setShowMemberList(false)
+  }
+
+  // §SUBMIT: Handles BOTH add and edit. If editingId is set → PUT (update).
+  // Otherwise → POST (create).
+  const handleSubmit = async () => {
     const price = Number(newPrice)
     if (isNaN(price) || price < 0) { toast.error('Invalid price'); return }
     if (mode === 'buyer' && !selectedBuyerId) { toast.error('Select a buyer'); return }
     if (mode === 'group' && !groupName.trim()) { toast.error('Enter a group name'); return }
+
     try {
-      await apiPost(`/api/products/${productId}/custom-prices`, {
-        buyerId: mode === 'buyer' ? selectedBuyerId : null,
-        buyerGroupName: mode === 'group' ? groupName.trim() : null,
-        customPrice: price,
-        buyerName: mode === 'buyer' ? parties?.find((p) => p.id === selectedBuyerId)?.name : groupName.trim(),
-      })
-      // §GROUP-MEMBERS: If creating a group price, assign the selected members
-      // to this group by setting their buyerGroup field.
-      if (mode === 'group' && selectedMemberIds.size > 0) {
-        await Promise.all(
-          Array.from(selectedMemberIds).map((pid) =>
-            fetch(`/api/parties/${pid}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ buyerGroup: groupName.trim() }),
-            })
+      if (isEditMode && editingId) {
+        // §EDIT: Update the existing custom price — entity AND/OR price.
+        const updateBody: Record<string, unknown> = { customPrice: price }
+        if (mode === 'buyer') {
+          updateBody.buyerId = selectedBuyerId
+          updateBody.buyerGroupName = null
+        } else {
+          updateBody.buyerGroupName = groupName.trim()
+          updateBody.buyerId = null
+        }
+        await fetch(`/api/products/${productId}/custom-prices/${editingId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updateBody),
+        })
+        // §GROUP-MEMBERS: If editing a group, update member assignments.
+        if (mode === 'group' && selectedMemberIds.size > 0) {
+          await Promise.all(
+            Array.from(selectedMemberIds).map((pid) =>
+              fetch(`/api/parties/${pid}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ buyerGroup: groupName.trim() }),
+              })
+            )
           )
-        )
-        toast.success(`Group "${groupName.trim()}" created with ${selectedMemberIds.size} member${selectedMemberIds.size > 1 ? 's' : ''} · Custom price set`)
+        }
+        toast.success('Custom price updated')
       } else {
-        toast.success('Custom price set · Buyer notified')
+        // §ADD: Create a new custom price.
+        await apiPost(`/api/products/${productId}/custom-prices`, {
+          buyerId: mode === 'buyer' ? selectedBuyerId : null,
+          buyerGroupName: mode === 'group' ? groupName.trim() : null,
+          customPrice: price,
+          buyerName: mode === 'buyer' ? parties?.find((p) => p.id === selectedBuyerId)?.name : groupName.trim(),
+        })
+        if (mode === 'group' && selectedMemberIds.size > 0) {
+          await Promise.all(
+            Array.from(selectedMemberIds).map((pid) =>
+              fetch(`/api/parties/${pid}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ buyerGroup: groupName.trim() }),
+              })
+            )
+          )
+          toast.success(`Group "${groupName.trim()}" created with ${selectedMemberIds.size} member${selectedMemberIds.size > 1 ? 's' : ''} · Custom price set`)
+        } else {
+          toast.success('Custom price set · Buyer notified')
+        }
       }
-      setShowAdd(false)
-      setNewPrice('')
-      setSelectedBuyerId('')
-      setGroupName('')
-      setSelectedMemberIds(new Set())
-      setShowMemberList(false)
-      // §FIX: refetch the custom prices list so the UI updates immediately
+      closeForm()
       await refetchPrices()
+      triggerRefresh()
     } catch (e) {
-      toast.error('Failed to set custom price')
+      toast.error(isEditMode ? 'Failed to update price' : 'Failed to set custom price')
     }
-  }
-
-  // §EDIT: Update an existing custom price
-  const handleEdit = async (priceId: string) => {
-    const price = Number(editPrice)
-    if (isNaN(price) || price < 0) { toast.error('Invalid price'); return }
-    try {
-      await fetch(`/api/products/${productId}/custom-prices/${priceId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customPrice: price }),
-      })
-      toast.success('Price updated')
-      setEditingId(null)
-      setEditPrice('')
-      await refetchPrices()
-    } catch (e) {
-      toast.error('Failed to update price')
-    }
-  }
-
-  const startEdit = (row: CustomPriceRow) => {
-    setEditingId(row.id)
-    setEditPrice(String(row.customPrice))
   }
 
   const handleDelete = async (priceId: string) => {
@@ -973,6 +1033,7 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
       await apiDelete(`/api/products/${productId}/custom-prices/${priceId}`)
       toast.success('Custom price removed')
       await refetchPrices()
+      triggerRefresh()
     } catch (e) {
       toast.error('Failed to remove')
     }
@@ -1020,78 +1081,57 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
                     {row.buyer?.phone && <p className="text-[10px] text-muted-foreground">{row.buyer.phone}</p>}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {editingId === row.id ? (
-                      // §EDIT-MODE: Inline price editing
-                      <>
-                        <input
-                          type="number"
-                          value={editPrice}
-                          onChange={(e) => setEditPrice(e.target.value)}
-                          className="w-20 h-7 px-1.5 text-xs rounded border border-violet-300 bg-background text-right tabular"
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleEdit(row.id)
-                            if (e.key === 'Escape') { setEditingId(null); setEditPrice('') }
-                          }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleEdit(row.id)}
-                          className="w-6 h-6 rounded-md hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center justify-center text-emerald-600"
-                          aria-label="Save price"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setEditingId(null); setEditPrice('') }}
-                          className="w-6 h-6 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground"
-                          aria-label="Cancel edit"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </>
-                    ) : (
-                      // §VIEW-MODE: Price + edit/delete buttons
-                      <>
-                        <span className="text-sm font-bold tabular text-violet-600">₹{row.customPrice.toFixed(2)}</span>
-                        {/* §EDIT: Pen icon for inline price editing */}
-                        <button
-                          type="button"
-                          onClick={() => startEdit(row)}
-                          className="w-6 h-6 rounded-md hover:bg-violet-50 dark:hover:bg-violet-950/30 flex items-center justify-center text-muted-foreground hover:text-violet-600"
-                          aria-label="Edit price"
-                        >
-                          <FileEdit className="w-3.5 h-3.5" />
-                        </button>
-                        {/* §DELETE: Trash icon for removing custom price */}
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(row.id)}
-                          className="w-6 h-6 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center text-muted-foreground hover:text-red-600"
-                          aria-label="Remove custom price"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </>
-                    )}
+                    <span className="text-sm font-bold tabular text-violet-600">₹{row.customPrice.toFixed(2)}</span>
+                    {/* §EDIT: Pen icon opens the FULL form (not inline) — allows
+                        changing BOTH the entity (buyer/group) AND the price. */}
+                    <button
+                      type="button"
+                      onClick={() => openEditForm(row)}
+                      className="w-6 h-6 rounded-md hover:bg-violet-50 dark:hover:bg-violet-950/30 flex items-center justify-center text-muted-foreground hover:text-violet-600"
+                      aria-label="Edit custom price"
+                    >
+                      <FileEdit className="w-3.5 h-3.5" />
+                    </button>
+                    {/* §DELETE: Trash icon for removing custom price */}
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(row.id)}
+                      className="w-6 h-6 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center justify-center text-muted-foreground hover:text-red-600"
+                      aria-label="Remove custom price"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
               ))}
             </div>
           )}
 
-          {showAdd ? (
-            <div className="p-3 rounded-lg bg-card border border-border space-y-2">
+          {showForm ? (
+            <div className="p-3 rounded-lg bg-card border border-violet-200 dark:border-violet-900/50 space-y-2">
+              {/* §FORM-HEADER: Shows whether this is Add or Edit mode */}
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-violet-600 flex items-center gap-1">
+                  {isEditMode ? (
+                    <><FileEdit className="w-3 h-3" /> Edit Custom Price</>
+                  ) : (
+                    <><Plus className="w-3 h-3" /> Add Custom Price</>
+                  )}
+                </p>
+                <button type="button" onClick={closeForm} className="w-6 h-6 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" aria-label="Cancel">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
               <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted">
                 <button
                   type="button"
-                  onClick={() => setMode('buyer')}
+                  onClick={() => { setMode('buyer'); setGroupName(''); setSelectedMemberIds(new Set()) }}
                   className={`flex-1 py-1.5 rounded-md text-[11px] font-medium ${mode === 'buyer' ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}
                 >👤 Specific Buyer</button>
                 <button
                   type="button"
-                  onClick={() => setMode('group')}
+                  onClick={() => { setMode('group'); setSelectedBuyerId('') }}
                   className={`flex-1 py-1.5 rounded-md text-[11px] font-medium ${mode === 'group' ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}
                 >👥 Group / Tier</button>
               </div>
@@ -1192,12 +1232,13 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
                   className="h-10 text-sm flex-1"
                   inputMode="numeric"
                 />
-                <Button type="button" size="sm" onClick={handleAdd} className="h-10">Set</Button>
+                <Button type="button" size="sm" onClick={handleSubmit} className="h-10">
+                  {isEditMode ? 'Update' : 'Set'}
+                </Button>
               </div>
-              <button type="button" onClick={() => setShowAdd(false)} className="text-[10px] text-muted-foreground">Cancel</button>
             </div>
           ) : (
-            <Button type="button" variant="outline" size="sm" onClick={() => setShowAdd(true)} className="w-full h-9 text-xs">
+            <Button type="button" variant="outline" size="sm" onClick={openAddForm} className="w-full h-9 text-xs">
               <Plus className="w-3.5 h-3.5 mr-1" /> Add Custom Price
             </Button>
           )}
