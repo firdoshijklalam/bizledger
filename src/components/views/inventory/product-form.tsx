@@ -1109,13 +1109,21 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
 
           {showForm ? (
             <div className="p-3 rounded-lg bg-card border border-violet-200 dark:border-violet-900/50 space-y-2">
-              {/* §FORM-HEADER: Shows whether this is Add or Edit mode */}
+              {/* §FORM-HEADER: Dynamic title based on mode + edit state.
+                  - Add mode: "Add Custom Price"
+                  - Edit buyer: "Edit Buyer Price"
+                  - Edit group: "Edit Group Price" */}
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold text-violet-600 flex items-center gap-1">
                   {isEditMode ? (
-                    <><FileEdit className="w-3 h-3" /> Edit Custom Price</>
+                    <>
+                      <FileEdit className="w-3 h-3" />
+                      {mode === 'buyer' ? 'Edit Buyer Price' : 'Edit Group Price'}
+                    </>
                   ) : (
-                    <><Plus className="w-3 h-3" /> Add Custom Price</>
+                    <>
+                      <Plus className="w-3 h-3" /> Add Custom Price
+                    </>
                   )}
                 </p>
                 <button type="button" onClick={closeForm} className="w-6 h-6 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" aria-label="Cancel">
@@ -1123,18 +1131,42 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
                 </button>
               </div>
 
-              <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted">
-                <button
-                  type="button"
-                  onClick={() => { setMode('buyer'); setGroupName(''); setSelectedMemberIds(new Set()) }}
-                  className={`flex-1 py-1.5 rounded-md text-[11px] font-medium ${mode === 'buyer' ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}
-                >👤 Specific Buyer</button>
-                <button
-                  type="button"
-                  onClick={() => { setMode('group'); setSelectedBuyerId('') }}
-                  className={`flex-1 py-1.5 rounded-md text-[11px] font-medium ${mode === 'group' ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}
-                >👥 Group / Tier</button>
-              </div>
+              {/* §TAB-SWITCHER: Only shown in ADD mode.
+                  In EDIT mode, the entity type (Buyer vs Group) is LOCKED at
+                  creation — switching tabs mid-edit causes UX confusion and
+                  data mutation errors. Instead, show a read-only badge
+                  indicating the locked entity type. */}
+              {!isEditMode ? (
+                <div className="flex items-center gap-1 p-0.5 rounded-lg bg-muted">
+                  <button
+                    type="button"
+                    onClick={() => { setMode('buyer'); setGroupName(''); setSelectedMemberIds(new Set()) }}
+                    className={`flex-1 py-1.5 rounded-md text-[11px] font-medium ${mode === 'buyer' ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}
+                  >👤 Specific Buyer</button>
+                  <button
+                    type="button"
+                    onClick={() => { setMode('group'); setSelectedBuyerId('') }}
+                    className={`flex-1 py-1.5 rounded-md text-[11px] font-medium ${mode === 'group' ? 'bg-card shadow-sm' : 'text-muted-foreground'}`}
+                  >👥 Group / Tier</button>
+                </div>
+              ) : (
+                /* §LOCKED-ENTITY-BADGE: Read-only indicator showing the locked
+                   entity type in Edit mode. Not clickable — prevents the user
+                   from switching a Buyer rule into a Group rule (or vice versa)
+                   halfway through editing. */
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-900/50">
+                  {mode === 'buyer' ? (
+                    <span className="text-[11px] font-medium text-violet-700 dark:text-violet-300 flex items-center gap-1">
+                      <span>👤</span> Specific Buyer
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-medium text-violet-700 dark:text-violet-300 flex items-center gap-1">
+                      <span>👥</span> Group / Tier
+                    </span>
+                  )}
+                  <span className="text-[9px] text-muted-foreground ml-auto">locked</span>
+                </div>
+              )}
               {mode === 'buyer' ? (
                 <select
                   value={selectedBuyerId}
