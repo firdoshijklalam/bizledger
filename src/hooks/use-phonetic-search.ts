@@ -143,11 +143,15 @@ export function usePhoneticSearch<T extends Record<string, any>>(
 
       // §TOKEN-BASED: Check each SIGNIFICANT token (stop words filtered out).
       // Prefix matches score much higher than infix matches.
+      // §MULTI-TOKEN-BONUS: Each additional token match adds to the score,
+      // so items matching MORE tokens rank higher than items matching fewer.
       if (!matched || score < 500) {
+        let tokenMatchCount = 0
         for (const token of significantTokens) {
           const idx = name.indexOf(token)
           if (idx >= 0) {
             matched = true
+            tokenMatchCount++
             if (idx === 0) {
               // Prefix match — highest token score
               score = Math.max(score, 500 + token.length * 10)
@@ -159,6 +163,12 @@ export function usePhoneticSearch<T extends Record<string, any>>(
               score = Math.max(score, 300 + token.length * 5)
             }
           }
+        }
+        // §MULTI-TOKEN-BONUS: Add 200 per additional matching token.
+        // This ensures "Firdosh Alam" (2 tokens: "firdos" + "alam") ranks
+        // higher than just "Alam" (1 token: "alam").
+        if (tokenMatchCount > 1) {
+          score += (tokenMatchCount - 1) * 200
         }
       }
 

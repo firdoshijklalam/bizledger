@@ -589,72 +589,72 @@ export function findAllHighlightRanges(text: string, query: string): Array<{ sta
 
 /**
  * §FUZZY-HIGHLIGHT-RANGE: Find the best matching range in text for a query
- * using consonant-skeleton matching. Strips vowels from both and finds the
- * longest CONSECUTIVE consonant match, then maps it back to the original
- * text positions.
+ * using Longest Common Substring (LCS) at the character level.
  *
- * §STRICT: Only matches CONSECUTIVE consonants (no scattered subsequence
- * matching). This prevents false positives like "Das" matching "Bhandar"
- * just because 'd' and 's' appear somewhere in the text.
+ * §PREFIX-PRIORITY: Starts matching from index 0 of the text. The algorithm
+ * walks both strings character-by-character, finding the longest contiguous
+ * matching run. This prioritizes prefix matches naturally.
  *
- * Example: text="Firdosh Alam", query="Firdaus"
- *   → skeletons: text="frdshlm", query="frds"
- *   → CONSECUTIVE match "frds" at index 0 → highlight "Firdo" in original
+ * Example: text="Firdosh", query="firdouse"
+ *   → Match starts at index 0: "F","i","r","d" match (4 chars)
+ *   → Then "o" matches "o" (5 chars)
+ *   → Then "s" matches "s" (6 chars)
+ *   → Then "h" vs "u" — mismatch. Stop.
+ *   → Longest run = "Firdos" (6 chars) → highlight "Firdos" in "Firdosh"
  *
  * Example: text="Maa Lakshmi Bhandar", query="Das"
- *   → skeletons: text="mlkshmbhndr", query="ds"
- *   → NO consecutive match (d and s are not adjacent in the text) → null
+ *   → No 3+ char contiguous match → null (prevents false positives)
  */
 function findFuzzyHighlightRange(text: string, query: string): { start: number; end: number } | null {
-  if (!text || !query || query.length < 4) return null
+  if (!text || !query || query.length < 3) return null
 
-  const textGraphemes = getGraphemeStrings(text)
-  const queryConsonants = getGraphemeStrings(query).filter((g) => !isVowelGrapheme(g))
-  // §STRICT: Require at least 3 consonants to prevent false positives.
-  // 2-consonant matches like "nd" (from "and") match too many words.
-  // 3+ consonants like "frds" (from "Firdaus") are specific enough.
-  if (queryConsonants.length < 3) return null
+  const t = text.toLowerCase()
+  const q = query.toLowerCase()
 
-  // §STRICT: We require CONSECUTIVE consonant matches.
-  // Slide a window of the same length as queryConsonants through the text.
-  // All consonants in the window must match in order.
-  const windowSize = queryConsonants.length
+  // §LCS-WITH-SKIP: Find the longest contiguous character match.
+  // Also supports "skip-one" in the query: if the query has an extra char
+  // that doesn't match, skip it and try continuing.
+  // Example: query="firdouse", text="firdosh"
+  //   → Exact match: "firdo" (5 chars, stops at 'u' vs 's')
+  //   → Skip 'u' in query: "firdos" (6 chars in text) ✓
+  let bestStart = -1
+  let bestLength = 0
 
-  for (let start = 0; start <= textGraphemes.length - windowSize; start++) {
-    // Extract consonants from the window [start, start+windowSize)
-    // (skipping vowels in the text, but requiring all query consonants
-    //  to appear CONSECUTIVELY in the text's consonant sequence)
-    let qi = 0
-    let end = start
-    let matchCount = 0
-    let consecutive = true
-
-    for (let ti = start; ti < textGraphemes.length && qi < queryConsonants.length; ti++) {
-      const tg = textGraphemes[ti]
-      // Skip vowels in the text (they don't break consecutiveness for consonants)
-      if (isVowelGrapheme(tg)) {
-        continue
-      }
-      // This is a consonant — it must match the next query consonant
-      if (graphemesMatch(tg, queryConsonants[qi])) {
-        qi++
-        end = ti + 1
-        matchCount++
+  for (let ti = 0; ti < t.length; ti++) {
+    // Try exact contiguous match from this position
+    let matchLen = 0
+    for (let offset = 0; ti + offset < t.length && offset < q.length; offset++) {
+      if (t[ti + offset] === q[offset]) {
+        matchLen++
       } else {
-        // Consonant mismatch → this window doesn't work
-        consecutive = false
         break
       }
     }
+    if (matchLen >= 3 && matchLen > bestLength) {
+      bestLength = matchLen
+      bestStart = ti
+    }
 
-    // All query consonants must be matched, and they must be consecutive
-    // (no non-matching consonants between them in the text)
-    if (consecutive && matchCount === queryConsonants.length) {
-      const charStart = graphemeIndexToCharIndex(text, start)
-      const charEnd = graphemeIndexToCharIndex(text, end)
-      return { start: charStart, end: charEnd }
+    // §SKIP-ONE: Allow 1 extra char in the query to be skipped.
+    // After a mismatch, skip the next query char and try continuing.
+    if (matchLen >= 2 && matchLen < q.length - 1) {
+      let skipMatchLen = matchLen
+      for (let offset = matchLen + 1; ti + skipMatchLen < t.length && offset < q.length; offset++) {
+        const textIdx = ti + skipMatchLen
+        if (textIdx < t.length && t[textIdx] === q[offset]) {
+          skipMatchLen++
+        } else {
+          break
+        }
+      }
+      if (skipMatchLen > bestLength && skipMatchLen >= 3) {
+        bestLength = skipMatchLen
+        bestStart = ti
+      }
     }
   }
 
-  return null
+  if (bestStart < 0 || bestLength < 3) return null
+
+  return { start: bestStart, end: bestStart + bestLength }
 }
