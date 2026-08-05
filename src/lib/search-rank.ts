@@ -329,27 +329,74 @@ export function rankByPosition<T>(
     //    "Das" matching "Maa Lakshmi Bhandar" (no consecutive consonant match)
     //    while allowing "Firdaus Alam" to match "Firdosh Alam" (Alam is exact,
     //    Fird is a consonant match).
+    //
+    // §SCORING-FIX: The fallback now assigns PROPER scores based on the BEST
+    // word match position (prefix < infix < suffix) instead of always 3.
+    // It also adds a MULTI-TOKEN BONUS so items matching MORE query tokens
+    // rank higher than items matching fewer tokens.
+    // Example: query "Firdous Alam"
+    //   - "Firdous Alam" (full match, caught in step 1) → score 0
+    //   - "Alam" (1 token "alam" prefix match) → score 3.0 (prefix) + 0 bonus = 3.0
+    //   - "Firdosh Alam" (2 tokens: "firdos" fuzzy prefix + "alam" exact suffix)
+    //     → bestWordScore = 2.0 (suffix) + 0.5 multi-token bonus = 2.5
+    //     → ranks ABOVE "Alam" (3.0) ✓
     const words = q.split(/\s+/).filter((w) => w.length >= 2)
     let hasHighlightableMatch = false
+    // §BASE-PENALTY: Step 4 matches start at 2.0 so they NEVER tie with
+    // step 1 (full exact match, score 0-2). This ensures a full-query
+    // exact match always ranks above a per-word match.
+    //   Step 4 prefix word match  → 2.0 + 0     = 2.0
+    //   Step 4 infix word match   → 2.0 + 1     = 3.0
+    //   Step 4 suffix word match  → 2.0 + 2     = 4.0
+    //   Step 4 fuzzy prefix       → 2.0 + 0 + 1 = 3.0
+    //   Multi-token bonus: -0.5 per extra token
+    const STEP4_BASE = 2.0
+    let bestWordScore = 99.0 // worst initially
+    let tokenMatchCount = 0
+    let bestMatchIndex = -1
 
     for (const word of words) {
+      let wordScore: number | null = null
+      let wordIdx = -1
+
       // 4a. Exact word match in primary text
       const wordExact = findMatchPosition(primaryText, word)
       if (wordExact.index >= 0) {
-        hasHighlightableMatch = true
-        break
+        wordScore = STEP4_BASE + positionToScore(wordExact.position)
+        wordIdx = wordExact.index
       }
-      // 4b. Cross-lingual word match
-      const wordCross = findCrossLingualMatch(primaryText, word)
-      if (wordCross) {
-        hasHighlightableMatch = true
-        break
+
+      // 4b. Cross-lingual word match (slight penalty)
+      if (wordScore === null) {
+        const wordCross = findCrossLingualMatch(primaryText, word)
+        if (wordCross) {
+          wordScore = STEP4_BASE + positionToScore(wordCross.position) + 0.5
+          wordIdx = wordCross.start
+        }
       }
-      // 4c. Consonant-skeleton fuzzy match (consecutive consonants)
-      const fuzzy = findFuzzyHighlightRange(primaryText, word)
-      if (fuzzy) {
+
+      // 4c. Consonant-skeleton fuzzy match (heavier penalty)
+      if (wordScore === null) {
+        const fuzzy = findFuzzyHighlightRange(primaryText, word)
+        if (fuzzy) {
+          // Classify the fuzzy match position
+          const fuzzyEnd = fuzzy.end
+          let fuzzyPos: MatchPosition
+          if (fuzzy.start === 0) fuzzyPos = 'prefix'
+          else if (fuzzyEnd === primaryText.length) fuzzyPos = 'suffix'
+          else fuzzyPos = 'infix'
+          wordScore = STEP4_BASE + positionToScore(fuzzyPos) + 1.0 // penalty for fuzzy
+          wordIdx = fuzzy.start
+        }
+      }
+
+      if (wordScore !== null) {
         hasHighlightableMatch = true
-        break
+        tokenMatchCount++
+        if (wordScore < bestWordScore) {
+          bestWordScore = wordScore
+          bestMatchIndex = wordIdx
+        }
       }
     }
 
@@ -361,6 +408,8 @@ export function rankByPosition<T>(
         for (const word of words) {
           if (field.toLowerCase().includes(word.toLowerCase())) {
             hasHighlightableMatch = true
+            bestWordScore = STEP4_BASE + 2.5 // secondary field match — worst priority
+            tokenMatchCount++
             break
           }
         }
@@ -369,13 +418,18 @@ export function rankByPosition<T>(
     }
 
     if (hasHighlightableMatch) {
+      // §MULTI-TOKEN-BONUS: Each additional matching token improves the score.
+      // 0.5 bonus per extra token — enough to separate "2 tokens" from "1 token"
+      // but not enough to override a full-query exact match (score 0).
+      const multiTokenBonus = tokenMatchCount > 1 ? (tokenMatchCount - 1) * 0.5 : 0
+      const finalScore = bestWordScore - multiTokenBonus
       ranked.push({
         item,
         position: 'none' as MatchPosition,
-        matchIndex: -1,
+        matchIndex: bestMatchIndex,
         matchLength: 0,
         matchedText: '',
-        score: 3, // lowest priority (below suffix)
+        score: finalScore,
       })
     }
     // If no highlightable match, the item is FILTERED OUT — not returned.
