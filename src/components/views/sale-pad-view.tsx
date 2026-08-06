@@ -1673,12 +1673,9 @@ export function SalePadView() {
                     {formatCurrency(price, currency)}
                     <span className="text-[9px] text-muted-foreground font-normal">/{unit}</span>
                   </p>
-                  {/* §TIERED-PRICING: Show badge when a custom/tiered price is applied */}
-                  {customPriceMap[p.id] && (
-                    <span className="absolute top-1 left-1 px-1 py-0.5 rounded text-[8px] font-bold bg-emerald-500 text-white">
-                      {customPriceMap[p.id].source === 'buyer' ? 'CUSTOM' : 'TIER'}
-                    </span>
-                  )}
+                  {/* §PRIVACY-FIX: Removed the green "CUSTOM"/"TIER" badge — it caused
+                      visual clutter and the merchant already knows the price is customized
+                      because they explicitly selected that buyer's cart. Cards are now clean. */}
                   {inCart && (
                     <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
                       {inCart.quantity}
@@ -2415,20 +2412,22 @@ export function SalePadView() {
           position:fixed so it stays pinned to the top-right when scrolling
           down the product grid.
           
-          §COST-TOOLTIP: When a product is long-pressed (and cost reveal is ON),
-          the purchase cost + profit appears as a floating tooltip DIRECTLY
-          BELOW the FAB — dark background with crisp white text for maximum
-          readability. position:fixed so always visible regardless of scroll. */}
+          §STEALTH-TOOLTIP: When a product is long-pressed (and cost reveal is ON),
+          ONLY the raw cost price appears as a tiny, dull-colored text label
+          next to the FAB. No profit, no percentage, no sell price — those are
+          a privacy hazard at a physical counter where customers can peek.
+          The text is faint grey so it blends in; only the merchant knows
+          what that number means. */}
       {typeof document !== 'undefined' && activeView === 'sale-pad' && createPortal(
-        <div className="fixed top-14 right-3 z-[500] flex flex-col items-end gap-2">
-          {/* §COST-TOOLTIP: Floating cost/profit display — appears BELOW the
-              Eye FAB when a product is long-pressed. Dark background + white
-              text for crisp readability. Fixed position so always in viewport. */}
+        <div className="fixed top-14 right-3 z-[500] flex items-center gap-1.5">
+          {/* §STEALTH-COST: Minimal cost display — appears next to the Eye FAB
+              when a product is long-pressed. Shows ONLY the raw cost price in
+              faint grey text. No background, no border, no profit/percentage.
+              Blends in so customers can't easily notice it. */}
           <AnimatePresence>
             {revealedCostProductId && isCostRevealEnabled && (() => {
               const rp = products?.find((p) => p.id === revealedCostProductId)
               if (!rp) return null
-              const sellPrice = getPrice(rp)
               const unit = getPriceUnit(rp)
               // §RETAIL-COST: For retail mode, divide purchase price by conversion factor
               const baseCost = (rp as any).purchasePrice || 0
@@ -2436,46 +2435,18 @@ export function SalePadView() {
               const costPrice = mode === 'retail' && (rp as any).retailEnabled && convFactor > 0
                 ? baseCost / convFactor
                 : baseCost
-              const profit = sellPrice - costPrice
-              const profitPct = costPrice > 0 ? Math.round((profit / costPrice) * 100) : 0
               return (
-                <motion.div
-                  initial={{ opacity: 0, y: -10, scale: 0.9 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.9 }}
-                  transition={{ duration: 0.15 }}
-                  /* §DARK-TOOLTIP: Dark slate background with crisp white text
-                     for maximum readability — no eye strain. */
-                  className="w-60 p-3 rounded-xl bg-slate-900 dark:bg-slate-950 text-white shadow-xl shadow-black/30 border border-slate-700 dark:border-slate-800"
+                <motion.span
+                  initial={{ opacity: 0, x: 5 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 5 }}
+                  transition={{ duration: 0.1 }}
+                  /* §STEALTH: Faint grey text, no background, no border. Just the
+                     raw number. Only the merchant knows what it means. */
+                  className="text-[11px] tabular text-muted-foreground/60 dark:text-muted-foreground/50 select-none"
                 >
-                  {/* Product name */}
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <Package className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <p className="text-xs font-medium truncate">{rp.name}</p>
-                  </div>
-                  {/* Cost + Profit */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-[9px] text-slate-400 uppercase tracking-wide">Cost</p>
-                      <p className="text-sm font-bold tabular text-orange-400">
-                        {formatCurrency(costPrice, currency)}
-                        <span className="text-[9px] font-normal text-slate-400">/{unit}</span>
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[9px] text-slate-400 uppercase tracking-wide">Profit</p>
-                      <p className={`text-sm font-bold tabular ${profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {formatCurrency(profit, currency)}
-                        <span className="text-[9px] font-normal text-slate-400"> ({profitPct}%)</span>
-                      </p>
-                    </div>
-                  </div>
-                  {/* Sell price */}
-                  <div className="mt-1.5 pt-1.5 border-t border-slate-700 dark:border-slate-800 flex items-center justify-between">
-                    <p className="text-[9px] text-slate-400 uppercase tracking-wide">Sell Price</p>
-                    <p className="text-xs font-bold tabular text-white">{formatCurrency(sellPrice, currency)}</p>
-                  </div>
-                </motion.div>
+                  {formatCurrency(costPrice, currency)}/{unit}
+                </motion.span>
               )
             })()}
           </AnimatePresence>
@@ -2483,19 +2454,15 @@ export function SalePadView() {
           {/* §EYE-FAB: The toggle button itself — top-right, fixed position */}
           <button
             onClick={() => setIsCostRevealEnabled((v) => !v)}
-            className={`w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-90 ${
+            className={`w-9 h-9 rounded-full shadow-sm flex items-center justify-center transition-all active:scale-90 ${
               isCostRevealEnabled
-                ? 'bg-orange-500 text-white shadow-orange-500/30'
-                : 'bg-background border border-border text-muted-foreground shadow-black/10'
+                ? 'bg-muted text-muted-foreground'
+                : 'bg-background border border-border text-muted-foreground/60 shadow-black/5'
             }`}
             aria-label={isCostRevealEnabled ? 'Disable cost reveal' : 'Enable cost reveal'}
-            title={isCostRevealEnabled ? 'Cost reveal ON — long-press products to see purchase price' : 'Enable cost reveal'}
+            title={isCostRevealEnabled ? 'Cost reveal ON — long-press products to see cost' : 'Enable cost reveal'}
           >
             {isCostRevealEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-            {/* §ACTIVE-INDICATOR: Small dot shown when cost reveal is enabled */}
-            {isCostRevealEnabled && (
-              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-orange-500 rounded-full border-2 border-background" />
-            )}
           </button>
         </div>,
         document.body
