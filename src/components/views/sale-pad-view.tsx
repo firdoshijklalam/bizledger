@@ -434,13 +434,21 @@ export function SalePadView() {
   // starts — so the old customer's custom prices don't bleed into the new
   // cart's product grid. The default prices show instantly while the new
   // customer's prices load.
-  const [customPriceMap, setCustomPriceMap] = useState<Record<string, {
+  //
+  // §CACHE: Resolved prices are cached per-customerId in state.
+  // Switching back to a previously-loaded cart loads from cache INSTANTLY
+  // — no database query fired. The cache key is `customerId:budgetGroup`.
+  type CustomPriceEntry = {
     price: number; source: string
-    // §MULTI-PRICE: all three custom price fields (null if not set)
     salePrice?: number | null
     mrp?: number | null
     wholesalePrice?: number | null
-  }>>({})
+  }
+  const [customPriceMap, setCustomPriceMap] = useState<Record<string, CustomPriceEntry>>({})
+  // §CACHE: Map<cacheKey, Record<productId, CustomPriceEntry>>
+  // Using state (not useRef) so we can read it during render without
+  // triggering the react-hooks/refs lint rule.
+  const [priceCache, setPriceCache] = useState<Record<string, Record<string, CustomPriceEntry>>>({})
 
   // §SYNC-CLEAR: Track the customer ID that customPriceMap was last built for.
   // If the customer changed, we clear the map SYNCHRONOUSLY during render
@@ -451,14 +459,33 @@ export function SalePadView() {
   const currentCustomerId = customer?.id || null
   if (lastLoadedCustomerId !== currentCustomerId) {
     setLastLoadedCustomerId(currentCustomerId)
-    setCustomPriceMap({})
+    // §CACHE-HIT: If we've already fetched prices for this customer, restore
+    // from cache INSTANTLY (no loading delay). Only clear if no cache entry.
+    const buyerGroup = customer?.buyerGroup || ''
+    const cacheKey = `${currentCustomerId || 'none'}:${buyerGroup}`
+    const cached = currentCustomerId ? priceCache[cacheKey] : undefined
+    if (cached) {
+      setCustomPriceMap(cached)
+    } else {
+      setCustomPriceMap({})
+    }
   }
 
   // §FETCH: Load the new customer's custom prices. Uses the batch endpoint
   // (resolveProductPricesBatch) to fetch ALL products in ONE request instead
   // of N parallel requests — dramatically faster (1 round-trip vs N).
+  // §CACHE-CHECK: If prices are already cached for this customer, skip the
+  // fetch entirely (the map was already restored from cache in the sync-clear
+  // block above).
   useEffect(() => {
     if (!customer?.id || !products || products.length === 0) {
+      return
+    }
+    const buyerGroup = customer?.buyerGroup || ''
+    const cacheKey = `${customer.id}:${buyerGroup}`
+    // §CACHE-HIT: Already cached — the sync-clear block above already
+    // restored the cached prices to customPriceMap. No fetch needed.
+    if (priceCache[cacheKey]) {
       return
     }
     let cancelled = false
@@ -468,7 +495,6 @@ export function SalePadView() {
         // this buyer. Falls back to individual fetches if the batch
         // endpoint isn't available.
         const productIds = products.map((p) => p.id)
-        const buyerGroup = customer?.buyerGroup || ''
 
         // Try the batch endpoint first (much faster — 1 request vs N)
         try {
@@ -485,7 +511,7 @@ export function SalePadView() {
             const batchData = await batchRes.json()
             if (cancelled) return
             if (batchData && typeof batchData === 'object') {
-              const map: Record<string, typeof customPriceMap[string]> = {}
+              const map: Record<string, CustomPriceEntry> = {}
               for (const [pid, resolved] of Object.entries(batchData)) {
                 const r = resolved as any
                 if (r && r.source !== 'default' && r.customPrices) {
@@ -498,7 +524,11 @@ export function SalePadView() {
                   }
                 }
               }
-              if (!cancelled) setCustomPriceMap(map)
+              if (!cancelled) {
+                // §CACHE-STORE: Save to cache so switching back is instant
+                setPriceCache((prev) => ({ ...prev, [cacheKey]: map }))
+                setCustomPriceMap(map)
+              }
               return
             }
           }
@@ -518,15 +548,17 @@ export function SalePadView() {
               salePrice: data.customPrices?.salePrice ?? null,
               mrp: data.customPrices?.mrp ?? null,
               wholesalePrice: data.customPrices?.wholesalePrice ?? null,
-            }] as [string, typeof customPriceMap[string]]
+            }] as [string, CustomPriceEntry]
           }
           return null
         }))
         if (cancelled) return
-        const map: Record<string, typeof customPriceMap[string]> = {}
+        const map: Record<string, CustomPriceEntry> = {}
         for (const entry of entries) {
           if (entry) map[entry[0]] = entry[1]
         }
+        // §CACHE-STORE: Save to cache so switching back is instant
+        setPriceCache((prev) => ({ ...prev, [cacheKey]: map }))
         setCustomPriceMap(map)
       } catch {}
     })()
@@ -1245,56 +1277,11 @@ export function SalePadView() {
             so it stays accessible when scrolling through the product grid. */}
       </div>
 
-      {/* §SECRET-COST-REVEAL: Cost display bar — appears in the HEADER area
-          (not inside the product card) when long-pressing a product.
-          This ensures the customer can't see the cost by looking at the card.
-          When the merchant releases the press, this bar disappears instantly. */}
-      <AnimatePresence>
-        {revealedCostProductId && (() => {
-          const rp = products?.find((p) => p.id === revealedCostProductId)
-          if (!rp) return null
-          const sellPrice = getPrice(rp)
-          const unit = getPriceUnit(rp)
-          // §RETAIL-COST: For retail mode, divide purchase price by conversion factor
-          const baseCost = (rp as any).purchasePrice || 0
-          const convFactor = (rp as any).conversionFactor || 1
-          const costPrice = mode === 'retail' && (rp as any).retailEnabled && convFactor > 0
-            ? baseCost / convFactor
-            : baseCost
-          const profit = sellPrice - costPrice
-          const profitPct = costPrice > 0 ? Math.round((profit / costPrice) * 100) : 0
-          return (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.15 }}
-              className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-900/50"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <Package className="w-4 h-4 text-orange-600 shrink-0" />
-                <p className="text-xs font-medium truncate">{rp.name}</p>
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <div className="text-right">
-                  <p className="text-[9px] text-muted-foreground">Cost</p>
-                  <p className="text-sm font-bold tabular text-orange-600">
-                    {formatCurrency(costPrice, currency)}
-                    <span className="text-[9px] font-normal text-muted-foreground">/{unit}</span>
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[9px] text-muted-foreground">Profit</p>
-                  <p className={`text-sm font-bold tabular ${profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {formatCurrency(profit, currency)}
-                    <span className="text-[9px] font-normal text-muted-foreground"> ({profitPct}%)</span>
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-          )
-        })()}
-      </AnimatePresence>
+      {/* §SECRET-COST-REVEAL: The cost display bar has been MOVED to a fixed
+          floating tooltip that appears ABOVE the Eye FAB (see bottom of component).
+          Previously it was rendered inline here at the top of the page, which
+          meant it was out of view when the user scrolled down. Now it's
+          position:fixed so it's always visible regardless of scroll depth. */}
 
       {/* §1: Customer Input Bar — pinned to absolute TOP of Quick Sale */}
       <div className="flex items-center gap-2">
@@ -2392,24 +2379,89 @@ export function SalePadView() {
           permanently accessible no matter how far down the product grid the
           user scrolls. Uses createPortal to escape any overflow/stacking
           contexts. High z-index (z-[500]) ensures it floats above all
-          product cards, modals, and the bottom nav. */}
+          product cards, modals, and the bottom nav.
+          
+          §COST-TOOLTIP: When a product is long-pressed (and cost reveal is ON),
+          the purchase cost + profit appears as a floating tooltip DIRECTLY
+          ABOVE the FAB — position:fixed so it's always visible regardless of
+          scroll depth. The customer can't see it by looking at the product card. */}
       {typeof document !== 'undefined' && createPortal(
-        <button
-          onClick={() => setIsCostRevealEnabled((v) => !v)}
-          className={`fixed bottom-20 right-4 z-[500] w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-90 ${
-            isCostRevealEnabled
-              ? 'bg-orange-500 text-white shadow-orange-500/30'
-              : 'bg-background border border-border text-muted-foreground shadow-black/10'
-          }`}
-          aria-label={isCostRevealEnabled ? 'Disable cost reveal' : 'Enable cost reveal'}
-          title={isCostRevealEnabled ? 'Cost reveal ON — long-press products to see purchase price' : 'Enable cost reveal'}
-        >
-          {isCostRevealEnabled ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
-          {/* §ACTIVE-INDICATOR: Small dot shown when cost reveal is enabled */}
-          {isCostRevealEnabled && (
-            <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-orange-500 rounded-full border-2 border-background" />
-          )}
-        </button>,
+        <div className="fixed bottom-20 right-4 z-[500] flex flex-col items-end gap-2">
+          {/* §COST-TOOLTIP: Floating cost/profit display — appears ABOVE the
+              Eye FAB when a product is long-pressed. Fixed position so it's
+              always in the viewport even when scrolled down. */}
+          <AnimatePresence>
+            {revealedCostProductId && isCostRevealEnabled && (() => {
+              const rp = products?.find((p) => p.id === revealedCostProductId)
+              if (!rp) return null
+              const sellPrice = getPrice(rp)
+              const unit = getPriceUnit(rp)
+              // §RETAIL-COST: For retail mode, divide purchase price by conversion factor
+              const baseCost = (rp as any).purchasePrice || 0
+              const convFactor = (rp as any).conversionFactor || 1
+              const costPrice = mode === 'retail' && (rp as any).retailEnabled && convFactor > 0
+                ? baseCost / convFactor
+                : baseCost
+              const profit = sellPrice - costPrice
+              const profitPct = costPrice > 0 ? Math.round((profit / costPrice) * 100) : 0
+              return (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                  transition={{ duration: 0.15 }}
+                  className="w-64 p-3 rounded-xl bg-orange-500 text-white shadow-xl shadow-orange-500/40"
+                >
+                  {/* Product name */}
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Package className="w-3.5 h-3.5 shrink-0" />
+                    <p className="text-xs font-medium truncate">{rp.name}</p>
+                  </div>
+                  {/* Cost + Profit */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-[9px] text-white/70">Cost</p>
+                      <p className="text-sm font-bold tabular">
+                        {formatCurrency(costPrice, currency)}
+                        <span className="text-[9px] font-normal text-white/70">/{unit}</span>
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[9px] text-white/70">Profit</p>
+                      <p className="text-sm font-bold tabular">
+                        {formatCurrency(profit, currency)}
+                        <span className="text-[9px] font-normal text-white/70"> ({profitPct}%)</span>
+                      </p>
+                    </div>
+                  </div>
+                  {/* Sell price */}
+                  <div className="mt-1.5 pt-1.5 border-t border-white/20 flex items-center justify-between">
+                    <p className="text-[9px] text-white/70">Sell Price</p>
+                    <p className="text-xs font-bold tabular">{formatCurrency(sellPrice, currency)}</p>
+                  </div>
+                </motion.div>
+              )
+            })()}
+          </AnimatePresence>
+
+          {/* §EYE-FAB: The toggle button itself */}
+          <button
+            onClick={() => setIsCostRevealEnabled((v) => !v)}
+            className={`w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-90 ${
+              isCostRevealEnabled
+                ? 'bg-orange-500 text-white shadow-orange-500/30'
+                : 'bg-background border border-border text-muted-foreground shadow-black/10'
+            }`}
+            aria-label={isCostRevealEnabled ? 'Disable cost reveal' : 'Enable cost reveal'}
+            title={isCostRevealEnabled ? 'Cost reveal ON — long-press products to see purchase price' : 'Enable cost reveal'}
+          >
+            {isCostRevealEnabled ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+            {/* §ACTIVE-INDICATOR: Small dot shown when cost reveal is enabled */}
+            {isCostRevealEnabled && (
+              <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-orange-500 rounded-full border-2 border-background" />
+            )}
+          </button>
+        </div>,
         document.body
       )}
     </div>
