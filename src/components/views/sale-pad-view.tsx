@@ -1,5 +1,6 @@
 'use client'
 
+import { createPortal } from 'react-dom'
 import { useAppStore } from '@/store/app-store'
 import { useCartStore, type CartItem, type HeldCart, type PaymentMode, type SaleMode } from '@/store/cart-store'
 import { useBillingStore } from '@/store/billing-store'
@@ -427,6 +428,12 @@ export function SalePadView() {
   // §MULTI-PRICE: We now fetch ALL THREE price fields (sale, mrp, wholesale)
   // in a single resolved-price call and store them. The getPrice function
   // picks the appropriate field based on the current sale mode.
+  //
+  // §STATE-BLEED-FIX: When the active cart changes (customer changes), we
+  // IMMEDIATELY clear the customPriceMap synchronously — before the fetch
+  // starts — so the old customer's custom prices don't bleed into the new
+  // cart's product grid. The default prices show instantly while the new
+  // customer's prices load.
   const [customPriceMap, setCustomPriceMap] = useState<Record<string, {
     price: number; source: string
     // §MULTI-PRICE: all three custom price fields (null if not set)
@@ -435,25 +442,79 @@ export function SalePadView() {
     wholesalePrice?: number | null
   }>>({})
 
+  // §SYNC-CLEAR: Track the customer ID that customPriceMap was last built for.
+  // If the customer changed, we clear the map SYNCHRONOUSLY during render
+  // (not in an effect) — this is the React-recommended pattern for derived
+  // state that must reset when a prop changes. This prevents the old
+  // customer's "CUSTOM" price tags from bleeding into the new cart's grid.
+  const [lastLoadedCustomerId, setLastLoadedCustomerId] = useState<string | null>(null)
+  const currentCustomerId = customer?.id || null
+  if (lastLoadedCustomerId !== currentCustomerId) {
+    setLastLoadedCustomerId(currentCustomerId)
+    setCustomPriceMap({})
+  }
+
+  // §FETCH: Load the new customer's custom prices. Uses the batch endpoint
+  // (resolveProductPricesBatch) to fetch ALL products in ONE request instead
+  // of N parallel requests — dramatically faster (1 round-trip vs N).
   useEffect(() => {
-    if (!customer?.id || !products) {
+    if (!customer?.id || !products || products.length === 0) {
       return
     }
     let cancelled = false
     ;(async () => {
       try {
-        // Batch fetch resolved prices for all products
+        // §BATCH-FETCH: Single request to resolve all product prices for
+        // this buyer. Falls back to individual fetches if the batch
+        // endpoint isn't available.
         const productIds = products.map((p) => p.id)
+        const buyerGroup = customer?.buyerGroup || ''
+
+        // Try the batch endpoint first (much faster — 1 request vs N)
+        try {
+          const batchRes = await fetch('/api/products/resolve-prices-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              productIds,
+              buyerId: customer.id,
+              buyerGroup,
+            }),
+          })
+          if (batchRes.ok) {
+            const batchData = await batchRes.json()
+            if (cancelled) return
+            if (batchData && typeof batchData === 'object') {
+              const map: Record<string, typeof customPriceMap[string]> = {}
+              for (const [pid, resolved] of Object.entries(batchData)) {
+                const r = resolved as any
+                if (r && r.source !== 'default' && r.customPrices) {
+                  map[pid] = {
+                    price: r.price,
+                    source: r.source,
+                    salePrice: r.customPrices.salePrice ?? null,
+                    mrp: r.customPrices.mrp ?? null,
+                    wholesalePrice: r.customPrices.wholesalePrice ?? null,
+                  }
+                }
+              }
+              if (!cancelled) setCustomPriceMap(map)
+              return
+            }
+          }
+        } catch {
+          // Batch endpoint failed — fall back to individual fetches
+        }
+
+        // §FALLBACK: Individual resolved-price fetches (parallel, but N requests)
         const entries = await Promise.all(productIds.map(async (pid) => {
           const res = await fetch(`/api/products/${pid}/resolved-price?buyerId=${encodeURIComponent(customer.id)}`)
           if (!res.ok) return null
           const data = await res.json()
-          // Only store if a custom price was found (non-default source)
           if (data && typeof data.price === 'number' && data.source !== 'default') {
             return [pid, {
               price: data.price,
               source: data.source,
-              // §MULTI-PRICE: Extract the individual price fields
               salePrice: data.customPrices?.salePrice ?? null,
               mrp: data.customPrices?.mrp ?? null,
               wholesalePrice: data.customPrices?.wholesalePrice ?? null,
@@ -471,14 +532,6 @@ export function SalePadView() {
     })()
     return () => { cancelled = true }
   }, [customer?.id, products, mode])
-
-  // Clear custom prices when customer is deselected
-  useEffect(() => {
-    if (!customer?.id) {
-      const t = setTimeout(() => setCustomPriceMap({}), 0)
-      return () => clearTimeout(t)
-    }
-  }, [customer?.id])
 
   // §2: Price display per mode — STRICT, no mixing
   // §MULTI-PRICE: Pick the mode-specific custom price field.
@@ -1188,19 +1241,8 @@ export function SalePadView() {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h2 className="text-base font-semibold flex-1">Quick Sale</h2>
-        {/* §SECRET-COST-REVEAL: Eye toggle for cost price reveal feature. */}
-        <button
-          onClick={() => setIsCostRevealEnabled((v) => !v)}
-          className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-colors ${
-            isCostRevealEnabled
-              ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600'
-              : 'hover:bg-muted text-muted-foreground'
-          }`}
-          aria-label={isCostRevealEnabled ? 'Disable cost reveal' : 'Enable cost reveal'}
-          title={isCostRevealEnabled ? 'Cost reveal ON — long-press products to see purchase price' : 'Enable cost reveal'}
-        >
-          {isCostRevealEnabled ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
-        </button>
+        {/* §SECRET-COST-REVEAL: Eye toggle moved to a floating FAB (below)
+            so it stays accessible when scrolling through the product grid. */}
       </div>
 
       {/* §SECRET-COST-REVEAL: Cost display bar — appears in the HEADER area
@@ -2344,6 +2386,32 @@ export function SalePadView() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* §SECRET-COST-REVEAL: Floating Action Button (FAB) for the Eye toggle.
+          Positioned fixed at the bottom-right of the viewport so it stays
+          permanently accessible no matter how far down the product grid the
+          user scrolls. Uses createPortal to escape any overflow/stacking
+          contexts. High z-index (z-[500]) ensures it floats above all
+          product cards, modals, and the bottom nav. */}
+      {typeof document !== 'undefined' && createPortal(
+        <button
+          onClick={() => setIsCostRevealEnabled((v) => !v)}
+          className={`fixed bottom-20 right-4 z-[500] w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-90 ${
+            isCostRevealEnabled
+              ? 'bg-orange-500 text-white shadow-orange-500/30'
+              : 'bg-background border border-border text-muted-foreground shadow-black/10'
+          }`}
+          aria-label={isCostRevealEnabled ? 'Disable cost reveal' : 'Enable cost reveal'}
+          title={isCostRevealEnabled ? 'Cost reveal ON — long-press products to see purchase price' : 'Enable cost reveal'}
+        >
+          {isCostRevealEnabled ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+          {/* §ACTIVE-INDICATOR: Small dot shown when cost reveal is enabled */}
+          {isCostRevealEnabled && (
+            <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-orange-500 rounded-full border-2 border-background" />
+          )}
+        </button>,
+        document.body
+      )}
     </div>
   )
 }
