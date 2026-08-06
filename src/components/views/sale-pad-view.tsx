@@ -13,7 +13,7 @@ import {
   ShoppingBag, Package, Plus, Minus, Trash2, UserPlus, Receipt, AlertTriangle,
   Store, Boxes, CheckCircle2, X, Wallet, QrCode, CreditCard, FileCheck,
   ChevronLeft, ChevronRight, Calculator, Lock, Eye, EyeOff, ShieldCheck,
-  Users, BadgePercent, Layers, Share2, ArrowLeft,
+  Users, BadgePercent, Layers, Share2, ArrowLeft, Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -183,7 +183,7 @@ const CartRow = memo(function CartRow({
 })
 
 export function SalePadView() {
-  const { business, setActiveView, setSelectedInvoiceId, triggerRefresh, showPartyForm, setShowPartyForm, pendingNewCustomerId, pendingNewCustomerName } = useAppStore()
+  const { business, setActiveView, setSelectedInvoiceId, triggerRefresh, showPartyForm, setShowPartyForm, pendingNewCustomerId, pendingNewCustomerName, activeView } = useAppStore()
   const { t } = useI18n()
   const { speak: soundBoxSpeak } = useSoundBox()
   const { data: products } = useFetch<Product[]>('/api/products', [])
@@ -449,6 +449,11 @@ export function SalePadView() {
   // Using state (not useRef) so we can read it during render without
   // triggering the react-hooks/refs lint rule.
   const [priceCache, setPriceCache] = useState<Record<string, Record<string, CustomPriceEntry>>>({})
+  // §LOADING: True while fetching custom prices for a NEW customer (not cached).
+  // Used to show a subtle loading spinner on the product grid so the user
+  // knows custom prices are being calculated. Does NOT freeze the UI — the
+  // grid remains interactive with default prices.
+  const [isLoadingPrices, setIsLoadingPrices] = useState(false)
 
   // §SYNC-CLEAR: Track the customer ID that customPriceMap was last built for.
   // If the customer changed, we clear the map SYNCHRONOUSLY during render
@@ -490,6 +495,9 @@ export function SalePadView() {
     }
     let cancelled = false
     ;(async () => {
+      // §LOADING: Not cached — show loading spinner on the product grid.
+      // Set inside the async function to avoid synchronous setState in effect.
+      setIsLoadingPrices(true)
       try {
         // §BATCH-FETCH: Single request to resolve all product prices for
         // this buyer. Falls back to individual fetches if the batch
@@ -528,6 +536,8 @@ export function SalePadView() {
                 // §CACHE-STORE: Save to cache so switching back is instant
                 setPriceCache((prev) => ({ ...prev, [cacheKey]: map }))
                 setCustomPriceMap(map)
+                // §LOADING-DONE: Hide spinner after successful batch fetch
+                setIsLoadingPrices(false)
               }
               return
             }
@@ -561,6 +571,8 @@ export function SalePadView() {
         setPriceCache((prev) => ({ ...prev, [cacheKey]: map }))
         setCustomPriceMap(map)
       } catch {}
+      // §LOADING-DONE: Hide the loading spinner (whether success or error)
+      if (!cancelled) setIsLoadingPrices(false)
     })()
     return () => { cancelled = true }
   }, [customer?.id, products, mode])
@@ -1580,6 +1592,24 @@ export function SalePadView() {
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
           {mode === 'retail' ? 'খুচরো পণ্য (per kg/pcs)' : mode === 'full' ? 'প্রোডাক্ট (per bag/box)' : 'পাইকারি পণ্য (bulk rate)'}
         </p>
+        {/* §LOADING-SPINNER: Subtle inline loading indicator shown while fetching
+            custom prices for a NEW customer (not cached). Does NOT freeze the UI —
+            the product grid remains interactive with default prices. */}
+        <AnimatePresence>
+          {isLoadingPrices && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="flex items-center gap-2 px-3 py-1.5 mb-2 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 overflow-hidden"
+            >
+              <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin shrink-0" />
+              <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                Loading custom prices for {customer?.name || 'customer'}…
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
         {filteredProducts.length === 0 ? (
           <EmptyState
             icon={Package}
@@ -2375,21 +2405,25 @@ export function SalePadView() {
       </AnimatePresence>
 
       {/* §SECRET-COST-REVEAL: Floating Action Button (FAB) for the Eye toggle.
-          Positioned fixed at the bottom-right of the viewport so it stays
-          permanently accessible no matter how far down the product grid the
-          user scrolls. Uses createPortal to escape any overflow/stacking
-          contexts. High z-index (z-[500]) ensures it floats above all
-          product cards, modals, and the bottom nav.
+          
+          §ISSUE-1-FIX: Scoped to Quick Sale page ONLY — checks activeView ===
+          'sale-pad' before rendering. Previously the FAB leaked to all pages
+          because SalePadView is always mounted (display:none when inactive)
+          and createPortal(document.body) rendered it regardless.
+          
+          §ISSUE-2-FIX: Moved to TOP-RIGHT corner (was bottom-right). Uses
+          position:fixed so it stays pinned to the top-right when scrolling
+          down the product grid.
           
           §COST-TOOLTIP: When a product is long-pressed (and cost reveal is ON),
           the purchase cost + profit appears as a floating tooltip DIRECTLY
-          ABOVE the FAB — position:fixed so it's always visible regardless of
-          scroll depth. The customer can't see it by looking at the product card. */}
-      {typeof document !== 'undefined' && createPortal(
-        <div className="fixed bottom-20 right-4 z-[500] flex flex-col items-end gap-2">
-          {/* §COST-TOOLTIP: Floating cost/profit display — appears ABOVE the
-              Eye FAB when a product is long-pressed. Fixed position so it's
-              always in the viewport even when scrolled down. */}
+          BELOW the FAB — dark background with crisp white text for maximum
+          readability. position:fixed so always visible regardless of scroll. */}
+      {typeof document !== 'undefined' && activeView === 'sale-pad' && createPortal(
+        <div className="fixed top-14 right-3 z-[500] flex flex-col items-end gap-2">
+          {/* §COST-TOOLTIP: Floating cost/profit display — appears BELOW the
+              Eye FAB when a product is long-pressed. Dark background + white
+              text for crisp readability. Fixed position so always in viewport. */}
           <AnimatePresence>
             {revealedCostProductId && isCostRevealEnabled && (() => {
               const rp = products?.find((p) => p.id === revealedCostProductId)
@@ -2406,48 +2440,50 @@ export function SalePadView() {
               const profitPct = costPrice > 0 ? Math.round((profit / costPrice) * 100) : 0
               return (
                 <motion.div
-                  initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                  initial={{ opacity: 0, y: -10, scale: 0.9 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.9 }}
                   transition={{ duration: 0.15 }}
-                  className="w-64 p-3 rounded-xl bg-orange-500 text-white shadow-xl shadow-orange-500/40"
+                  /* §DARK-TOOLTIP: Dark slate background with crisp white text
+                     for maximum readability — no eye strain. */
+                  className="w-60 p-3 rounded-xl bg-slate-900 dark:bg-slate-950 text-white shadow-xl shadow-black/30 border border-slate-700 dark:border-slate-800"
                 >
                   {/* Product name */}
                   <div className="flex items-center gap-1.5 mb-2">
-                    <Package className="w-3.5 h-3.5 shrink-0" />
+                    <Package className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <p className="text-xs font-medium truncate">{rp.name}</p>
                   </div>
                   {/* Cost + Profit */}
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-[9px] text-white/70">Cost</p>
-                      <p className="text-sm font-bold tabular">
+                      <p className="text-[9px] text-slate-400 uppercase tracking-wide">Cost</p>
+                      <p className="text-sm font-bold tabular text-orange-400">
                         {formatCurrency(costPrice, currency)}
-                        <span className="text-[9px] font-normal text-white/70">/{unit}</span>
+                        <span className="text-[9px] font-normal text-slate-400">/{unit}</span>
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-[9px] text-white/70">Profit</p>
-                      <p className="text-sm font-bold tabular">
+                      <p className="text-[9px] text-slate-400 uppercase tracking-wide">Profit</p>
+                      <p className={`text-sm font-bold tabular ${profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {formatCurrency(profit, currency)}
-                        <span className="text-[9px] font-normal text-white/70"> ({profitPct}%)</span>
+                        <span className="text-[9px] font-normal text-slate-400"> ({profitPct}%)</span>
                       </p>
                     </div>
                   </div>
                   {/* Sell price */}
-                  <div className="mt-1.5 pt-1.5 border-t border-white/20 flex items-center justify-between">
-                    <p className="text-[9px] text-white/70">Sell Price</p>
-                    <p className="text-xs font-bold tabular">{formatCurrency(sellPrice, currency)}</p>
+                  <div className="mt-1.5 pt-1.5 border-t border-slate-700 dark:border-slate-800 flex items-center justify-between">
+                    <p className="text-[9px] text-slate-400 uppercase tracking-wide">Sell Price</p>
+                    <p className="text-xs font-bold tabular text-white">{formatCurrency(sellPrice, currency)}</p>
                   </div>
                 </motion.div>
               )
             })()}
           </AnimatePresence>
 
-          {/* §EYE-FAB: The toggle button itself */}
+          {/* §EYE-FAB: The toggle button itself — top-right, fixed position */}
           <button
             onClick={() => setIsCostRevealEnabled((v) => !v)}
-            className={`w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-90 ${
+            className={`w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all active:scale-90 ${
               isCostRevealEnabled
                 ? 'bg-orange-500 text-white shadow-orange-500/30'
                 : 'bg-background border border-border text-muted-foreground shadow-black/10'
@@ -2455,10 +2491,10 @@ export function SalePadView() {
             aria-label={isCostRevealEnabled ? 'Disable cost reveal' : 'Enable cost reveal'}
             title={isCostRevealEnabled ? 'Cost reveal ON — long-press products to see purchase price' : 'Enable cost reveal'}
           >
-            {isCostRevealEnabled ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
+            {isCostRevealEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
             {/* §ACTIVE-INDICATOR: Small dot shown when cost reveal is enabled */}
             {isCostRevealEnabled && (
-              <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-orange-500 rounded-full border-2 border-background" />
+              <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-orange-500 rounded-full border-2 border-background" />
             )}
           </button>
         </div>,
