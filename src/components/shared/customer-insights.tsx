@@ -8,7 +8,17 @@
  * 2. Churned — customers who haven't bought in 60+ days
  * 3. Refill Due — customers predicted to need a refill soon
  *
- * Plus a Broadcast button to send targeted WhatsApp/SMS to product buyers.
+ * §GRANULAR-BROADCAST: When the user clicks "Broadcast", the list enters
+ * Selection Mode — each buyer row shows a checkbox. The merchant can
+ * tick/untick specific buyers, use Select All / Deselect All, and the
+ * send button text updates dynamically ("Send to 3 selected buyers").
+ *
+ * §SMART-TEMPLATES: Quick-action chips use template variables that are
+ * dynamically replaced per buyer:
+ *   {{customer_name}} → the buyer's name (e.g., "Amit Trading")
+ *   {{product_name}}  → the current product's name (e.g., "Plastic Chair")
+ * Example: "Hello {{customer_name}}, the price for {{product_name}} has dropped!"
+ *   → "Hello Amit Trading, the price for Plastic Chair has dropped!"
  */
 
 import { useFetch } from '@/hooks/use-fetch'
@@ -16,9 +26,9 @@ import { formatCurrency, timeAgo } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Users, TrendingDown, Clock, Crown, Phone, MessageCircle, Send,
-  AlertCircle, CheckCircle2, Package,
+  AlertCircle, CheckCircle2, Package, CheckSquare, Square, X,
 } from 'lucide-react'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { toast } from 'sonner'
 import { useAppStore } from '@/store/app-store'
 
@@ -62,13 +72,28 @@ const TABS = [
   { id: 'refill', label: 'Refill Due', icon: Clock, color: 'text-blue-600' },
 ] as const
 
+// §SMART-TEMPLATES: Quick-action chips with template variables.
+// {{customer_name}} and {{product_name}} are replaced per-buyer when sending.
+const MESSAGE_TEMPLATES = [
+  'New stock of {{product_name}} arrived! Restock now.',
+  'Price drop on {{product_name}} — check it out!',
+  'Hi {{customer_name}}, special discount on {{product_name}} for you!',
+  '{{customer_name}}, your usual {{product_name}} is back in stock. Shall I reserve some?',
+]
+
 export function CustomerInsights({ productId }: { productId: string }) {
   const { business } = useAppStore()
   const currency = business?.currency || 'INR'
   const { data, loading } = useFetch<InsightsData>(`/api/products/${productId}/customer-insights`, [productId])
   const [activeTab, setActiveTab] = useState<string>('top')
+  // §SELECTION-MODE: When broadcastOpen is true, the list enters selection mode.
+  // selectedIds tracks which buyer partyIds are ticked.
   const [broadcastOpen, setBroadcastOpen] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [broadcastMsg, setBroadcastMsg] = useState('')
+  // §REMAINING-BUYERS: State (not ref) for buyers that haven't been messaged
+  // yet, so the "Open next buyer" button re-renders when the list changes.
+  const [remainingBuyers, setRemainingBuyers] = useState<BuyerRecord[]>([])
 
   if (loading) {
     return (
@@ -94,23 +119,136 @@ export function CustomerInsights({ productId }: { productId: string }) {
 
   const currentList = activeTab === 'top' ? data.topBuyers : activeTab === 'churned' ? data.churnedBuyers : data.refillDue
 
+  // §SELECTION-MODE: Toggle a buyer's selection
+  const toggleBuyer = (partyId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(partyId)) next.delete(partyId)
+      else next.add(partyId)
+      return next
+    })
+  }
+
+  // §SELECT-ALL: Select all buyers in the current tab
+  const selectAll = () => {
+    setSelectedIds(new Set(currentList.map((b) => b.partyId)))
+  }
+
+  // §DESELECT-ALL: Clear all selections
+  const deselectAll = () => {
+    setSelectedIds(new Set())
+  }
+
+  // §SELECTED-BUYERS: The list of buyers matching the selected IDs
+  const selectedBuyers = currentList.filter((b) => selectedIds.has(b.partyId))
+  const selectedCount = selectedBuyers.length
+  const allSelected = currentList.length > 0 && selectedCount === currentList.length
+
+  // §SMART-TEMPLATE-RENDER: Replace {{customer_name}} and {{product_name}}
+  // variables in the message template for a specific buyer.
+  const renderTemplate = (template: string, buyer: BuyerRecord): string => {
+    return template
+      .replace(/\{\{customer_name\}\}/g, buyer.partyName)
+      .replace(/\{\{product_name\}\}/g, data.product.name)
+  }
+
+  // §HANDLE-BROADCAST: Send personalized WhatsApp messages to each selected
+  // buyer. Opens WhatsApp with the FIRST recipient's message pre-filled.
+  // The merchant can then send to others individually using the generated
+  // list (shown as a toast with a link).
   const handleBroadcast = () => {
     if (!broadcastMsg.trim()) {
       toast.error('Enter a message to broadcast')
       return
     }
-    // Open WhatsApp with pre-filled message for each buyer
-    const phoneList = currentList.filter((b) => b.partyPhone).map((b) => b.partyPhone)
-    if (phoneList.length === 0) {
-      toast.error('No phone numbers found for these buyers')
+    if (selectedCount === 0) {
+      toast.error('Select at least one buyer to broadcast to')
       return
     }
-    const msg = encodeURIComponent(`${broadcastMsg}\n\n— ${business?.name || 'BizLedger'}`)
-    // Open WhatsApp web with the first number (user can send to others individually)
-    window.open(`https://wa.me/?text=${msg}`, '_blank')
-    toast.success(`Broadcast prepared for ${phoneList.length} buyer${phoneList.length > 1 ? 's' : ''}`)
+    const buyersWithPhone = selectedBuyers.filter((b) => b.partyPhone)
+    if (buyersWithPhone.length === 0) {
+      toast.error('No phone numbers found for selected buyers')
+      return
+    }
+
+    // §OPEN-WHATSAPP: Open WhatsApp for the FIRST selected buyer with their
+    // personalized message. The merchant sends, then can open the next one.
+    const firstBuyer = buyersWithPhone[0]
+    const phone = firstBuyer.partyPhone!.replace(/[^0-9]/g, '')
+    const personalizedMsg = renderTemplate(broadcastMsg, firstBuyer)
+    const fullMsg = `${personalizedMsg}\n\n— ${business?.name || 'BizLedger'}`
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(fullMsg)}`, '_blank')
+
+    // §REMAINING-BUYERS: Show a toast with the count of remaining buyers
+    // and provide a way to open the next one.
+    const remaining = buyersWithPhone.length - 1
+    if (remaining > 0) {
+      toast.success(
+        `WhatsApp opened for ${firstBuyer.partyName}. ${remaining} more buyer${remaining > 1 ? 's' : ''} to message.`,
+        { duration: 6000 }
+      )
+      // Store the remaining buyers in a ref so the merchant can open them one by one
+      setRemainingBuyers(buyersWithPhone.slice(1))
+    } else {
+      toast.success(`WhatsApp opened for ${firstBuyer.partyName}`)
+    }
+
+    // Don't close the broadcast panel — the merchant may want to send to more
+    // buyers. Just clear the selection if all were sent.
+  }
+
+  // §OPEN-NEXT-BUYER: Open WhatsApp for the next remaining buyer.
+  const openNextBuyer = () => {
+    if (remainingBuyers.length === 0) {
+      toast.info('All selected buyers have been messaged!')
+      return
+    }
+    const [next, ...rest] = remainingBuyers
+    if (!next || !next.partyPhone) {
+      setRemainingBuyers(rest)
+      toast.info('Skipped (no phone) — moving to next buyer')
+      return
+    }
+    const phone = next.partyPhone.replace(/[^0-9]/g, '')
+    const personalizedMsg = renderTemplate(broadcastMsg, next)
+    const fullMsg = `${personalizedMsg}\n\n— ${business?.name || 'BizLedger'}`
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(fullMsg)}`, '_blank')
+
+    setRemainingBuyers(rest)
+    if (rest.length > 0) {
+      toast.success(`WhatsApp opened for ${next.partyName}. ${rest.length} more to go.`, { duration: 6000 })
+    } else {
+      toast.success(`WhatsApp opened for ${next.partyName}. All done! 🎉`)
+      setBroadcastOpen(false)
+      setBroadcastMsg('')
+      setSelectedIds(new Set())
+    }
+  }
+
+  // §ENTER-SELECTION-MODE: When broadcast is opened, auto-select all buyers
+  // in the current tab (merchant can deselect individual ones).
+  const enterBroadcastMode = () => {
+    setBroadcastOpen(true)
+    // Auto-select all buyers with phone numbers (those without phones can't be messaged)
+    setSelectedIds(new Set(currentList.filter((b) => b.partyPhone).map((b) => b.partyId)))
+  }
+
+  // §EXIT-SELECTION-MODE: Close broadcast and clear selection
+  const exitBroadcastMode = () => {
     setBroadcastOpen(false)
+    setSelectedIds(new Set())
     setBroadcastMsg('')
+    setRemainingBuyers([])
+  }
+
+  // §TAB-SWITCH: When switching tabs during selection mode, re-select all
+  // buyers with phones in the new tab.
+  const handleTabSwitch = (tabId: string) => {
+    setActiveTab(tabId)
+    if (broadcastOpen) {
+      const newList = tabId === 'top' ? data.topBuyers : tabId === 'churned' ? data.churnedBuyers : data.refillDue
+      setSelectedIds(new Set(newList.filter((b) => b.partyPhone).map((b) => b.partyId)))
+    }
   }
 
   return (
@@ -125,13 +263,24 @@ export function CustomerInsights({ productId }: { productId: string }) {
             <h3 className="text-sm font-semibold">Customer Insights</h3>
           </div>
           {/* §BROADCAST: Targeted marketing button */}
-          <button
-            onClick={() => setBroadcastOpen(!broadcastOpen)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-medium hover:bg-emerald-700 transition-colors"
-          >
-            <Send className="w-3 h-3" />
-            Broadcast
-          </button>
+          {broadcastOpen ? (
+            // §EXIT-BROADCAST: Close button when in selection mode
+            <button
+              onClick={exitBroadcastMode}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted text-muted-foreground text-[11px] font-medium hover:bg-muted/80 transition-colors"
+            >
+              <X className="w-3 h-3" />
+              Cancel
+            </button>
+          ) : (
+            <button
+              onClick={enterBroadcastMode}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-medium hover:bg-emerald-700 transition-colors"
+            >
+              <Send className="w-3 h-3" />
+              Broadcast
+            </button>
+          )}
         </div>
 
         {/* Summary stats */}
@@ -165,7 +314,7 @@ export function CustomerInsights({ productId }: { productId: string }) {
         </div>
       </div>
 
-      {/* Broadcast form */}
+      {/* Broadcast form (selection mode) */}
       <AnimatePresence>
         {broadcastOpen && (
           <motion.div
@@ -175,34 +324,68 @@ export function CustomerInsights({ productId }: { productId: string }) {
             className="overflow-hidden"
           >
             <div className="p-3 bg-muted/50 border-b border-border space-y-2">
-              <p className="text-[10px] text-muted-foreground">
-                Send to {currentList.length} buyer{currentList.length > 1 ? 's' : ''} in "{TABS.find((t) => t.id === activeTab)?.label}"
-              </p>
+              {/* §DYNAMIC-LABEL: Shows how many buyers are selected */}
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-muted-foreground">
+                  {selectedCount === 0
+                    ? 'Select buyers to message'
+                    : `Send to ${selectedCount} selected buyer${selectedCount > 1 ? 's' : ''}`}
+                </p>
+                {/* §SELECT-ALL / DESELECT-ALL master toggle */}
+                <button
+                  onClick={allSelected ? deselectAll : selectAll}
+                  className="text-[10px] font-medium text-primary hover:underline flex items-center gap-1"
+                >
+                  {allSelected ? (
+                    <><CheckSquare className="w-3 h-3" /> Deselect All</>
+                  ) : (
+                    <><CheckSquare className="w-3 h-3" /> Select All</>
+                  )}
+                </button>
+              </div>
+              {/* Message input */}
               <div className="flex gap-2">
                 <input
                   value={broadcastMsg}
                   onChange={(e) => setBroadcastMsg(e.target.value)}
-                  placeholder="e.g. New stock arrived! Price dropped to ₹..."
+                  placeholder="Type your message… Use {{customer_name}} and {{product_name}} for personalization"
                   className="flex-1 h-9 px-3 rounded-lg border border-border bg-background text-xs outline-none focus:border-primary"
                 />
                 <button
                   onClick={handleBroadcast}
-                  className="px-3 h-9 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 shrink-0"
+                  disabled={selectedCount === 0}
+                  className="px-3 h-9 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Send
                 </button>
               </div>
-              <div className="flex gap-1.5">
-                {['New stock arrived!', 'Price drop — check it out!', 'Special discount for you'].map((preset) => (
+              {/* §SMART-TEMPLATES: Quick-action chips with template variables */}
+              <div className="flex flex-wrap gap-1.5">
+                {MESSAGE_TEMPLATES.map((template) => (
                   <button
-                    key={preset}
-                    onClick={() => setBroadcastMsg(preset)}
-                    className="text-[9px] px-2 py-1 rounded-full bg-background border border-border hover:border-primary text-muted-foreground"
+                    key={template}
+                    onClick={() => setBroadcastMsg(template)}
+                    className="text-[9px] px-2 py-1 rounded-full bg-background border border-border hover:border-primary text-muted-foreground max-w-full truncate"
+                    title={template}
                   >
-                    {preset}
+                    {template.length > 40 ? template.substring(0, 40) + '…' : template}
                   </button>
                 ))}
               </div>
+              {/* §TEMPLATE-HELP: Hint about available variables */}
+              <p className="text-[9px] text-muted-foreground/70">
+                💡 Variables: <code className="text-emerald-600">{`{{customer_name}}`}</code>, <code className="text-emerald-600">{`{{product_name}}`}</code> — auto-replaced per buyer
+              </p>
+              {/* §OPEN-NEXT: Button to open WhatsApp for the next remaining buyer */}
+              {remainingBuyers.length > 0 && (
+                <button
+                  onClick={openNextBuyer}
+                  className="w-full py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-medium hover:bg-emerald-100 dark:hover:bg-emerald-950/50 flex items-center justify-center gap-1"
+                >
+                  <MessageCircle className="w-3 h-3" />
+                  Open WhatsApp for next buyer ({remainingBuyers.length} remaining)
+                </button>
+              )}
             </div>
           </motion.div>
         )}
@@ -216,7 +399,7 @@ export function CustomerInsights({ productId }: { productId: string }) {
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => handleTabSwitch(tab.id)}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[11px] font-medium border-b-2 transition-colors ${
                 activeTab === tab.id
                   ? 'border-primary text-primary'
@@ -260,6 +443,11 @@ export function CustomerInsights({ productId }: { productId: string }) {
                   tab={activeTab}
                   currency={currency}
                   unit={data.product.unit}
+                  productName={data.product.name}
+                  // §SELECTION-MODE props
+                  selectionMode={broadcastOpen}
+                  isSelected={selectedIds.has(buyer.partyId)}
+                  onToggleSelect={() => toggleBuyer(buyer.partyId)}
                 />
               ))}
             </motion.div>
@@ -273,13 +461,19 @@ export function CustomerInsights({ productId }: { productId: string }) {
 // ─── Buyer Row ───────────────────────────────────────────────────────────────
 
 function BuyerRow({
-  buyer, rank, tab, currency, unit,
+  buyer, rank, tab, currency, unit, productName,
+  selectionMode, isSelected, onToggleSelect,
 }: {
   buyer: BuyerRecord
   rank: number
   tab: string
   currency: string
   unit: string
+  productName: string
+  // §SELECTION-MODE props
+  selectionMode: boolean
+  isSelected: boolean
+  onToggleSelect: () => void
 }) {
   // §WHATSAPP-QUICK-ACTION: Open a direct WhatsApp chat with this buyer,
   // pre-filled with a product-specific restock/discount message.
@@ -287,7 +481,7 @@ function BuyerRow({
     if (!buyer.partyPhone) return
     const phone = buyer.partyPhone.replace(/[^0-9]/g, '')
     const msg = encodeURIComponent(
-      `Hi ${buyer.partyName}, regarding your purchase of this product —\n\n` +
+      `Hi ${buyer.partyName}, regarding your purchase of ${productName} —\n\n` +
       (tab === 'refill'
         ? `It's been a while since your last order. New stock available! Would you like to restock?`
         : tab === 'churned'
@@ -298,21 +492,47 @@ function BuyerRow({
   }
 
   return (
-    <div className="flex items-center gap-3 p-3 border-b border-border/50 hover:bg-muted/30">
-      {/* Rank / VIP badge */}
-      <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold ${
-        buyer.isVIP ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-muted text-muted-foreground'
-      }`}>
-        {buyer.isVIP ? <Crown className="w-3.5 h-3.5" /> : rank}
-      </div>
+    <div
+      className={`flex items-center gap-3 p-3 border-b border-border/50 hover:bg-muted/30 cursor-pointer transition-colors ${
+        selectionMode && isSelected ? 'bg-emerald-50 dark:bg-emerald-950/20' : ''
+      }`}
+      onClick={selectionMode ? onToggleSelect : undefined}
+    >
+      {/* §CHECKBOX: Shown only in selection mode. Replaces the rank/VIP badge. */}
+      {selectionMode ? (
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleSelect() }}
+          className="w-7 h-7 flex items-center justify-center shrink-0"
+          aria-label={isSelected ? `Deselect ${buyer.partyName}` : `Select ${buyer.partyName}`}
+        >
+          {isSelected ? (
+            <CheckSquare className="w-5 h-5 text-emerald-600" />
+          ) : (
+            <Square className="w-5 h-5 text-muted-foreground" />
+          )}
+        </button>
+      ) : (
+        /* Rank / VIP badge (normal mode) */
+        <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold ${
+          buyer.isVIP ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-muted text-muted-foreground'
+        }`}>
+          {buyer.isVIP ? <Crown className="w-3.5 h-3.5" /> : rank}
+        </div>
+      )}
 
       {/* Customer info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <p className="text-xs font-medium truncate">{buyer.partyName}</p>
-          {buyer.isVIP && (
+          {buyer.isVIP && !selectionMode && (
             <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
               VIP
+            </span>
+          )}
+          {/* §NO-PHONE: Show a warning badge if the buyer has no phone number */}
+          {selectionMode && !buyer.partyPhone && (
+            <span className="text-[8px] font-bold px-1 py-0.5 rounded-full bg-muted text-muted-foreground">
+              no phone
             </span>
           )}
         </div>
@@ -352,30 +572,33 @@ function BuyerRow({
       {/* Total spend + quick actions */}
       <div className="text-right shrink-0 flex flex-col items-end gap-1">
         <p className="text-xs font-bold tabular text-foreground">{formatCurrency(buyer.totalSpend, currency)}</p>
-        <div className="flex items-center gap-1">
-          {/* §WHATSAPP: Quick-action button to message this buyer directly */}
-          {buyer.partyPhone && (
-            <button
-              onClick={handleWhatsApp}
-              className="w-6 h-6 rounded-md flex items-center justify-center text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
-              aria-label={`WhatsApp ${buyer.partyName}`}
-              title={`WhatsApp ${buyer.partyName}`}
-            >
-              <MessageCircle className="w-3 h-3" />
-            </button>
-          )}
-          {/* §CALL: Quick-action to call the buyer */}
-          {buyer.partyPhone && (
-            <a
-              href={`tel:${buyer.partyPhone}`}
-              className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
-              aria-label={`Call ${buyer.partyName}`}
-              title={`Call ${buyer.partyName}`}
-            >
-              <Phone className="w-3 h-3" />
-            </a>
-          )}
-        </div>
+        {/* §QUICK-ACTIONS: Hide WhatsApp/Call buttons in selection mode to
+            keep the row clean. The checkbox is the primary action then. */}
+        {!selectionMode && (
+          <div className="flex items-center gap-1">
+            {buyer.partyPhone && (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleWhatsApp() }}
+                className="w-6 h-6 rounded-md flex items-center justify-center text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors"
+                aria-label={`WhatsApp ${buyer.partyName}`}
+                title={`WhatsApp ${buyer.partyName}`}
+              >
+                <MessageCircle className="w-3 h-3" />
+              </button>
+            )}
+            {buyer.partyPhone && (
+              <a
+                href={`tel:${buyer.partyPhone}`}
+                onClick={(e) => e.stopPropagation()}
+                className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
+                aria-label={`Call ${buyer.partyName}`}
+                title={`Call ${buyer.partyName}`}
+              >
+                <Phone className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
