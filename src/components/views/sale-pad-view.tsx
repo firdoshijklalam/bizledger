@@ -424,10 +424,16 @@ export function SalePadView() {
   }, [products, mode, activeCategory, effectiveSubCategory])
 
   // §TIERED-PRICING: Fetch custom/tiered prices for the selected customer.
-  // When a customer is selected, we fetch ALL custom prices for that buyer
-  // and store them in a map: productId → { price, source }.
-  // The getPrice function checks this map first before falling back to defaults.
-  const [customPriceMap, setCustomPriceMap] = useState<Record<string, { price: number; source: string }>>({})
+  // §MULTI-PRICE: We now fetch ALL THREE price fields (sale, mrp, wholesale)
+  // in a single resolved-price call and store them. The getPrice function
+  // picks the appropriate field based on the current sale mode.
+  const [customPriceMap, setCustomPriceMap] = useState<Record<string, {
+    price: number; source: string
+    // §MULTI-PRICE: all three custom price fields (null if not set)
+    salePrice?: number | null
+    mrp?: number | null
+    wholesalePrice?: number | null
+  }>>({})
 
   useEffect(() => {
     if (!customer?.id || !products) {
@@ -442,14 +448,21 @@ export function SalePadView() {
           const res = await fetch(`/api/products/${pid}/resolved-price?buyerId=${encodeURIComponent(customer.id)}`)
           if (!res.ok) return null
           const data = await res.json()
-          // Only store if the price is different from the fallback (non-default)
+          // Only store if a custom price was found (non-default source)
           if (data && typeof data.price === 'number' && data.source !== 'default') {
-            return [pid, { price: data.price, source: data.source }] as [string, { price: number; source: string }]
+            return [pid, {
+              price: data.price,
+              source: data.source,
+              // §MULTI-PRICE: Extract the individual price fields
+              salePrice: data.customPrices?.salePrice ?? null,
+              mrp: data.customPrices?.mrp ?? null,
+              wholesalePrice: data.customPrices?.wholesalePrice ?? null,
+            }] as [string, typeof customPriceMap[string]]
           }
           return null
         }))
         if (cancelled) return
-        const map: Record<string, { price: number; source: string }> = {}
+        const map: Record<string, typeof customPriceMap[string]> = {}
         for (const entry of entries) {
           if (entry) map[entry[0]] = entry[1]
         }
@@ -468,11 +481,24 @@ export function SalePadView() {
   }, [customer?.id])
 
   // §2: Price display per mode — STRICT, no mixing
-  // §TIERED-PRICING: Check custom price map first (Specific Buyer > Group > Default)
+  // §MULTI-PRICE: Pick the mode-specific custom price field.
+  //   - 'retail' mode  → customSalePrice (fallback to legacy customPrice)
+  //   - 'wholesale'    → customWholesalePrice (fallback to legacy customPrice)
+  //   - 'full' (bulk)  → customSalePrice (fallback to legacy customPrice)
   const getPrice = (p: Product): number => {
-    // §TIERED: If we have a custom price for this product+customer, use it
     const custom = customPriceMap[p.id]
-    if (custom) return custom.price
+    if (custom) {
+      // §MULTI-PRICE: Pick the field matching the current sale mode
+      if (mode === 'wholesale' && custom.wholesalePrice != null) {
+        return custom.wholesalePrice
+      }
+      // For retail + full modes, use customSalePrice (fallback to legacy price)
+      if (custom.salePrice != null) {
+        return custom.salePrice
+      }
+      // §LEGACY: If only the legacy customPrice is set (old record), use it
+      return custom.price
+    }
 
     if (mode === 'retail') return (p as any).retailSalePrice || 0
     if (mode === 'wholesale') return p.wholesalePrice || p.salePrice

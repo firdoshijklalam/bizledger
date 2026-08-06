@@ -69,7 +69,11 @@ model CustomPrice {
   catalogItemId   String?
   buyerId         String?
   buyerGroupName  String?
-  customPrice     Float
+  // §MULTI-PRICE: Three-tier custom pricing mirroring the main Product form.
+  customPrice          Float  @default(0)
+  customSalePrice      Float?
+  customMrp            Float?
+  customWholesalePrice Float?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

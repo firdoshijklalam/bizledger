@@ -884,6 +884,10 @@ interface CustomPriceRow {
   buyerId: string | null
   buyerGroupName: string | null
   customPrice: number
+  // §MULTI-PRICE: Three-tier custom pricing fields
+  customSalePrice?: number | null
+  customMrp?: number | null
+  customWholesalePrice?: number | null
   buyer?: { id: string; name: string; phone?: string | null; buyerGroup?: string | null } | null
 }
 
@@ -895,13 +899,16 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
   // §UNIFIED-FORM: A single form state used for BOTH "Add" and "Edit".
   // When `editingId` is null → Add mode (empty form).
   // When `editingId` is set   → Edit mode (form pre-filled with the row's data).
-  // The user can edit BOTH the target entity (buyer/group) AND the price.
+  // The user can edit BOTH the target entity (buyer/group) AND the prices.
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [mode, setMode] = useState<'buyer' | 'group'>('buyer')
   const [selectedBuyerId, setSelectedBuyerId] = useState('')
   const [groupName, setGroupName] = useState('')
-  const [newPrice, setNewPrice] = useState('')
+  // §MULTI-PRICE: Three-tier custom pricing (mirrors the main Product form)
+  const [salePrice, setSalePrice] = useState('')
+  const [mrpPrice, setMrpPrice] = useState('')
+  const [wholesalePrice, setWholesalePrice] = useState('')
   // §GROUP-MEMBERS: Selected customer IDs for group membership
   const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(new Set())
   const [showMemberList, setShowMemberList] = useState(false)
@@ -914,14 +921,16 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
     setMode('buyer')
     setSelectedBuyerId('')
     setGroupName('')
-    setNewPrice('')
+    setSalePrice('')
+    setMrpPrice('')
+    setWholesalePrice('')
     setSelectedMemberIds(new Set())
     setShowMemberList(false)
     setShowForm(true)
   }
 
   // §OPEN-FORM-EDIT: Open the form in Edit mode, pre-filled with the row's data.
-  // The user can change the buyer/group AND the price — full editability.
+  // The user can change the buyer/group AND the prices — full editability.
   const openEditForm = (row: CustomPriceRow) => {
     setEditingId(row.id)
     if (row.buyerId && row.buyer) {
@@ -944,7 +953,11 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
       setSelectedBuyerId('')
       setGroupName('')
     }
-    setNewPrice(String(row.customPrice))
+    // §MULTI-PRICE: Pre-fill the three price fields from the row's data.
+    // Fall back to customPrice (legacy) if the specific field is null.
+    setSalePrice(row.customSalePrice != null ? String(row.customSalePrice) : String(row.customPrice))
+    setMrpPrice(row.customMrp != null ? String(row.customMrp) : '')
+    setWholesalePrice(row.customWholesalePrice != null ? String(row.customWholesalePrice) : '')
     setShowMemberList(false)
     setShowForm(true)
   }
@@ -955,23 +968,42 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
     setEditingId(null)
     setSelectedBuyerId('')
     setGroupName('')
-    setNewPrice('')
+    setSalePrice('')
+    setMrpPrice('')
+    setWholesalePrice('')
     setSelectedMemberIds(new Set())
     setShowMemberList(false)
   }
 
   // §SUBMIT: Handles BOTH add and edit. If editingId is set → PUT (update).
   // Otherwise → POST (create).
+  // §MULTI-PRICE: Sends all three price fields. At least one must be valid.
   const handleSubmit = async () => {
-    const price = Number(newPrice)
-    if (isNaN(price) || price < 0) { toast.error('Invalid price'); return }
+    const sPrice = salePrice ? Number(salePrice) : NaN
+    const mPrice = mrpPrice ? Number(mrpPrice) : NaN
+    const wPrice = wholesalePrice ? Number(wholesalePrice) : NaN
+
+    // Validate: at least one price must be provided
+    if (isNaN(sPrice) && isNaN(mPrice) && isNaN(wPrice)) {
+      toast.error('Enter at least one price'); return
+    }
+    if (!isNaN(sPrice) && sPrice < 0) { toast.error('Invalid sale price'); return }
+    if (!isNaN(mPrice) && mPrice < 0) { toast.error('Invalid MRP'); return }
+    if (!isNaN(wPrice) && wPrice < 0) { toast.error('Invalid wholesale price'); return }
+
     if (mode === 'buyer' && !selectedBuyerId) { toast.error('Select a buyer'); return }
     if (mode === 'group' && !groupName.trim()) { toast.error('Enter a group name'); return }
 
+    // Build the price payload — only include fields that are provided
+    const pricePayload: Record<string, unknown> = {}
+    if (!isNaN(sPrice)) pricePayload.customSalePrice = sPrice
+    if (!isNaN(mPrice)) pricePayload.customMrp = mPrice
+    if (!isNaN(wPrice)) pricePayload.customWholesalePrice = wPrice
+
     try {
       if (isEditMode && editingId) {
-        // §EDIT: Update the existing custom price — entity AND/OR price.
-        const updateBody: Record<string, unknown> = { customPrice: price }
+        // §EDIT: Update the existing custom price — entity AND/OR prices.
+        const updateBody: Record<string, unknown> = { ...pricePayload }
         if (mode === 'buyer') {
           updateBody.buyerId = selectedBuyerId
           updateBody.buyerGroupName = null
@@ -996,13 +1028,13 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
             )
           )
         }
-        toast.success('Custom price updated')
+        toast.success('Custom prices updated')
       } else {
         // §ADD: Create a new custom price.
         await apiPost(`/api/products/${productId}/custom-prices`, {
           buyerId: mode === 'buyer' ? selectedBuyerId : null,
           buyerGroupName: mode === 'group' ? groupName.trim() : null,
-          customPrice: price,
+          ...pricePayload,
           buyerName: mode === 'buyer' ? parties?.find((p) => p.id === selectedBuyerId)?.name : groupName.trim(),
         })
         if (mode === 'group' && selectedMemberIds.size > 0) {
@@ -1015,16 +1047,16 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
               })
             )
           )
-          toast.success(`Group "${groupName.trim()}" created with ${selectedMemberIds.size} member${selectedMemberIds.size > 1 ? 's' : ''} · Custom price set`)
+          toast.success(`Group "${groupName.trim()}" created with ${selectedMemberIds.size} member${selectedMemberIds.size > 1 ? 's' : ''} · Custom prices set`)
         } else {
-          toast.success('Custom price set · Buyer notified')
+          toast.success('Custom prices set · Buyer notified')
         }
       }
       closeForm()
       await refetchPrices()
       triggerRefresh()
     } catch (e) {
-      toast.error(isEditMode ? 'Failed to update price' : 'Failed to set custom price')
+      toast.error(isEditMode ? 'Failed to update prices' : 'Failed to set custom prices')
     }
   }
 
@@ -1079,11 +1111,34 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
                       {row.buyer ? `👤 ${row.buyer.name}` : `👥 ${row.buyerGroupName}`}
                     </p>
                     {row.buyer?.phone && <p className="text-[10px] text-muted-foreground">{row.buyer.phone}</p>}
+                    {/* §MULTI-PRICE: Show all three price fields (compact badges) */}
+                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                      {row.customSalePrice != null && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 font-medium tabular">
+                          Sale ₹{row.customSalePrice.toFixed(0)}
+                        </span>
+                      )}
+                      {row.customMrp != null && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 font-medium tabular">
+                          MRP ₹{row.customMrp.toFixed(0)}
+                        </span>
+                      )}
+                      {row.customWholesalePrice != null && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium tabular">
+                          Ws ₹{row.customWholesalePrice.toFixed(0)}
+                        </span>
+                      )}
+                      {/* §LEGACY: If only customPrice is set (old record), show it */}
+                      {row.customSalePrice == null && row.customMrp == null && row.customWholesalePrice == null && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 font-medium tabular">
+                          ₹{row.customPrice.toFixed(0)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-sm font-bold tabular text-violet-600">₹{row.customPrice.toFixed(2)}</span>
                     {/* §EDIT: Pen icon opens the FULL form (not inline) — allows
-                        changing BOTH the entity (buyer/group) AND the price. */}
+                        changing BOTH the entity (buyer/group) AND the prices. */}
                     <button
                       type="button"
                       onClick={() => openEditForm(row)}
@@ -1256,18 +1311,47 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
                   )}
                 </div>
               )}
-              <div className="flex items-center gap-2">
-                <Input
-                  value={newPrice}
-                  onChange={(e) => setNewPrice(e.target.value)}
-                  placeholder="Custom price ₹"
-                  className="h-10 text-sm flex-1"
-                  inputMode="numeric"
-                />
-                <Button type="button" size="sm" onClick={handleSubmit} className="h-10">
-                  {isEditMode ? 'Update' : 'Set'}
-                </Button>
+              {/* §MULTI-PRICE: Three-tier custom pricing mirroring the main Product form.
+                  The merchant can set Sale, MRP, and Wholesale prices independently.
+                  At least one must be provided. */}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-16 text-[10px] text-muted-foreground shrink-0">Sale ₹</span>
+                  <Input
+                    value={salePrice}
+                    onChange={(e) => setSalePrice(e.target.value)}
+                    placeholder="0"
+                    className="h-9 text-sm flex-1"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-16 text-[10px] text-muted-foreground shrink-0">MRP ₹</span>
+                  <Input
+                    value={mrpPrice}
+                    onChange={(e) => setMrpPrice(e.target.value)}
+                    placeholder="0 (optional)"
+                    className="h-9 text-sm flex-1"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-16 text-[10px] text-muted-foreground shrink-0">Wholesale ₹</span>
+                  <Input
+                    value={wholesalePrice}
+                    onChange={(e) => setWholesalePrice(e.target.value)}
+                    placeholder="0 (optional)"
+                    className="h-9 text-sm flex-1"
+                    inputMode="numeric"
+                  />
+                </div>
+                <p className="text-[9px] text-muted-foreground/70 leading-tight">
+                  At least one price required. These override the product's default prices for this buyer/group.
+                </p>
               </div>
+              <Button type="button" size="sm" onClick={handleSubmit} className="w-full h-10">
+                {isEditMode ? 'Update Prices' : 'Set Custom Prices'}
+              </Button>
             </div>
           ) : (
             <Button type="button" variant="outline" size="sm" onClick={openAddForm} className="w-full h-9 text-xs">

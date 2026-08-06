@@ -71,7 +71,17 @@ model CustomPrice {
   catalogItemId   String?  // for SupplierCatalogItem-based pricing (B2B sourcing)
   buyerId         String?  // specific Party (buyer) — HIGHEST priority
   buyerGroupName  String?  // tier label ("Wholesalers", "VIP") — group priority
-  customPrice     Float
+  // §MULTI-PRICE: Three-tier custom pricing mirroring the main Product form.
+  // The merchant can set a complete pricing structure per buyer/group:
+  //   - customSalePrice:     the retail/bulk sale price override
+  //   - customMrp:           the MRP override (for printed price + discount calc)
+  //   - customWholesalePrice: the wholesale price override (for bulk orders)
+  // `customPrice` is kept for backward compat — used as a fallback when only
+  // one price is set or for older records created before this change.
+  customPrice          Float  @default(0)
+  customSalePrice      Float? // §MULTI-PRICE: override for Product.salePrice
+  customMrp            Float? // §MULTI-PRICE: override for Product.mrp
+  customWholesalePrice Float? // §MULTI-PRICE: override for Product.wholesalePrice
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
