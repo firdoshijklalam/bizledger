@@ -884,10 +884,13 @@ interface CustomPriceRow {
   buyerId: string | null
   buyerGroupName: string | null
   customPrice: number
-  // §MULTI-PRICE: Three-tier custom pricing fields
+  // §MULTI-PRICE: Three-tier custom pricing fields (BULK/FULL mode — per bag/box)
   customSalePrice?: number | null
   customMrp?: number | null
   customWholesalePrice?: number | null
+  // §RETAIL-ISOLATION: Retail-specific prices (per kg/pcs) — separate from bulk
+  customRetailSalePrice?: number | null
+  customRetailMrp?: number | null
   buyer?: { id: string; name: string; phone?: string | null; buyerGroup?: string | null } | null
 }
 
@@ -906,9 +909,13 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
   const [selectedBuyerId, setSelectedBuyerId] = useState('')
   const [groupName, setGroupName] = useState('')
   // §MULTI-PRICE: Three-tier custom pricing (mirrors the main Product form)
+  // BULK/FULL mode prices (per bag/box)
   const [salePrice, setSalePrice] = useState('')
   const [mrpPrice, setMrpPrice] = useState('')
   const [wholesalePrice, setWholesalePrice] = useState('')
+  // §RETAIL-ISOLATION: Retail prices (per kg/pcs) — SEPARATE from bulk
+  const [retailSalePrice, setRetailSalePrice] = useState('')
+  const [retailMrpPrice, setRetailMrpPrice] = useState('')
   // §GROUP-MEMBERS: Selected customer IDs for group membership
   const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(new Set())
   const [showMemberList, setShowMemberList] = useState(false)
@@ -924,6 +931,8 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
     setSalePrice('')
     setMrpPrice('')
     setWholesalePrice('')
+    setRetailSalePrice('')
+    setRetailMrpPrice('')
     setSelectedMemberIds(new Set())
     setShowMemberList(false)
     setShowForm(true)
@@ -953,11 +962,14 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
       setSelectedBuyerId('')
       setGroupName('')
     }
-    // §MULTI-PRICE: Pre-fill the three price fields from the row's data.
+    // §MULTI-PRICE: Pre-fill the three BULK price fields from the row's data.
     // Fall back to customPrice (legacy) if the specific field is null.
     setSalePrice(row.customSalePrice != null ? String(row.customSalePrice) : String(row.customPrice))
     setMrpPrice(row.customMrp != null ? String(row.customMrp) : '')
     setWholesalePrice(row.customWholesalePrice != null ? String(row.customWholesalePrice) : '')
+    // §RETAIL-ISOLATION: Pre-fill retail-specific prices (separate from bulk)
+    setRetailSalePrice(row.customRetailSalePrice != null ? String(row.customRetailSalePrice) : '')
+    setRetailMrpPrice(row.customRetailMrp != null ? String(row.customRetailMrp) : '')
     setShowMemberList(false)
     setShowForm(true)
   }
@@ -971,25 +983,32 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
     setSalePrice('')
     setMrpPrice('')
     setWholesalePrice('')
+    setRetailSalePrice('')
+    setRetailMrpPrice('')
     setSelectedMemberIds(new Set())
     setShowMemberList(false)
   }
 
   // §SUBMIT: Handles BOTH add and edit. If editingId is set → PUT (update).
   // Otherwise → POST (create).
-  // §MULTI-PRICE: Sends all three price fields. At least one must be valid.
+  // §MULTI-PRICE: Sends all price fields (bulk + retail). At least one must be valid.
+  // §RETAIL-ISOLATION: Retail prices are sent separately from bulk prices.
   const handleSubmit = async () => {
     const sPrice = salePrice ? Number(salePrice) : NaN
     const mPrice = mrpPrice ? Number(mrpPrice) : NaN
     const wPrice = wholesalePrice ? Number(wholesalePrice) : NaN
+    const rsPrice = retailSalePrice ? Number(retailSalePrice) : NaN
+    const rmPrice = retailMrpPrice ? Number(retailMrpPrice) : NaN
 
     // Validate: at least one price must be provided
-    if (isNaN(sPrice) && isNaN(mPrice) && isNaN(wPrice)) {
+    if (isNaN(sPrice) && isNaN(mPrice) && isNaN(wPrice) && isNaN(rsPrice) && isNaN(rmPrice)) {
       toast.error('Enter at least one price'); return
     }
     if (!isNaN(sPrice) && sPrice < 0) { toast.error('Invalid sale price'); return }
     if (!isNaN(mPrice) && mPrice < 0) { toast.error('Invalid MRP'); return }
     if (!isNaN(wPrice) && wPrice < 0) { toast.error('Invalid wholesale price'); return }
+    if (!isNaN(rsPrice) && rsPrice < 0) { toast.error('Invalid retail sale price'); return }
+    if (!isNaN(rmPrice) && rmPrice < 0) { toast.error('Invalid retail MRP'); return }
 
     if (mode === 'buyer' && !selectedBuyerId) { toast.error('Select a buyer'); return }
     if (mode === 'group' && !groupName.trim()) { toast.error('Enter a group name'); return }
@@ -999,6 +1018,9 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
     if (!isNaN(sPrice)) pricePayload.customSalePrice = sPrice
     if (!isNaN(mPrice)) pricePayload.customMrp = mPrice
     if (!isNaN(wPrice)) pricePayload.customWholesalePrice = wPrice
+    // §RETAIL-ISOLATION: Include retail-specific prices
+    if (!isNaN(rsPrice)) pricePayload.customRetailSalePrice = rsPrice
+    if (!isNaN(rmPrice)) pricePayload.customRetailMrp = rmPrice
 
     try {
       if (isEditMode && editingId) {
@@ -1111,7 +1133,8 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
                       {row.buyer ? `👤 ${row.buyer.name}` : `👥 ${row.buyerGroupName}`}
                     </p>
                     {row.buyer?.phone && <p className="text-[10px] text-muted-foreground">{row.buyer.phone}</p>}
-                    {/* §MULTI-PRICE: Show all three price fields (compact badges) */}
+                    {/* §MULTI-PRICE: Show all price fields (compact badges)
+                        §RETAIL-ISOLATION: Retail badges shown in blue, bulk in violet/amber */}
                     <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                       {row.customSalePrice != null && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 font-medium tabular">
@@ -1128,8 +1151,19 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
                           Ws ₹{row.customWholesalePrice.toFixed(0)}
                         </span>
                       )}
+                      {/* §RETAIL-ISOLATION: Retail-specific badges (teal colored) */}
+                      {row.customRetailSalePrice != null && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 font-medium tabular">
+                          R.Sale ₹{row.customRetailSalePrice.toFixed(0)}
+                        </span>
+                      )}
+                      {row.customRetailMrp != null && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 font-medium tabular">
+                          R.MRP ₹{row.customRetailMrp.toFixed(0)}
+                        </span>
+                      )}
                       {/* §LEGACY: If only customPrice is set (old record), show it */}
-                      {row.customSalePrice == null && row.customMrp == null && row.customWholesalePrice == null && (
+                      {row.customSalePrice == null && row.customMrp == null && row.customWholesalePrice == null && row.customRetailSalePrice == null && row.customRetailMrp == null && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 font-medium tabular">
                           ₹{row.customPrice.toFixed(0)}
                         </span>
@@ -1311,10 +1345,13 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
                   )}
                 </div>
               )}
-              {/* §MULTI-PRICE: Three-tier custom pricing mirroring the main Product form.
-                  The merchant can set Sale, MRP, and Wholesale prices independently.
-                  At least one must be provided. */}
+              {/* §MULTI-PRICE: Custom pricing mirroring the main Product form.
+                  §RETAIL-ISOLATION: Bulk (Full/Wholesale) and Retail (loose/kg) prices
+                  are COMPLETELY SEPARATE. A custom price set for a BAG does NOT bleed
+                  into the retail (kg) tab. The merchant can set either or both. */}
               <div className="space-y-1.5">
+                {/* §BULK-PRICES: Full/Wholesale mode (per bag/box) */}
+                <p className="text-[9px] font-semibold text-violet-600 dark:text-violet-400 uppercase tracking-wide">Full / Bulk (per bag/box)</p>
                 <div className="flex items-center gap-1.5">
                   <span className="w-16 text-[10px] text-muted-foreground shrink-0">Sale ₹</span>
                   <Input
@@ -1345,8 +1382,30 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
                     inputMode="numeric"
                   />
                 </div>
+                {/* §RETAIL-PRICES: Retail mode (per kg/pcs) — SEPARATE from bulk */}
+                <p className="text-[9px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide mt-2">Retail / Loose (per kg/pcs)</p>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-16 text-[10px] text-muted-foreground shrink-0">Sale ₹</span>
+                  <Input
+                    value={retailSalePrice}
+                    onChange={(e) => setRetailSalePrice(e.target.value)}
+                    placeholder="0 (optional)"
+                    className="h-9 text-sm flex-1"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-16 text-[10px] text-muted-foreground shrink-0">MRP ₹</span>
+                  <Input
+                    value={retailMrpPrice}
+                    onChange={(e) => setRetailMrpPrice(e.target.value)}
+                    placeholder="0 (optional)"
+                    className="h-9 text-sm flex-1"
+                    inputMode="numeric"
+                  />
+                </div>
                 <p className="text-[9px] text-muted-foreground/70 leading-tight">
-                  At least one price required. These override the product's default prices for this buyer/group.
+                  Bulk and Retail prices are independent. If Retail is left blank, the retail tab uses the product's default price (not the bulk custom price).
                 </p>
               </div>
               <Button type="button" size="sm" onClick={handleSubmit} className="w-full h-10">

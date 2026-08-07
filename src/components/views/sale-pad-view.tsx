@@ -443,6 +443,11 @@ export function SalePadView() {
     salePrice?: number | null
     mrp?: number | null
     wholesalePrice?: number | null
+    // §RETAIL-ISOLATION: Retail-specific prices (per kg/pcs) — SEPARATE from bulk.
+    // These do NOT fall back to bulk prices. If null, retail mode uses the
+    // product's default retailSalePrice.
+    retailSalePrice?: number | null
+    retailMrp?: number | null
   }
   const [customPriceMap, setCustomPriceMap] = useState<Record<string, CustomPriceEntry>>({})
   // §CACHE: Map<cacheKey, Record<productId, CustomPriceEntry>>
@@ -529,6 +534,9 @@ export function SalePadView() {
                     salePrice: r.customPrices.salePrice ?? null,
                     mrp: r.customPrices.mrp ?? null,
                     wholesalePrice: r.customPrices.wholesalePrice ?? null,
+                    // §RETAIL-ISOLATION: Extract retail-specific prices
+                    retailSalePrice: r.customPrices.retailSalePrice ?? null,
+                    retailMrp: r.customPrices.retailMrp ?? null,
                   }
                 }
               }
@@ -558,6 +566,9 @@ export function SalePadView() {
               salePrice: data.customPrices?.salePrice ?? null,
               mrp: data.customPrices?.mrp ?? null,
               wholesalePrice: data.customPrices?.wholesalePrice ?? null,
+              // §RETAIL-ISOLATION: Extract retail-specific prices
+              retailSalePrice: data.customPrices?.retailSalePrice ?? null,
+              retailMrp: data.customPrices?.retailMrp ?? null,
             }] as [string, CustomPriceEntry]
           }
           return null
@@ -578,18 +589,34 @@ export function SalePadView() {
   }, [customer?.id, products, mode])
 
   // §2: Price display per mode — STRICT, no mixing
-  // §MULTI-PRICE: Pick the mode-specific custom price field.
-  //   - 'retail' mode  → customSalePrice (fallback to legacy customPrice)
-  //   - 'wholesale'    → customWholesalePrice (fallback to legacy customPrice)
-  //   - 'full' (bulk)  → customSalePrice (fallback to legacy customPrice)
+  // §RETAIL-ISOLATION: Retail (loose/kg/pcs) prices are COMPLETELY SEPARATE
+  // from bulk/full prices. A custom price set for a BAG must NOT bleed into
+  // the retail (kg) tab. If no retail-specific custom price is set, retail
+  // mode falls back to the product's default retailSalePrice — it NEVER
+  // inherits the bulk bag's custom price.
+  //
+  // Mode → custom price field mapping:
+  //   - 'retail' mode    → customRetailSalePrice (no fallback to bulk!)
+  //   - 'wholesale'      → customWholesalePrice (fallback to legacy customPrice)
+  //   - 'full' (bulk)    → customSalePrice (fallback to legacy customPrice)
   const getPrice = (p: Product): number => {
     const custom = customPriceMap[p.id]
     if (custom) {
-      // §MULTI-PRICE: Pick the field matching the current sale mode
+      // §RETAIL-ISOLATION: Retail mode uses ONLY the retail-specific custom
+      // price. If it's null, fall through to the product's default retail
+      // price — do NOT use the bulk customSalePrice.
+      if (mode === 'retail') {
+        if (custom.retailSalePrice != null) {
+          return custom.retailSalePrice
+        }
+        // No retail-specific custom price → fall through to default retail price
+        return (p as any).retailSalePrice || 0
+      }
+      // §BULK-MODES: wholesale + full use the bulk custom prices
       if (mode === 'wholesale' && custom.wholesalePrice != null) {
         return custom.wholesalePrice
       }
-      // For retail + full modes, use customSalePrice (fallback to legacy price)
+      // For full mode, use customSalePrice (fallback to legacy price)
       if (custom.salePrice != null) {
         return custom.salePrice
       }

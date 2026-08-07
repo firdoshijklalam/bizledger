@@ -73,15 +73,22 @@ model CustomPrice {
   buyerGroupName  String?  // tier label ("Wholesalers", "VIP") — group priority
   // §MULTI-PRICE: Three-tier custom pricing mirroring the main Product form.
   // The merchant can set a complete pricing structure per buyer/group:
-  //   - customSalePrice:     the retail/bulk sale price override
+  //   - customSalePrice:     the bulk/full sale price override (per bag/box)
   //   - customMrp:           the MRP override (for printed price + discount calc)
   //   - customWholesalePrice: the wholesale price override (for bulk orders)
   // `customPrice` is kept for backward compat — used as a fallback when only
   // one price is set or for older records created before this change.
   customPrice          Float  @default(0)
-  customSalePrice      Float? // §MULTI-PRICE: override for Product.salePrice
-  customMrp            Float? // §MULTI-PRICE: override for Product.mrp
-  customWholesalePrice Float? // §MULTI-PRICE: override for Product.wholesalePrice
+  customSalePrice      Float? // §MULTI-PRICE: override for Product.salePrice (BULK/FULL mode)
+  customMrp            Float? // §MULTI-PRICE: override for Product.mrp (BULK/FULL mode)
+  customWholesalePrice Float? // §MULTI-PRICE: override for Product.wholesalePrice (BULK/FULL mode)
+  // §RETAIL-ISOLATION: Retail (loose/kg/pcs) custom prices are SEPARATE from
+  // bulk/full prices. A custom price set for a BAG must NOT bleed into the
+  // retail (kg) tab. If a merchant only sets a bulk custom price, the retail
+  // tab falls back to the product's default retailSalePrice — it NEVER
+  // inherits the bulk bag's custom price.
+  customRetailSalePrice Float? // §RETAIL: override for Product.retailSalePrice (per kg/pcs)
+  customRetailMrp       Float? // §RETAIL: override for Product.retailMrp (per kg/pcs)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

@@ -20,19 +20,22 @@ import { db } from '@/lib/db'
  * Returns { price, source, customPriceId? } where source ∈ 'buyer' | 'group' | 'default'.
  */
 
-export type PriceMode = 'sale' | 'mrp' | 'wholesale' | 'default'
+export type PriceMode = 'sale' | 'mrp' | 'wholesale' | 'default' | 'retail-sale' | 'retail-mrp'
 
 export interface ResolvedPrice {
   price: number
   source: 'buyer' | 'group' | 'default'
   customPriceId?: string
   // §MULTI-PRICE: The full custom price record (if a custom price was found)
-  // so the caller can access all 3 price fields if needed.
+  // so the caller can access all price fields if needed.
   customPrices?: {
     salePrice?: number | null
     mrp?: number | null
     wholesalePrice?: number | null
     legacyPrice?: number | null
+    // §RETAIL-ISOLATION: Retail-specific prices (per kg/pcs) — SEPARATE from bulk.
+    retailSalePrice?: number | null
+    retailMrp?: number | null
   }
 }
 
@@ -40,9 +43,23 @@ export interface ResolvedPrice {
  * §HELPER: Extract the mode-specific price from a CustomPrice record.
  * Falls back to the legacy `customPrice` field if the mode-specific field
  * is null (for records created before the multi-price change).
+ *
+ * §RETAIL-ISOLATION: 'retail-sale' and 'retail-mrp' modes use the
+ * retail-specific fields (customRetailSalePrice, customRetailMrp). These
+ * do NOT fall back to the bulk customPrice — if no retail-specific price
+ * is set, returns null so the caller falls back to the product's default
+ * retail price. This prevents a bulk bag price from bleeding into the
+ * retail (kg) tab.
  */
 function getPriceForMode(
-  cp: { customPrice: number; customSalePrice: number | null; customMrp: number | null; customWholesalePrice: number | null },
+  cp: {
+    customPrice: number
+    customSalePrice: number | null
+    customMrp: number | null
+    customWholesalePrice: number | null
+    customRetailSalePrice: number | null
+    customRetailMrp: number | null
+  },
   mode?: PriceMode,
 ): number | null {
   switch (mode) {
@@ -54,6 +71,14 @@ function getPriceForMode(
     case 'wholesale':
       // §LEGACY: If customWholesalePrice is null, fall back to customPrice
       return cp.customWholesalePrice ?? cp.customPrice
+    case 'retail-sale':
+      // §RETAIL-ISOLATION: NO fallback to bulk customPrice — retail prices
+      // are completely separate. If no retail-specific price is set, return
+      // null so the caller uses the product's default retailSalePrice.
+      return cp.customRetailSalePrice
+    case 'retail-mrp':
+      // §RETAIL-ISOLATION: Same — no fallback to bulk customMrp.
+      return cp.customRetailMrp
     case 'default':
     default:
       // Legacy behavior — return the generic customPrice
@@ -94,6 +119,9 @@ export async function resolveProductPrice(
             mrp: cp.customMrp,
             wholesalePrice: cp.customWholesalePrice,
             legacyPrice: cp.customPrice,
+            // §RETAIL-ISOLATION: Include retail-specific prices
+            retailSalePrice: cp.customRetailSalePrice,
+            retailMrp: cp.customRetailMrp,
           },
         }
       }
@@ -116,6 +144,9 @@ export async function resolveProductPrice(
             mrp: cp.customMrp,
             wholesalePrice: cp.customWholesalePrice,
             legacyPrice: cp.customPrice,
+            // §RETAIL-ISOLATION: Include retail-specific prices
+            retailSalePrice: cp.customRetailSalePrice,
+            retailMrp: cp.customRetailMrp,
           },
         }
       }
@@ -198,6 +229,9 @@ export async function resolveProductPricesBatch(
           mrp: bp.customMrp,
           wholesalePrice: bp.customWholesalePrice,
           legacyPrice: bp.customPrice,
+          // §RETAIL-ISOLATION: Include retail-specific prices
+          retailSalePrice: bp.customRetailSalePrice,
+          retailMrp: bp.customRetailMrp,
         },
       })
       continue
@@ -213,6 +247,9 @@ export async function resolveProductPricesBatch(
           mrp: gp.customMrp,
           wholesalePrice: gp.customWholesalePrice,
           legacyPrice: gp.customPrice,
+          // §RETAIL-ISOLATION: Include retail-specific prices
+          retailSalePrice: gp.customRetailSalePrice,
+          retailMrp: gp.customRetailMrp,
         },
       })
       continue

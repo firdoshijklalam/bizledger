@@ -74,6 +74,9 @@ model CustomPrice {
   customSalePrice      Float?
   customMrp            Float?
   customWholesalePrice Float?
+  // §RETAIL-ISOLATION: Retail prices are separate from bulk prices.
+  customRetailSalePrice Float?
+  customRetailMrp       Float?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

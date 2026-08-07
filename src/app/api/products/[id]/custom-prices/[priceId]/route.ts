@@ -44,6 +44,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (isNaN(v) || v < 0) return NextResponse.json({ error: 'Invalid customWholesalePrice' }, { status: 400 })
       updateData.customWholesalePrice = v
     }
+    // §RETAIL-ISOLATION: Retail-specific prices (per kg/pcs) — separate from bulk
+    if (body.customRetailSalePrice !== undefined) {
+      const v = Number(body.customRetailSalePrice)
+      if (isNaN(v) || v < 0) return NextResponse.json({ error: 'Invalid customRetailSalePrice' }, { status: 400 })
+      updateData.customRetailSalePrice = v
+    }
+    if (body.customRetailMrp !== undefined) {
+      const v = Number(body.customRetailMrp)
+      if (isNaN(v) || v < 0) return NextResponse.json({ error: 'Invalid customRetailMrp' }, { status: 400 })
+      updateData.customRetailMrp = v
+    }
 
     // §LEGACY: single customPrice (maps to customSalePrice if customSalePrice not provided)
     if (body.customPrice !== undefined && updateData.customSalePrice === undefined) {

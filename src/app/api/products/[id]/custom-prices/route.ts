@@ -44,11 +44,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'Either buyerId or buyerGroupName is required' }, { status: 400 })
     }
 
-    // §MULTI-PRICE: Parse the three price fields. All are optional individually,
+    // §MULTI-PRICE: Parse the price fields. All are optional individually,
     // but at least one must be provided.
     const customSalePrice = body.customSalePrice !== undefined ? Number(body.customSalePrice) : undefined
     const customMrp = body.customMrp !== undefined ? Number(body.customMrp) : undefined
     const customWholesalePrice = body.customWholesalePrice !== undefined ? Number(body.customWholesalePrice) : undefined
+    // §RETAIL-ISOLATION: Retail-specific prices (per kg/pcs) — separate from bulk
+    const customRetailSalePrice = body.customRetailSalePrice !== undefined ? Number(body.customRetailSalePrice) : undefined
+    const customRetailMrp = body.customRetailMrp !== undefined ? Number(body.customRetailMrp) : undefined
 
     // §LEGACY: If only customPrice is provided (old clients), map it to customSalePrice
     const legacyPrice = body.customPrice !== undefined ? Number(body.customPrice) : undefined
@@ -57,6 +60,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       (customSalePrice === undefined || isNaN(customSalePrice) || customSalePrice < 0) &&
       (customMrp === undefined || isNaN(customMrp) || customMrp < 0) &&
       (customWholesalePrice === undefined || isNaN(customWholesalePrice) || customWholesalePrice < 0) &&
+      (customRetailSalePrice === undefined || isNaN(customRetailSalePrice) || customRetailSalePrice < 0) &&
+      (customRetailMrp === undefined || isNaN(customRetailMrp) || customRetailMrp < 0) &&
       (legacyPrice === undefined || isNaN(legacyPrice) || legacyPrice < 0)
     ) {
       return NextResponse.json({ error: 'At least one valid price is required' }, { status: 400 })
@@ -67,6 +72,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (customSalePrice !== undefined && !isNaN(customSalePrice)) data.customSalePrice = customSalePrice
     if (customMrp !== undefined && !isNaN(customMrp)) data.customMrp = customMrp
     if (customWholesalePrice !== undefined && !isNaN(customWholesalePrice)) data.customWholesalePrice = customWholesalePrice
+    // §RETAIL-ISOLATION: Store retail-specific prices
+    if (customRetailSalePrice !== undefined && !isNaN(customRetailSalePrice)) data.customRetailSalePrice = customRetailSalePrice
+    if (customRetailMrp !== undefined && !isNaN(customRetailMrp)) data.customRetailMrp = customRetailMrp
 
     // §LEGACY: Map legacy customPrice to customSalePrice + keep customPrice for backward compat
     if (legacyPrice !== undefined && !isNaN(legacyPrice)) {
