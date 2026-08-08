@@ -319,8 +319,8 @@ model Invoice {
   collectedByRole String? // family | partner | agent | primary
   paidToName      String? // e.g. "Partner - Amit" (when paid to supplier partner)
   paidToRole      String? // partner | agent | primary
-  // §3: Fulfillment status — handed | pickup (for "Pick Up Later" orders)
-  deliveryStatus  String?  @default("handed") // handed | pickup
+  // §3: Fulfillment status — handed | pickup | ready (for "Pick Up Later" orders)
+  deliveryStatus  String?  @default("handed") // handed | pickup | ready
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -343,6 +343,8 @@ model InvoiceItem {
   discount  Float  @default(0)
   gstRate   Float  @default(0)
   total     Float  @default(0)
+  // §PARTIAL-FULFILLMENT: Tracks how much has been handed over
+  fulfilledQty Float @default(0)
 
   invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)

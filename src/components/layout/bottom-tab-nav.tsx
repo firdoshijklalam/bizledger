@@ -3,7 +3,7 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
-import { Home, BookOpen, Package, Receipt, MoreHorizontal, BarChart3, Sparkles, Settings, Bell, Store, Users, History, ShoppingBag } from 'lucide-react'
+import { Home, BookOpen, Package, Receipt, MoreHorizontal, BarChart3, Sparkles, Settings, Bell, Store, Users, History, ShoppingBag, ClipboardList } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ViewId } from '@/lib/types'
 import { useState } from 'react'
@@ -18,6 +18,7 @@ const TABS: Array<{ id: ViewId | 'more'; icon: typeof Home; labelKey: string }> 
 ]
 
 const MORE_ITEMS = [
+  { id: 'fulfillment' as ViewId, icon: ClipboardList, labelKey: 'Fulfillment', color: 'text-orange-600 bg-orange-100 dark:bg-orange-900/30' },
   { id: 'online-orders' as ViewId, icon: ShoppingBag, labelKey: 'Online Orders', color: 'text-cyan-600 bg-cyan-100 dark:bg-cyan-900/30' },
   { id: 'history' as ViewId, icon: History, labelKey: 'History', color: 'text-orange-600 bg-orange-100 dark:bg-orange-900/30' },
   { id: 'sourcing' as ViewId, icon: Store, labelKey: 'B2B Sourcing', color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/30' },

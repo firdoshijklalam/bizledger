@@ -22,6 +22,7 @@ import { SalePadView } from '@/components/views/sale-pad-view'
 import { SourcingView } from '@/components/views/sourcing-view'
 import { StaffManagementView } from '@/components/views/staff-management-view'
 import { OnlineOrdersView } from '@/components/views/online-orders-view'
+import { FulfillmentView } from '@/components/views/fulfillment-view'
 import { StoreCatalogView } from '@/components/views/store-catalog-view'
 import { CentralCatalogView } from '@/components/views/central-catalog-view'  // Part 36
 import { MoreShopsView } from '@/components/views/more-shops-view'
@@ -300,6 +301,8 @@ function renderView(view: string) {
       return <SourcingView />
     case 'online-orders':
       return <OnlineOrdersView />
+    case 'fulfillment':
+      return <FulfillmentView />
     case 'staff':
       return <StaffManagementView />
     default:

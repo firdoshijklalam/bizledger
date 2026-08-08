@@ -14,6 +14,7 @@ export type ViewId =
   | 'history'
   | 'online-orders'
   | 'staff'
+  | 'fulfillment'
 
 export type PartyType = 'customer' | 'supplier' | 'both'
 export type QualityGrade = 'A' | 'B' | 'C' | 'D' | 'E'
