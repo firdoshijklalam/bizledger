@@ -259,7 +259,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
     <motion.div
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
-      className="space-y-4"
+      className="space-y-4 pb-24"
     >
       {/* §3: Pickup Pending banner — prominent button to mark as handed over */}
       {isPickupPending && (
@@ -371,27 +371,31 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
       </div>
 
       {/* §3: Premium Invoice — print area. FORCED LIGHT MODE for image export.
-          Hardcoded white bg + black text so dark mode doesn't cause white-on-white. */}
-      <div ref={printRef} className="invoice-content rounded-2xl overflow-hidden border border-gray-200 shadow-sm" style={{ backgroundColor: '#FFFFFF', color: '#000000' }}>
-        {/* Brand color header band */}
-        <div className="p-5" style={{ background: 'linear-gradient(to right, #059669, #047857)', color: '#FFFFFF' }}>
+          §PAPER-EFFECT: Subtle drop shadow + rounded corners so it looks like a
+          real physical paper receipt sitting on a slightly darker background. */}
+      <div ref={printRef} className="invoice-content rounded-2xl overflow-hidden border border-gray-200 shadow-xl shadow-black/10" style={{ backgroundColor: '#FFFFFF', color: '#000000' }}>
+        {/* §HEADER-THEME: Sophisticated deep teal gradient (was harsh emerald).
+          Deep teal conveys trust, professionalism, and premium quality. */}
+        <div className="p-5" style={{ background: 'linear-gradient(135deg, #0F766E 0%, #115E59 50%, #134E4A 100%)', color: '#FFFFFF' }}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h1 className="text-xl font-bold leading-tight">{business?.name}</h1>
-              <p className="text-xs opacity-90 mt-1">{business?.address}</p>
-              <p className="text-xs opacity-90">
+              <h1 className="text-xl font-bold leading-tight tracking-tight">{business?.name}</h1>
+              {/* §TYPOGRAPHY: Secondary info in muted white/70 so it doesn't
+                  fight for attention with the main content. */}
+              <p className="text-xs opacity-70 mt-1">{business?.address}</p>
+              <p className="text-xs opacity-70">
                 {business?.phone}{business?.gstin ? ` · GSTIN: ${business.gstin}` : ''}
               </p>
               {/* §1: CIN No + Terminal/Counter ID */}
-              <p className="text-[10px] opacity-75 mt-1">
+              <p className="text-[10px] opacity-50 mt-1">
                 {business?.pan ? `CIN: U74110WB2018PTC${business.pan}` : ''}{invoice.collectedByRole ? ` · Terminal: ${invoice.collectedByRole.toUpperCase()}` : ' · Terminal: T01'}
               </p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] uppercase opacity-75 tracking-wider">Tax Invoice</p>
-              <p className="text-sm font-bold">{invoice.invoiceNumber}</p>
-              <p className="text-[11px] opacity-90 mt-1">{formatDate(invoice.createdAt)}</p>
-              <p className="text-[10px] opacity-75 mt-0.5">Counter: {(invoice as any).counterId || 'T01'}</p>
+              <p className="text-[10px] uppercase opacity-50 tracking-widest font-medium">Tax Invoice</p>
+              <p className="text-sm font-bold tracking-tight">{invoice.invoiceNumber}</p>
+              <p className="text-[11px] opacity-70 mt-1">{formatDate(invoice.createdAt)}</p>
+              <p className="text-[10px] opacity-50 mt-0.5">Counter: {(invoice as any).counterId || 'T01'}</p>
             </div>
           </div>
         </div>
@@ -482,15 +486,17 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
               </div>
             </>
           )}
-          {/* Grand Total = Subtotal - Discount + GST (from DB) */}
-          <div className="flex justify-between pt-2 border-t border-dashed border-gray-300">
-            <span className="font-bold" style={{ color: '#000000' }}>{t('bill.grandTotal')}</span>
-            <span className="font-bold tabular text-lg" style={{ color: '#059669' }}>{formatCurrency(safeGrandTotal, currency)}</span>
+          {/* Grand Total = Subtotal - Discount + GST (from DB)
+              §TYPOGRAPHY: Grand Total pops more — larger font, bold, teal color
+              (matches header theme) so it stands out from other totals. */}
+          <div className="flex justify-between items-center pt-2.5 border-t-2 border-gray-300">
+            <span className="font-bold text-base" style={{ color: '#000000' }}>{t('bill.grandTotal')}</span>
+            <span className="font-bold tabular text-xl tracking-tight" style={{ color: '#0F766E' }}>{formatCurrency(safeGrandTotal, currency)}</span>
           </div>
-          {/* Paid — shows actual amount paid */}
+          {/* Paid — shows actual amount paid. §TYPOGRAPHY: teal accent. */}
           <div className="flex justify-between pt-1">
             <span style={{ color: '#6B7280' }}>Paid {invoice.paymentMode ? `via ${invoice.paymentMode.toUpperCase()}` : ''}</span>
-            <span className="tabular" style={{ color: '#059669' }}>{formatCurrency(safeAmountPaid, currency)}</span>
+            <span className="tabular font-medium" style={{ color: '#0F766E' }}>{formatCurrency(safeAmountPaid, currency)}</span>
           </div>
           {/* Remaining Due — only if underpaid */}
           {remainingDue > 0 && (
@@ -501,9 +507,9 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
           )}
           {/* Change Due — only if overpaid (customer paid more than GrandTotal) */}
           {changeDue > 0 && (
-            <div className="flex justify-between" style={{ color: '#059669' }}>
+            <div className="flex justify-between" style={{ color: '#0F766E' }}>
               <span className="font-medium">Change Due</span>
-              <span className="tabular">{formatCurrency(changeDue, currency)}</span>
+              <span className="tabular font-medium">{formatCurrency(changeDue, currency)}</span>
             </div>
           )}
           {/* Amount in Words */}
@@ -574,8 +580,13 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
         </div>
       </div>
 
-      {/* §3: Sticky bottom action footer — image-based sharing */}
-      <div className="sticky bottom-0 z-20 bg-card border-t border-border p-3 action-buttons shadow-lg">
+      {/* §3: Fixed bottom action footer — image-based sharing.
+          §POSITION-FIX: position:fixed bottom:0 left:0 w-full z-[99] so it
+          ALWAYS anchors to the bottom regardless of entry point (was sticky
+          which broke when opened from Khata/Ledger history).
+          §GLASSMORPHISM: Translucent bg + backdrop-blur for modern app feel.
+          Uses inline style for the glass effect (works in both light + dark). */}
+      <div className="fixed bottom-0 left-0 w-full z-[99] action-buttons border-t border-border p-3 dark:border-border" style={{ backgroundColor: 'color-mix(in srgb, var(--background) 85%, transparent)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
         <div className="grid grid-cols-4 gap-2 max-w-2xl mx-auto">
           <Button variant="outline" onClick={handleWhatsAppShare} disabled={capturing} className="h-11 flex-col gap-0.5 text-emerald-600 border-emerald-300 dark:border-emerald-800">
             <MessageCircle className="w-4 h-4" />
