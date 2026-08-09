@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 
 // POST /api/returns — create a return request (PRD Part 36 §3.1).
 //   Body: { orderSplitId, customerPhone, reason }
@@ -51,6 +51,10 @@ interface SplitItem {
 
 export async function POST(req: NextRequest) {
   try {
+    // §OWNERSHIP-CHECK: Verify the current business before processing returns.
+    const business = await getCurrentBusiness()
+    if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
+
     const body = await req.json()
     const orderSplitId = String(body.orderSplitId || '').trim()
     const customerPhone = body.customerPhone ? String(body.customerPhone).trim() : null
@@ -63,8 +67,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const orderSplit = await db.orderSplit.findUnique({
-      where: { id: orderSplitId },
+    // §OWNERSHIP: Use findFirst with businessId scope instead of findUnique
+    const orderSplit = await db.orderSplit.findFirst({
+      where: { id: orderSplitId, businessId: business.id },
     })
     if (!orderSplit) {
       return NextResponse.json(

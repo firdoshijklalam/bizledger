@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { randomBytes } from 'crypto'
 
+// §SECURITY: Staff management endpoints. In production, these MUST be protected
+// with role-based authorization (OWNER/ADMIN only). Currently uses businessId
+// from getCurrentBusiness() for data isolation, but no role check exists yet.
+// TODO: Add requireRole(['OWNER', 'ADMIN']) when auth system is implemented.
+
 export async function GET() {
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json([])

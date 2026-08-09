@@ -33,9 +33,10 @@ export async function POST(req: NextRequest) {
     const partyId = body.partyId
 
     // Update party balance — §2 FIX: default to 0 instead of null for walk-in customers
+    // §OWNERSHIP-CHECK: Verify the party belongs to the current business before modifying.
     let balanceAfter: number = 0
     if (partyId) {
-      const party = await db.party.findUnique({ where: { id: partyId } })
+      const party = await db.party.findFirst({ where: { id: partyId, businessId: business.id } })
       if (party) {
         // credit (money in) reduces receivable balance; debit (money out) increases payable
         const newBalance =
