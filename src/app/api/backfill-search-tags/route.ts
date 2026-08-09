@@ -9,6 +9,10 @@ import { apiError } from '@/lib/api-error'
  * Call: POST /api/backfill-search-tags?force=true  (regenerate ALL tags)
  */
 export async function POST(req: NextRequest) {
+  // §SECURITY: Blocked in production — maintenance endpoint for dev only.
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'This endpoint is disabled in production' }, { status: 403 })
+  }
   try {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
