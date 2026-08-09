@@ -4,7 +4,11 @@ import { generateToken } from '@/lib/utils'
 
 // POST /api/reset — delete the current business's data and re-seed fresh demo data.
 // Security: only resets the FIRST business (Sharma Trading Co.), NOT demo shops.
+// §SECURITY: Blocked in production — destructive endpoint.
 export async function POST() {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'This endpoint is disabled in production' }, { status: 403 })
+  }
   try {
     // Find the Sharma Trading Co. business specifically (not demo shops)
     const business = await db.business.findFirst({

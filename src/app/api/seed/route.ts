@@ -7,6 +7,11 @@ function hashPin(pin: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  // §SECURITY: Block this endpoint in production — it can wipe ALL data.
+  // Only allowed in development for testing/seeding demo data.
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'This endpoint is disabled in production' }, { status: 403 })
+  }
   try {
     const force = new URL(req.url).searchParams.get('force') === 'true'
     const existing = await db.business.findFirst({ where: { name: 'Sharma Trading Co.' } })
