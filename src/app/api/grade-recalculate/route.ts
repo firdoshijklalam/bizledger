@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/grade-recalculate — trigger grade recalculation for one or all parties
 // Body: { partyId?: string }  — if partyId omitted, recalculate for all parties of current business
@@ -38,6 +39,6 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, count: results.length, results })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

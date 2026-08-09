@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import type { PaymentSplit } from '@prisma/client'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/orders/[id]/otp — verify delivery OTP for an order split (PRD Part 36 §2.2).
 //   Body: { otp: "1234" }
@@ -32,7 +33,7 @@ export async function GET(
       otpVerifiedAt: split.otpVerifiedAt,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -122,6 +123,6 @@ export async function POST(
         : null,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

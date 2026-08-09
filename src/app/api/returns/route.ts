@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/returns — create a return request (PRD Part 36 §3.1).
 //   Body: { orderSplitId, customerPhone, reason }
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ returns })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -212,6 +213,6 @@ export async function POST(req: NextRequest) {
       returnRequestId: returnRequest.id,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

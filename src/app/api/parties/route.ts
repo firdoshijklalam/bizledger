@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
 import { generateSearchTags, phoneticMatch } from '@/lib/transliteration'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/parties — optimized with pagination + field selection
 export async function GET(req: NextRequest) {
@@ -89,6 +90,6 @@ export async function POST(req: NextRequest) {
     })
     return NextResponse.json(party)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // Single defaulter record (PRD Part 32 §3).
 // PATCH  — update status (active → resolved | disputed) + optional notes.
@@ -35,7 +36,7 @@ export async function PATCH(
     })
     return NextResponse.json({ ok: true, defaulter: updated })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -52,6 +53,6 @@ export async function DELETE(
     await db.defaulterRegistry.delete({ where: { id } })
     return NextResponse.json({ ok: true, message: 'Defaulter entry removed' })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

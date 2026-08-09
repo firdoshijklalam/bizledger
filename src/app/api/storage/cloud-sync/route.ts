@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // PRD Part 37 §1.2 — Cloud Sync Mode (Zero-Cost Cloud)
 // POST /api/storage/cloud-sync
@@ -28,7 +29,7 @@ export async function GET() {
       totalFilesSynced: 0,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -74,6 +75,6 @@ export async function POST(req: NextRequest) {
       syncedAt: new Date().toISOString(),
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

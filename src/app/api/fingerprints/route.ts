@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { createHash, randomBytes } from 'crypto'
+import { apiError } from '@/lib/api-error'
 
 // Fingerprint management (PRD Part 32 §2 + §4).
 // GET    — list fingerprints for a party (?partyId=...).
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
     })
     return NextResponse.json({ count: records.length, fingerprints: records })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -113,7 +114,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, fingerprint: record })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -141,6 +142,6 @@ export async function DELETE(req: NextRequest) {
       id,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

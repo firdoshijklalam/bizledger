@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/orders/split/[id] — return a specific order split with its items,
 // linked payment split, and return requests.
@@ -76,7 +77,7 @@ export async function GET(
       returnRequests,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -138,6 +139,6 @@ export async function PATCH(
       },
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

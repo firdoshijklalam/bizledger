@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/notifications — list DB-backed notifications for the current business
 export async function GET(req: NextRequest) {

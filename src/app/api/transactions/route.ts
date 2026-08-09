@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { recalculatePartyGrade } from '@/lib/grade-calculator'
 import { generateToken, generateInvoiceNumber } from '@/lib/utils'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/transactions
 export async function GET(req: NextRequest) {
@@ -70,6 +71,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(txn)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

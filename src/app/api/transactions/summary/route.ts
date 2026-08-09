@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/transactions/summary
 // Returns a daily summary for the History/Reports module.
@@ -149,7 +150,7 @@ export async function GET(req: NextRequest) {
     })
   } catch (e: any) {
     return NextResponse.json(
-      { error: 'Summary failed', detail: String(e?.message || e) },
+      apiError(e, 'Summary calculation failed'),
       { status: 500 }
     )
   }

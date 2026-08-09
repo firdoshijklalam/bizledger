@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
+import { apiError } from '@/lib/api-error'
 
 /**
  * §3: Backfill searchTags for existing parties and products.
@@ -48,6 +49,6 @@ export async function POST(req: NextRequest) {
       totalUpdated: partyCount + productCount,
     })
   } catch (e: any) {
-    return NextResponse.json({ error: 'DB error', detail: String(e?.message || e) }, { status: 500 })
+    return apiError(e, "Database error")
   }
 }

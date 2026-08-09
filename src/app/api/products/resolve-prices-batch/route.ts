@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { resolveProductPricesBatch } from '@/lib/price-resolver'
+import { apiError } from '@/lib/api-error'
 
 /**
  * POST /api/products/resolve-prices-batch
@@ -74,6 +75,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result)
   } catch (e: any) {
-    return NextResponse.json({ error: String(e?.message || e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

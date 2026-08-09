@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import ZAI from 'z-ai-web-dev-sdk'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/ocr — scan a bill/receipt image and extract structured data using VLM
 // Body: { image: "data:image/jpeg;base64,..." }
@@ -59,6 +60,6 @@ If a field is not visible, use null or 0. For items, extract every line item vis
     return NextResponse.json({ success: true, data: parsed })
   } catch (e) {
     console.error('OCR error:', e)
-    return NextResponse.json({ error: 'OCR failed: ' + String(e) }, { status: 500 })
+    return apiError(e, "OCR processing failed")
   }
 }

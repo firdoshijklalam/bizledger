@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { apiError } from '@/lib/api-error'
 
 // PRD Part 37 §1.2 — Local Mode image compression (GLM 5.2 simulated).
 // POST /api/image-compress
@@ -86,6 +87,6 @@ export async function POST(req: NextRequest) {
       message: `Image compressed from ${originalSizeKB}KB to ~${compressedSizeKB}KB (${compressionRatio}x ratio).`,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

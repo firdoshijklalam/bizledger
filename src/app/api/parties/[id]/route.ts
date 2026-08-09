@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
+import { apiError } from '@/lib/api-error'
 
 // /api/parties/[id] — CRUD for a single party.
 // Security: all operations verify the party belongs to the current business.
@@ -46,7 +47,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         if (!party) return NextResponse.json({ error: 'Not found' }, { status: 404 })
         return NextResponse.json({ ...party, transactions: [], invoices: [], partyNotes: [] })
       } catch (e3: any) {
-        return NextResponse.json({ error: 'DB error', detail: String(e3?.message || e3) }, { status: 500 })
+        return apiError(e3, "Database error")
       }
     }
   }
@@ -87,7 +88,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     })
     return NextResponse.json(updated)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -104,6 +105,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     await db.party.delete({ where: { id } })
     return NextResponse.json({ ok: true })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

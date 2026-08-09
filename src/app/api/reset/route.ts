@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { generateToken } from '@/lib/utils'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/reset — delete the current business's data and re-seed fresh demo data.
 // Security: only resets the FIRST business (Sharma Trading Co.), NOT demo shops.
@@ -41,7 +42,7 @@ export async function POST() {
     return NextResponse.json({ ok: true, message: 'Reset and re-seeded successfully' })
   } catch (e) {
     console.error('Reset error:', e)
-    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 })
+    return apiError(e, 'Reset failed')
   }
 }
 

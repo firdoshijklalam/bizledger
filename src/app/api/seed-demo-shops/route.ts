@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/seed-demo-shops — seed 2 demo nearby shops for the "More Shops" view
 export async function POST() {
@@ -75,6 +76,6 @@ export async function POST() {
       ],
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

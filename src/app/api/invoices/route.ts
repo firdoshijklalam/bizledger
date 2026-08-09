@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { generateToken, generateInvoiceNumber } from '@/lib/utils'
 import { recalculatePartyGrade } from '@/lib/grade-calculator'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/invoices — optimized with pagination
 export async function GET(req: NextRequest) {

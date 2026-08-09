@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // /api/staff/[id] — owner: update or delete a staff member.
 // Security: verifies the staff belongs to the current business.
@@ -32,7 +33,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const staff = await db.staff.update({ where: { id }, data: updateData })
     return NextResponse.json(staff)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -56,6 +57,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     await db.staff.delete({ where: { id } })
     return NextResponse.json({ ok: true })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

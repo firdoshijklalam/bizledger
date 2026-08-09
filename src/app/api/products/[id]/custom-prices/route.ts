@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/products/[id]/custom-prices
 // Lists all custom prices (per buyer + per group) for a product.
@@ -136,6 +137,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     return NextResponse.json({ ok: true, customPrice: cp })
   } catch (e: any) {
-    return NextResponse.json({ error: String(e?.message || e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

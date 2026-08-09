@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/store/[slug]/order — owner view: list last 50 orders for this store.
 // POST /api/store/[slug]/order — PUBLIC customer order placement from the catalog.
@@ -29,7 +30,7 @@ export async function GET(
     }))
     return NextResponse.json(parsed)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -161,6 +162,6 @@ export async function POST(
       commissionLogId,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

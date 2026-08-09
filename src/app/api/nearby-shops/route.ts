@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/nearby-shops — PUBLIC geo-fenced shop discovery.
 // Accepts ?lat=X&lng=Y (Haversine distance match against deliveryRadiusKm)
@@ -118,6 +119,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(results)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

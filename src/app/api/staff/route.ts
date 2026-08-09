@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { randomBytes } from 'crypto'
+import { apiError } from '@/lib/api-error'
 
 // §SECURITY: Staff management endpoints. In production, these MUST be protected
 // with role-based authorization (OWNER/ADMIN only). Currently uses businessId

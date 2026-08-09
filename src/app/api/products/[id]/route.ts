@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
+import { apiError } from '@/lib/api-error'
 
 // /api/products/[id] — CRUD for a single product.
 // Security: all operations verify the product belongs to the current business.
@@ -30,7 +31,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 })
       return NextResponse.json({ ...product, images: [] })
     } catch (e2: any) {
-      return NextResponse.json({ error: 'DB error', detail: String(e2?.message || e2) }, { status: 500 })
+      return apiError(e3, "Database error")
     }
   }
 }
@@ -82,7 +83,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     })
     return NextResponse.json(updated)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -99,6 +100,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     await db.product.delete({ where: { id } })
     return NextResponse.json({ ok: true })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

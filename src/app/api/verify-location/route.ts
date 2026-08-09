@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { verifyLocation, type LocationVerification } from '@/lib/security'
+import { apiError } from '@/lib/api-error'
 
 /**
  * PRD Part 34 — Threat 3: GPS Spoofing Prevention
@@ -93,7 +94,7 @@ export async function POST(req: NextRequest) {
         : 'Location verification failed. Please enable GPS + WiFi for accurate location.',
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 

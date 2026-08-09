@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // PRD Part 37 §1.1 — Merchant Control Toggles
 // GET  /api/settings/toggles
@@ -43,7 +44,7 @@ export async function GET() {
       appMode: settings.appMode,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -100,6 +101,6 @@ export async function PUT(req: NextRequest) {
       appMode: updated.appMode,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

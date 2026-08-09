@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 /**
  * PUT /api/fulfillment/[id]/ready
@@ -30,6 +31,6 @@ export async function PUT(
 
     return NextResponse.json({ ok: true, deliveryStatus: 'ready' })
   } catch (e: any) {
-    return NextResponse.json({ error: String(e?.message || e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

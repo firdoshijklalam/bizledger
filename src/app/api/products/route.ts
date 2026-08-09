@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
 import { generateSearchTags, phoneticMatch } from '@/lib/transliteration'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/products — optimized with pagination + field selection
 // Supports ?q=search&phonetic=true&lowStock=true&limit=50&offset=0
@@ -104,6 +105,6 @@ export async function POST(req: NextRequest) {
     })
     return NextResponse.json(product)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

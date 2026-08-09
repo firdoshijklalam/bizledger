@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // PRD Part 37 §3.2 — Switch between customer and merchant mode
 // POST /api/profile/mode
@@ -37,7 +38,7 @@ export async function GET() {
     }
     return NextResponse.json({ appMode: settings.appMode })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -101,6 +102,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, mode: body.targetMode })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // AI Credit Trust Score (PRD Part 32 §3.2).
 // GET/POST — compute a 1.0–5.0★ trust score for a party + max credit suggestion.
@@ -142,7 +143,7 @@ export async function GET(
     const result = await computeAndPersist(partyId)
     return NextResponse.json(result)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -162,6 +163,6 @@ export async function POST(
     const result = await computeAndPersist(partyId)
     return NextResponse.json({ ok: true, ...result })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

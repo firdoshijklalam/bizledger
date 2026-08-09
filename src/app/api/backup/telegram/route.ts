@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/backup/telegram — send JSON backup to Telegram channel
 // In production, this would use Telegram Bot API. Here we simulate + log.
@@ -61,6 +62,6 @@ export async function POST() {
       records: { parties: parties.length, products: products.length, invoices: invoices.length, transactions: transactions.length },
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

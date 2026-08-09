@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { createHash } from 'crypto'
+import { apiError } from '@/lib/api-error'
 
 // Biometric action gate verification (PRD Part 32 §1).
 // POST  — verify a PIN or fingerprint attempt against the 5 action gates.
@@ -255,7 +256,7 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     )
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -291,7 +292,7 @@ export async function GET() {
       })),
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
