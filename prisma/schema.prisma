@@ -350,6 +350,9 @@ model Invoice {
 
   @@index([businessId])
   @@index([partyId])
+  // §UNIQUE-CONSTRAINT: Prevents duplicate invoice numbers within the same business.
+  // Without this, concurrent requests could create invoices with the same number.
+  @@unique([businessId, invoiceNumber])
 }
 
 model InvoiceItem {
