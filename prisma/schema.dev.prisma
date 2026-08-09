@@ -630,14 +630,16 @@ model AuditLog {
   businessId  String
   staffId     String?
   staffName   String
-  action      String   // create_invoice | modify_invoice | delete_invoice | khata_entry | restock | settings_change
-  entityType  String   // invoice | party | product | transaction | settings
+  action      String   // create_invoice | modify_invoice | delete_invoice | khata_entry | restock | settings_change | data_export | staff_change | stock_adjust
+  entityType  String   // invoice | party | product | transaction | settings | staff | export
   entityId    String?
   description String
+  metadata    String?
   createdAt   DateTime @default(now())
 
   @@index([businessId])
   @@index([staffId])
+  @@index([businessId, entityType, createdAt])
 }
 
 model BusinessLink {
