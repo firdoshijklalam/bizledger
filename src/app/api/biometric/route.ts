@@ -14,7 +14,9 @@ export async function POST(req: NextRequest) {
 
     // Generate a simulated fingerprint hash (in production, scanner SDK provides this)
     const rawHash = body.hash || randomBytes(32).toString('hex')
-    const fingerprintHash = createHash('sha256').update(rawHash + (process.env.NEXTAUTH_SECRET || 'salt')).digest('hex')
+    // §SECURITY: Use NEXTAUTH_SECRET from env. If not set, use a non-obvious fallback.
+    const secret = process.env.NEXTAUTH_SECRET || 'bizledger-fb2a7c9e-bio-salt-v1'
+    const fingerprintHash = createHash('sha256').update(rawHash + secret).digest('hex')
 
     if (body.action === 'register') {
       if (!body.partyId) return NextResponse.json({ error: 'partyId required for register' }, { status: 400 })

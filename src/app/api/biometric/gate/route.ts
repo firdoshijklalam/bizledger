@@ -14,8 +14,10 @@ type GateType =
   | 'danger_zone'
 
 function hashPin(pin: string): string {
+  // §SECURITY: Use NEXTAUTH_SECRET from env. Non-obvious fallback if not set.
+  const secret = process.env.NEXTAUTH_SECRET || 'bizledger-fb2a7c9e-gate-salt-v1'
   return createHash('sha256')
-    .update(pin + (process.env.NEXTAUTH_SECRET || 'salt'))
+    .update(pin + secret)
     .digest('hex')
 }
 

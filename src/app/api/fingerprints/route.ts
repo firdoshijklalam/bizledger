@@ -8,8 +8,10 @@ import { createHash, randomBytes } from 'crypto'
 // DELETE — remove a fingerprint by ?id=...
 
 function hashFingerprint(rawHash: string): string {
+  // §SECURITY: Use NEXTAUTH_SECRET from env. Non-obvious fallback if not set.
+  const secret = process.env.NEXTAUTH_SECRET || 'bizledger-fb2a7c9e-fp-salt-v1'
   return createHash('sha256')
-    .update(rawHash + (process.env.NEXTAUTH_SECRET || 'salt'))
+    .update(rawHash + secret)
     .digest('hex')
 }
 

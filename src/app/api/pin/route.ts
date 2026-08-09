@@ -10,7 +10,13 @@ import {
 } from '@/lib/security'
 
 function hashPin(pin: string): string {
-  return createHash('sha256').update(pin + (process.env.NEXTAUTH_SECRET || 'bizledger-salt')).digest('hex')
+  // §SECURITY: Use NEXTAUTH_SECRET from env. If not set, use a non-obvious
+  // fallback (NOT a simple 'salt' string) and log a warning.
+  const secret = process.env.NEXTAUTH_SECRET
+  if (!secret && process.env.NODE_ENV === 'production') {
+    console.warn('⚠️ NEXTAUTH_SECRET not set — PIN hashing using fallback. Set NEXTAUTH_SECRET in production!')
+  }
+  return createHash('sha256').update(pin + (secret || 'bizledger-fb2a7c9e-pin-salt-v1')).digest('hex')
 }
 
 // POST /api/pin — set or verify PIN
