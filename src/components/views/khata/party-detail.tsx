@@ -375,12 +375,31 @@ export function PartyDetail({ partyId }: { partyId: string }) {
           </div>
         </div>
 
-        {/* Multi-select control bar (PRD Part 7 §4.3) */}
+        {/* Multi-select control bar (PRD Part 7 §4.3)
+            §SELECTION-SYNC: The "Select All" button shows an ACTIVE state
+            (filled bg-primary text-primary-foreground) when ALL visible
+            transactions are selected. If the user unchecks even one item,
+            the button visually deactivates (bg-primary/10 text-primary). */}
         {multiSelectMode && (
           <div className="flex items-center justify-between gap-2 mb-3 p-2 rounded-xl bg-primary/5 border border-primary/20">
             <div className="flex items-center gap-2">
-              <button onClick={selectAllTx} className="text-[10px] font-medium text-primary px-2 py-1 rounded-lg bg-primary/10">Select All</button>
-              <button onClick={deselectAllTx} className="text-[10px] font-medium text-muted-foreground px-2 py-1 rounded-lg bg-muted">Deselect All</button>
+              {(() => {
+                const visibleTxIds = data.transactions.map((t) => t.id)
+                const allSelected = visibleTxIds.length > 0 && visibleTxIds.every((id) => selectedTxIds.has(id))
+                return (
+                  <button
+                    onClick={allSelected ? deselectAllTx : selectAllTx}
+                    className={`text-[10px] font-medium px-2.5 py-1.5 rounded-lg transition-colors ${
+                      allSelected
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-primary/10 text-primary hover:bg-primary/20'
+                    }`}
+                  >
+                    {allSelected ? '✓ All Selected' : 'Select All'}
+                  </button>
+                )
+              })()}
+              <button onClick={deselectAllTx} className="text-[10px] font-medium text-muted-foreground px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors">Deselect All</button>
             </div>
             <span className="text-[10px] text-muted-foreground">{selectedTxIds.size} selected</span>
           </div>
@@ -558,6 +577,10 @@ function SettleUpDialog({
 }
 
 // Transaction row with long-press multi-select (PRD Part 7 §4)
+// §FULL-ROW-CLICK: In multi-select mode, the ENTIRE row is clickable to
+// toggle selection — not just the tiny checkbox. The row gets a clear
+// background highlight when selected. In normal mode, long-press activates
+// multi-select mode.
 function TxRow({ tx, isCredit, isSelected, multiSelectMode, currency, onLongPress, onToggle }: {
   tx: any
   isCredit: boolean
@@ -586,18 +609,28 @@ function TxRow({ tx, isCredit, isSelected, multiSelectMode, currency, onLongPres
 
   return (
     <div
+      // §FULL-ROW-CLICK: In multi-select mode, onClick toggles selection.
+      // In normal mode, long-press (onTouchStart/onMouseDown timer) activates
+      // multi-select. The entire card is the tap target.
+      onClick={multiSelectMode ? onToggle : undefined}
       onTouchStart={handleStart}
       onTouchEnd={handleEnd}
       onMouseDown={handleStart}
       onMouseUp={handleEnd}
       onMouseLeave={() => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null } }}
-      className={`flex items-center gap-3 p-2 rounded-lg transition-colors cursor-pointer select-none ${
-        isSelected ? 'bg-primary/10 border border-primary/30' : 'hover:bg-muted/50'
+      className={`flex items-center gap-3 p-2.5 rounded-lg transition-all select-none ${
+        multiSelectMode ? 'cursor-pointer' : ''
+      } ${
+        isSelected
+          ? 'bg-primary/15 border border-primary/40 ring-1 ring-primary/20'
+          : multiSelectMode
+          ? 'border border-transparent hover:bg-muted/50'
+          : 'hover:bg-muted/50'
       }`}
     >
       {multiSelectMode && (
-        <span className={`w-5 h-5 rounded-md border-2 shrink-0 flex items-center justify-center ${
-          isSelected ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground'
+        <span className={`w-5 h-5 rounded-md border-2 shrink-0 flex items-center justify-center transition-colors ${
+          isSelected ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/40 bg-background'
         }`}>
           {isSelected && <CheckCircle2 className="w-3 h-3" />}
         </span>
