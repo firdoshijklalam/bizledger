@@ -259,7 +259,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
     <motion.div
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
-      className="space-y-4 pb-24"
+      className="space-y-4"
     >
       {/* §3: Pickup Pending banner — prominent button to mark as handed over */}
       {isPickupPending && (
@@ -580,13 +580,14 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
         </div>
       </div>
 
-      {/* §3: Fixed bottom action footer — image-based sharing.
-          §POSITION-FIX: position:fixed bottom:0 left:0 w-full z-[99] so it
-          ALWAYS anchors to the bottom regardless of entry point (was sticky
-          which broke when opened from Khata/Ledger history).
-          §GLASSMORPHISM: Translucent bg + backdrop-blur for modern app feel.
-          Uses inline style for the glass effect (works in both light + dark). */}
-      <div className="fixed bottom-0 left-0 w-full z-[99] action-buttons border-t border-border p-3 dark:border-border" style={{ backgroundColor: 'color-mix(in srgb, var(--background) 85%, transparent)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+      {/* §3: Action footer — image-based sharing.
+          §SCROLL-FLOW: NOT fixed/sticky — part of the scrollable document flow.
+          The action bar scrolls WITH the invoice content. When the user scrolls
+          to the bottom, the action bar sits ABOVE the global Bottom Navigation
+          Bar (which is always visible). The parent <main> already has pb-28
+          padding for the bottom nav, so we add a small mb-4 for breathing room.
+          §GLASSMORPHISM: Translucent bg + backdrop-blur for modern app feel. */}
+      <div className="action-buttons border-t border-border p-3 rounded-2xl dark:border-border mb-4" style={{ backgroundColor: 'color-mix(in srgb, var(--background) 85%, transparent)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
         <div className="grid grid-cols-4 gap-2 max-w-2xl mx-auto">
           <Button variant="outline" onClick={handleWhatsAppShare} disabled={capturing} className="h-11 flex-col gap-0.5 text-emerald-600 border-emerald-300 dark:border-emerald-800">
             <MessageCircle className="w-4 h-4" />
