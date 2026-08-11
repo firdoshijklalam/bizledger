@@ -11,7 +11,9 @@
     "db:generate": "prisma generate --schema prisma/schema.dev.prisma",
     "db:migrate": "prisma migrate dev --schema prisma/schema.dev.prisma",
     "db:reset": "prisma migrate reset --schema prisma/schema.dev.prisma",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test": "npx tsx tests/unit/invoice-calculation.test.ts",
+    "test:unit": "npx tsx tests/unit/invoice-calculation.test.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
