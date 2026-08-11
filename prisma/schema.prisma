@@ -58,6 +58,41 @@ model Business {
   // §DYNAMIC-PRICING + §NOTIFICATIONS
   customPrices  CustomPrice[]
   notifications Notification[]
+  // §AUTH: Users and sessions for this business
+  users    User[]
+}
+
+// §AUTH: User model for authentication.
+// Each user belongs to exactly one Business. The businessId is the
+// tenant isolation key — it comes from the session, never from the client.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         String   @default("OWNER") // OWNER | ADMIN | STAFF
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  sessions     Session[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([businessId])
+}
+
+// §AUTH: Session model for secure httpOnly cookie-based sessions.
+// The tokenHash is what's stored in the cookie (hashed). The raw token
+// is never stored in the database — only its hash.
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // §DYNAMIC-PRICING: Tiered B2B pricing — a supplier assigns different prices
