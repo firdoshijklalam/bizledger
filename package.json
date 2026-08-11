@@ -12,8 +12,8 @@
     "db:migrate": "prisma migrate dev --schema prisma/schema.dev.prisma",
     "db:reset": "prisma migrate reset --schema prisma/schema.dev.prisma",
     "postinstall": "prisma generate",
-    "test": "npx tsx tests/unit/invoice-calculation.test.ts && npx tsx tests/integration/cross-tenant.test.ts && npx tsx tests/integration/security-ownership.test.ts",
-    "test:unit": "npx tsx tests/unit/invoice-calculation.test.ts",
+    "test": "npx tsx tests/unit/invoice-calculation.test.ts && npx tsx tests/unit/server-authoritative-invoice.test.ts && npx tsx tests/integration/cross-tenant.test.ts && npx tsx tests/integration/security-ownership.test.ts",
+    "test:unit": "npx tsx tests/unit/invoice-calculation.test.ts && npx tsx tests/unit/server-authoritative-invoice.test.ts",
     "test:integration": "npx tsx tests/integration/cross-tenant.test.ts && npx tsx tests/integration/security-ownership.test.ts"
   },
   "dependencies": {

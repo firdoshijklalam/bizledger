@@ -117,10 +117,11 @@ export async function POST(req: NextRequest) {
 }
 
 // GET /api/pin — check if PIN is enabled
+// §AUTH: Requires authenticated session. Unauthenticated → 401.
 export async function GET() {
-  const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json({ enabled: false })
+  const user = await requireAuth()
+  if (user instanceof NextResponse) return user
 
-  const settings = await db.appSettings.findUnique({ where: { businessId } })
+  const settings = await db.appSettings.findUnique({ where: { businessId: user.businessId } })
   return NextResponse.json({ enabled: settings?.pinEnabled ?? false })
 }

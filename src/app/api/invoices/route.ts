@@ -75,33 +75,66 @@ export async function POST(req: NextRequest) {
       return generateInvoiceNumber(prefix, seq.nextNumber - 1 + 1)
     })
 
-    // §GST-FIX: Calculate GST on the TAXABLE amount (after discount), NOT on the
-    // raw item total. This is the correct Indian GST calculation method:
-    //   subtotal = sum(item.total)
-    //   taxable = subtotal - discountAmount
-    //   gstAmount = taxable * gstRate / 100 (proportionally allocated per item)
-    const subtotal = items.reduce((s: number, i: any) => s + Number(i.total), 0)
+    // §SERVER-AUTHORITATIVE: The server calculates ALL financial values.
+    // Client-provided totals (item.total, subtotal, gstAmount, grandTotal,
+    // amountDue, status) are NEVER trusted. The server derives them from:
+    //   quantity (from client, validated > 0)
+    //   unitPrice (from client, validated >= 0)
+    //   gstRate (from client, validated 0-100)
+    //   discount (from client, validated)
+    //
+    // If productId exists, the server could fetch the authoritative price
+    // from the product record. For now, we accept client-provided unitPrice
+    // (POS allows custom pricing), but the TOTALS are always recalculated.
+
+    // §STEP-1: Calculate per-item line totals (server-authoritative)
+    const serverItems = items.map((i: any) => {
+      const qty = Number(i.quantity)
+      const unitPrice = Number(i.unitPrice)
+      const itemDiscount = Number(i.discount) || 0
+      const gstRate = Math.min(100, Math.max(0, Number(i.gstRate) || 0))
+      const lineTotal = Math.max(0, qty * unitPrice - itemDiscount)
+      return { ...i, _serverTotal: lineTotal, _serverGstRate: gstRate }
+    })
+
+    // §STEP-2: Calculate subtotal (server-authoritative)
+    const subtotal = serverItems.reduce((s: number, i: any) => s + i._serverTotal, 0)
+
+    // §STEP-3: Validate discount
     const discountMode = body.discountMode || 'flat'
     const discountValue = Number(body.discountValue) || 0
-    const discountAmount =
-      discountMode === 'percent' ? (subtotal * discountValue) / 100 : discountValue
-    const taxable = Math.max(0, subtotal - discountAmount) // §GUARD: taxable can't be negative
+    if (discountValue < 0) {
+      return NextResponse.json({ error: 'Discount cannot be negative' }, { status: 400 })
+    }
+    if (discountMode === 'percent' && discountValue > 100) {
+      return NextResponse.json({ error: 'Discount percentage cannot exceed 100%' }, { status: 400 })
+    }
+    const discountAmount = discountMode === 'percent'
+      ? (subtotal * discountValue) / 100
+      : Math.min(discountValue, subtotal) // §GUARD: discount can't exceed subtotal
+    const taxable = Math.max(0, subtotal - discountAmount)
 
-    // §GST-ON-TAXABLE: Calculate GST proportionally on the taxable amount.
-    // Each item's GST is: (item.total / subtotal) * taxable * gstRate / 100
-    // This ensures discount is applied BEFORE GST, matching Indian GST rules.
-    const gstAmount = items.reduce((s: number, i: any) => {
-      const itemTotal = Number(i.total)
-      const gstRate = Number(i.gstRate) || 0
+    // §STEP-4: Calculate GST on taxable (server-authoritative, after discount)
+    const gstAmount = serverItems.reduce((s: number, i: any) => {
       if (subtotal === 0) return s
-      // Proportional allocation: item's share of taxable * gst rate
-      const itemTaxable = (itemTotal / subtotal) * taxable
-      return s + (itemTaxable * gstRate) / 100
+      const itemTaxable = (i._serverTotal / subtotal) * taxable
+      return s + (itemTaxable * i._serverGstRate) / 100
     }, 0)
 
+    // §STEP-5: Calculate grand total (server-authoritative)
     const grandTotal = taxable + gstAmount
+
+    // §STEP-6: Validate amountPaid
     const amountPaid = Number(body.amountPaid) || 0
-    const amountDue = grandTotal - amountPaid
+    if (isNaN(amountPaid) || !isFinite(amountPaid)) {
+      return NextResponse.json({ error: 'Invalid amountPaid' }, { status: 400 })
+    }
+    if (amountPaid < 0) {
+      return NextResponse.json({ error: 'amountPaid cannot be negative' }, { status: 400 })
+    }
+
+    // §STEP-7: Calculate amountDue + status (server-authoritative)
+    const amountDue = Math.max(0, grandTotal - amountPaid)
     const status = amountDue <= 0 ? 'paid' : amountPaid > 0 ? 'partial' : 'unpaid'
 
     // §STOCK-DIRECTION: Sale → decrement stock; Purchase → increment stock.
@@ -182,14 +215,14 @@ export async function POST(req: NextRequest) {
           notes: body.notes || null,
           paymentLandingToken: generateToken(),
           items: {
-            create: items.map((i: any) => ({
+            create: serverItems.map((i: any) => ({
               productId: i.productId || null,
               name: i.name,
               quantity: Number(i.quantity),
               unitPrice: Number(i.unitPrice),
               discount: Number(i.discount) || 0,
-              gstRate: Number(i.gstRate) || 0,
-              total: Number(i.total),
+              gstRate: i._serverGstRate,
+              total: i._serverTotal, // §SERVER-AUTHORITATIVE: use server-calculated total
             })),
           },
         },
