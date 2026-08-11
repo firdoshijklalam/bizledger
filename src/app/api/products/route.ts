@@ -69,22 +69,36 @@ export async function POST(req: NextRequest) {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
+    // §INPUT-VALIDATION: Validate required fields and numeric values
+    if (!body.name || typeof body.name !== 'string' || body.name.trim().length === 0) {
+      return NextResponse.json({ error: 'Product name is required' }, { status: 400 })
+    }
+    const purchasePrice = Number(body.purchasePrice) || 0
+    const salePrice = Number(body.salePrice) || 0
+    const stock = Number(body.stock) || 0
+    const gstRate = Number(body.gstRate) || 0
+    // §GUARD: Reject negative prices/stock/gst
+    if (purchasePrice < 0) return NextResponse.json({ error: 'Purchase price cannot be negative' }, { status: 400 })
+    if (salePrice < 0) return NextResponse.json({ error: 'Sale price cannot be negative' }, { status: 400 })
+    if (stock < 0) return NextResponse.json({ error: 'Stock cannot be negative' }, { status: 400 })
+    if (gstRate < 0 || gstRate > 100) return NextResponse.json({ error: 'GST rate must be between 0 and 100' }, { status: 400 })
+
     // §3: Auto-generate phonetic search tags from the product name
     const searchTags = JSON.stringify(generateSearchTags(body.name || ''))
 
     const product = await db.product.create({
       data: {
         businessId: business.id,
-        name: body.name,
+        name: body.name.trim(),
         sku: body.sku || null,
         category: body.category || null,
         unit: body.unit || 'pcs',
-        purchasePrice: Number(body.purchasePrice) || 0,
-        salePrice: Number(body.salePrice) || 0,
+        purchasePrice,
+        salePrice,
         mrp: body.mrp ? Number(body.mrp) : null,
         wholesalePrice: body.wholesalePrice ? Number(body.wholesalePrice) : null,
-        gstRate: Number(body.gstRate) || 0,
-        stock: Number(body.stock) || 0,
+        gstRate,
+        stock,
         lowStockThreshold: Number(body.lowStockThreshold) || 5,
         supplierId: body.supplierId || null,
         // PRD Part 11: Dual-stock + retail config
@@ -104,6 +118,6 @@ export async function POST(req: NextRequest) {
     })
     return NextResponse.json(product)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Failed to create product")
   }
 }
