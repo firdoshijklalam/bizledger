@@ -47,6 +47,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!existing) return NextResponse.json({ error: 'Not found in your business' }, { status: 404 })
 
     const body = await req.json()
+
+    // §INPUT-VALIDATION: Validate numeric fields — reject negative values
+    const purchasePrice = body.purchasePrice !== undefined ? Number(body.purchasePrice) : existing.purchasePrice
+    const salePrice = body.salePrice !== undefined ? Number(body.salePrice) : existing.salePrice
+    const stock = body.stock !== undefined ? Number(body.stock) : existing.stock
+    const gstRate = body.gstRate !== undefined ? Number(body.gstRate) : existing.gstRate
+    if (purchasePrice < 0) return NextResponse.json({ error: 'Purchase price cannot be negative' }, { status: 400 })
+    if (salePrice < 0) return NextResponse.json({ error: 'Sale price cannot be negative' }, { status: 400 })
+    if (stock < 0) return NextResponse.json({ error: 'Stock cannot be negative' }, { status: 400 })
+    if (gstRate < 0 || gstRate > 100) return NextResponse.json({ error: 'GST rate must be between 0 and 100' }, { status: 400 })
+
     // §3: Regenerate search tags if name changed
     const searchTags = body.name !== existing.name
       ? JSON.stringify(generateSearchTags(body.name || ''))
@@ -58,12 +69,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         sku: body.sku,
         category: body.category,
         unit: body.unit,
-        purchasePrice: Number(body.purchasePrice),
-        salePrice: Number(body.salePrice),
+        purchasePrice,
+        salePrice,
         mrp: body.mrp ? Number(body.mrp) : null,
         wholesalePrice: body.wholesalePrice ? Number(body.wholesalePrice) : null,
-        gstRate: Number(body.gstRate) || 0,
-        stock: Number(body.stock) || 0,
+        gstRate,
+        stock,
         lowStockThreshold: Number(body.lowStockThreshold) || 5,
         supplierId: body.supplierId || null,
         // PRD Part 11: Dual-stock + retail config
