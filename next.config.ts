@@ -18,10 +18,16 @@ const nextConfig: NextConfig = {
         source: '/(.*)',
         headers: [
           { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate' },
-          // §CORS-FIX: Removed wildcard '*' — replaced with specific allowed origins.
-          // In a same-origin Next.js app, CORS headers aren't needed for API calls.
-          // External integrations (if any) should be explicitly allowlisted.
-          // { key: 'Access-Control-Allow-Origin', value: '*' }, — REMOVED
+          // §SECURITY-HEADERS: Standard security headers for production
+          // Prevents MIME-type sniffing — browser trusts declared Content-Type
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          // Prevents clickjacking — page cannot be embedded in iframes
+          { key: 'X-Frame-Options', value: 'DENY' },
+          // Controls how much referrer info is sent with requests
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          // Restricts browser features (camera, mic, geolocation, etc.)
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          // §CORS-FIX: Removed wildcard '*' — same-origin app doesn't need CORS.
         ],
       },
     ];
