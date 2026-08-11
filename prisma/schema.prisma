@@ -113,17 +113,17 @@ model CustomPrice {
   //   - customWholesalePrice: the wholesale price override (for bulk orders)
   // `customPrice` is kept for backward compat — used as a fallback when only
   // one price is set or for older records created before this change.
-  customPrice          Float  @default(0)
-  customSalePrice      Float? // §MULTI-PRICE: override for Product.salePrice (BULK/FULL mode)
-  customMrp            Float? // §MULTI-PRICE: override for Product.mrp (BULK/FULL mode)
-  customWholesalePrice Float? // §MULTI-PRICE: override for Product.wholesalePrice (BULK/FULL mode)
+  customPrice          Decimal  @default(0) @db.Decimal(18, 2)
+  customSalePrice      Decimal? @db.Decimal(18, 2) // §MULTI-PRICE: override for Product.salePrice (BULK/FULL mode)
+  customMrp            Decimal? @db.Decimal(18, 2) // §MULTI-PRICE: override for Product.mrp (BULK/FULL mode)
+  customWholesalePrice Decimal? @db.Decimal(18, 2) // §MULTI-PRICE: override for Product.wholesalePrice (BULK/FULL mode)
   // §RETAIL-ISOLATION: Retail (loose/kg/pcs) custom prices are SEPARATE from
   // bulk/full prices. A custom price set for a BAG must NOT bleed into the
   // retail (kg) tab. If a merchant only sets a bulk custom price, the retail
   // tab falls back to the product's default retailSalePrice — it NEVER
   // inherits the bulk bag's custom price.
-  customRetailSalePrice Float? // §RETAIL: override for Product.retailSalePrice (per kg/pcs)
-  customRetailMrp       Float? // §RETAIL: override for Product.retailMrp (per kg/pcs)
+  customRetailSalePrice Decimal? @db.Decimal(18, 2) // §RETAIL: override for Product.retailSalePrice (per kg/pcs)
+  customRetailMrp       Decimal? @db.Decimal(18, 2) // §RETAIL: override for Product.retailMrp (per kg/pcs)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -163,10 +163,10 @@ model Party {
   name                 String
   phone                String?
   type                 String   @default("customer") // customer | supplier | both
-  balance              Float    @default(0) // +ve = receivable, -ve = payable
+  balance              Decimal  @default(0) @db.Decimal(18, 2) // +ve = receivable, -ve = payable
   qualityGrade         String   @default("B") // A | B | C | D | E
-  creditLimit          Float?
-  openingBalance       Float    @default(0)
+  creditLimit          Decimal? @db.Decimal(18, 2)
+  openingBalance       Decimal  @default(0) @db.Decimal(18, 2)
   address              String?
   gstin                String?
   notes                String?
@@ -209,10 +209,10 @@ model Product {
   sku                String?
   category           String?
   unit               String   @default("pcs") // pcs | kg | bag | box
-  purchasePrice      Float    @default(0)
-  salePrice          Float    @default(0)
-  mrp                Float?
-  wholesalePrice     Float?
+  purchasePrice      Decimal  @default(0) @db.Decimal(18, 2)
+  salePrice          Decimal  @default(0) @db.Decimal(18, 2)
+  mrp                Decimal? @db.Decimal(18, 2)
+  wholesalePrice     Decimal? @db.Decimal(18, 2)
   gstRate            Float    @default(0)
   stock              Float    @default(0) // bulk stock (bags/boxes)
   lowStockThreshold  Float    @default(5)
@@ -221,8 +221,8 @@ model Product {
   retailEnabled      Boolean  @default(false)
   retailUnit         String?  // sub-unit: kg, pcs, ltr, gm
   conversionFactor   Float?   // 1 bag = 25 kg
-  retailSalePrice    Float?   // price per sub-unit (₹55 per kg)
-  retailMrp          Float?   // MRP per sub-unit for auto-discount calc
+  retailSalePrice    Decimal? @db.Decimal(18, 2)   // price per sub-unit (₹55 per kg)
+  retailMrp          Decimal? @db.Decimal(18, 2)   // MRP per sub-unit for auto-discount calc
   looseStock         Float    @default(0) // loose/fractional stock (kg)
   subCategory        String?  // PRD Part 13: sub-category (e.g. Rice → Miniket)
   // PRD Part 35 §1.2: AI auto-filled description
@@ -332,8 +332,8 @@ model Transaction {
   businessId  String
   partyId     String?
   type        String // credit (money in / receivable reduced) | debit (money out / payable reduced) | sale | purchase | expense
-  amount      Float
-  balanceAfter Float?
+  amount      Decimal @db.Decimal(18, 2)
+  balanceAfter Decimal? @db.Decimal(18, 2)
   description String?
   category    String?
   invoiceId   String?
@@ -356,14 +356,14 @@ model Invoice {
   type            String   @default("sales") // sales | purchase | retail | challan
   status          String   @default("unpaid") // unpaid | partial | paid
   isGst           Boolean  @default(false)
-  subtotal        Float    @default(0)
-  discountValue   Float    @default(0)
+  subtotal        Decimal  @default(0) @db.Decimal(18, 2)
+  discountValue   Decimal  @default(0) @db.Decimal(18, 2)
   discountMode    String   @default("flat") // flat | percent
-  discountAmount  Float    @default(0)
-  gstAmount       Float    @default(0)
-  grandTotal      Float    @default(0)
-  amountPaid      Float    @default(0)
-  amountDue       Float    @default(0)
+  discountAmount  Decimal  @default(0) @db.Decimal(18, 2)
+  gstAmount       Decimal  @default(0) @db.Decimal(18, 2)
+  grandTotal      Decimal  @default(0) @db.Decimal(18, 2)
+  amountPaid      Decimal  @default(0) @db.Decimal(18, 2)
+  amountDue       Decimal  @default(0) @db.Decimal(18, 2)
   paymentMode     String?  // cash | upi | credit | cheque
   notes           String?
   paymentLandingToken String? @unique
@@ -398,10 +398,10 @@ model InvoiceItem {
   productId String?
   name      String
   quantity  Float
-  unitPrice Float
-  discount  Float  @default(0)
-  gstRate   Float  @default(0)
-  total     Float  @default(0)
+  unitPrice Decimal @db.Decimal(18, 2)
+  discount  Decimal  @default(0) @db.Decimal(18, 2)
+  gstRate   Decimal  @default(0) @db.Decimal(18, 2)
+  total     Decimal  @default(0) @db.Decimal(18, 2)
   // §PARTIAL-FULFILLMENT: Tracks how much of this line item has been handed
   // over to the customer. 0 = nothing delivered, = quantity = fully delivered.
   // Used by the Fulfillment Dashboard for wholesale partial deliveries.
@@ -764,7 +764,7 @@ model OrderSplit {
   businessId      String
   businessName    String
   items           String   // JSON array of items for this shop
-  subtotal        Float    @default(0)
+  subtotal        Decimal  @default(0) @db.Decimal(18, 2)
   commissionPct   Float    @default(2)
   commissionAmount Float   @default(0)
   merchantAmount  Float    @default(0) // subtotal - commission

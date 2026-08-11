@@ -101,13 +101,13 @@ model CustomPrice {
   buyerId         String?
   buyerGroupName  String?
   // §MULTI-PRICE: Three-tier custom pricing mirroring the main Product form.
-  customPrice          Float  @default(0)
-  customSalePrice      Float?
-  customMrp            Float?
-  customWholesalePrice Float?
+  customPrice          Decimal  @default(0)
+  customSalePrice      Decimal?
+  customMrp            Decimal?
+  customWholesalePrice Decimal?
   // §RETAIL-ISOLATION: Retail prices are separate from bulk prices.
-  customRetailSalePrice Float?
-  customRetailMrp       Float?
+  customRetailSalePrice Decimal?
+  customRetailMrp       Decimal?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -145,10 +145,10 @@ model Party {
   name                 String
   phone                String?
   type                 String   @default("customer") // customer | supplier | both
-  balance              Float    @default(0) // +ve = receivable, -ve = payable
+  balance              Decimal  @default(0) // +ve = receivable, -ve = payable
   qualityGrade         String   @default("B") // A | B | C | D | E
-  creditLimit          Float?
-  openingBalance       Float    @default(0)
+  creditLimit          Decimal?
+  openingBalance       Decimal  @default(0)
   address              String?
   gstin                String?
   notes                String?
@@ -189,10 +189,10 @@ model Product {
   sku                String?
   category           String?
   unit               String   @default("pcs") // pcs | kg | bag | box
-  purchasePrice      Float    @default(0)
-  salePrice          Float    @default(0)
-  mrp                Float?
-  wholesalePrice     Float?
+  purchasePrice      Decimal  @default(0)
+  salePrice          Decimal  @default(0)
+  mrp                Decimal?
+  wholesalePrice     Decimal?
   gstRate            Float    @default(0)
   stock              Float    @default(0) // bulk stock (bags/boxes)
   lowStockThreshold  Float    @default(5)
@@ -201,8 +201,8 @@ model Product {
   retailEnabled      Boolean  @default(false)
   retailUnit         String?  // sub-unit: kg, pcs, ltr, gm
   conversionFactor   Float?   // 1 bag = 25 kg
-  retailSalePrice    Float?   // price per sub-unit (₹55 per kg)
-  retailMrp          Float?   // MRP per sub-unit for auto-discount calc
+  retailSalePrice    Decimal?   // price per sub-unit (₹55 per kg)
+  retailMrp          Decimal?   // MRP per sub-unit for auto-discount calc
   looseStock         Float    @default(0) // loose/fractional stock (kg)
   subCategory        String?  // PRD Part 13: sub-category (e.g. Rice → Miniket)
   // PRD Part 35 §1.2: AI auto-filled description
@@ -311,8 +311,8 @@ model Transaction {
   businessId  String
   partyId     String?
   type        String // credit (money in / receivable reduced) | debit (money out / payable reduced) | sale | purchase | expense
-  amount      Float
-  balanceAfter Float?
+  amount      Decimal
+  balanceAfter Decimal?
   description String?
   category    String?
   invoiceId   String?
@@ -335,14 +335,14 @@ model Invoice {
   type            String   @default("sales") // sales | purchase | retail | challan
   status          String   @default("unpaid") // unpaid | partial | paid
   isGst           Boolean  @default(false)
-  subtotal        Float    @default(0)
-  discountValue   Float    @default(0)
+  subtotal        Decimal  @default(0)
+  discountValue   Decimal  @default(0)
   discountMode    String   @default("flat") // flat | percent
-  discountAmount  Float    @default(0)
-  gstAmount       Float    @default(0)
-  grandTotal      Float    @default(0)
-  amountPaid      Float    @default(0)
-  amountDue       Float    @default(0)
+  discountAmount  Decimal  @default(0)
+  gstAmount       Decimal  @default(0)
+  grandTotal      Decimal  @default(0)
+  amountPaid      Decimal  @default(0)
+  amountDue       Decimal  @default(0)
   paymentMode     String?  // cash | upi | credit | cheque
   notes           String?
   paymentLandingToken String? @unique
@@ -373,10 +373,10 @@ model InvoiceItem {
   productId String?
   name      String
   quantity  Float
-  unitPrice Float
-  discount  Float  @default(0)
-  gstRate   Float  @default(0)
-  total     Float  @default(0)
+  unitPrice Decimal
+  discount  Decimal  @default(0)
+  gstRate   Decimal  @default(0)
+  total     Decimal  @default(0)
   // §PARTIAL-FULFILLMENT: Tracks how much has been handed over
   fulfilledQty Float @default(0)
 
@@ -725,7 +725,7 @@ model OrderSplit {
   businessId      String
   businessName    String
   items           String   // JSON array of items for this shop
-  subtotal        Float    @default(0)
+  subtotal        Decimal  @default(0)
   commissionPct   Float    @default(2)
   commissionAmount Float   @default(0)
   merchantAmount  Float    @default(0) // subtotal - commission
