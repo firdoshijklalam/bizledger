@@ -65,6 +65,16 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!existing) return NextResponse.json({ error: 'Not found in your business' }, { status: 404 })
 
     const body = await req.json()
+
+    // §INPUT-VALIDATION: Validate fields
+    if (body.name !== undefined && (!body.name || typeof body.name !== 'string' || body.name.trim().length === 0)) {
+      return NextResponse.json({ error: 'Party name cannot be empty' }, { status: 400 })
+    }
+    if (body.creditLimit !== undefined && body.creditLimit !== null) {
+      const cl = Number(body.creditLimit)
+      if (isNaN(cl) || cl < 0) return NextResponse.json({ error: 'Credit limit cannot be negative' }, { status: 400 })
+    }
+
     // §3: Regenerate search tags if name changed
     const searchTags = body.name !== existing.name
       ? JSON.stringify(generateSearchTags(body.name || ''))
@@ -72,7 +82,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const updated = await db.party.update({
       where: { id },
       data: {
-        name: body.name,
+        name: body.name !== undefined ? body.name.trim() : undefined,
         phone: body.phone,
         type: body.type,
         creditLimit: body.creditLimit ? Number(body.creditLimit) : null,
