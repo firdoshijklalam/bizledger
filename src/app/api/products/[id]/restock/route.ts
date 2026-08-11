@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
 
 // POST /api/products/[id]/restock — quick stock increment
 // Security: verifies the product belongs to the current business.
@@ -30,6 +31,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       where: { id },
       data: { stock: { increment: addQty } },
     })
+
+    // §AUDIT-LOG: Log the restock action
+    await logAudit({
+      businessId: business.id,
+      action: AUDIT_ACTIONS.RESTOCK,
+      entityType: ENTITY_TYPES.PRODUCT,
+      entityId: id,
+      description: `Restocked ${existing.name}: +${addQty} ${existing.unit} (was ${existing.stock}, now ${updated.stock})`,
+      metadata: JSON.stringify({ productId: id, productName: existing.name, addedQty: addQty, oldStock: existing.stock, newStock: updated.stock }),
+    })
+
+    // §STOCK-MOVEMENT: Record the stock movement for audit trail
+    await db.stockMovement.create({
+      data: {
+        businessId: business.id,
+        productId: id,
+        type: 'purchase',
+        quantity: addQty,
+        balanceAfter: updated.stock,
+        referenceType: 'manual',
+        description: `Manual restock: +${addQty} ${existing.unit}`,
+      },
+    }).catch(() => {}) // non-fatal if StockMovement table doesn't exist yet
+
     return NextResponse.json({ ok: true, product: updated })
   } catch (e) {
     return apiError(e, "Request failed")
