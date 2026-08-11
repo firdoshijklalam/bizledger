@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
 
 // GET /api/data-export?format=json|csv
 // §SECURITY: Exports ALL business data (customers, products, invoices, transactions).
@@ -17,6 +18,15 @@ export async function GET(req: NextRequest) {
     db.invoice.findMany({ where: { businessId: business.id }, include: { items: true } }),
     db.transaction.findMany({ where: { businessId: business.id } }),
   ])
+
+  // §AUDIT-LOG: Log the data export (critical security event)
+  await logAudit({
+    businessId: business.id,
+    action: AUDIT_ACTIONS.DATA_EXPORT,
+    entityType: ENTITY_TYPES.EXPORT,
+    description: `Data export (${format.toUpperCase()}): ${parties.length} parties, ${products.length} products, ${invoices.length} invoices, ${transactions.length} transactions`,
+    metadata: JSON.stringify({ format, partyCount: parties.length, productCount: products.length, invoiceCount: invoices.length, transactionCount: transactions.length }),
+  })
 
   const data = {
     business,
