@@ -45,21 +45,22 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
 
 /**
  * Multi-tenant isolation helper.
- * Returns the CURRENT business.
+ * Returns the CURRENT business from the authenticated session.
  *
- * §AUTH-UPDATE: Now uses session-based authentication as the PRIMARY method.
- * If a valid session exists → Session → User → User.businessId → Business.
+ * §AUTH: Uses session-based authentication. The businessId comes from:
+ *   Session → User → User.businessId → Business
  *
- * §FALLBACK: If no session (not logged in), falls back to the old hardcoded
- * "Sharma Trading Co." lookup. This fallback maintains backward compatibility
- * for the existing single-tenant demo deployment. In production with auth
- * enforced, the fallback should never be reached.
+ * §NO-FALLBACK: If no session exists, returns null. The caller should
+ * return 401 Unauthorized. The old hardcoded "Sharma Trading Co." fallback
+ * has been REMOVED — it was a security hole that allowed unauthenticated
+ * access to business data.
  *
- * §FUTURE: Once the login UI is deployed and all users have accounts,
- * remove the fallback and return null (401) when no session exists.
+ * §DEV-FALLBACK: In development only (NODE_ENV !== 'production'), falls back
+ * to the first business so the app works without login during development.
+ * In production, no fallback — must be authenticated.
  */
 export async function getCurrentBusiness() {
-  // §AUTH-PRIMARY: Try session-based authentication first
+  // §AUTH-PRIMARY: Get business from authenticated session
   try {
     const { getCurrentUser } = await import('@/lib/auth/session')
     const user = await getCurrentUser()
@@ -73,21 +74,21 @@ export async function getCurrentBusiness() {
     // Session module might not be available in some contexts — fall through
   }
 
-  // §FALLBACK: Old hardcoded lookup (backward compatibility)
-  let business = await db.business.findFirst({
-    where: { name: 'Sharma Trading Co.' },
-  })
-  if (!business) {
-    business = await db.business.findFirst({
-      orderBy: { createdAt: 'asc' },
+  // §DEV-FALLBACK: In development only, allow access without login.
+  // This makes local development easier — no need to login every time.
+  // In PRODUCTION: returns null → caller returns 401.
+  if (process.env.NODE_ENV !== 'production') {
+    let business = await db.business.findFirst({
+      where: { name: 'Sharma Trading Co.' },
     })
-    if (business && process.env.NODE_ENV === 'production') {
-      console.warn(
-        '⚠️ SECURITY WARNING: getCurrentBusiness() fell back to first business (' +
-        business.name +
-        '). No authenticated session found. Implement proper authentication to resolve this.'
-      )
+    if (!business) {
+      business = await db.business.findFirst({
+        orderBy: { createdAt: 'asc' },
+      })
     }
+    return business
   }
-  return business
+
+  // §PRODUCTION: No session → no business → 401
+  return null
 }
