@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/central-catalog — PRD Part 36 §1.1
 // Merged catalog from ALL shops within the customer's geo-fence.
@@ -226,6 +227,6 @@ export async function GET(req: NextRequest) {
       shopsInRange: shopsInRange.length,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

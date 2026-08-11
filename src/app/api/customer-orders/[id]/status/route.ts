@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
+import { apiError } from '@/lib/api-error'
 
 /**
  * PATCH /api/customer-orders/[id]/status — update order status.
@@ -72,7 +73,7 @@ export async function PATCH(
     })
   } catch (e) {
     console.error('Order status update error:', e)
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 

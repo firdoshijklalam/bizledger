@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
+import { apiError } from '@/lib/api-error'
 
 /**
  * §3: Backfill searchTags for existing parties and products.
@@ -8,6 +9,10 @@ import { generateSearchTags } from '@/lib/transliteration'
  * Call: POST /api/backfill-search-tags?force=true  (regenerate ALL tags)
  */
 export async function POST(req: NextRequest) {
+  // §SECURITY: Blocked in production — maintenance endpoint for dev only.
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'This endpoint is disabled in production' }, { status: 403 })
+  }
   try {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
@@ -48,6 +53,6 @@ export async function POST(req: NextRequest) {
       totalUpdated: partyCount + productCount,
     })
   } catch (e: any) {
-    return NextResponse.json({ error: 'DB error', detail: String(e?.message || e) }, { status: 500 })
+    return apiError(e, "Database error")
   }
 }

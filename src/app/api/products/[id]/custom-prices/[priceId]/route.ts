@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // PUT /api/products/[id]/custom-prices/[priceId] — update custom price
 // §FULL-EDIT: Allows editing BOTH the target entity (buyerId / buyerGroupName)
@@ -94,7 +95,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     return NextResponse.json({ ok: true, ...updateData })
   } catch (e: any) {
-    return NextResponse.json({ error: String(e?.message || e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -107,6 +108,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     await db.customPrice.deleteMany({ where: { id: priceId, productId: id, businessId: business.id } })
     return NextResponse.json({ ok: true })
   } catch (e: any) {
-    return NextResponse.json({ error: String(e?.message || e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

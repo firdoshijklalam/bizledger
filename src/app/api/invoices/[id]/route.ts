@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { recalculatePartyGrade } from '@/lib/grade-calculator'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/invoices/[id]
 // Security: verifies the invoice belongs to the current business.
@@ -32,7 +33,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         if (!invoice) return NextResponse.json({ error: 'Not found' }, { status: 404 })
         return NextResponse.json({ ...invoice, party: null, items: [] })
       } catch (e3: any) {
-        return NextResponse.json({ error: 'DB error', detail: String(e3?.message || e3) }, { status: 500 })
+        return apiError(e3, "Database error")
       }
     }
   }
@@ -82,7 +83,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     return NextResponse.json(updated)
   } catch (e: any) {
-    return NextResponse.json({ error: 'Update failed', detail: String(e?.message || e) }, { status: 500 })
+    return apiError(e, "Update failed")
   }
 }
 
@@ -159,7 +160,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
     return NextResponse.json({ ok: true, invoice: voided })
   } catch (e: any) {
-    return NextResponse.json({ error: 'Void failed', detail: String(e?.message || e) }, { status: 500 })
+    return apiError(e, "Void failed")
   }
 }
 

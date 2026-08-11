@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { blockIP, getClientIP, type TamperCheckResult } from '@/lib/security'
+import { apiError } from '@/lib/api-error'
 
 /**
  * PRD Part 34 — Threat 1: Anti-Tamper & Root Detection
@@ -76,6 +77,6 @@ export async function POST(req: NextRequest) {
       blocked: action === 'block',
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

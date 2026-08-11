@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // /api/purchase-orders/[id] — CRUD for a single purchase order.
 // Security: verifies the PO belongs to the current business.
@@ -38,6 +39,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const po = await db.purchaseOrder.update({ where: { id }, data, include: { items: true, supplier: true } })
     return NextResponse.json(po)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

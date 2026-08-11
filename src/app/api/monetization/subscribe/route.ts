@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/monetization/subscribe — owner: activate SaaS subscription (₹199/month default).
 // Body: { plan?: 'monthly' | 'yearly' } (default 'monthly').
@@ -37,6 +38,6 @@ export async function POST(req: NextRequest) {
       business: updated,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

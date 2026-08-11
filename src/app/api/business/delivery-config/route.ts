@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/business/delivery-config — owner: current delivery radius, location, serviceable areas.
 // PUT /api/business/delivery-config — owner: update delivery radius / lat / lng / serviceableAreas.
@@ -25,7 +26,7 @@ export async function GET() {
       serviceableAreas,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -57,6 +58,6 @@ export async function PUT(req: NextRequest) {
     })
     return NextResponse.json(updated)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

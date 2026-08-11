@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 
 // GET /api/data-export?format=json|csv
+// §SECURITY: Exports ALL business data (customers, products, invoices, transactions).
+// This is a highly sensitive endpoint — only the business owner should be able to
+// trigger it. In production, this MUST be behind authentication + role check.
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const format = searchParams.get('format') || 'json'

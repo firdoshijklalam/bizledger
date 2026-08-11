@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { createHash, randomBytes } from 'crypto'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/biometric — register or recognize a fingerprint
 // Body: { action: 'register' | 'recognize', partyId?, hash }
@@ -14,7 +15,9 @@ export async function POST(req: NextRequest) {
 
     // Generate a simulated fingerprint hash (in production, scanner SDK provides this)
     const rawHash = body.hash || randomBytes(32).toString('hex')
-    const fingerprintHash = createHash('sha256').update(rawHash + (process.env.NEXTAUTH_SECRET || 'salt')).digest('hex')
+    // §SECURITY: Use NEXTAUTH_SECRET from env. If not set, use a non-obvious fallback.
+    const secret = process.env.NEXTAUTH_SECRET || 'bizledger-fb2a7c9e-bio-salt-v1'
+    const fingerprintHash = createHash('sha256').update(rawHash + secret).digest('hex')
 
     if (body.action === 'register') {
       if (!body.partyId) return NextResponse.json({ error: 'partyId required for register' }, { status: 400 })
@@ -69,7 +72,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 

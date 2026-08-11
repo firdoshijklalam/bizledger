@@ -350,6 +350,9 @@ model Invoice {
 
   @@index([businessId])
   @@index([partyId])
+  // §UNIQUE-CONSTRAINT: Prevents duplicate invoice numbers within the same business.
+  // Without this, concurrent requests could create invoices with the same number.
+  @@unique([businessId, invoiceNumber])
 }
 
 model InvoiceItem {
@@ -654,14 +657,18 @@ model AuditLog {
   businessId  String
   staffId     String?
   staffName   String
-  action      String   // create_invoice | modify_invoice | delete_invoice | khata_entry | restock | settings_change
-  entityType  String   // invoice | party | product | transaction | settings
+  action      String   // create_invoice | modify_invoice | delete_invoice | khata_entry | restock | settings_change | data_export | staff_change | stock_adjust
+  entityType  String   // invoice | party | product | transaction | settings | staff | export
   entityId    String?
   description String
+  // §AUDIT-METADATA: Optional JSON for additional context (amount, qty, old/new values)
+  metadata    String?
   createdAt   DateTime @default(now())
 
   @@index([businessId])
   @@index([staffId])
+  // §AUDIT-INDEX: Query by entity type + time (e.g., "all invoice actions this week")
+  @@index([businessId, entityType, createdAt])
 }
 
 model BusinessLink {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 /**
  * PUT /api/fulfillment/[id]/handover
@@ -114,6 +115,6 @@ export async function PUT(
       fullyFulfilled: allFullyFulfilled,
     })
   } catch (e: any) {
-    return NextResponse.json({ error: String(e?.message || e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

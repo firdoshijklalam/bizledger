@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/store/[slug] — PUBLIC customer-facing store catalog.
 // Fetches the Business by storeSlug and returns only in-stock products.
@@ -101,6 +102,6 @@ export async function GET(
       products,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { createHash } from 'crypto'
+import { apiError } from '@/lib/api-error'
 
 function hashPin(pin: string): string {
   return createHash('sha256').update(pin + (process.env.NEXTAUTH_SECRET || 'bizledger-salt')).digest('hex')
 }
 
 export async function POST(req: NextRequest) {
+  // §SECURITY: Block this endpoint in production — it can wipe ALL data.
+  // Only allowed in development for testing/seeding demo data.
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'This endpoint is disabled in production' }, { status: 403 })
+  }
   try {
     const force = new URL(req.url).searchParams.get('force') === 'true'
     const existing = await db.business.findFirst({ where: { name: 'Sharma Trading Co.' } })
@@ -112,6 +118,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, message: 'Seeded successfully', businessId: business.id })
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: String(e.message || e) })
+    return apiError(e, 'Seed failed')
   }
 }

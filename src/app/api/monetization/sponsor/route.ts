@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/monetization/sponsor — owner: become a sponsored/featured shop.
 // Body: { area?: string, days?: number } (default 30 days).
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
       business: updated,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -56,6 +57,6 @@ export async function DELETE() {
     })
     return NextResponse.json({ success: true, business: updated })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

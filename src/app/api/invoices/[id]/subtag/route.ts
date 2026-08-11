@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // Invoice auto-tagging sub-tags (PRD Part 32 §4.3).
 // PATCH — selectively update collectedByName/Role and paidToName/Role on an
@@ -57,6 +58,6 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true, invoice: updated })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

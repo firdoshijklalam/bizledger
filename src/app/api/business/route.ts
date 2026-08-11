@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/business — get the current business (single-tenant dev).
 // Security: prefers "Sharma Trading Co." (the owner's business) over demo shops.
@@ -18,7 +19,7 @@ export async function GET() {
     }
     return NextResponse.json(business)
   } catch (e: any) {
-    return NextResponse.json({ error: 'DB error', detail: String(e?.message || e), code: e?.code }, { status: 500 })
+    return apiError(e, "Database error")
   }
 }
 
@@ -51,6 +52,6 @@ export async function PUT(req: NextRequest) {
     })
     return NextResponse.json(updated)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

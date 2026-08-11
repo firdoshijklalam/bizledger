@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { createHash } from 'crypto'
+import { apiError } from '@/lib/api-error'
 
 // Biometric action gate verification (PRD Part 32 §1).
 // POST  — verify a PIN or fingerprint attempt against the 5 action gates.
@@ -14,8 +15,10 @@ type GateType =
   | 'danger_zone'
 
 function hashPin(pin: string): string {
+  // §SECURITY: Use NEXTAUTH_SECRET from env. Non-obvious fallback if not set.
+  const secret = process.env.NEXTAUTH_SECRET || 'bizledger-fb2a7c9e-gate-salt-v1'
   return createHash('sha256')
-    .update(pin + (process.env.NEXTAUTH_SECRET || 'salt'))
+    .update(pin + secret)
     .digest('hex')
 }
 
@@ -253,7 +256,7 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     )
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -289,7 +292,7 @@ export async function GET() {
       })),
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 

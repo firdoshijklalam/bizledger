@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/seed-demo-shops — seed 2 demo nearby shops for the "More Shops" view
+// §SECURITY: Blocked in production — only for development demo data.
 export async function POST() {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'This endpoint is disabled in production' }, { status: 403 })
+  }
   try {
     const existing = await db.business.count()
     if (existing >= 3) {
@@ -75,6 +80,6 @@ export async function POST() {
       ],
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/image-remove-bg — remove background from product image
 // In production, this would use remove.bg API. Here we use a placeholder approach.
@@ -30,6 +31,6 @@ export async function POST(req: NextRequest) {
       image: image, // Return original as fallback
     })
   } catch (e) {
-    return NextResponse.json({ error: 'Failed: ' + String(e) }, { status: 500 })
+    return apiError(e, "Image processing failed")
   }
 }

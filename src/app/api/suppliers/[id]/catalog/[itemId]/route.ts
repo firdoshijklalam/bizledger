@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // /api/suppliers/[id]/catalog/[itemId] — update/delete a supplier catalog item.
 // Security: verifies the catalog item belongs to the current business.
@@ -37,7 +38,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     })
     return NextResponse.json(item)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 
@@ -55,6 +56,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     await db.supplierCatalogItem.delete({ where: { id: itemId } })
     return NextResponse.json({ ok: true })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

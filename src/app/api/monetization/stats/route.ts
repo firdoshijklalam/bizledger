@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/monetization/stats — owner: revenue + commission + sponsorship summary.
 // Returns subscription status, commission earned (as referrer), commission paid (as payer),
@@ -84,6 +85,6 @@ export async function GET() {
       sponsoredUntil: business.sponsoredUntil,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }

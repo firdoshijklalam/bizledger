@@ -1,12 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // §VERCEL-FIX: Removed output: "standalone" — Vercel has its own build system
-  // and doesn't need standalone output. standalone is for Docker/self-hosting
-  // and can cause issues on Vercel (missing files, incorrect server path).
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  // §SECURITY-FIX: Removed ignoreBuildErrors — TypeScript errors should NOT
+  // be silently bypassed in production builds. They can hide real bugs.
+  // typescript: { ignoreBuildErrors: true } — REMOVED
   reactStrictMode: false,
   allowedDevOrigins: [
     "*.space-z.ai",
@@ -21,7 +18,10 @@ const nextConfig: NextConfig = {
         source: '/(.*)',
         headers: [
           { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate' },
-          { key: 'Access-Control-Allow-Origin', value: '*' },
+          // §CORS-FIX: Removed wildcard '*' — replaced with specific allowed origins.
+          // In a same-origin Next.js app, CORS headers aren't needed for API calls.
+          // External integrations (if any) should be explicitly allowlisted.
+          // { key: 'Access-Control-Allow-Origin', value: '*' }, — REMOVED
         ],
       },
     ];

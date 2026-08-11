@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server'
 import { PrismaClient } from '@prisma/client'
 
+// §SECURITY: All endpoints blocked in production — database setup should
+// happen via deployment scripts, not public API endpoints.
 export async function GET() {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'This endpoint is disabled in production' }, { status: 403 })
+  }
   try {
     let dbUrl = process.env.DATABASE_URL || ''
     if (dbUrl.includes('channel_binding')) {
@@ -36,6 +41,9 @@ export async function GET() {
 
 // POST: Run prisma db push via SQL
 export async function POST() {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'This endpoint is disabled in production' }, { status: 403 })
+  }
   try {
     let dbUrl = process.env.DATABASE_URL || ''
     if (dbUrl.includes('channel_binding')) {

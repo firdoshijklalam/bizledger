@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // GET /api/invoices/[id]/export-image?format=jpg|pdf
 // PRD Part 38 §5.1: HTML-to-Canvas Invoice Exporter for WhatsApp HD image sharing
@@ -32,7 +33,7 @@ export async function GET(
       invoiceNumber: invoice.invoiceNumber,
     })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
 

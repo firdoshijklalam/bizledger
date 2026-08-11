@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
 
 // POST /api/orders/split — PRD Part 36 §2.1
 // Auto-splits a global cart order by shop.
@@ -222,6 +223,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, splits, parentOrders })
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Request failed")
   }
 }
