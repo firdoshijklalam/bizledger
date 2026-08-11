@@ -68,17 +68,25 @@ export async function POST(req: NextRequest) {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
+    // §INPUT-VALIDATION: Validate required fields
+    if (!body.name || typeof body.name !== 'string' || body.name.trim().length === 0) {
+      return NextResponse.json({ error: 'Party name is required' }, { status: 400 })
+    }
+    const openingBalance = Number(body.openingBalance) || 0
+    // §GUARD: Reject negative opening balance
+    if (openingBalance < 0) return NextResponse.json({ error: 'Opening balance cannot be negative' }, { status: 400 })
+
     // §3: Auto-generate phonetic search tags from the party name
     const searchTags = JSON.stringify(generateSearchTags(body.name || ''))
 
     const party = await db.party.create({
       data: {
         businessId: business.id,
-        name: body.name,
+        name: body.name.trim(),
         phone: body.phone || null,
         type: body.type || 'customer',
-        balance: Number(body.openingBalance) || 0,
-        openingBalance: Number(body.openingBalance) || 0,
+        balance: openingBalance,
+        openingBalance,
         qualityGrade: body.qualityGrade || 'B',
         creditLimit: body.creditLimit ? Number(body.creditLimit) : null,
         address: body.address || null,
@@ -89,6 +97,6 @@ export async function POST(req: NextRequest) {
     })
     return NextResponse.json(party)
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    return apiError(e, "Failed to create party")
   }
 }
