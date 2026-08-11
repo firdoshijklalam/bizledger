@@ -198,10 +198,19 @@ export async function POST(req: NextRequest) {
 
       // 2. Update product stock (inside transaction for atomicity)
       // §STOCK-DIRECTION: Sale → decrement; Purchase → increment.
+      // §OWNERSHIP: Every product lookup inside the transaction MUST use
+      // findFirst with businessId — never findUnique without businessId.
+      // If product not found → throw error (rolls back entire transaction).
       for (const item of items) {
         if (item.productId) {
-          const product = await tx.product.findUnique({ where: { id: item.productId } })
-          if (!product) continue
+          // §OWNERSHIP: Verify product belongs to this business INSIDE the transaction
+          const product = await tx.product.findFirst({
+            where: { id: item.productId, businessId: business.id },
+          })
+          if (!product) {
+            // §REJECT: Throwing inside $transaction rolls back ALL changes
+            throw new Error(`Product not found or does not belong to your business: ${item.productId}`)
+          }
           const qty = Number(item.quantity)
 
           if (isPurchase) {
@@ -253,9 +262,12 @@ export async function POST(req: NextRequest) {
       }
 
       // 3. Update party balance if credit
+      // §OWNERSHIP: Party ownership was verified BEFORE the transaction (line 148-156).
+      // This update is safe because we already confirmed the party belongs to this business.
+      // Using updateMany with businessId as an extra safety net.
       if (body.partyId && body.paymentMode === 'credit') {
-        await tx.party.update({
-          where: { id: body.partyId },
+        await tx.party.updateMany({
+          where: { id: body.partyId, businessId: business.id },
           data: { balance: { increment: grandTotal } },
         })
       }
