@@ -1,32 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db, getCurrentBusiness } from '@/lib/db'
+import { db } from '@/lib/db'
 import { randomBytes } from 'crypto'
 import { apiError } from '@/lib/api-error'
+import { requireRole } from '@/lib/auth/session'
 
-// §SECURITY: Staff management endpoints. In production, these MUST be protected
-// with role-based authorization (OWNER/ADMIN only). Currently uses businessId
-// from getCurrentBusiness() for data isolation, but no role check exists yet.
-// TODO: Add requireRole(['OWNER', 'ADMIN']) when auth system is implemented.
+// §SECURITY: Staff management endpoints — OWNER/ADMIN only.
+// Role comes from authenticated session, never from client.
 
 export async function GET() {
-  const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json([])
-  const staff = await db.staff.findMany({ where: { businessId: business.id }, orderBy: { createdAt: 'desc' } })
+  // §RBAC: Require OWNER or ADMIN role
+  const user = await requireRole(['OWNER', 'ADMIN'])
+  if (user instanceof NextResponse) return user
+
+  const staff = await db.staff.findMany({ where: { businessId: user.businessId }, orderBy: { createdAt: 'desc' } })
   return NextResponse.json(staff)
 }
 
 export async function POST(req: NextRequest) {
+  // §RBAC: Require OWNER or ADMIN role
+  const user = await requireRole(['OWNER', 'ADMIN'])
+  if (user instanceof NextResponse) return user
+
   const body = await req.json()
-  const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
-  
+
   // Generate 6-digit unique staff ID and QR token
   const staffId = String(Math.floor(100000 + Math.random() * 900000))
   const qrToken = randomBytes(16).toString('hex')
-  
+
   const staff = await db.staff.create({
     data: {
-      businessId: business.id,
+      businessId: user.businessId,
       name: body.name,
       phone: body.phone || null,
       role: body.role || 'sales',

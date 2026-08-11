@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db, getCurrentBusiness } from '@/lib/db'
+import { db } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { requireAuth } from '@/lib/auth/session'
 import { createHash } from 'crypto'
 import {
   recordFailedPINAttempt,
@@ -25,11 +26,15 @@ function hashPin(pin: string): string {
 // Body: { action: 'set' | 'verify' | 'disable', pin }
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const business = await getCurrentBusiness()
-    if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
+    // §AUTH: Require authenticated session — PIN operations must not be
+    // accessible without authentication. businessId comes from session.
+    const user = await requireAuth()
+    if (user instanceof NextResponse) return user
 
-    const settings = await db.appSettings.findUnique({ where: { businessId: business.id } })
+    const body = await req.json()
+    const businessId = user.businessId
+
+    const settings = await db.appSettings.findUnique({ where: { businessId } })
     if (!settings) return NextResponse.json({ error: 'Settings not found' }, { status: 404 })
 
     const clientIP = getClientIP(req)
@@ -39,7 +44,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'PIN must be 4-6 digits' }, { status: 400 })
       }
       await db.appSettings.update({
-        where: { businessId: business.id },
+        where: { businessId },
         data: { pinEnabled: true, pinHash: hashPin(body.pin) },
       })
       return NextResponse.json({ ok: true, message: 'PIN set successfully' })
@@ -98,7 +103,7 @@ export async function POST(req: NextRequest) {
 
     if (body.action === 'disable') {
       await db.appSettings.update({
-        where: { businessId: business.id },
+        where: { businessId },
         data: { pinEnabled: false, pinHash: null },
       })
       resetBruteForce(clientIP)
@@ -116,6 +121,6 @@ export async function GET() {
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ enabled: false })
 
-  const settings = await db.appSettings.findUnique({ where: { businessId: business.id } })
+  const settings = await db.appSettings.findUnique({ where: { businessId } })
   return NextResponse.json({ enabled: settings?.pinEnabled ?? false })
 }

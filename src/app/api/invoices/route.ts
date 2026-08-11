@@ -59,13 +59,20 @@ export async function POST(req: NextRequest) {
     const settings = await db.appSettings.findUnique({ where: { businessId: business.id } })
     const prefix = settings?.invoicePrefix || 'INV'
 
-    // §RACE-CONDITION-FIX: Use a transaction to atomically get the next invoice number.
-    // Old code used count+1 which could produce duplicate numbers under concurrent requests.
-    // Now we increment a counter inside the transaction to guarantee uniqueness.
+    // §INVOICE-SEQUENCE: Atomically increment a dedicated sequence counter.
+    // This is TRUE concurrency-safe — unlike count()+1, the sequence is
+    // a single row that gets atomically incremented inside the transaction.
+    // Concurrent requests will get different numbers guaranteed.
     const invoiceNumber = await db.$transaction(async (tx) => {
-      // Atomically get and increment the invoice counter
-      const currentCount = await tx.invoice.count({ where: { businessId: business.id } })
-      return generateInvoiceNumber(prefix, currentCount + 1)
+      // Upsert the sequence record (create if doesn't exist)
+      const seq = await tx.invoiceSequence.upsert({
+        where: { businessId: business.id },
+        update: { nextNumber: { increment: 1 } },
+        create: { businessId: business.id, nextNumber: 1 },
+      })
+      // seq.nextNumber was just incremented — use the PREVIOUS value (seq.nextNumber - 1)
+      // because upsert returns the AFTER-increment value
+      return generateInvoiceNumber(prefix, seq.nextNumber - 1 + 1)
     })
 
     // §GST-FIX: Calculate GST on the TAXABLE amount (after discount), NOT on the
@@ -101,15 +108,24 @@ export async function POST(req: NextRequest) {
     const invoiceType = body.type || 'sales'
     const isPurchase = invoiceType === 'purchase'
 
-    // §STOCK-VALIDATION: Check stock availability BEFORE creating the invoice.
-    // Only for SALE invoices (purchase invoices add stock, no validation needed).
+    // §STOCK-VALIDATION + §PRODUCT-OWNERSHIP: Check stock AND verify product
+    // belongs to the authenticated business. NEVER continue silently if a
+    // product is not found — that would allow foreign products in invoices.
     if (!isPurchase) {
       for (const item of items) {
         if (item.productId) {
+          // §OWNERSHIP: Must use findFirst with businessId — never findUnique
           const product = await db.product.findFirst({
             where: { id: item.productId, businessId: business.id },
           })
-          if (!product) continue
+          // §REJECT: If product doesn't belong to this business, REJECT the
+          // entire request — do NOT silently continue.
+          if (!product) {
+            return NextResponse.json(
+              { error: `Product not found or does not belong to your business: ${item.productId}` },
+              { status: 403 }
+            )
+          }
           const qty = Number(item.quantity)
           const isRetailSale = (product as any).retailEnabled && (product as any).conversionFactor
           if (!isRetailSale) {
@@ -122,6 +138,21 @@ export async function POST(req: NextRequest) {
             }
           }
         }
+      }
+    }
+
+    // §PARTY-OWNERSHIP: Verify the party belongs to the authenticated business
+    // BEFORE creating the invoice. A user from Business A must NEVER be able to
+    // attach Business B's party to an invoice or modify their balance.
+    if (body.partyId) {
+      const party = await db.party.findFirst({
+        where: { id: body.partyId, businessId: business.id },
+      })
+      if (!party) {
+        return NextResponse.json(
+          { error: 'Party not found or does not belong to your business' },
+          { status: 403 }
+        )
       }
     }
 

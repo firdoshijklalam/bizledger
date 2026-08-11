@@ -60,6 +60,22 @@ model Business {
   notifications Notification[]
   // §AUTH: Users and sessions for this business
   users    User[]
+  // §INVOICE-SEQUENCE: Atomic counter for race-safe invoice numbering
+  invoiceSequence InvoiceSequence?
+}
+
+// §INVOICE-SEQUENCE: Dedicated sequence table for concurrency-safe invoice numbering.
+// Each business has exactly one sequence record. The nextNumber is atomically
+// incremented inside a transaction, guaranteeing unique sequential invoice numbers
+// even under concurrent requests. This replaces the unsafe count()+1 approach.
+model InvoiceSequence {
+  id          String   @id @default(cuid())
+  businessId  String   @unique
+  nextNumber  Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
 
 // §AUTH: User model for authentication.
