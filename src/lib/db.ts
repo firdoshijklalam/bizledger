@@ -45,22 +45,15 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
 
 /**
  * Multi-tenant isolation helper.
- * Returns the CURRENT business from the authenticated session.
+ * Returns the CURRENT business from the authenticated session ONLY.
  *
- * §AUTH: Uses session-based authentication. The businessId comes from:
- *   Session → User → User.businessId → Business
+ * §NO-FALLBACK: There is NO fallback. No hardcoded business name.
+ * No "first business" lookup. No dev fallback. If there is no valid
+ * authenticated session, this returns null and the caller MUST return 401.
  *
- * §NO-FALLBACK: If no session exists, returns null. The caller should
- * return 401 Unauthorized. The old hardcoded "Sharma Trading Co." fallback
- * has been REMOVED — it was a security hole that allowed unauthenticated
- * access to business data.
- *
- * §DEV-FALLBACK: In development only (NODE_ENV !== 'production'), falls back
- * to the first business so the app works without login during development.
- * In production, no fallback — must be authenticated.
+ * The businessId comes from: Session → User → User.businessId → Business
  */
 export async function getCurrentBusiness() {
-  // §AUTH-PRIMARY: Get business from authenticated session
   try {
     const { getCurrentUser } = await import('@/lib/auth/session')
     const user = await getCurrentUser()
@@ -71,24 +64,7 @@ export async function getCurrentBusiness() {
       if (business) return business
     }
   } catch {
-    // Session module might not be available in some contexts — fall through
+    // Session module not available (e.g. during build) — return null
   }
-
-  // §DEV-FALLBACK: In development only, allow access without login.
-  // This makes local development easier — no need to login every time.
-  // In PRODUCTION: returns null → caller returns 401.
-  if (process.env.NODE_ENV !== 'production') {
-    let business = await db.business.findFirst({
-      where: { name: 'Sharma Trading Co.' },
-    })
-    if (!business) {
-      business = await db.business.findFirst({
-        orderBy: { createdAt: 'asc' },
-      })
-    }
-    return business
-  }
-
-  // §PRODUCTION: No session → no business → 401
   return null
 }
