@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { generateToken, generateInvoiceNumber } from '@/lib/utils'
 import { recalculatePartyGrade } from '@/lib/grade-calculator'
+import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
 
 // GET /api/invoices — optimized with pagination
 export async function GET(req: NextRequest) {
@@ -183,6 +184,16 @@ export async function POST(req: NextRequest) {
       // Trigger grade recalculation for this party (fire-and-forget)
       recalculatePartyGrade(body.partyId).catch((e) => console.error('Grade recalc error:', e))
     }
+
+    // §AUDIT-LOG: Log the invoice creation
+    await logAudit({
+      businessId: business.id,
+      action: isPurchase ? AUDIT_ACTIONS.INVOICE_CREATE : AUDIT_ACTIONS.INVOICE_CREATE,
+      entityType: ENTITY_TYPES.INVOICE,
+      entityId: invoice.id,
+      description: `${isPurchase ? 'Purchase' : 'Sale'} invoice ${invoiceNumber} created for ${formatCurrency(grandTotal)}`,
+      metadata: JSON.stringify({ invoiceNumber, grandTotal, partyId: body.partyId, type: body.type || 'sales' }),
+    })
 
     return NextResponse.json(invoice)
   } catch (e) {

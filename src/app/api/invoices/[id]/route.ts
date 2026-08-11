@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { recalculatePartyGrade } from '@/lib/grade-calculator'
 import { apiError } from '@/lib/api-error'
+import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
 
 // GET /api/invoices/[id]
 // Security: verifies the invoice belongs to the current business.
@@ -156,6 +157,16 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const voided = await db.invoice.update({
       where: { id: invoice.id },
       data: { status: 'void' },
+    })
+
+    // §AUDIT-LOG: Log the invoice void/cancellation
+    await logAudit({
+      businessId: business.id,
+      action: AUDIT_ACTIONS.INVOICE_VOID,
+      entityType: ENTITY_TYPES.INVOICE,
+      entityId: invoice.id,
+      description: `Invoice ${invoice.invoiceNumber} voided (₹${invoice.grandTotal})`,
+      metadata: JSON.stringify({ invoiceNumber: invoice.invoiceNumber, grandTotal: invoice.grandTotal, partyId: invoice.partyId }),
     })
 
     return NextResponse.json({ ok: true, invoice: voided })
