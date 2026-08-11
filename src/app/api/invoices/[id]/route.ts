@@ -113,16 +113,25 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     }
 
     // 1. Reverse product stock
+    // §STOCK-DIRECTION: Sale invoice → stock was decremented → restore by incrementing.
+    // Purchase invoice → stock was incremented → restore by decrementing.
+    const isPurchaseInvoice = invoice.type === 'purchase'
     for (const item of invoice.items) {
       if (item.productId && item.product) {
         const product = item.product
-        // If the item was sold in retail units but product tracks bulk stock,
-        // convert back. Here we restore in the same unit the item was sold in.
-        // (Simple restore — matches the decrement logic in POST /api/invoices.)
-        await db.product.update({
-          where: { id: product.id },
-          data: { stock: { increment: item.quantity } },
-        })
+        if (isPurchaseInvoice) {
+          // Purchase: stock was incremented, so decrement to reverse
+          await db.product.update({
+            where: { id: product.id },
+            data: { stock: { decrement: item.quantity } },
+          })
+        } else {
+          // Sale: stock was decremented, so increment to reverse
+          await db.product.update({
+            where: { id: product.id },
+            data: { stock: { increment: item.quantity } },
+          })
+        }
       }
     }
 
