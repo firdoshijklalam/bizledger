@@ -207,6 +207,8 @@ model Product {
   invoiceItems InvoiceItem[]
   // §DYNAMIC-PRICING: custom per-buyer/per-tier prices for this product
   customPrices CustomPrice[]
+  // §STOCK-MOVEMENT: complete inventory audit trail
+  stockMovements StockMovement[]
 
   @@index([businessId])
   @@index([supplierId])
@@ -650,6 +652,30 @@ model Staff {
   updatedAt    DateTime @updatedAt
 
   @@index([businessId])
+}
+
+// §STOCK-MOVEMENT: Tracks every stock change with type, quantity, and reference.
+// This provides a complete audit trail for inventory — you can trace exactly
+// when and why stock changed for any product.
+model StockMovement {
+  id          String   @id @default(cuid())
+  businessId  String
+  productId   String
+  // §MOVEMENT-TYPE: SALE = stock out, PURCHASE = stock in,
+  // SALE_RETURN = stock back in, PURCHASE_RETURN = stock back out,
+  // ADJUSTMENT = manual correction
+  type        String   // sale | purchase | sale_return | purchase_return | adjustment
+  quantity    Float    // positive = stock in, negative = stock out
+  balanceAfter Float   // stock level after this movement
+  referenceId String?  // invoice ID, transaction ID, etc.
+  referenceType String? // invoice | transaction | manual
+  description String?
+  createdAt   DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, productId])
+  @@index([businessId, createdAt])
 }
 
 model AuditLog {
