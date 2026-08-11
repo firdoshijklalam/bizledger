@@ -1,23 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db, getCurrentBusiness } from '@/lib/db'
+import { db } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { requireRole } from '@/lib/auth/session'
 
-// /api/staff/[id] — owner: update or delete a staff member.
-// Security: verifies the staff belongs to the current business.
+// /api/staff/[id] — owner/admin: update or delete a staff member.
+// §RBAC: Requires OWNER or ADMIN role. STAFF → 403, unauthenticated → 401.
+// Role comes from authenticated session, never from client.
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §RBAC: Require OWNER or ADMIN
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const { id } = await params
     const body = await req.json()
 
-    // Multi-tenant isolation: verify ownership
-    const business = await getCurrentBusiness()
-    if (!business) {
-      return NextResponse.json({ error: 'No business found' }, { status: 400 })
-    }
-
+    // Multi-tenant isolation: verify ownership using authenticated businessId
     const existing = await db.staff.findFirst({
-      where: { id, businessId: business.id },
+      where: { id, businessId: user.businessId },
     })
     if (!existing) {
       return NextResponse.json({ error: 'Staff not found in your business' }, { status: 404 })
@@ -39,16 +40,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §RBAC: Require OWNER or ADMIN
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const { id } = await params
 
-    // Multi-tenant isolation: verify ownership
-    const business = await getCurrentBusiness()
-    if (!business) {
-      return NextResponse.json({ error: 'No business found' }, { status: 400 })
-    }
-
+    // Multi-tenant isolation: verify ownership using authenticated businessId
     const existing = await db.staff.findFirst({
-      where: { id, businessId: business.id },
+      where: { id, businessId: user.businessId },
     })
     if (!existing) {
       return NextResponse.json({ error: 'Staff not found in your business' }, { status: 404 })

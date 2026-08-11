@@ -136,12 +136,19 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     }
 
     // 2. Reverse party balance (if credit sale increased it)
+    // §OWNERSHIP: Use findFirst with businessId + updateMany with businessId
+    // to enforce business-scoped access. Never use findUnique/update without businessId.
     if (invoice.partyId && invoice.paymentMode === 'credit') {
-      const party = await db.party.findUnique({ where: { id: invoice.partyId } })
+      const party = await db.party.findFirst({
+        where: { id: invoice.partyId, businessId: business.id },
+      })
       if (party) {
         // Credit sale increased balance by grandTotal; reverse it.
         const newBalance = party.balance - invoice.grandTotal
-        await db.party.update({ where: { id: party.id }, data: { balance: newBalance } })
+        await db.party.updateMany({
+          where: { id: party.id, businessId: business.id },
+          data: { balance: newBalance },
+        })
         recalculatePartyGrade(party.id).catch(() => {})
       }
     }

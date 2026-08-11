@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
             : body.type === 'debit'
             ? party.balance + amount
             : party.balance
-        await db.party.update({ where: { id: partyId }, data: { balance: newBalance } })
+        await db.party.updateMany({ where: { id: partyId, businessId: business.id }, data: { balance: newBalance } })
         balanceAfter = newBalance
       }
     }

@@ -106,10 +106,12 @@ export async function POST(
     }
 
     // Decrement product stock for each ordered item.
+    // §OWNERSHIP: Every product MUST belong to the store's business.
+    // Client-supplied productId from another business → rejected.
     // PRD Part 35 §3.3: For loose/retail products, reduce looseStock AND auto-convert bulk stock.
     await Promise.all(
       items.map(async (it) => {
-        const product = await db.product.findUnique({ where: { id: it.productId } })
+        const product = await db.product.findFirst({ where: { id: it.productId, businessId: business.id } })
         if (!product) return
 
         const orderedQty = Number(it.quantity || 0)

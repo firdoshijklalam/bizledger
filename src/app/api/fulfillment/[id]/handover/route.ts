@@ -67,7 +67,14 @@ export async function PUT(
     let allFullyFulfilled = true
     for (const handoverItem of items) {
       const dbItem = invoice.items.find((i) => i.id === handoverItem.id)
-      if (!dbItem) continue
+      // §VALIDATION: Do NOT silently skip invalid items — reject the entire
+      // handover request if any item ID doesn't match the invoice.
+      if (!dbItem) {
+        return NextResponse.json(
+          { error: `Item not found in this invoice: ${handoverItem.id}` },
+          { status: 400 },
+        )
+      }
 
       const newFulfilledQty = Math.min(
         (dbItem.fulfilledQty || 0) + handoverItem.qty,

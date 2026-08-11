@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ productName: '', matches: [] })
   let targetName = name || '', targetCategory = category || null
-  if (productId) { const p = await db.product.findUnique({ where: { id: productId } }); if (!p) return NextResponse.json({ error: 'Not found' }, { status: 404 }); targetName = p.name; targetCategory = p.category || null }
+  if (productId) { const p = await db.product.findFirst({ where: { id: productId, businessId: business.id } }); if (!p) return NextResponse.json({ error: 'Not found' }, { status: 404 }); targetName = p.name; targetCategory = p.category || null }
   if (!targetName) return NextResponse.json({ error: 'Either productId or name is required' }, { status: 400 })
   const items = await db.supplierCatalogItem.findMany({ where: { businessId: business.id, isActive: true } })
   const supplierIds = [...new Set(items.map(i => i.supplierId))]

@@ -9,11 +9,11 @@ import { apiError } from '@/lib/api-error'
 
 // Recursively recompute descendant levels after a parent change.
 // Walks the subtree using parentId edges and updates each node's level.
-async function cascadeDescendantLevels(rootId: string, rootLevel: number) {
+async function cascadeDescendantLevels(rootId: string, rootLevel: number, businessId: string) {
   const stack: { id: string; level: number }[] = [{ id: rootId, level: rootLevel }]
   while (stack.length > 0) {
     const current = stack.pop()!
-    await db.category.update({ where: { id: current.id }, data: { level: current.level } })
+    await db.category.updateMany({ where: { id: current.id, businessId }, data: { level: current.level } })
     const children = await db.category.findMany({
       where: { parentId: current.id },
       select: { id: true },
@@ -114,7 +114,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       data.sortOrder = body.sortOrder
     }
 
-    const updated = await db.category.update({ where: { id }, data })
+    const updated = await db.category.updateMany({ where: { id, businessId: business.id }, data })
 
     // If the level changed, cascade the new level to all descendants.
     if (
@@ -122,10 +122,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       typeof data.level === 'number' &&
       data.level !== existing.level
     ) {
-      await cascadeDescendantLevels(id, data.level)
+      await cascadeDescendantLevels(id, data.level, business.id)
     }
 
-    return NextResponse.json(updated)
+    return NextResponse.json({ ...updated, id })
   } catch (e) {
     return apiError(e, "Request failed")
   }
