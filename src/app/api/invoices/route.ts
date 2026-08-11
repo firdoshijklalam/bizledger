@@ -198,6 +198,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(invoice)
   } catch (e) {
     console.error('Invoice create error:', e)
-    return NextResponse.json({ error: String(e) }, { status: 500 })
+    // §SECURITY: Don't expose internal DB error details in production
+    const message = process.env.NODE_ENV === 'production'
+      ? 'Failed to create invoice'
+      : (e instanceof Error ? e.message : String(e))
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
