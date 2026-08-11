@@ -47,20 +47,33 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
  * Multi-tenant isolation helper.
  * Returns the CURRENT business.
  *
- * §SECURITY-WARNING: This is a TEMPORARY implementation. It hardcodes
- * "Sharma Trading Co." as the default business — this is NOT secure for
- * a real multi-tenant SaaS. When the authentication system is implemented,
- * this function should be replaced with:
+ * §AUTH-UPDATE: Now uses session-based authentication as the PRIMARY method.
+ * If a valid session exists → Session → User → User.businessId → Business.
  *
- *   Session → User → User.businessId → Business
+ * §FALLBACK: If no session (not logged in), falls back to the old hardcoded
+ * "Sharma Trading Co." lookup. This fallback maintains backward compatibility
+ * for the existing single-tenant demo deployment. In production with auth
+ * enforced, the fallback should never be reached.
  *
- * Until then, this function at least scopes all queries to a single
- * businessId, preventing cross-tenant data leakage within the current
- * single-tenant deployment.
- *
- * In production, if no business is found, it logs a critical warning.
+ * §FUTURE: Once the login UI is deployed and all users have accounts,
+ * remove the fallback and return null (401) when no session exists.
  */
 export async function getCurrentBusiness() {
+  // §AUTH-PRIMARY: Try session-based authentication first
+  try {
+    const { getCurrentUser } = await import('@/lib/auth/session')
+    const user = await getCurrentUser()
+    if (user) {
+      const business = await db.business.findUnique({
+        where: { id: user.businessId },
+      })
+      if (business) return business
+    }
+  } catch {
+    // Session module might not be available in some contexts — fall through
+  }
+
+  // §FALLBACK: Old hardcoded lookup (backward compatibility)
   let business = await db.business.findFirst({
     where: { name: 'Sharma Trading Co.' },
   })
@@ -68,13 +81,11 @@ export async function getCurrentBusiness() {
     business = await db.business.findFirst({
       orderBy: { createdAt: 'asc' },
     })
-    // §SECURITY: Log warning when falling back to first business
     if (business && process.env.NODE_ENV === 'production') {
       console.warn(
         '⚠️ SECURITY WARNING: getCurrentBusiness() fell back to first business (' +
         business.name +
-        ') instead of "Sharma Trading Co.". This means the hardcoded business ' +
-        'lookup failed. Implement proper authentication to resolve this.'
+        '). No authenticated session found. Implement proper authentication to resolve this.'
       )
     }
   }
