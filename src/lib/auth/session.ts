@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { createHash, randomBytes, timingSafeEqual } from 'crypto'
+import { scryptSync, randomBytes, timingSafeEqual } from 'crypto'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
@@ -23,8 +23,10 @@ const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 // ─── Password Hashing ─────────────────────────────────────────────────────
 
 /**
- * Hash a password using scrypt (Node.js built-in, no external deps).
+ * Hash a password using Node.js built-in scrypt (memory-hard KDF).
  * Format: "scrypt:salt:hash" (both hex-encoded).
+ * scrypt is designed specifically for password hashing — it's CPU + memory
+ * hard, making brute-force attacks computationally expensive.
  */
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString('hex')
@@ -42,11 +44,30 @@ export function verifyPassword(password: string, storedHash: string): boolean {
   const salt = parts[1]
   const hash = parts[2]
   const computedHash = scryptHash(password, salt)
-  return timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(computedHash, 'hex'))
+  const a = Buffer.from(hash, 'hex')
+  const b = Buffer.from(computedHash, 'hex')
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
 }
 
+/**
+ * §SCRYPT: Uses Node.js crypto.scryptSync — a proper password-hardening
+ * KDF (Key Derivation Function). Unlike SHA-256 (which is fast and
+ * designed for hashing, NOT passwords), scrypt is:
+ * - Memory-hard (requires significant RAM, prevents GPU/ASIC brute-force)
+ * - CPU-hard (configurable iteration cost)
+ * - Designed specifically for password storage
+ *
+ * Parameters: N=16384 (CPU/memory cost), r=8 (block size), p=1 (parallelism)
+ * These are the recommended defaults for interactive login (OWASP).
+ */
 function scryptHash(password: string, salt: string): string {
-  return createHash('sha256').update(password + salt + (process.env.NEXTAUTH_SECRET || 'bizledger-auth-key-v1')).digest('hex')
+  return scryptSync(password, salt, 64, {
+    N: 16384,
+    r: 8,
+    p: 1,
+    maxmem: 128 * 1024 * 1024, // 128MB — needed for N=16384
+  }).toString('hex')
 }
 
 // ─── Session Management ───────────────────────────────────────────────────
