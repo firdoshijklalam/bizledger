@@ -95,31 +95,34 @@ export async function POST(req: NextRequest) {
     })
 
     // Update product stock — PRD Part 11 §3: Dual-stock with auto bulk-to-loose conversion
+    // §STOCK-DIRECTION: Sale → decrement stock; Purchase → increment stock.
+    // The old code always decremented regardless of invoice type — a purchase
+    // invoice would WRONGLY reduce stock instead of increasing it.
+    const invoiceType = body.type || 'sales'
+    const isPurchase = invoiceType === 'purchase'
+
     for (const item of items) {
       if (item.productId) {
         const product = await db.product.findUnique({ where: { id: item.productId } })
         if (!product) continue
         const qty = Number(item.quantity)
-        // Check if this is a loose/retail sale (item has retailUnit or product has retailEnabled)
-        const isRetailSale = (product as any).retailEnabled && (product as any).conversionFactor
-        if (isRetailSale) {
-          // PRD Part 11 §3.1: Fractional deduction engine
-          const factor = (product as any).conversionFactor
-          let bulkStock = product.stock
-          let looseStock = (product as any).looseStock || 0
-          let remaining = qty
-          // First use loose stock
-          if (looseStock >= remaining) {
-            looseStock -= remaining
-            remaining = 0
-          } else {
-            remaining -= looseStock
-            looseStock = 0
-          }
-          // Cut bags from bulk if needed
-          while (remaining > 0 && bulkStock > 0) {
-            bulkStock -= 1
-            looseStock += factor
+
+        if (isPurchase) {
+          // §PURCHASE: Stock INCREASES when buying from supplier
+          await db.product.update({
+            where: { id: item.productId },
+            data: { stock: { increment: qty } },
+          })
+        } else {
+          // §SALE: Stock DECREASES when selling to customer
+          // Check if this is a loose/retail sale
+          const isRetailSale = (product as any).retailEnabled && (product as any).conversionFactor
+          if (isRetailSale) {
+            // PRD Part 11 §3.1: Fractional deduction engine
+            const factor = (product as any).conversionFactor
+            let bulkStock = product.stock
+            let looseStock = (product as any).looseStock || 0
+            let remaining = qty
             if (looseStock >= remaining) {
               looseStock -= remaining
               remaining = 0
@@ -127,17 +130,28 @@ export async function POST(req: NextRequest) {
               remaining -= looseStock
               looseStock = 0
             }
+            while (remaining > 0 && bulkStock > 0) {
+              bulkStock -= 1
+              looseStock += factor
+              if (looseStock >= remaining) {
+                looseStock -= remaining
+                remaining = 0
+              } else {
+                remaining -= looseStock
+                looseStock = 0
+              }
+            }
+            await db.product.update({
+              where: { id: item.productId },
+              data: { stock: bulkStock, looseStock },
+            })
+          } else {
+            // Normal bulk sale — just decrement stock
+            await db.product.update({
+              where: { id: item.productId },
+              data: { stock: { decrement: qty } },
+            })
           }
-          await db.product.update({
-            where: { id: item.productId },
-            data: { stock: bulkStock, looseStock },
-          })
-        } else {
-          // Normal bulk sale — just decrement stock
-          await db.product.update({
-            where: { id: item.productId },
-            data: { stock: { decrement: qty } },
-          })
         }
       }
     }
@@ -151,15 +165,17 @@ export async function POST(req: NextRequest) {
     }
 
     // Create transaction record
+    // §PURCHASE-LOGIC: Purchase invoices create a 'debit' transaction (money out
+    // to supplier), while sale invoices create a 'sale' transaction (money in).
     if (body.partyId) {
       await db.transaction.create({
         data: {
           businessId: business.id,
           partyId: body.partyId,
-          type: 'sale',
+          type: isPurchase ? 'debit' : 'sale',
           amount: grandTotal,
           description: `Invoice ${invoiceNumber}`,
-          category: 'Sale',
+          category: isPurchase ? 'Purchase' : 'Sale',
           invoiceId: invoice.id,
         },
       })
