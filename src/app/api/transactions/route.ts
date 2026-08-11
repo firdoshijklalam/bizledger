@@ -30,7 +30,15 @@ export async function POST(req: NextRequest) {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
+    // §INPUT-VALIDATION: Amount must be a positive number
     const amount = Number(body.amount)
+    if (isNaN(amount) || amount <= 0) {
+      return NextResponse.json({ error: 'Amount must be a positive number' }, { status: 400 })
+    }
+    // §VALIDATION: Type must be credit or debit
+    if (body.type !== 'credit' && body.type !== 'debit' && body.type !== 'sale') {
+      return NextResponse.json({ error: 'Type must be credit, debit, or sale' }, { status: 400 })
+    }
     const partyId = body.partyId
 
     // Update party balance — §2 FIX: default to 0 instead of null for walk-in customers
