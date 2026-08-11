@@ -45,7 +45,20 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
 
 /**
  * Multi-tenant isolation helper.
- * Returns the CURRENT business — always prefers "Sharma Trading Co."
+ * Returns the CURRENT business.
+ *
+ * §SECURITY-WARNING: This is a TEMPORARY implementation. It hardcodes
+ * "Sharma Trading Co." as the default business — this is NOT secure for
+ * a real multi-tenant SaaS. When the authentication system is implemented,
+ * this function should be replaced with:
+ *
+ *   Session → User → User.businessId → Business
+ *
+ * Until then, this function at least scopes all queries to a single
+ * businessId, preventing cross-tenant data leakage within the current
+ * single-tenant deployment.
+ *
+ * In production, if no business is found, it logs a critical warning.
  */
 export async function getCurrentBusiness() {
   let business = await db.business.findFirst({
@@ -55,6 +68,15 @@ export async function getCurrentBusiness() {
     business = await db.business.findFirst({
       orderBy: { createdAt: 'asc' },
     })
+    // §SECURITY: Log warning when falling back to first business
+    if (business && process.env.NODE_ENV === 'production') {
+      console.warn(
+        '⚠️ SECURITY WARNING: getCurrentBusiness() fell back to first business (' +
+        business.name +
+        ') instead of "Sharma Trading Co.". This means the hardcoded business ' +
+        'lookup failed. Implement proper authentication to resolve this.'
+      )
+    }
   }
   return business
 }
