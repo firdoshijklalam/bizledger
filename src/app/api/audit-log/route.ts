@@ -3,7 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 
 export async function GET() {
   const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json([])
+  if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const logs = await db.auditLog.findMany({ where: { businessId: business.id }, orderBy: { createdAt: 'desc' }, take: 50 })
   return NextResponse.json(logs)
 }

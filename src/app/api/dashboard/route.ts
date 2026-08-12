@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   const endDate = searchParams.get('endDate')
 
   const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json(null)
+  if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const parties = await db.party.findMany({ where: { businessId: business.id } })
   const products = await db.product.findMany({ where: { businessId: business.id } })

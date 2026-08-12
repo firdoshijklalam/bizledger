@@ -5,7 +5,7 @@ import { apiError } from '@/lib/api-error'
 // GET /api/reports — aggregated report data
 export async function GET() {
   const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json(null)
+  if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const parties = await db.party.findMany({ where: { businessId: business.id } })
   const products = await db.product.findMany({ where: { businessId: business.id } })

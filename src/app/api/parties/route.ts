@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(Number(searchParams.get('limit')) || 50, 200)
   const offset = Number(searchParams.get('offset')) || 0
   const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json({ items: [], total: 0, hasMore: false })
+  if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const where: any = {
     businessId: business.id,

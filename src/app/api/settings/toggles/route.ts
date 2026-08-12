@@ -24,16 +24,7 @@ export async function GET() {
   try {
     const business = await getCurrentBusiness()
     if (!business) {
-      return NextResponse.json(
-        {
-          onlineSalesEnabled: true,
-          offlineOnlyMode: false,
-          cloudSyncMode: false,
-          telegramFileIdMode: false,
-          appMode: 'merchant',
-        },
-        { status: 200 }
-      )
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
     const settings = await getOrCreateSettings(business.id)
     return NextResponse.json({
