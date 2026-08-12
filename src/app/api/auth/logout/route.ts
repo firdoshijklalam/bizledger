@@ -8,7 +8,7 @@ import { getSessionToken, deleteSession, clearSessionCookie } from '@/lib/auth/s
  */
 export async function POST() {
   try {
-    const token = getSessionToken()
+    const token = await getSessionToken()
     if (token) {
       await deleteSession(token)
     }

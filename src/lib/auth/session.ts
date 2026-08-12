@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { scryptSync, randomBytes, timingSafeEqual } from 'crypto'
+import { scryptSync, randomBytes, timingSafeEqual, createHash } from 'crypto'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
@@ -153,9 +153,10 @@ export function clearSessionCookie(response: NextResponse) {
 
 /**
  * Get the session token from the current request's cookies.
+ * §NEXTJS16: In Next.js 16, cookies() returns a Promise<ReadonlyRequestCookies>.
  */
-export function getSessionToken(): string | undefined {
-  const cookieStore = cookies()
+export async function getSessionToken(): Promise<string | undefined> {
+  const cookieStore = await cookies()
   return cookieStore.get(SESSION_COOKIE)?.value
 }
 
@@ -168,7 +169,7 @@ export function getSessionToken(): string | undefined {
 export async function getCurrentUser(): Promise<{
   id: string; email: string; name: string | null; role: string; businessId: string
 } | null> {
-  const token = getSessionToken()
+  const token = await getSessionToken()
   if (!token) return null
   const result = await validateSession(token)
   return result?.user || null
