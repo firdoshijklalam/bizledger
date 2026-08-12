@@ -39,7 +39,8 @@ export async function POST(req: NextRequest) {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
-    // §INPUT-VALIDATION: Validate items — quantity and price must be positive
+    // §INPUT-VALIDATION: Validate items — quantity, price, discount, gstRate
+    // must be finite numbers. Reject NaN, Infinity, negative values.
     const items = body.items || []
     if (items.length === 0) {
       return NextResponse.json({ error: 'At least one item is required' }, { status: 400 })
@@ -47,11 +48,23 @@ export async function POST(req: NextRequest) {
     for (const item of items) {
       const qty = Number(item.quantity)
       const price = Number(item.unitPrice)
-      if (isNaN(qty) || qty <= 0) {
+      const itemDiscount = Number(item.discount) || 0
+      const gstRate = Number(item.gstRate) || 0
+      if (!Number.isFinite(qty) || qty <= 0) {
         return NextResponse.json({ error: `Invalid quantity for "${item.name}"` }, { status: 400 })
       }
-      if (isNaN(price) || price < 0) {
+      if (!Number.isFinite(price) || price < 0) {
         return NextResponse.json({ error: `Invalid price for "${item.name}"` }, { status: 400 })
+      }
+      // §ITEM-DISCOUNT: Reject negative or > qty×price
+      if (!Number.isFinite(itemDiscount) || itemDiscount < 0) {
+        return NextResponse.json({ error: `Invalid discount for "${item.name}"` }, { status: 400 })
+      }
+      if (itemDiscount > qty * price) {
+        return NextResponse.json({ error: `Item discount cannot exceed line total for "${item.name}"` }, { status: 400 })
+      }
+      if (!Number.isFinite(gstRate) || gstRate < 0 || gstRate > 100) {
+        return NextResponse.json({ error: `Invalid GST rate for "${item.name}" (must be 0-100)` }, { status: 400 })
       }
     }
 
@@ -103,7 +116,7 @@ export async function POST(req: NextRequest) {
     // §STEP-3: Validate discount
     const discountMode = body.discountMode || 'flat'
     const discountValue = Number(body.discountValue) || 0
-    if (discountValue < 0) {
+    if (!Number.isFinite(discountValue) || discountValue < 0) {
       return NextResponse.json({ error: 'Discount cannot be negative' }, { status: 400 })
     }
     if (discountMode === 'percent' && discountValue > 100) {
@@ -126,7 +139,7 @@ export async function POST(req: NextRequest) {
 
     // §STEP-6: Validate amountPaid
     const amountPaid = Number(body.amountPaid) || 0
-    if (isNaN(amountPaid) || !isFinite(amountPaid)) {
+    if (!Number.isFinite(amountPaid)) {
       return NextResponse.json({ error: 'Invalid amountPaid' }, { status: 400 })
     }
     if (amountPaid < 0) {

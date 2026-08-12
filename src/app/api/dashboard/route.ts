@@ -58,17 +58,21 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const totalReceivable = parties.filter((p) => p.balance > 0).reduce((s, p) => s + p.balance, 0)
-  const totalPayable = parties.filter((p) => p.balance < 0).reduce((s, p) => s + Math.abs(p.balance), 0)
+  // §DECIMAL-FIX: Prisma Decimal fields return as string. Convert to Number
+  // before arithmetic to prevent string concatenation (e.g., "68000"+"45000" = "6800045000").
+  const num = (v: any): number => Number(v) || 0
+
+  const totalReceivable = parties.filter((p) => num(p.balance) > 0).reduce((s, p) => s + num(p.balance), 0)
+  const totalPayable = parties.filter((p) => num(p.balance) < 0).reduce((s, p) => s + Math.abs(num(p.balance)), 0)
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
-  const todaySales = invoices.filter((i) => new Date(i.createdAt) >= today).reduce((s, i) => s + i.grandTotal, 0)
+  const todaySales = invoices.filter((i) => new Date(i.createdAt) >= today).reduce((s, i) => s + num(i.grandTotal), 0)
 
   const monthStart = new Date()
   monthStart.setDate(1)
   monthStart.setHours(0, 0, 0, 0)
-  const monthlyRevenue = invoices.filter((i) => new Date(i.createdAt) >= monthStart).reduce((s, i) => s + i.grandTotal, 0)
+  const monthlyRevenue = invoices.filter((i) => new Date(i.createdAt) >= monthStart).reduce((s, i) => s + num(i.grandTotal), 0)
 
   // §LOCALIZED-CARD-FILTERS: range-aware totals for the time-dependent metric
   // cards (Sales, Collection, Expense). Each card fetches /api/dashboard with
@@ -81,9 +85,9 @@ export async function GET(req: NextRequest) {
     const d = new Date(t.createdAt)
     return d >= rangeStart && d <= rangeEnd
   })
-  const rangeSales = rangeInvoices.reduce((s, i) => s + i.grandTotal, 0)
-  const rangeCollection = rangeTransactions.filter((t) => t.type === 'credit').reduce((s, t) => s + t.amount, 0)
-  const rangeExpense = rangeTransactions.filter((t) => t.type === 'debit' || t.type === 'expense' || t.type === 'purchase').reduce((s, t) => s + t.amount, 0)
+  const rangeSales = rangeInvoices.reduce((s, i) => s + num(i.grandTotal), 0)
+  const rangeCollection = rangeTransactions.filter((t) => t.type === 'credit').reduce((s, t) => s + num(t.amount), 0)
+  const rangeExpense = rangeTransactions.filter((t) => t.type === 'debit' || t.type === 'expense' || t.type === 'purchase').reduce((s, t) => s + num(t.amount), 0)
 
   const lowStockCount = products.filter((p) => p.stock <= p.lowStockThreshold).length
 
@@ -95,10 +99,10 @@ export async function GET(req: NextRequest) {
   )
 
   const topDebtors = parties
-    .filter((p) => p.balance > 0)
-    .sort((a, b) => b.balance - a.balance)
+    .filter((p) => num(p.balance) > 0)
+    .sort((a, b) => num(b.balance) - num(a.balance))
     .slice(0, 5)
-    .map((p) => ({ id: p.id, name: p.name, balance: p.balance, grade: p.qualityGrade }))
+    .map((p) => ({ id: p.id, name: p.name, balance: num(p.balance), grade: p.qualityGrade }))
 
   const gradeDist = (['A', 'B', 'C', 'D', 'E'] as const).map((grade) => ({
     grade,
@@ -149,17 +153,17 @@ export async function GET(req: NextRequest) {
     const dayInvoices = invoices.filter(
       (inv) => new Date(inv.createdAt) >= bucketStart && new Date(inv.createdAt) < bucketEnd
     )
-    const revenue = dayInvoices.reduce((s, inv) => s + inv.grandTotal, 0)
+    const revenue = dayInvoices.reduce((s, inv) => s + num(inv.grandTotal), 0)
     const dayTxns = allTransactions.filter(
       (t) => new Date(t.createdAt) >= bucketStart && new Date(t.createdAt) < bucketEnd
     )
-    const expense = dayTxns.filter((t) => t.type === 'debit').reduce((s, t) => s + t.amount, 0)
+    const expense = dayTxns.filter((t) => t.type === 'debit').reduce((s, t) => s + num(t.amount), 0)
 
     // Collections vs New Credit (PRD P4-3.1)
-    const collected = dayTxns.filter((t) => t.type === 'credit').reduce((s, t) => s + t.amount, 0)
+    const collected = dayTxns.filter((t) => t.type === 'credit').reduce((s, t) => s + num(t.amount), 0)
     const creditGiven = dayInvoices
       .filter((inv) => inv.paymentMode === 'credit')
-      .reduce((s, inv) => s + inv.grandTotal, 0)
+      .reduce((s, inv) => s + num(inv.grandTotal), 0)
 
     salesTrend.push({
       date: label,
@@ -179,9 +183,9 @@ export async function GET(req: NextRequest) {
     inv.items?.forEach((item) => {
       const product = products.find((p) => p.id === item.productId)
       const cat = product?.category || 'Uncategorized'
-      categorySales[cat] = (categorySales[cat] || 0) + item.total
+      categorySales[cat] = (categorySales[cat] || 0) + num(item.total)
       if (product) {
-        productSales[product.name] = (productSales[product.name] || 0) + item.total
+        productSales[product.name] = (productSales[product.name] || 0) + num(item.total)
       }
     })
   })
@@ -202,7 +206,7 @@ export async function GET(req: NextRequest) {
     if (inv.partyId && inv.party) {
       const key = inv.partyId
       if (!buyerSales[key]) buyerSales[key] = { id: inv.partyId, name: inv.party.name, total: 0 }
-      buyerSales[key].total += inv.grandTotal
+      buyerSales[key].total += num(inv.grandTotal)
     }
   })
   const topBuyers = Object.values(buyerSales)
@@ -218,7 +222,7 @@ export async function GET(req: NextRequest) {
       const name = product?.name || item.name
       if (!productUnits[name]) productUnits[name] = { name, units: 0, revenue: 0 }
       productUnits[name].units += item.quantity
-      productUnits[name].revenue += item.total
+      productUnits[name].revenue += num(item.total)
     })
   })
   const topProductsByUnits = Object.values(productUnits)
@@ -227,7 +231,7 @@ export async function GET(req: NextRequest) {
     .map((p) => ({ name: p.name, value: p.units, revenue: p.revenue }))
 
   // Inventory Value Trend (PRD P4-3.3)
-  const inventoryValue = products.reduce((s, p) => s + p.stock * p.purchasePrice, 0)
+  const inventoryValue = products.reduce((s, p) => s + (p.stock * num(p.purchasePrice)), 0)
   const inventoryTrend: Array<{ month: string; value: number }> = []
   for (let i = 5; i >= 0; i--) {
     const d = new Date()
