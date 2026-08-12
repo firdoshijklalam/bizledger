@@ -97,10 +97,11 @@ export function BillingView() {
 
   const stats = useMemo(() => {
     if (!invoices) return { total: 0, paid: 0, due: 0 }
+    const num = (v: any): number => Number(v) || 0
     return {
-      total: invoices.reduce((s, i) => s + i.grandTotal, 0),
-      paid: invoices.reduce((s, i) => s + i.amountPaid, 0),
-      due: invoices.reduce((s, i) => s + i.amountDue, 0),
+      total: invoices.reduce((s, i) => s + num(i.grandTotal), 0),
+      paid: invoices.reduce((s, i) => s + num(i.amountPaid), 0),
+      due: invoices.reduce((s, i) => s + num(i.amountDue), 0),
     }
   }, [invoices])
 

@@ -143,9 +143,10 @@ export function KhataView() {
 
   const totals = useMemo(() => {
     if (!parties) return { receivable: 0, payable: 0 }
+    const num = (v: any): number => Number(v) || 0
     return {
-      receivable: parties.filter((p) => p.balance > 0).reduce((s, p) => s + p.balance, 0),
-      payable: parties.filter((p) => p.balance < 0).reduce((s, p) => s + Math.abs(p.balance), 0),
+      receivable: parties.filter((p) => num(p.balance) > 0).reduce((s, p) => s + num(p.balance), 0),
+      payable: parties.filter((p) => num(p.balance) < 0).reduce((s, p) => s + Math.abs(num(p.balance)), 0),
     }
   }, [parties])
 
