@@ -6,12 +6,14 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  // §NEON-POOLER: Use the direct (non-pooled) URL for migrations.
-  // PgBouncer (pooled URL) doesn't support DDL operations reliably.
-  // In production, set DIRECT_URL to the non-pooled Neon endpoint.
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // §NEON-POOLER: In production, DATABASE_URL should use the Neon pooled
+  // endpoint (-pooler in hostname) for serverless connection reuse.
+  // For migrations, if you encounter DDL errors with the pooled URL,
+  // set DIRECT_URL to the non-pooled Neon endpoint in Vercel env vars
+  // and uncomment the line below:
+  // directUrl = env("DIRECT_URL")
 }
 
 model Business {
@@ -603,9 +605,9 @@ model CommissionLog {
   recipientBusinessId String // merchant who earned commission (referrer)
   payerBusinessId     String // merchant whose product was ordered
   customerOrderId     String?
-  orderAmount         Float    @default(0)
+  orderAmount         Decimal  @default(0) @db.Decimal(18, 2)
   commissionPct       Float    @default(2) // 1-3%
-  commissionAmount    Float    @default(0)
+  commissionAmount    Decimal  @default(0) @db.Decimal(18, 2)
   status              String   @default("pending") // pending | paid
   createdAt           DateTime @default(now())
 
@@ -623,9 +625,9 @@ model SupplierCatalogItem {
   supplierId       String
   productName      String
   category         String?
-  basePrice        Float    @default(0)
-  transportFare    Float    @default(0)
-  coolieCharge     Float    @default(0)
+  basePrice        Decimal  @default(0) @db.Decimal(18, 2)
+  transportFare    Decimal  @default(0) @db.Decimal(18, 2)
+  coolieCharge     Decimal  @default(0) @db.Decimal(18, 2)
   unit             String   @default("pcs")
   minOrderQty      Int      @default(1)
   notes            String?
@@ -649,7 +651,7 @@ model PurchaseOrder {
   supplierId   String
   poNumber     String
   status       String    @default("sent") // sent | dispatched | received | cancelled
-  totalAmount  Float     @default(0)
+  totalAmount  Decimal   @default(0) @db.Decimal(18, 2)
   notes        String?
   dispatchedAt DateTime?
   receivedAt   DateTime?
@@ -672,10 +674,10 @@ model PurchaseOrderItem {
   productName      String
   category         String?
   quantity         Int     @default(1)
-  unitPrice        Float   @default(0)
-  transportFare    Float   @default(0)
-  coolieCharge     Float   @default(0)
-  totalCost        Float   @default(0)
+  unitPrice        Decimal @default(0) @db.Decimal(18, 2)
+  transportFare    Decimal @default(0) @db.Decimal(18, 2)
+  coolieCharge     Decimal @default(0) @db.Decimal(18, 2)
+  totalCost        Decimal @default(0) @db.Decimal(18, 2)
   matchedProductId String?
 
   purchaseOrder PurchaseOrder        @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
@@ -786,8 +788,8 @@ model OrderSplit {
   items            String // JSON array of items for this shop
   subtotal         Decimal   @default(0) @db.Decimal(18, 2)
   commissionPct    Float     @default(2)
-  commissionAmount Float     @default(0)
-  merchantAmount   Float     @default(0) // subtotal - commission
+  commissionAmount Decimal   @default(0) @db.Decimal(18, 2)
+  merchantAmount   Decimal   @default(0) @db.Decimal(18, 2) // subtotal - commission
   status           String    @default("pending") // pending | confirmed | delivered | returned | cancelled
   deliveryOtp      String? // 4-digit OTP for delivery verification
   otpVerifiedAt    DateTime?
@@ -804,10 +806,10 @@ model PaymentSplit {
   id               String    @id @default(cuid())
   orderSplitId     String
   businessId       String
-  totalAmount      Float     @default(0)
+  totalAmount      Decimal   @default(0) @db.Decimal(18, 2)
   commissionPct    Float     @default(2)
-  commissionAmount Float     @default(0)
-  merchantAmount   Float     @default(0)
+  commissionAmount Decimal   @default(0) @db.Decimal(18, 2)
+  merchantAmount   Decimal   @default(0) @db.Decimal(18, 2)
   settlementStatus String    @default("pending") // pending | settled | reversed
   settledAt        DateTime?
   reversedAt       DateTime?
@@ -823,7 +825,7 @@ model ReturnRequest {
   orderSplitId  String
   customerPhone String?
   reason        String // damaged | wrong_product | quality_issue | other
-  refundAmount  Float     @default(0)
+  refundAmount  Decimal   @default(0) @db.Decimal(18, 2)
   refundStatus  String    @default("pending") // pending | refunded | denied
   refundedAt    DateTime?
   stockRestored Boolean   @default(false)
