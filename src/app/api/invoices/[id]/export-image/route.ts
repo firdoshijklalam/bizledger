@@ -1,26 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
 // GET /api/invoices/[id]/export-image?format=jpg|pdf
 // PRD Part 38 §5.1: HTML-to-Canvas Invoice Exporter for WhatsApp HD image sharing
+// §SECURITY: Requires authentication + business ownership of the invoice.
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { id } = await params
     const { searchParams } = new URL(req.url)
     const format = searchParams.get('format') || 'jpg'
 
+    // §OWNERSHIP: findFirst with businessId — never findUnique by id alone.
     const invoice = await db.invoice.findFirst({
-      where: { id },
+      where: { id, businessId: business.id },
       include: { party: true, items: { include: { product: true } } },
     })
     if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
-
-    const business = await db.business.findFirst()
-    if (!business) return NextResponse.json({ error: 'Business not found' }, { status: 404 })
 
     const html = generateInvoiceHTML(invoice, business)
     const htmlBase64 = Buffer.from(html).toString('base64')

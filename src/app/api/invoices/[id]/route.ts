@@ -89,17 +89,26 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 // DELETE /api/invoices/[id]
-// VOID/CANCEL/REFUND an invoice with full stock reverse logic.
-// - Restores product stock (with bulk↔loose conversion if applicable)
-// - Reverses party balance (if credit sale)
-// - Creates a reversal Transaction (category: 'Invoice Voided')
-// - Marks invoice status = 'void' (soft delete — keeps the record for audit)
-//   (If hard-delete is desired, the record is removed instead. We soft-delete
-//    by setting status='void' so history remains auditable.)
+// VOID/CANCEL an invoice with FULL atomic stock + balance + transaction reversal.
+//
+// §ATOMIC: All reversal operations (stock restore, party balance reversal,
+// reversal transaction, invoice status) happen inside a single $transaction.
+// If ANY step fails, ALL changes are rolled back — no inconsistent state.
+//
+// §STOCK-RESTORATION: For retail (loose) sales, only looseStock is restored
+// (bulk stock was NOT decremented for a loose sale, so we don't touch it).
+// For bulk sales, stock is incremented. This prevents phantom bulk stock
+// creation when voiding a retail sale.
+//
+// §BALANCE-REVERSAL: The party balance is reversed by `amountDue` (the unpaid
+// portion that was added at invoice creation). This correctly handles:
+//   - Credit sale (amountDue = grandTotal): full reversal
+//   - Partial cash (amountDue < grandTotal): only the due portion reversed
+//   - Full cash (amountDue = 0): no balance change (was never owed)
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
+  if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   try {
     const invoice = await db.invoice.findFirst({
@@ -112,68 +121,102 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       return NextResponse.json({ error: 'Already voided' }, { status: 400 })
     }
 
-    // 1. Reverse product stock
-    // §STOCK-DIRECTION: Sale invoice → stock was decremented → restore by incrementing.
-    // Purchase invoice → stock was incremented → restore by decrementing.
     const isPurchaseInvoice = invoice.type === 'purchase'
-    for (const item of invoice.items) {
-      if (item.productId && item.product) {
-        const product = item.product
-        if (isPurchaseInvoice) {
-          // Purchase: stock was incremented, so decrement to reverse
-          await db.product.update({
-            where: { id: product.id },
-            data: { stock: { decrement: item.quantity } },
+    const amountDue = invoice.amountDue.toNumber()
+
+    // §ATOMIC: All reversals in a single transaction.
+    const voided = await db.$transaction(async (tx) => {
+      // 1. Reverse product stock (retail-aware)
+      for (const item of invoice.items) {
+        if (item.productId && item.product) {
+          const product = item.product
+          // Re-verify ownership inside the transaction
+          const owned = await tx.product.findFirst({
+            where: { id: product.id, businessId: business.id },
           })
-        } else {
-          // Sale: stock was decremented, so increment to reverse
-          await db.product.update({
-            where: { id: product.id },
-            data: { stock: { increment: item.quantity } },
-          })
+          if (!owned) throw new Error(`Product not found or does not belong to this business: ${product.id}`)
+
+          if (isPurchaseInvoice) {
+            // Purchase: stock was incremented, so decrement to reverse
+            await tx.product.update({
+              where: { id: product.id },
+              data: { stock: { decrement: item.quantity } },
+            })
+          } else {
+            // §RETAIL-AWARE: Check if this was a retail (loose) sale.
+            // If the item's unitPrice matches the product's retailSalePrice,
+            // it was a loose sale — only restore looseStock, NOT bulk stock.
+            const isRetailSale = product.retailEnabled &&
+              product.retailSalePrice &&
+              Math.abs(item.unitPrice.toNumber() - product.retailSalePrice.toNumber()) < 0.01
+
+            if (isRetailSale) {
+              // Retail sale: only looseStock was decremented → restore looseStock only
+              await tx.product.update({
+                where: { id: product.id },
+                data: { looseStock: { increment: item.quantity } },
+              })
+            } else {
+              // Bulk sale: stock was decremented → restore stock
+              await tx.product.update({
+                where: { id: product.id },
+                data: { stock: { increment: item.quantity } },
+              })
+            }
+          }
         }
       }
-    }
 
-    // 2. Reverse party balance (if credit sale increased it)
-    // §OWNERSHIP: Use findFirst with businessId + updateMany with businessId
-    // to enforce business-scoped access. Never use findUnique/update without businessId.
-    if (invoice.partyId && invoice.paymentMode === 'credit') {
-      const party = await db.party.findFirst({
-        where: { id: invoice.partyId, businessId: business.id },
-      })
-      if (party) {
-        // Credit sale increased balance by grandTotal; reverse it.
-        const newBalance = party.balance.toNumber() - invoice.grandTotal.toNumber()
-        await db.party.updateMany({
-          where: { id: party.id, businessId: business.id },
-          data: { balance: newBalance },
+      // 2. Reverse party balance by amountDue (the unpaid portion that was added)
+      // §BALANCE-FIX: Previously only reversed for paymentMode==='credit' and
+      // reversed by grandTotal. Now reverses by amountDue for ALL sales where
+      // amountDue > 0 — correctly handling partial cash payments.
+      let currentPartyBalance: number | null = null
+      if (invoice.partyId && amountDue > 0) {
+        const party = await tx.party.findFirst({
+          where: { id: invoice.partyId, businessId: business.id },
         })
-        recalculatePartyGrade(party.id).catch(() => {})
+        if (party) {
+          const newBalance = party.balance.toNumber() - amountDue
+          await tx.party.updateMany({
+            where: { id: party.id, businessId: business.id },
+            data: { balance: newBalance },
+          })
+          currentPartyBalance = newBalance
+        }
+      } else if (invoice.party) {
+        currentPartyBalance = invoice.party.balance.toNumber()
       }
-    }
 
-    // 3. Create a reversal transaction for audit trail
-    if (invoice.partyId) {
-      await db.transaction.create({
-        data: {
-          businessId: business.id,
-          partyId: invoice.partyId,
-          type: 'debit', // money out / reversal
-          amount: invoice.grandTotal,
-          balanceAfter: invoice.party?.balance,
-          description: `Invoice ${invoice.invoiceNumber} voided/cancelled`,
-          category: 'Invoice Voided',
-          invoiceId: invoice.id,
-        },
+      // 3. Create a reversal transaction for audit trail
+      if (invoice.partyId) {
+        await tx.transaction.create({
+          data: {
+            businessId: business.id,
+            partyId: invoice.partyId,
+            type: 'debit', // money out / reversal
+            amount: invoice.grandTotal,
+            balanceAfter: currentPartyBalance,
+            description: `Invoice ${invoice.invoiceNumber} voided/cancelled`,
+            category: 'Invoice Voided',
+            invoiceId: invoice.id,
+          },
+        })
+      }
+
+      // 4. Mark invoice as void (soft delete — keeps record for audit)
+      const updated = await tx.invoice.update({
+        where: { id: invoice.id },
+        data: { status: 'void' },
       })
-    }
 
-    // 4. Mark invoice as void (soft delete — keeps record for audit)
-    const voided = await db.invoice.update({
-      where: { id: invoice.id },
-      data: { status: 'void' },
+      return updated
     })
+
+    // 5. Trigger grade recalculation (fire-and-forget, outside transaction)
+    if (invoice.partyId) {
+      recalculatePartyGrade(invoice.partyId).catch(() => {})
+    }
 
     // §AUDIT-LOG: Log the invoice void/cancellation
     await logAudit({

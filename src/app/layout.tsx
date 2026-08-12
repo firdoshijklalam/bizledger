@@ -26,6 +26,16 @@ export const metadata: Metadata = {
     title: "BizLedger",
     statusBarStyle: "black-translucent",
   },
+  // §PWA-ICONS: Required for installability + iOS Add to Home Screen
+  icons: {
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
 };
 
 export const viewport: Viewport = {
@@ -61,9 +71,12 @@ export default function RootLayout({
             <Toaster position="top-center" closeButton richColors />
           </QueryProvider>
         </ThemeProvider>
+        {/* §PWA-SW: Register the production service worker for offline app shell.
+            The SW uses network-first for HTML, cache-first for static assets,
+            and NEVER caches API responses (financial data stays fresh). */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.getRegistrations().then(function(regs){regs.forEach(function(r){r.unregister();console.log('SW unregistered',r.scope)})}).catch(function(){})})}`,
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').then(function(reg){console.log('SW registered',reg.scope)}).catch(function(e){console.warn('SW registration failed',e)})})}`,
           }}
         />
       </body>

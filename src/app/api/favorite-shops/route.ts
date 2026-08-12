@@ -12,6 +12,12 @@ import { apiError } from '@/lib/api-error'
 //
 // DELETE /api/favorite-shops?customerPhone=X&businessId=Y
 //   Removes a favorite shop.
+//
+// §AUTH: INTENTIONALLY PUBLIC. This is a customer-facing endpoint — customers
+// in the central marketplace do NOT have accounts. They are identified solely
+// by `customerPhone`. Requiring a session here would break the customer-side
+// favorites flow. Rate limiting + phone validation should be applied at the
+// edge to mitigate abuse (e.g. flooding favorites for a shop).
 
 export async function GET(req: NextRequest) {
   try {

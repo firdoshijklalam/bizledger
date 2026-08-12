@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
 // POST /api/image-remove-bg — remove background from product image
 // In production, this would use remove.bg API. Here we use a placeholder approach.
 // Body: { image: "data:image/jpeg;base64,..." }
+// §AUTH: Requires an authenticated business (any role) — background removal is a
+// merchant-side catalog image operation tied to the business.
 export async function POST(req: NextRequest) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const body = await req.json()
     const image = body.image
     if (!image) {

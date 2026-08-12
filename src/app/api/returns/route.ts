@@ -21,6 +21,9 @@ import { apiError } from '@/lib/api-error'
 
 export async function GET(req: NextRequest) {
   try {
+    const business = await getCurrentBusiness()
+    if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+
     const { searchParams } = new URL(req.url)
     const orderSplitId = searchParams.get('orderSplitId')?.trim()
 
@@ -29,6 +32,15 @@ export async function GET(req: NextRequest) {
         { error: 'orderSplitId is required' },
         { status: 400 }
       )
+    }
+
+    // §OWNERSHIP: Verify the order split belongs to this business
+    const split = await db.orderSplit.findFirst({
+      where: { id: orderSplitId, businessId: business.id },
+      select: { id: true },
+    })
+    if (!split) {
+      return NextResponse.json({ error: 'Order split not found' }, { status: 404 })
     }
 
     const returns = await db.returnRequest.findMany({
@@ -54,7 +66,7 @@ export async function POST(req: NextRequest) {
   try {
     // §OWNERSHIP-CHECK: Verify the current business before processing returns.
     const business = await getCurrentBusiness()
-    if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
+    if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
     const body = await req.json()
     const orderSplitId = String(body.orderSplitId || '').trim()
@@ -68,7 +80,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // §OWNERSHIP: Use findFirst with businessId scope instead of findUnique
+    // §OWNERSHIP: Use findFirst with businessId scope
     const orderSplit = await db.orderSplit.findFirst({
       where: { id: orderSplitId, businessId: business.id },
     })
@@ -79,43 +91,21 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // §IDEMPOTENCY: Prevent double-return. If a return already exists for this
+    // order split with refundStatus='refunded', reject the duplicate.
+    const existingReturn = await db.returnRequest.findFirst({
+      where: { orderSplitId, refundStatus: 'refunded' },
+    })
+    if (existingReturn) {
+      return NextResponse.json(
+        { error: 'This order has already been returned', returnRequestId: existingReturn.id },
+        { status: 409 }
+      )
+    }
+
     const refundAmount = orderSplit.subtotal.toNumber()
     const now = new Date()
 
-    // 1. Create the ReturnRequest.
-    const returnRequest = await db.returnRequest.create({
-      data: {
-        orderSplitId,
-        customerPhone,
-        reason,
-        refundAmount,
-        refundStatus: 'refunded',
-        refundedAt: now,
-        stockRestored: false,
-      },
-    })
-
-    // 2. Reverse the PaymentSplit.
-    const paymentSplit = await db.paymentSplit.findFirst({
-      where: { orderSplitId },
-    })
-    if (paymentSplit) {
-      await db.paymentSplit.update({
-        where: { id: paymentSplit.id },
-        data: {
-          settlementStatus: 'reversed',
-          reversedAt: now,
-        },
-      })
-    }
-
-    // 3. Update OrderSplit status.
-    await db.orderSplit.update({
-      where: { id: orderSplitId },
-      data: { status: 'returned' },
-    })
-
-    // 4. Restore product stock.
     let items: SplitItem[] = []
     try {
       items = orderSplit.items ? JSON.parse(orderSplit.items) : []
@@ -123,12 +113,47 @@ export async function POST(req: NextRequest) {
       items = []
     }
 
-    await Promise.all(
-      items.map(async (it) => {
-        const product = await db.product.findUnique({
-          where: { id: it.productId },
+    // §ATOMIC: All reversal operations in a single transaction.
+    const result = await db.$transaction(async (tx) => {
+      // 1. Create the ReturnRequest.
+      const returnRequest = await tx.returnRequest.create({
+        data: {
+          orderSplitId,
+          customerPhone,
+          reason,
+          refundAmount,
+          refundStatus: 'refunded',
+          refundedAt: now,
+          stockRestored: false,
+        },
+      })
+
+      // 2. Reverse the PaymentSplit (business-scoped).
+      const paymentSplit = await tx.paymentSplit.findFirst({
+        where: { orderSplitId, businessId: business.id },
+      })
+      if (paymentSplit) {
+        await tx.paymentSplit.update({
+          where: { id: paymentSplit.id },
+          data: {
+            settlementStatus: 'reversed',
+            reversedAt: now,
+          },
         })
-        if (!product) return
+      }
+
+      // 3. Update OrderSplit status.
+      await tx.orderSplit.update({
+        where: { id: orderSplitId },
+        data: { status: 'returned' },
+      })
+
+      // 4. Restore product stock (retail-aware, ownership-verified).
+      for (const it of items) {
+        const product = await tx.product.findFirst({
+          where: { id: it.productId, businessId: business.id },
+        })
+        if (!product) continue
 
         const returnQty = Number(it.quantity || 0)
 
@@ -139,78 +164,77 @@ export async function POST(req: NextRequest) {
           Math.abs(Number(it.unitPrice) - product.retailSalePrice.toNumber()) < 0.01
 
         if (isLooseOrder) {
-          // Restore loose stock first; if loose stock exceeds one bulk unit,
-          // optionally convert back to bulk (keep simple: just increment looseStock).
-          await db.product.update({
+          await tx.product.update({
             where: { id: product.id },
             data: { looseStock: { increment: returnQty } },
           })
         } else {
-          await db.product.update({
+          await tx.product.update({
             where: { id: product.id },
             data: { stock: { increment: returnQty } },
           })
         }
-      })
-    )
-
-    // Mark stock as restored on the return record.
-    await db.returnRequest.update({
-      where: { id: returnRequest.id },
-      data: { stockRestored: true },
-    })
-
-    // 5. Update CustomerTrustScore.
-    let trustScoreValue = 5.0
-    let codLocked = false
-    if (customerPhone) {
-      const existing = await db.customerTrustScore.findUnique({
-        where: { customerPhone },
-      })
-
-      const totalReturns = (existing?.totalReturns ?? 0) + 1
-      const consecutiveReturns = (existing?.consecutiveReturns ?? 0) + 1
-      const totalOrders = existing?.totalOrders ?? 0
-
-      // Trust penalty: -1.0 per return when consecutiveReturns >= 3
-      let newTrust = existing?.trustScore ?? 5.0
-      let newCodLocked = existing?.codLocked ?? false
-      if (consecutiveReturns >= 3) {
-        newCodLocked = true
-        newTrust = Math.max(0, newTrust - 1.0)
       }
 
-      const updated = await db.customerTrustScore.upsert({
-        where: { customerPhone },
-        update: {
-          totalReturns,
-          consecutiveReturns,
-          codLocked: newCodLocked,
-          trustScore: newTrust,
-          lastReturnAt: now,
-        },
-        create: {
-          customerPhone,
-          trustScore: newTrust,
-          totalOrders,
-          totalReturns,
-          consecutiveReturns,
-          codLocked: newCodLocked,
-          lastReturnAt: now,
-        },
+      // Mark stock as restored on the return record.
+      await tx.returnRequest.update({
+        where: { id: returnRequest.id },
+        data: { stockRestored: true },
       })
 
-      trustScoreValue = updated.trustScore
-      codLocked = updated.codLocked
-    }
+      // 5. Update CustomerTrustScore.
+      let trustScoreValue = 5.0
+      let codLocked = false
+      if (customerPhone) {
+        const existing = await tx.customerTrustScore.findUnique({
+          where: { customerPhone },
+        })
+
+        const totalReturns = (existing?.totalReturns ?? 0) + 1
+        const consecutiveReturns = (existing?.consecutiveReturns ?? 0) + 1
+        const totalOrders = existing?.totalOrders ?? 0
+
+        let newTrust = existing?.trustScore ?? 5.0
+        let newCodLocked = existing?.codLocked ?? false
+        if (consecutiveReturns >= 3) {
+          newCodLocked = true
+          newTrust = Math.max(0, newTrust - 1.0)
+        }
+
+        const updated = await tx.customerTrustScore.upsert({
+          where: { customerPhone },
+          update: {
+            totalReturns,
+            consecutiveReturns,
+            codLocked: newCodLocked,
+            trustScore: newTrust,
+            lastReturnAt: now,
+          },
+          create: {
+            customerPhone,
+            trustScore: newTrust,
+            totalOrders,
+            totalReturns,
+            consecutiveReturns,
+            codLocked: newCodLocked,
+            lastReturnAt: now,
+          },
+        })
+
+        trustScoreValue = updated.trustScore
+        codLocked = updated.codLocked
+      }
+
+      return { returnRequest, trustScoreValue, codLocked }
+    })
 
     return NextResponse.json({
       ok: true,
       refundAmount,
       stockRestored: true,
-      trustScore: trustScoreValue,
-      codLocked,
-      returnRequestId: returnRequest.id,
+      trustScore: result.trustScoreValue,
+      codLocked: result.codLocked,
+      returnRequestId: result.returnRequest.id,
     })
   } catch (e) {
     return apiError(e, "Request failed")

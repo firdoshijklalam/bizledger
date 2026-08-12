@@ -1,47 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import type { PaymentSplit } from '@prisma/client'
 import { apiError } from '@/lib/api-error'
 
 // POST /api/orders/[id]/otp — verify delivery OTP for an order split (PRD Part 36 §2.2).
 //   Body: { otp: "1234" }
-//   - Find OrderSplit by id.
+//   - Find OrderSplit by id + businessId (ownership enforced).
 //   - If deliveryOtp === otp → status='delivered', otpVerifiedAt=now.
 //     Also settle the PaymentSplit (settlementStatus='settled', settledAt=now).
 //     Return { ok: true, delivered: true }.
 //   - If OTP mismatch → { ok: false, message: 'Invalid OTP' }.
 //
-// GET /api/orders/[id]/otp — return the OTP for the order (demo only; in prod sent via SMS).
-
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params
-    const split = await db.orderSplit.findUnique({ where: { id } })
-    if (!split) {
-      return NextResponse.json(
-        { error: 'Order split not found' },
-        { status: 404 }
-      )
-    }
-    return NextResponse.json({
-      orderSplitId: split.id,
-      deliveryOtp: split.deliveryOtp,
-      status: split.status,
-      otpVerifiedAt: split.otpVerifiedAt,
-    })
-  } catch (e) {
-    return apiError(e, "Request failed")
-  }
-}
+// §SECURITY: GET endpoint REMOVED — it returned the OTP in plaintext, allowing
+// anyone with an order ID to bypass delivery verification. In production, OTPs
+// are sent via SMS to the customer. The merchant verifies via POST only.
+// §AUTH: POST requires authentication + business ownership of the OrderSplit.
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { id } = await params
     const body = await req.json()
     const otp = String(body.otp || '').trim()
@@ -53,7 +37,11 @@ export async function POST(
       )
     }
 
-    const split = await db.orderSplit.findUnique({ where: { id } })
+    // §OWNERSHIP: Use findFirst with businessId — never findUnique by id alone.
+    // This ensures a merchant can only verify OTPs for their own OrderSplits.
+    const split = await db.orderSplit.findFirst({
+      where: { id, businessId: business.id },
+    })
     if (!split) {
       return NextResponse.json(
         { error: 'Order split not found' },
@@ -68,57 +56,61 @@ export async function POST(
 
     const now = new Date()
 
-    // Mark split as delivered.
-    const updated = await db.orderSplit.update({
-      where: { id },
-      data: {
-        status: 'delivered',
-        otpVerifiedAt: now,
-      },
-    })
-
-    // Settle the linked PaymentSplit.
-    const paymentSplit = await db.paymentSplit.findFirst({
-      where: { orderSplitId: id },
-    })
-    let settledPayment: PaymentSplit | null = null
-    if (paymentSplit && paymentSplit.settlementStatus !== 'settled') {
-      settledPayment = await db.paymentSplit.update({
-        where: { id: paymentSplit.id },
+    // §ATOMIC: Mark split as delivered + settle payment in a single transaction.
+    const result = await db.$transaction(async (tx) => {
+      const updated = await tx.orderSplit.update({
+        where: { id },
         data: {
-          settlementStatus: 'settled',
-          settledAt: now,
+          status: 'delivered',
+          otpVerifiedAt: now,
         },
       })
-    } else if (paymentSplit) {
-      settledPayment = paymentSplit
-    }
 
-    // Also update parent CustomerOrder status to 'delivered' for owner dashboard.
-    try {
-      await db.customerOrder.update({
-        where: { id: split.parentOrderId },
-        data: { status: 'delivered' },
+      // Settle the linked PaymentSplit (business-scoped).
+      const paymentSplit = await tx.paymentSplit.findFirst({
+        where: { orderSplitId: id, businessId: business.id },
       })
-    } catch {
-      // Parent order may have been deleted; ignore.
-    }
+      let settledPayment: PaymentSplit | null = null
+      if (paymentSplit && paymentSplit.settlementStatus !== 'settled') {
+        settledPayment = await tx.paymentSplit.update({
+          where: { id: paymentSplit.id },
+          data: {
+            settlementStatus: 'settled',
+            settledAt: now,
+          },
+        })
+      } else if (paymentSplit) {
+        settledPayment = paymentSplit
+      }
+
+      // Also update parent CustomerOrder status to 'delivered'.
+      try {
+        await tx.customerOrder.updateMany({
+          where: { id: split.parentOrderId, businessId: business.id },
+          data: { status: 'delivered' },
+        })
+      } catch {
+        // Parent order may have been deleted; ignore.
+      }
+
+      return { updated, settledPayment }
+    })
 
     return NextResponse.json({
       ok: true,
       delivered: true,
       orderSplit: {
-        id: updated.id,
-        status: updated.status,
-        otpVerifiedAt: updated.otpVerifiedAt,
+        id: result.updated.id,
+        status: result.updated.status,
+        otpVerifiedAt: result.updated.otpVerifiedAt,
       },
-      paymentSplit: settledPayment
+      paymentSplit: result.settledPayment
         ? {
-            id: settledPayment.id,
-            settlementStatus: settledPayment.settlementStatus,
-            settledAt: settledPayment.settledAt,
-            merchantAmount: settledPayment.merchantAmount,
-            commissionAmount: settledPayment.commissionAmount,
+            id: result.settledPayment.id,
+            settlementStatus: result.settledPayment.settlementStatus,
+            settledAt: result.settledPayment.settledAt,
+            merchantAmount: result.settledPayment.merchantAmount,
+            commissionAmount: result.settledPayment.commissionAmount,
           }
         : null,
     })

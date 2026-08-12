@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
 // PRD Part 37 §1.2 — Local Mode image compression (GLM 5.2 simulated).
@@ -11,11 +12,19 @@ import { apiError } from '@/lib/api-error'
 //     4. Otherwise, simulate compression (production would use sharp/canvas).
 //        compressedSizeKB = min(originalSizeKB, targetSizeKB) with a realistic ratio.
 //     5. Return { ok, originalSizeKB, compressedSizeKB, compressionRatio, image }.
+// §AUTH: Requires an authenticated business (any role) — image processing is a
+// merchant-side operation tied to the business's catalog.
 
 const DEFAULT_TARGET_KB = 200
 
 export async function POST(req: NextRequest) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const body = await req.json() as {
       image: string
       targetSizeKB?: number

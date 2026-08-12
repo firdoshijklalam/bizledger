@@ -3,17 +3,40 @@
 // PATCH:  update fields (status, progress, scores, urls, etc.) — used for
 //         internal status updates and manual overrides.
 // DELETE: remove the asset.
+//
+// §AUTH: All handlers require an authenticated business and verify the product
+// belongs to that business before touching its media assets.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+
+// §OWNERSHIP: Confirms the product belongs to the authenticated business.
+// Returns the product or null (caller responds 404 on null).
+async function getOwnedProduct(businessId: string, productId: string) {
+  return db.product.findFirst({ where: { id: productId, businessId } })
+}
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string; assetId: string }> }
 ) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { id, assetId } = await params
+
+    // §OWNERSHIP: Verify the product belongs to this business before reading
+    // any of its media assets.
+    const product = await getOwnedProduct(business.id, id)
+    if (!product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
+
     const asset = await db.productMediaAsset.findFirst({
       where: { id: assetId, productId: id },
     })
@@ -31,7 +54,21 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; assetId: string }> }
 ) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { id, assetId } = await params
+
+    // §OWNERSHIP: Verify the product belongs to this business before updating
+    // any of its media assets.
+    const product = await getOwnedProduct(business.id, id)
+    if (!product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
+
     const body = await req.json()
 
     // Verify ownership before update
@@ -93,7 +130,21 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; assetId: string }> }
 ) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { id, assetId } = await params
+
+    // §OWNERSHIP: Verify the product belongs to this business before deleting
+    // any of its media assets.
+    const product = await getOwnedProduct(business.id, id)
+    if (!product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
+
     await db.productMediaAsset.deleteMany({
       where: { id: assetId, productId: id },
     })

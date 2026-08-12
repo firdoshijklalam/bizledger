@@ -3,9 +3,12 @@
 // 3D mesh, persist each as a ProductImage (imageType=multi_angle), and
 // optionally attach a spin video URL to the media asset.
 // GET:  return existing multi-angle ProductImages for the product.
+//
+// §AUTH: Both handlers require an authenticated business and verify the product
+// belongs to that business before serving or generating media.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -15,7 +18,20 @@ type Angle = (typeof VALID_ANGLES)[number]
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { id } = await params
+
+    // §OWNERSHIP: findFirst scoped to businessId — never findUnique by id alone.
+    const product = await db.product.findFirst({ where: { id, businessId: business.id } })
+    if (!product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
+
     const images = await db.productImage.findMany({
       where: { productId: id, imageType: 'multi_angle' },
       orderBy: { createdAt: 'desc' },
@@ -28,7 +44,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { id } = await params
+
+    // §OWNERSHIP: findFirst scoped to businessId — never findUnique by id alone.
+    const product = await db.product.findFirst({ where: { id, businessId: business.id } })
+    if (!product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
+
     const body = await req.json()
 
     // Resolve angle list (default all 4)

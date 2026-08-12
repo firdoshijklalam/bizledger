@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { requireRole } from '@/lib/auth/session'
 import { apiError } from '@/lib/api-error'
 
 // Shared Defaulter Registry (PRD Part 32 §3).
 // GET  — lookup by fingerprintHash / phone / name; ?action=seed seeds 3 demo
 //        defaulters if registry is empty. If no params, returns last 20.
-// POST — add a defaulter entry.
+//        PUBLIC: read-only lookup is a shared safety feature for all merchants.
+// POST — add a defaulter entry. §RBAC: OWNER/ADMIN only — adding someone to a
+//        shared defaulter registry is a serious reputation-affecting action
+//        and must not be exposed to unprivileged callers.
 
 const SEED_DEFAULTERS = [
   {
@@ -85,6 +89,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    // §RBAC: Adding a defaulter to the shared registry requires OWNER/ADMIN.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const body = await req.json()
     if (!body.partyName || !body.merchantName) {
       return NextResponse.json(

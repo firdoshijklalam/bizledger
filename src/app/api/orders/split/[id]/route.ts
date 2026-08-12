@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
 // GET /api/orders/split/[id] — return a specific order split with its items,
@@ -7,6 +7,10 @@ import { apiError } from '@/lib/api-error'
 //
 // PATCH /api/orders/split/[id] — update order split status (owner confirmation).
 //   Body: { status: 'pending' | 'confirmed' | 'delivered' | 'returned' | 'cancelled' }
+//
+// §AUTH: Both handlers require an authenticated merchant session and scope the
+// lookup to the merchant's own businessId (ownership check via findFirst) so a
+// merchant cannot view or mutate another business's order splits.
 
 const ALLOWED_STATUSES = new Set([
   'pending',
@@ -21,9 +25,16 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { id } = await params
 
-    const split = await db.orderSplit.findUnique({ where: { id } })
+    // §OWNERSHIP: findFirst scoped to businessId — never findUnique by id alone.
+    const split = await db.orderSplit.findFirst({ where: { id, businessId: business.id } })
     if (!split) {
       return NextResponse.json(
         { error: 'Order split not found' },
@@ -86,6 +97,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { id } = await params
     const body = await req.json()
     const status = String(body.status || '').trim()
@@ -100,7 +117,8 @@ export async function PATCH(
       )
     }
 
-    const existing = await db.orderSplit.findUnique({ where: { id } })
+    // §OWNERSHIP: findFirst scoped to businessId — never findUnique by id alone.
+    const existing = await db.orderSplit.findFirst({ where: { id, businessId: business.id } })
     if (!existing) {
       return NextResponse.json(
         { error: 'Order split not found' },

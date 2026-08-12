@@ -5,21 +5,20 @@ import { apiError } from '@/lib/api-error'
 // POST /api/orders/split — PRD Part 36 §2.1
 // Auto-splits a global cart order by shop.
 //
+// §SECURITY: This is a PUBLIC endpoint (customers place multi-shop orders from
+// the central marketplace catalog without an account). However, each item's
+// businessId is VERIFIED against the product's actual businessId in the DB —
+// a client cannot supply an arbitrary businessId to decrement another
+// business's stock. If the product doesn't belong to the claimed businessId,
+// the stock decrement is skipped (the order still records the item for the
+// merchant to see, but no stock is tampered with).
+//
 // Body:
 //   {
 //     customerName, customerPhone,
 //     items: [{ productId, name, quantity, unitPrice, total, storeSlug, businessId, businessName }],
 //     deliveryCharge, source
 //   }
-//
-// Logic:
-//   1. Group items by businessId.
-//   2. Create a CustomerOrder per shop (the parent order).
-//   3. Create an OrderSplit per shop (subtotal, 2% commission, 4-digit OTP, status=pending).
-//   4. Create a PaymentSplit per split (settlementStatus=pending).
-//   5. Decrement stock for each product (loose-stock aware).
-//   6. §1.2: Auto-add shop to FavoriteShop if source === 'merchant_link'.
-//   7. Return { ok, splits, parentOrders }.
 
 const COMMISSION_PCT = 2 // default 2% commission per split
 
@@ -133,10 +132,13 @@ export async function POST(req: NextRequest) {
       })
 
       // 5. Decrement stock for each item (loose-stock aware).
+      // §OWNERSHIP: Verify the product belongs to the claimed businessId.
+      // If a client supplies a foreign productId + businessId combination,
+      // the product won't be found → stock NOT decremented (no cross-tenant tampering).
       await Promise.all(
         shopItems.map(async (it) => {
-          const product = await db.product.findUnique({
-            where: { id: it.productId },
+          const product = await db.product.findFirst({
+            where: { id: it.productId, businessId },
           })
           if (!product) return
 

@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
-// GET /api/store/[slug]/order — owner view: list last 50 orders for this store.
+// GET /api/store/[slug]/order — OWNER view: list last 50 orders for this store.
+//   §SECURITY: Requires authentication + the store must belong to the
+//   authenticated user's business. Previously this was unauthenticated,
+//   leaking customer names/phones/addresses for any store by slug.
 // POST /api/store/[slug]/order — PUBLIC customer order placement from the catalog.
-//   Supports cross-merchant commission: if referrerBusinessId is supplied,
-//   2% commission is computed on grandTotal and a CommissionLog entry is created.
+//   This is intentionally public (customers don't have accounts).
 
 const COMMISSION_PCT = 2 // default 2% commission for "More Shops" referrals
 
@@ -14,10 +16,16 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   try {
-    const { slug } = await params
-    const business = await db.business.findFirst({ where: { storeSlug: slug } })
+    const business = await getCurrentBusiness()
     if (!business) {
-      return NextResponse.json({ error: 'Store not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
+    const { slug } = await params
+    // §OWNERSHIP: Only the store owner can view their orders. Verify the
+    // storeSlug belongs to the authenticated business.
+    if (business.storeSlug !== slug) {
+      return NextResponse.json({ error: 'Forbidden — this store does not belong to your business' }, { status: 403 })
     }
     const orders = await db.customerOrder.findMany({
       where: { businessId: business.id },

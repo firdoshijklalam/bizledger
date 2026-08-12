@@ -89,13 +89,14 @@ export async function POST(req: NextRequest) {
 
     // 2. PIN verification path.
     if (method === 'pin') {
-      // §DEFAULT-PIN: If no PIN is set, use '123456' as the default testing PIN.
-      // This allows the client to test the wholesale/inventory gate flows without
-      // first configuring a PIN in Settings → Security. Once they set a custom PIN,
-      // this fallback is no longer used.
-      const DEFAULT_TEST_PIN = '123456'
-      const effectivePinHash = settings.pinHash || hashPin(DEFAULT_TEST_PIN)
-      const isPinEnabled = settings.pinEnabled || !settings.pinHash // enabled if explicitly set OR if no pin set yet (use default)
+      // §SECURITY-FIX: Removed the DEFAULT_TEST_PIN = '123456' backdoor.
+      // Previously, if no PIN was configured, '123456' was accepted for ALL
+      // gates — allowing anyone to bypass wholesale/inventory/discount gates
+      // without knowing the real PIN. Now, if no PIN is set, the gate is
+      // simply disabled (returns "PIN not set" error). Merchants MUST
+      // configure a PIN in Settings → Security before gates are active.
+      const effectivePinHash = settings.pinHash
+      const isPinEnabled = settings.pinEnabled && !!settings.pinHash
 
       if (!isPinEnabled) {
         await logGate({

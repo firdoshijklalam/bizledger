@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import ZAI from 'z-ai-web-dev-sdk'
+import { getCurrentBusiness } from '@/lib/db'
 
 // POST /api/products/ai-autofill — AI auto-fill product data from an uploaded image (PRD Part 35 §1.2).
 // Pipeline: 1) VLM OCR reads packaging text → 2) Web search enriches with official description/MRP/GST.
 // Body: { image: "data:image/jpeg;base64,..." }
 // Returns: { ok: true, data: { name, category, subCategory, mrp, gstRate, description, brand, unit }, source }
 // Always returns 200 (with a fallback object) so the frontend keeps working even if VLM fails.
+// §AUTH: Requires an authenticated business (any role) — autofill runs in the
+// merchant's product context and uses business-scoped resources.
 
 const OCR_PROMPT = `You are a product identification AI for Indian retail. Analyze this product image and extract ONLY what is visible on the packaging:
 1. Product name (brand + variant, e.g. "Tata Salt 1kg")
@@ -85,6 +88,12 @@ function normalizeData(parsed: Record<string, unknown> | null) {
 
 export async function POST(req: NextRequest) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const body = await req.json()
     const imageDataUrl: string | undefined = body.image
     if (!imageDataUrl) {

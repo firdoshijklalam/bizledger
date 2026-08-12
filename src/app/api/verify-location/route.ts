@@ -18,6 +18,12 @@ import { apiError } from '@/lib/api-error'
  * }
  *
  * Returns: { trusted, trustScore, reason, triangulatedLat, triangulatedLng, spoofingDetected, withinDeliveryRadius }
+ *
+ * §AUTH: INTENTIONALLY PUBLIC. This endpoint is called by CUSTOMERS in the
+ * browser before placing an order — they must be able to verify whether they
+ * are within the shop's delivery radius without first signing in. The endpoint
+ * performs no privileged writes and returns only a boolean trust verdict plus
+ * the triangulated position (which the client itself supplied inputs for).
  */
 export async function POST(req: NextRequest) {
   try {

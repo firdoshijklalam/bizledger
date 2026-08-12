@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import ZAI from 'z-ai-web-dev-sdk'
+import { getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
 // POST /api/ocr — scan a bill/receipt image and extract structured data using VLM
 // Body: { image: "data:image/jpeg;base64,..." }
 // Returns: { vendor, date, items: [{name, qty, price, total}], subtotal, tax, grandTotal }
+// §AUTH: Requires an authenticated business (any role) — OCR processes business
+// documents and the extracted data is associated with the merchant's account.
 export async function POST(req: NextRequest) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const body = await req.json()
     const image = body.image
     if (!image) {

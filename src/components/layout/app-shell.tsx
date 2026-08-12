@@ -57,25 +57,27 @@ export function AppShell() {
   const [paymentToken, setPaymentToken] = useState<string | null>(() => { if (typeof window === 'undefined') return null; return new URLSearchParams(window.location.search).get('payment') })
   // PRD Part 33: public store / more-shops / visited-shops URL routing
   // Use lazy initializers to read URL params on first render (before businessLoaded check)
+  // §MARKETPLACE-FLAG: All marketplace pages gated behind NEXT_PUBLIC_ENABLE_MARKETPLACE
+  const _mpEnabled = process.env.NEXT_PUBLIC_ENABLE_MARKETPLACE === 'true'
   const [storeSlug, setStoreSlug] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null
+    if (typeof window === 'undefined' || !_mpEnabled) return null
     return new URLSearchParams(window.location.search).get('store')
   })
   const [storeInvoiceToken, setStoreInvoiceToken] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null
+    if (typeof window === 'undefined' || !_mpEnabled) return null
     return new URLSearchParams(window.location.search).get('invoice')
   })
   const [showMoreShops, setShowMoreShops] = useState(() => {
-    if (typeof window === 'undefined') return false
+    if (typeof window === 'undefined' || !_mpEnabled) return false
     return !!new URLSearchParams(window.location.search).get('more-shops')
   })
   const [showVisitedDeck, setShowVisitedDeck] = useState(() => {
-    if (typeof window === 'undefined') return false
+    if (typeof window === 'undefined' || !_mpEnabled) return false
     return !!new URLSearchParams(window.location.search).get('visited')
   })
   // PRD Part 36: public central marketplace catalog (?marketplace=1)
   const [showMarketplace, setShowMarketplace] = useState(() => {
-    if (typeof window === 'undefined') return false
+    if (typeof window === 'undefined' || !_mpEnabled) return false
     return !!new URLSearchParams(window.location.search).get('marketplace')
   })
 
@@ -111,15 +113,21 @@ export function AppShell() {
 
   // PRD Part 36: Re-check URL params after hydration (lazy init handles client-side first render,
   // but this ensures the state is set even after SSR hydration)
+  // §MARKETPLACE-FLAG: The public marketplace pages (central catalog, more shops,
+  // visited shops deck) are gated behind NEXT_PUBLIC_ENABLE_MARKETPLACE. If
+  // disabled (default), these URL params are ignored and the marketplace is
+  // hidden from users until it's production-ready (customer auth, payment
+  // webhook, commission settlement).
+  const MARKETPLACE_ENABLED = process.env.NEXT_PUBLIC_ENABLE_MARKETPLACE === 'true'
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
-    if (params.get('marketplace')) setShowMarketplace(true)
-    if (params.get('store')) setStoreSlug(params.get('store'))
-    if (params.get('more-shops')) setShowMoreShops(true)
-    if (params.get('visited')) setShowVisitedDeck(true)
+    if (MARKETPLACE_ENABLED && params.get('marketplace')) setShowMarketplace(true)
+    if (MARKETPLACE_ENABLED && params.get('store')) setStoreSlug(params.get('store'))
+    if (MARKETPLACE_ENABLED && params.get('more-shops')) setShowMoreShops(true)
+    if (MARKETPLACE_ENABLED && params.get('visited')) setShowVisitedDeck(true)
     if (params.get('payment')) setPaymentToken(params.get('payment'))
-  }, [])
+  }, [MARKETPLACE_ENABLED])
 
   // Bootstrap: ensure seeded + load business + load language setting
   // Includes retry logic for sandbox environment where server may be temporarily unavailable
