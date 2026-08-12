@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { checkRateLimit, getClientId, RATE_LIMITS } from '@/lib/rate-limit'
+
+// §VERCEL-LIMIT: Allow up to 20s for image processing
+export const maxDuration = 20
 
 // PRD Part 37 §1.2 — Local Mode image compression (GLM 5.2 simulated).
 // POST /api/image-compress
@@ -23,6 +27,28 @@ export async function POST(req: NextRequest) {
     const business = await getCurrentBusiness()
     if (!business) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
+    // §RATE-LIMIT: 10 image-processing requests per minute per user.
+    const clientId = getClientId(req, business.id)
+    const rateResult = await checkRateLimit(
+      clientId,
+      RATE_LIMITS.IMAGE.name,
+      RATE_LIMITS.IMAGE.limit,
+      RATE_LIMITS.IMAGE.window
+    )
+    if (!rateResult.success) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Please try again later.' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(Math.ceil(rateResult.reset / 1000) || 60),
+            'X-RateLimit-Limit': String(rateResult.limit),
+            'X-RateLimit-Remaining': String(rateResult.remaining),
+          },
+        }
+      )
     }
 
     const body = await req.json() as {

@@ -6,8 +6,12 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // §NEON-POOLER: Use the direct (non-pooled) URL for migrations.
+  // PgBouncer (pooled URL) doesn't support DDL operations reliably.
+  // In production, set DIRECT_URL to the non-pooled Neon endpoint.
+  directUrl = env("DIRECT_URL")
 }
 
 model Business {
@@ -27,41 +31,41 @@ model Business {
   updatedAt DateTime @updatedAt
 
   // PRD Part 33 §2: Multi-store PWA — unique slug for public store URL
-  storeSlug       String?  @unique
+  storeSlug          String?   @unique
   // PRD Part 33 §3: Geo-fenced delivery
-  deliveryRadiusKm Int     @default(5)
-  latitude        Float?
-  longitude       Float?
-  serviceableAreas String? // JSON array of area names, e.g. ["Bhowanipore","Gariahat"]
+  deliveryRadiusKm   Int       @default(5)
+  latitude           Float?
+  longitude          Float?
+  serviceableAreas   String? // JSON array of area names, e.g. ["Bhowanipore","Gariahat"]
   // PRD Part 33 §4: Monetization
-  subscriptionPlan  String  @default("trial") // trial | active | expired | cancelled
-  trialEndsAt       DateTime?
+  subscriptionPlan   String    @default("trial") // trial | active | expired | cancelled
+  trialEndsAt        DateTime?
   subscriptionEndsAt DateTime?
-  isSponsored       Boolean @default(false)
-  sponsoredUntil    DateTime?
-  sponsoredArea     String? // area where the ad is shown
+  isSponsored        Boolean   @default(false)
+  sponsoredUntil     DateTime?
+  sponsoredArea      String? // area where the ad is shown
 
-  parties      Party[]
-  products     Product[]
-  transactions Transaction[]
-  invoices     Invoice[]
-  settings     AppSettings?
+  parties              Party[]
+  products             Product[]
+  transactions         Transaction[]
+  invoices             Invoice[]
+  settings             AppSettings?
   supplierCatalogItems SupplierCatalogItem[]
-  purchaseOrders PurchaseOrder[]
-  fingerprints FingerprintRecord[]
-  biometricGateLogs BiometricGateLog[]
-  customerOrders CustomerOrder[]
-  commissionEarned CommissionLog[] @relation("CommissionRecipient")
-  commissionPaid   CommissionLog[] @relation("CommissionPayer")
-  mediaAssets  ProductMediaAsset[]
-  categories   Category[]
+  purchaseOrders       PurchaseOrder[]
+  fingerprints         FingerprintRecord[]
+  biometricGateLogs    BiometricGateLog[]
+  customerOrders       CustomerOrder[]
+  commissionEarned     CommissionLog[]       @relation("CommissionRecipient")
+  commissionPaid       CommissionLog[]       @relation("CommissionPayer")
+  mediaAssets          ProductMediaAsset[]
+  categories           Category[]
   // §DYNAMIC-PRICING + §NOTIFICATIONS
-  customPrices  CustomPrice[]
-  notifications Notification[]
+  customPrices         CustomPrice[]
+  notifications        Notification[]
   // §AUTH: Users and sessions for this business
-  users    User[]
+  users                User[]
   // §INVOICE-SEQUENCE: Atomic counter for race-safe invoice numbering
-  invoiceSequence InvoiceSequence?
+  invoiceSequence      InvoiceSequence?
 }
 
 // §INVOICE-SEQUENCE: Dedicated sequence table for concurrency-safe invoice numbering.
@@ -69,11 +73,11 @@ model Business {
 // incremented inside a transaction, guaranteeing unique sequential invoice numbers
 // even under concurrent requests. This replaces the unsafe count()+1 approach.
 model InvoiceSequence {
-  id          String   @id @default(cuid())
-  businessId  String   @unique
-  nextNumber  Int      @default(1)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(cuid())
+  businessId String   @unique
+  nextNumber Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
@@ -82,16 +86,16 @@ model InvoiceSequence {
 // Each user belongs to exactly one Business. The businessId is the
 // tenant isolation key — it comes from the session, never from the client.
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String    @id @default(cuid())
+  email        String    @unique
   passwordHash String
   name         String?
-  role         String   @default("OWNER") // OWNER | ADMIN | STAFF
+  role         String    @default("OWNER") // OWNER | ADMIN | STAFF
   businessId   String
-  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
   sessions     Session[]
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([businessId])
 }
@@ -100,12 +104,12 @@ model User {
 // The tokenHash is what's stored in the cookie (hashed). The raw token
 // is never stored in the database — only its hash.
 model Session {
-  id         String   @id @default(cuid())
-  tokenHash  String   @unique
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 
   @@index([userId])
   @@index([expiresAt])
@@ -116,12 +120,12 @@ model Session {
 // or catalog item. Resolution hierarchy:
 //   Specific Buyer Price > Group Price > Default Wholesale Price
 model CustomPrice {
-  id              String   @id @default(cuid())
-  businessId      String   // the supplier who sets this price
-  productId       String?  // for Product-based pricing (inventory + POS)
-  catalogItemId   String?  // for SupplierCatalogItem-based pricing (B2B sourcing)
-  buyerId         String?  // specific Party (buyer) — HIGHEST priority
-  buyerGroupName  String?  // tier label ("Wholesalers", "VIP") — group priority
+  id                    String   @id @default(cuid())
+  businessId            String // the supplier who sets this price
+  productId             String? // for Product-based pricing (inventory + POS)
+  catalogItemId         String? // for SupplierCatalogItem-based pricing (B2B sourcing)
+  buyerId               String? // specific Party (buyer) — HIGHEST priority
+  buyerGroupName        String? // tier label ("Wholesalers", "VIP") — group priority
   // §MULTI-PRICE: Three-tier custom pricing mirroring the main Product form.
   // The merchant can set a complete pricing structure per buyer/group:
   //   - customSalePrice:     the bulk/full sale price override (per bag/box)
@@ -129,10 +133,10 @@ model CustomPrice {
   //   - customWholesalePrice: the wholesale price override (for bulk orders)
   // `customPrice` is kept for backward compat — used as a fallback when only
   // one price is set or for older records created before this change.
-  customPrice          Decimal  @default(0) @db.Decimal(18, 2)
-  customSalePrice      Decimal? @db.Decimal(18, 2) // §MULTI-PRICE: override for Product.salePrice (BULK/FULL mode)
-  customMrp            Decimal? @db.Decimal(18, 2) // §MULTI-PRICE: override for Product.mrp (BULK/FULL mode)
-  customWholesalePrice Decimal? @db.Decimal(18, 2) // §MULTI-PRICE: override for Product.wholesalePrice (BULK/FULL mode)
+  customPrice           Decimal  @default(0) @db.Decimal(18, 2)
+  customSalePrice       Decimal? @db.Decimal(18, 2) // §MULTI-PRICE: override for Product.salePrice (BULK/FULL mode)
+  customMrp             Decimal? @db.Decimal(18, 2) // §MULTI-PRICE: override for Product.mrp (BULK/FULL mode)
+  customWholesalePrice  Decimal? @db.Decimal(18, 2) // §MULTI-PRICE: override for Product.wholesalePrice (BULK/FULL mode)
   // §RETAIL-ISOLATION: Retail (loose/kg/pcs) custom prices are SEPARATE from
   // bulk/full prices. A custom price set for a BAG must NOT bleed into the
   // retail (kg) tab. If a merchant only sets a bulk custom price, the retail
@@ -140,12 +144,12 @@ model CustomPrice {
   // inherits the bulk bag's custom price.
   customRetailSalePrice Decimal? @db.Decimal(18, 2) // §RETAIL: override for Product.retailSalePrice (per kg/pcs)
   customRetailMrp       Decimal? @db.Decimal(18, 2) // §RETAIL: override for Product.retailMrp (per kg/pcs)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
-  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  product     Product?  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  buyer       Party?    @relation("CustomPriceBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  product  Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+  buyer    Party?   @relation("CustomPriceBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
 
   @@index([businessId])
   @@index([productId])
@@ -158,14 +162,14 @@ model CustomPrice {
 // (e.g. supplier sets a custom price → buyer gets notified).
 // type: 'custom-price' | 'low-stock' | 'overdue' | 'system' | 'order'
 model Notification {
-  id           String   @id @default(cuid())
-  businessId   String   // the recipient business (buyer)
-  type         String   @default("system")
-  title        String
-  body         String
-  link         String?  // optional deep-link (e.g. "/?sourcing=1")
-  isRead       Boolean  @default(false)
-  createdAt    DateTime @default(now())
+  id         String   @id @default(cuid())
+  businessId String // the recipient business (buyer)
+  type       String   @default("system")
+  title      String
+  body       String
+  link       String? // optional deep-link (e.g. "/?sourcing=1")
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -174,90 +178,90 @@ model Notification {
 }
 
 model Party {
-  id                   String   @id @default(cuid())
-  businessId           String
-  name                 String
-  phone                String?
-  type                 String   @default("customer") // customer | supplier | both
-  balance              Decimal  @default(0) @db.Decimal(18, 2) // +ve = receivable, -ve = payable
-  qualityGrade         String   @default("B") // A | B | C | D | E
-  creditLimit          Decimal? @db.Decimal(18, 2)
-  openingBalance       Decimal  @default(0) @db.Decimal(18, 2)
-  address              String?
-  gstin                String?
-  notes                String?
-  avgPaymentDays       Float?
-  avgDiscountPct       Float    @default(0)
-  gradeLastCalculated  DateTime?
-  gradeOverrideReason  String?
+  id                  String    @id @default(cuid())
+  businessId          String
+  name                String
+  phone               String?
+  type                String    @default("customer") // customer | supplier | both
+  balance             Decimal   @default(0) @db.Decimal(18, 2) // +ve = receivable, -ve = payable
+  qualityGrade        String    @default("B") // A | B | C | D | E
+  creditLimit         Decimal?  @db.Decimal(18, 2)
+  openingBalance      Decimal   @default(0) @db.Decimal(18, 2)
+  address             String?
+  gstin               String?
+  notes               String?
+  avgPaymentDays      Float?
+  avgDiscountPct      Float     @default(0)
+  gradeLastCalculated DateTime?
+  gradeOverrideReason String?
   // PRD Part 32 §3.2: AI Credit Trust Score (1-5 stars)
-  creditTrustScore     Float    @default(3) // 1.0 - 5.0
-  maxCreditSuggestion  Float    @default(0) // AI-suggested max credit (₹)
-  trustScoreUpdatedAt  DateTime?
-  trustScoreReason     String?  // human-readable reason
+  creditTrustScore    Float     @default(3) // 1.0 - 5.0
+  maxCreditSuggestion Decimal   @default(0) @db.Decimal(18, 2) // AI-suggested max credit (₹)
+  trustScoreUpdatedAt DateTime?
+  trustScoreReason    String? // human-readable reason
   // §3: Cross-lingual phonetic search tags (JSON array of English phonetic variants)
   // Generated from Bengali name via transliteration. e.g. "অমিত" → ["amit","omit"]
-  searchTags           String?  // JSON array string: ["amit","omit","অমিত"]
+  searchTags          String? // JSON array string: ["amit","omit","অমিত"]
   // §DYNAMIC-PRICING: tier label for group-based custom pricing
   // (e.g. "Wholesalers", "VIP Retailers", "Distributors"). Free-form string
   // so suppliers can create ad-hoc tiers without a separate table.
-  buyerGroup           String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  buyerGroup          String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
-  invoices     Invoice[]
-  partyNotes   PartyNote[]
-  purchaseOrders PurchaseOrder[]
+  business             Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  transactions         Transaction[]
+  invoices             Invoice[]
+  partyNotes           PartyNote[]
+  purchaseOrders       PurchaseOrder[]
   supplierCatalogItems SupplierCatalogItem[] @relation("SupplierCatalogItems")
-  fingerprints FingerprintRecord[]
+  fingerprints         FingerprintRecord[]
   // §DYNAMIC-PRICING: custom prices targeted at this buyer (as the buyer Party)
-  customPricesAsBuyer  CustomPrice[] @relation("CustomPriceBuyer")
+  customPricesAsBuyer  CustomPrice[]         @relation("CustomPriceBuyer")
 
   @@index([businessId])
 }
 
 model Product {
-  id                 String   @id @default(cuid())
-  businessId         String
-  name               String
-  sku                String?
-  category           String?
-  unit               String   @default("pcs") // pcs | kg | bag | box
-  purchasePrice      Decimal  @default(0) @db.Decimal(18, 2)
-  salePrice          Decimal  @default(0) @db.Decimal(18, 2)
-  mrp                Decimal? @db.Decimal(18, 2)
-  wholesalePrice     Decimal? @db.Decimal(18, 2)
-  gstRate            Float    @default(0)
-  stock              Float    @default(0) // bulk stock (bags/boxes)
-  lowStockThreshold  Float    @default(5)
-  supplierId         String?
+  id                String   @id @default(cuid())
+  businessId        String
+  name              String
+  sku               String?
+  category          String?
+  unit              String   @default("pcs") // pcs | kg | bag | box
+  purchasePrice     Decimal  @default(0) @db.Decimal(18, 2)
+  salePrice         Decimal  @default(0) @db.Decimal(18, 2)
+  mrp               Decimal? @db.Decimal(18, 2)
+  wholesalePrice    Decimal? @db.Decimal(18, 2)
+  gstRate           Float    @default(0)
+  stock             Float    @default(0) // bulk stock (bags/boxes)
+  lowStockThreshold Float    @default(5)
+  supplierId        String?
   // PRD Part 11: Dual-stock matrix + retail/loose config
-  retailEnabled      Boolean  @default(false)
-  retailUnit         String?  // sub-unit: kg, pcs, ltr, gm
-  conversionFactor   Float?   // 1 bag = 25 kg
-  retailSalePrice    Decimal? @db.Decimal(18, 2)   // price per sub-unit (₹55 per kg)
-  retailMrp          Decimal? @db.Decimal(18, 2)   // MRP per sub-unit for auto-discount calc
-  looseStock         Float    @default(0) // loose/fractional stock (kg)
-  subCategory        String?  // PRD Part 13: sub-category (e.g. Rice → Miniket)
+  retailEnabled     Boolean  @default(false)
+  retailUnit        String? // sub-unit: kg, pcs, ltr, gm
+  conversionFactor  Float? // 1 bag = 25 kg
+  retailSalePrice   Decimal? @db.Decimal(18, 2) // price per sub-unit (₹55 per kg)
+  retailMrp         Decimal? @db.Decimal(18, 2) // MRP per sub-unit for auto-discount calc
+  looseStock        Float    @default(0) // loose/fractional stock (kg)
+  subCategory       String? // PRD Part 13: sub-category (e.g. Rice → Miniket)
   // PRD Part 35 §1.2: AI auto-filled description
-  description        String?  // AI-generated professional description from OCR + web scrape
+  description       String? // AI-generated professional description from OCR + web scrape
   // PRD Part 35 §3.1: online catalog publishing status
-  isPublished        Boolean  @default(true) // auto-published to PWA store on save
-  categoryPath       String?  // PRD Part 35 §2: full nested path (e.g. "Groceries > চাল > বাসমতি")
+  isPublished       Boolean  @default(true) // auto-published to PWA store on save
+  categoryPath      String? // PRD Part 35 §2: full nested path (e.g. "Groceries > চাল > বাসমতি")
   // §3: Cross-lingual phonetic search tags (JSON array of English phonetic variants)
   // e.g. "উৎসব" → ["utsab","utshob","utsob","উৎসব"]
-  searchTags         String?  // JSON array string
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  searchTags        String? // JSON array string
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  business    Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  images      ProductImage[]
-  mediaAssets ProductMediaAsset[]
-  invoiceItems InvoiceItem[]
+  business       Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  images         ProductImage[]
+  mediaAssets    ProductMediaAsset[]
+  invoiceItems   InvoiceItem[]
   // §DYNAMIC-PRICING: custom per-buyer/per-tier prices for this product
-  customPrices CustomPrice[]
+  customPrices   CustomPrice[]
   // §STOCK-MOVEMENT: complete inventory audit trail
   stockMovements StockMovement[]
 
@@ -267,14 +271,14 @@ model Product {
 
 // PRD Part 35 §2: Unlimited nested sub-category tree
 model Category {
-  id          String   @id @default(cuid())
-  businessId  String
-  name        String
-  parentId    String?  // null = root category
-  level       Int      @default(0) // 0 = root, 1 = sub, 2 = sub-sub, ...
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(cuid())
+  businessId String
+  name       String
+  parentId   String? // null = root category
+  level      Int      @default(0) // 0 = root, 1 = sub, 2 = sub-sub, ...
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   business Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
   parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Cascade)
@@ -285,17 +289,17 @@ model Category {
 }
 
 model ProductImage {
-  id         String   @id @default(cuid())
-  productId  String
-  url        String
-  isPrimary  Boolean  @default(false)
-  order      Int      @default(0)
+  id          String   @id @default(cuid())
+  productId   String
+  url         String
+  isPrimary   Boolean  @default(false)
+  order       Int      @default(0)
   // PRD Part 34: AI Vision Core — image classification
-  imageType  String   @default("raw") // raw | processed | multi_angle | thumbnail
-  viewAngle  String?  // front | back | left | right | top | spin_frame
-  isProcessed Boolean @default(false) // AI ironing + bg removal applied
-  isHD       Boolean  @default(false) // ultra-HD text restoration applied
-  createdAt  DateTime @default(now())
+  imageType   String   @default("raw") // raw | processed | multi_angle | thumbnail
+  viewAngle   String? // front | back | left | right | top | spin_frame
+  isProcessed Boolean  @default(false) // AI ironing + bg removal applied
+  isHD        Boolean  @default(false) // ultra-HD text restoration applied
+  createdAt   DateTime @default(now())
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
@@ -304,36 +308,36 @@ model ProductImage {
 
 // PRD Part 34 §1: Raw media ingest & 3D digital twin generation
 model ProductMediaAsset {
-  id           String   @id @default(cuid())
-  productId    String
-  businessId   String
+  id                String   @id @default(cuid())
+  productId         String
+  businessId        String
   // Input media
-  inputType    String   @default("image") // image | video
-  inputUrl     String?  // stored raw upload (data URL or file path)
-  inputCount   Int      @default(1) // number of images or video seconds
+  inputType         String   @default("image") // image | video
+  inputUrl          String? // stored raw upload (data URL or file path)
+  inputCount        Int      @default(1) // number of images or video seconds
   // Processing status
-  status       String   @default("pending") // pending | processing | completed | failed | rejected
-  progress     Int      @default(0) // 0-100
+  status            String   @default("pending") // pending | processing | completed | failed | rejected
+  progress          Int      @default(0) // 0-100
   // Output: 3D mesh + processed images
-  meshData     String?  // JSON: { vertices, faces, bounds, confidenceScore }
+  meshData          String? // JSON: { vertices, faces, bounds, confidenceScore }
   processedImageUrl String? // primary cleaned image
-  spinVideoUrl String?  // 360-degree spinning video
-  frontViewUrl String?
-  backViewUrl  String?
-  leftViewUrl  String?
-  rightViewUrl String?
+  spinVideoUrl      String? // 360-degree spinning video
+  frontViewUrl      String?
+  backViewUrl       String?
+  leftViewUrl       String?
+  rightViewUrl      String?
   // Quality & guardrails (PRD Part 34 §3.1)
-  qualityScore Float?   // 0-100, must be >= 90 to pass
-  symmetryScore Float?  // 0-100
-  volumeMatch  Float?   // 0-100, volume preservation vs reference
-  matchScore   Float?   // 0-100, overall match to raw reference (must be >= 90)
-  rejectionReason String?
+  qualityScore      Float? // 0-100, must be >= 90 to pass
+  symmetryScore     Float? // 0-100
+  volumeMatch       Float? // 0-100, volume preservation vs reference
+  matchScore        Float? // 0-100, overall match to raw reference (must be >= 90)
+  rejectionReason   String?
   // Processing metadata
-  ironingApplied   Boolean @default(false) // §2.1 fold/scratch removal
-  textRestored     Boolean @default(false) // §2.2 HD text/logo re-render
-  bgRemoved        Boolean @default(false) // §1.1 background removal
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  ironingApplied    Boolean  @default(false) // §2.1 fold/scratch removal
+  textRestored      Boolean  @default(false) // §2.2 HD text/logo re-render
+  bgRemoved         Boolean  @default(false) // §1.1 background removal
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -344,17 +348,17 @@ model ProductMediaAsset {
 }
 
 model Transaction {
-  id          String   @id @default(cuid())
-  businessId  String
-  partyId     String?
-  type        String // credit (money in / receivable reduced) | debit (money out / payable reduced) | sale | purchase | expense
-  amount      Decimal @db.Decimal(18, 2)
+  id           String   @id @default(cuid())
+  businessId   String
+  partyId      String?
+  type         String // credit (money in / receivable reduced) | debit (money out / payable reduced) | sale | purchase | expense
+  amount       Decimal  @db.Decimal(18, 2)
   balanceAfter Decimal? @db.Decimal(18, 2)
-  description String?
-  category    String?
-  invoiceId   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  description  String?
+  category     String?
+  invoiceId    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   party    Party?   @relation(fields: [partyId], references: [id], onDelete: SetNull)
@@ -365,63 +369,63 @@ model Transaction {
 }
 
 model Invoice {
-  id              String   @id @default(cuid())
-  businessId      String
-  partyId         String?
-  invoiceNumber   String
-  type            String   @default("sales") // sales | purchase | retail | challan
-  status          String   @default("unpaid") // unpaid | partial | paid
-  isGst           Boolean  @default(false)
-  subtotal        Decimal  @default(0) @db.Decimal(18, 2)
-  discountValue   Decimal  @default(0) @db.Decimal(18, 2)
-  discountMode    String   @default("flat") // flat | percent
-  discountAmount  Decimal  @default(0) @db.Decimal(18, 2)
-  gstAmount       Decimal  @default(0) @db.Decimal(18, 2)
-  grandTotal      Decimal  @default(0) @db.Decimal(18, 2)
-  amountPaid      Decimal  @default(0) @db.Decimal(18, 2)
-  amountDue       Decimal  @default(0) @db.Decimal(18, 2)
-  paymentMode     String?  // cash | upi | credit | cheque
-  notes           String?
-  paymentLandingToken String? @unique
+  id                  String   @id @default(cuid())
+  businessId          String
+  partyId             String?
+  invoiceNumber       String
+  type                String   @default("sales") // sales | purchase | retail | challan
+  status              String   @default("unpaid") // unpaid | partial | paid
+  isGst               Boolean  @default(false)
+  subtotal            Decimal  @default(0) @db.Decimal(18, 2)
+  discountValue       Decimal  @default(0) @db.Decimal(18, 2)
+  discountMode        String   @default("flat") // flat | percent
+  discountAmount      Decimal  @default(0) @db.Decimal(18, 2)
+  gstAmount           Decimal  @default(0) @db.Decimal(18, 2)
+  grandTotal          Decimal  @default(0) @db.Decimal(18, 2)
+  amountPaid          Decimal  @default(0) @db.Decimal(18, 2)
+  amountDue           Decimal  @default(0) @db.Decimal(18, 2)
+  paymentMode         String? // cash | upi | credit | cheque
+  notes               String?
+  paymentLandingToken String?  @unique
   // PRD Part 32 §4.3: Auto-tagging audit trail (sub-tag on invoice)
-  collectedByName String? // e.g. "Rahim's Son" (when family member collects)
-  collectedByRole String? // family | partner | agent | primary
-  paidToName      String? // e.g. "Partner - Amit" (when paid to supplier partner)
-  paidToRole      String? // partner | agent | primary
+  collectedByName     String? // e.g. "Rahim's Son" (when family member collects)
+  collectedByRole     String? // family | partner | agent | primary
+  paidToName          String? // e.g. "Partner - Amit" (when paid to supplier partner)
+  paidToRole          String? // partner | agent | primary
   // §3: Fulfillment status — handed | pickup | ready (for "Pick Up Later" orders)
   //   handed: fully handed over to customer (default)
   //   pickup: customer will pick up later (pending)
   //   ready:  packed and ready for pick-up (intermediate state)
-  deliveryStatus  String?  @default("handed") // handed | pickup | ready
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  deliveryStatus      String?  @default("handed") // handed | pickup | ready
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  business Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  party    Party?         @relation(fields: [partyId], references: [id], onDelete: SetNull)
-  items    InvoiceItem[]
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party        Party?        @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  items        InvoiceItem[]
   transactions Transaction[]
 
-  @@index([businessId])
-  @@index([partyId])
   // §UNIQUE-CONSTRAINT: Prevents duplicate invoice numbers within the same business.
   // Without this, concurrent requests could create invoices with the same number.
   @@unique([businessId, invoiceNumber])
+  @@index([businessId])
+  @@index([partyId])
 }
 
 model InvoiceItem {
-  id        String @id @default(cuid())
-  invoiceId String
-  productId String?
-  name      String
-  quantity  Float
-  unitPrice Decimal @db.Decimal(18, 2)
-  discount  Decimal  @default(0) @db.Decimal(18, 2)
-  gstRate   Decimal  @default(0) @db.Decimal(18, 2)
-  total     Decimal  @default(0) @db.Decimal(18, 2)
+  id           String  @id @default(cuid())
+  invoiceId    String
+  productId    String?
+  name         String
+  quantity     Float
+  unitPrice    Decimal @db.Decimal(18, 2)
+  discount     Decimal @default(0) @db.Decimal(18, 2)
+  gstRate      Decimal @default(0) @db.Decimal(18, 2)
+  total        Decimal @default(0) @db.Decimal(18, 2)
   // §PARTIAL-FULFILLMENT: Tracks how much of this line item has been handed
   // over to the customer. 0 = nothing delivered, = quantity = fully delivered.
   // Used by the Fulfillment Dashboard for wholesale partial deliveries.
-  fulfilledQty Float @default(0)
+  fulfilledQty Float   @default(0)
 
   invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
@@ -443,42 +447,42 @@ model PartyNote {
 }
 
 model AppSettings {
-  id                   String   @id @default(cuid())
-  businessId           String   @unique
-  notificationsEnabled Boolean  @default(true)
-  autoBackupEnabled    Boolean  @default(false)
-  language             String   @default("en")
-  dateFormat           String   @default("DD/MM/YYYY")
-  invoicePrefix        String   @default("INV")
-  pinEnabled           Boolean  @default(false)
-  pinHash              String?
-  lastBackupAt         DateTime?
+  id                       String    @id @default(cuid())
+  businessId               String    @unique
+  notificationsEnabled     Boolean   @default(true)
+  autoBackupEnabled        Boolean   @default(false)
+  language                 String    @default("en")
+  dateFormat               String    @default("DD/MM/YYYY")
+  invoicePrefix            String    @default("INV")
+  pinEnabled               Boolean   @default(false)
+  pinHash                  String?
+  lastBackupAt             DateTime?
   // Phase 3 additions
-  userRole             String   @default("owner") // owner | manager | sales
-  telegramEnabled      Boolean  @default(false)
-  driveEnabled         Boolean  @default(false)
-  biometricEnabled     Boolean  @default(false)
+  userRole                 String    @default("owner") // owner | manager | sales
+  telegramEnabled          Boolean   @default(false)
+  driveEnabled             Boolean   @default(false)
+  biometricEnabled         Boolean   @default(false)
   // PRD Part 32 §1: Biometric action gates config
-  gateOwnerSwitch      Boolean  @default(true)  // Owner mode re-switching
-  gateHighValueDiscount Boolean  @default(true)  // Discount above limit
-  gateDiscountLimit    Float    @default(5000)  // ₹ threshold for high-value discount gate
-  gateDataExport       Boolean  @default(true)  // JSON/CSV export or Telegram backup
-  gateInventoryPrice   Boolean  @default(true)  // Purchase price / bulk stock edit
-  gateDangerZone       Boolean  @default(true)  // Demo reset or khata delete
+  gateOwnerSwitch          Boolean   @default(true) // Owner mode re-switching
+  gateHighValueDiscount    Boolean   @default(true) // Discount above limit
+  gateDiscountLimit        Decimal   @default(5000) @db.Decimal(18, 2) // ₹ threshold for high-value discount gate
+  gateDataExport           Boolean   @default(true) // JSON/CSV export or Telegram backup
+  gateInventoryPrice       Boolean   @default(true) // Purchase price / bulk stock edit
+  gateDangerZone           Boolean   @default(true) // Demo reset or khata delete
   // PRD Part 32 §2: External scanner (USB OTG) enabled
-  externalScannerEnabled Boolean @default(false)
+  externalScannerEnabled   Boolean   @default(false)
   // PRD Part 32 §3: Merchant mesh defaulter registry
-  defaulterRegistryEnabled Boolean @default(true)
-  gateLockdownUntil    DateTime? // when 2 wrong PINs entered, locked until this time
+  defaulterRegistryEnabled Boolean   @default(true)
+  gateLockdownUntil        DateTime? // when 2 wrong PINs entered, locked until this time
   // PRD Part 37 §1.1: Merchant control toggles
-  onlineSalesEnabled   Boolean  @default(true)  // Online Sales toggle — OFF hides from global catalog + GPS map
-  offlineOnlyMode      Boolean  @default(false) // Offline Billing Only — app works as pure offline ledger
-  cloudSyncMode        Boolean  @default(false) // Cloud Sync Mode — media pushed to Telegram as File IDs
-  telegramFileIdMode   Boolean  @default(false) // Store media as Telegram File IDs (zero cloud cost)
+  onlineSalesEnabled       Boolean   @default(true) // Online Sales toggle — OFF hides from global catalog + GPS map
+  offlineOnlyMode          Boolean   @default(false) // Offline Billing Only — app works as pure offline ledger
+  cloudSyncMode            Boolean   @default(false) // Cloud Sync Mode — media pushed to Telegram as File IDs
+  telegramFileIdMode       Boolean   @default(false) // Store media as Telegram File IDs (zero cloud cost)
   // PRD Part 37 §3: Dual-profile switching
-  appMode              String   @default("merchant") // merchant | customer — current active mode
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  appMode                  String    @default("merchant") // merchant | customer — current active mode
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
@@ -493,8 +497,8 @@ model FingerprintRecord {
   finger          String   @default("thumb") // thumb | index | middle | ring | pinky
   // PRD Part 32 §4: Role-based fingerprint mapping
   role            String   @default("primary") // primary | family | partner | agent
-  linkedName      String?  // e.g. "Rahim's Son", "Partner - Amit"
-  relation        String?  // son | wife | brother | partner | cashier | collection_agent
+  linkedName      String? // e.g. "Rahim's Son", "Partner - Amit"
+  relation        String? // son | wife | brother | partner | cashier | collection_agent
   scannerType     String   @default("native") // native (WebAuthn) | external (USB OTG MFS100/Morpho)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -511,7 +515,7 @@ model FingerprintRecord {
 model BackupLog {
   id         String   @id @default(cuid())
   businessId String
-  channel    String   // telegram | drive
+  channel    String // telegram | drive
   status     String   @default("success") // success | failed
   fileUrl    String?
   fileSize   Int?
@@ -523,12 +527,12 @@ model BackupLog {
 // PRD Part 32 §3.1: Shared Defaulter Registry (cloud-synced across merchant group)
 model DefaulterRegistry {
   id              String   @id @default(cuid())
-  fingerprintHash String?  // links to a fingerprint (if available)
+  fingerprintHash String? // links to a fingerprint (if available)
   partyName       String
   partyPhone      String?
-  defaultAmount   Float    @default(0)
-  merchantName    String   // merchant reporting the default
-  merchantArea    String?  // local area for matching
+  defaultAmount   Decimal  @default(0) @db.Decimal(18, 2)
+  merchantName    String // merchant reporting the default
+  merchantArea    String? // local area for matching
   status          String   @default("active") // active | resolved | disputed
   notes           String?
   reportedAt      DateTime @default(now())
@@ -541,15 +545,15 @@ model DefaulterRegistry {
 
 // PRD Part 32 §1: Biometric gate verification log (audit trail of gate attempts)
 model BiometricGateLog {
-  id          String   @id @default(cuid())
-  businessId  String
-  gateType    String   // owner_switch | high_value_discount | data_export | inventory_price | danger_zone
-  method      String   // biometric | pin | lockdown
-  result      String   // success | failed | locked
-  staffName   String?
-  ipAddress   String?
-  metadata    String?  // JSON string of extra context
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  businessId String
+  gateType   String // owner_switch | high_value_discount | data_export | inventory_price | danger_zone
+  method     String // biometric | pin | lockdown
+  result     String // success | failed | locked
+  staffName  String?
+  ipAddress  String?
+  metadata   String? // JSON string of extra context
+  createdAt  DateTime @default(now())
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -560,32 +564,32 @@ model BiometricGateLog {
 
 // PRD Part 33 §1: Customer orders from public WhatsApp catalog
 model CustomerOrder {
-  id            String   @id @default(cuid())
-  businessId    String
-  customerName  String
-  customerPhone String?
-  customerAddress String?
-  customerLat   Float?
-  customerLng   Float?
-  items         String   // JSON array of {productId, name, quantity, unitPrice, total}
-  subtotal      Float    @default(0)
-  deliveryCharge Float   @default(0)
-  grandTotal    Float    @default(0)
+  id                  String   @id @default(cuid())
+  businessId          String
+  customerName        String
+  customerPhone       String?
+  customerAddress     String?
+  customerLat         Float?
+  customerLng         Float?
+  items               String // JSON array of {productId, name, quantity, unitPrice, total}
+  subtotal            Decimal  @default(0) @db.Decimal(18, 2)
+  deliveryCharge      Decimal  @default(0) @db.Decimal(18, 2)
+  grandTotal          Decimal  @default(0) @db.Decimal(18, 2)
   // §ONLINE-ORDERS: Extended status workflow for quick-commerce orders.
   // pending → processing → out_for_delivery → completed | cancelled
-  status        String   @default("pending")
+  status              String   @default("pending")
   // §PAYMENT: COD = cash on delivery, prepaid = paid online
-  paymentMode   String   @default("cod") // cod | prepaid
+  paymentMode         String   @default("cod") // cod | prepaid
   // §SYNC: When an order is completed, stock is deducted + a transaction
   // entry is created. This field tracks the linked transaction ID.
   syncedTransactionId String?
-  syncedInvoiceId      String?
-  notes         String?
-  source        String   @default("catalog") // catalog | invoice_link | more_shops | quick-commerce
-  referrerBusinessId String?
-  commissionAmount Float @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  syncedInvoiceId     String?
+  notes               String?
+  source              String   @default("catalog") // catalog | invoice_link | more_shops | quick-commerce
+  referrerBusinessId  String?
+  commissionAmount    Decimal  @default(0) @db.Decimal(18, 2)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -595,15 +599,15 @@ model CustomerOrder {
 
 // PRD Part 33 §4: Commission log for cross-merchant orders
 model CommissionLog {
-  id              String   @id @default(cuid())
+  id                  String   @id @default(cuid())
   recipientBusinessId String // merchant who earned commission (referrer)
-  payerBusinessId String   // merchant whose product was ordered
-  customerOrderId String?
-  orderAmount     Float    @default(0)
-  commissionPct   Float    @default(2) // 1-3%
-  commissionAmount Float   @default(0)
-  status          String   @default("pending") // pending | paid
-  createdAt       DateTime @default(now())
+  payerBusinessId     String // merchant whose product was ordered
+  customerOrderId     String?
+  orderAmount         Float    @default(0)
+  commissionPct       Float    @default(2) // 1-3%
+  commissionAmount    Float    @default(0)
+  status              String   @default("pending") // pending | paid
+  createdAt           DateTime @default(now())
 
   recipient Business @relation("CommissionRecipient", fields: [recipientBusinessId], references: [id], onDelete: Cascade)
   payer     Business @relation("CommissionPayer", fields: [payerBusinessId], references: [id], onDelete: Cascade)
@@ -614,24 +618,24 @@ model CommissionLog {
 
 // PRD Part 13: B2B Sourcing — Supplier Catalog Item
 model SupplierCatalogItem {
-  id              String   @id @default(cuid())
-  businessId      String
-  supplierId      String
-  productName     String
-  category        String?
-  basePrice       Float    @default(0)
-  transportFare   Float    @default(0)
-  coolieCharge    Float    @default(0)
-  unit            String   @default("pcs")
-  minOrderQty     Int      @default(1)
-  notes           String?
-  isActive        Boolean  @default(true)
+  id               String   @id @default(cuid())
+  businessId       String
+  supplierId       String
+  productName      String
+  category         String?
+  basePrice        Float    @default(0)
+  transportFare    Float    @default(0)
+  coolieCharge     Float    @default(0)
+  unit             String   @default("pcs")
+  minOrderQty      Int      @default(1)
+  notes            String?
+  isActive         Boolean  @default(true)
   matchedProductId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  supplier Party    @relation("SupplierCatalogItems", fields: [supplierId], references: [id], onDelete: Cascade)
+  business           Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  supplier           Party               @relation("SupplierCatalogItems", fields: [supplierId], references: [id], onDelete: Cascade)
   purchaseOrderItems PurchaseOrderItem[]
 
   @@index([businessId])
@@ -640,20 +644,20 @@ model SupplierCatalogItem {
 
 // PRD Part 13: B2B Sourcing — Purchase Order
 model PurchaseOrder {
-  id            String   @id @default(cuid())
-  businessId    String
-  supplierId    String
-  poNumber      String
-  status        String   @default("sent") // sent | dispatched | received | cancelled
-  totalAmount   Float    @default(0)
-  notes         String?
-  dispatchedAt  DateTime?
-  receivedAt    DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String    @id @default(cuid())
+  businessId   String
+  supplierId   String
+  poNumber     String
+  status       String    @default("sent") // sent | dispatched | received | cancelled
+  totalAmount  Float     @default(0)
+  notes        String?
+  dispatchedAt DateTime?
+  receivedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  business Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  supplier Party              @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  business Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  supplier Party               @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   items    PurchaseOrderItem[]
 
   @@index([businessId])
@@ -662,19 +666,19 @@ model PurchaseOrder {
 
 // PRD Part 13: B2B Sourcing — Purchase Order Item (line items)
 model PurchaseOrderItem {
-  id              String   @id @default(cuid())
-  purchaseOrderId String
-  catalogItemId   String?
-  productName     String
-  category        String?
-  quantity        Int      @default(1)
-  unitPrice       Float    @default(0)
-  transportFare   Float    @default(0)
-  coolieCharge    Float    @default(0)
-  totalCost       Float    @default(0)
+  id               String  @id @default(cuid())
+  purchaseOrderId  String
+  catalogItemId    String?
+  productName      String
+  category         String?
+  quantity         Int     @default(1)
+  unitPrice        Float   @default(0)
+  transportFare    Float   @default(0)
+  coolieCharge     Float   @default(0)
+  totalCost        Float   @default(0)
   matchedProductId String?
 
-  purchaseOrder PurchaseOrder       @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrder PurchaseOrder        @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   catalogItem   SupplierCatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
 
   @@index([purchaseOrderId])
@@ -691,16 +695,16 @@ model Staff {
   qrToken       String   @unique // QR linking token
   isActive      Boolean  @default(true)
   // Permission checkboxes (PRD Part 31 §2)
-  permBilling       Boolean @default(true)
-  permInventory     Boolean @default(false)
-  permKhata         Boolean @default(false)
-  permReports       Boolean @default(false)
-  permSourcing      Boolean @default(false)
-  permSettings      Boolean @default(false)
-  permExport        Boolean @default(false)
-  permDelete        Boolean @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  permBilling   Boolean  @default(true)
+  permInventory Boolean  @default(false)
+  permKhata     Boolean  @default(false)
+  permReports   Boolean  @default(false)
+  permSourcing  Boolean  @default(false)
+  permSettings  Boolean  @default(false)
+  permExport    Boolean  @default(false)
+  permDelete    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([businessId])
 }
@@ -709,19 +713,19 @@ model Staff {
 // This provides a complete audit trail for inventory — you can trace exactly
 // when and why stock changed for any product.
 model StockMovement {
-  id          String   @id @default(cuid())
-  businessId  String
-  productId   String
+  id            String   @id @default(cuid())
+  businessId    String
+  productId     String
   // §MOVEMENT-TYPE: SALE = stock out, PURCHASE = stock in,
   // SALE_RETURN = stock back in, PURCHASE_RETURN = stock back out,
   // ADJUSTMENT = manual correction
-  type        String   // sale | purchase | sale_return | purchase_return | adjustment
-  quantity    Float    // positive = stock in, negative = stock out
-  balanceAfter Float   // stock level after this movement
-  referenceId String?  // invoice ID, transaction ID, etc.
+  type          String // sale | purchase | sale_return | purchase_return | adjustment
+  quantity      Float // positive = stock in, negative = stock out
+  balanceAfter  Float // stock level after this movement
+  referenceId   String? // invoice ID, transaction ID, etc.
   referenceType String? // invoice | transaction | manual
-  description String?
-  createdAt   DateTime @default(now())
+  description   String?
+  createdAt     DateTime @default(now())
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
@@ -734,8 +738,8 @@ model AuditLog {
   businessId  String
   staffId     String?
   staffName   String
-  action      String   // create_invoice | modify_invoice | delete_invoice | khata_entry | restock | settings_change | data_export | staff_change | stock_adjust
-  entityType  String   // invoice | party | product | transaction | settings | staff | export
+  action      String // create_invoice | modify_invoice | delete_invoice | khata_entry | restock | settings_change | data_export | staff_change | stock_adjust
+  entityType  String // invoice | party | product | transaction | settings | staff | export
   entityId    String?
   description String
   // §AUDIT-METADATA: Optional JSON for additional context (amount, qty, old/new values)
@@ -749,25 +753,25 @@ model AuditLog {
 }
 
 model BusinessLink {
-  id          String   @id @default(cuid())
-  staffPhone  String
-  businessId  String
+  id           String   @id @default(cuid())
+  staffPhone   String
+  businessId   String
   businessName String
-  role        String   @default("sales")
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  role         String   @default("sales")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
 
   @@index([staffPhone])
 }
 
 // PRD Part 36 §1.2: Favorite Shop — auto-added when customer orders from a merchant's shared link
 model FavoriteShop {
-  id           String   @id @default(cuid())
-  customerPhone String  // customer identifier (phone or session)
-  businessId   String
-  businessName String
-  storeSlug    String
-  addedAt      DateTime @default(now())
+  id            String   @id @default(cuid())
+  customerPhone String // customer identifier (phone or session)
+  businessId    String
+  businessName  String
+  storeSlug     String
+  addedAt       DateTime @default(now())
 
   @@unique([customerPhone, businessId])
   @@index([customerPhone])
@@ -775,20 +779,20 @@ model FavoriteShop {
 
 // PRD Part 36 §2.1: Order split — global cart auto-split by shop
 model OrderSplit {
-  id              String   @id @default(cuid())
-  parentOrderId   String   // the original global cart order ID
-  businessId      String
-  businessName    String
-  items           String   // JSON array of items for this shop
-  subtotal        Decimal  @default(0) @db.Decimal(18, 2)
-  commissionPct   Float    @default(2)
-  commissionAmount Float   @default(0)
-  merchantAmount  Float    @default(0) // subtotal - commission
-  status          String   @default("pending") // pending | confirmed | delivered | returned | cancelled
-  deliveryOtp     String?  // 4-digit OTP for delivery verification
-  otpVerifiedAt   DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String    @id @default(cuid())
+  parentOrderId    String // the original global cart order ID
+  businessId       String
+  businessName     String
+  items            String // JSON array of items for this shop
+  subtotal         Decimal   @default(0) @db.Decimal(18, 2)
+  commissionPct    Float     @default(2)
+  commissionAmount Float     @default(0)
+  merchantAmount   Float     @default(0) // subtotal - commission
+  status           String    @default("pending") // pending | confirmed | delivered | returned | cancelled
+  deliveryOtp      String? // 4-digit OTP for delivery verification
+  otpVerifiedAt    DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([parentOrderId])
   @@index([businessId])
@@ -797,17 +801,17 @@ model OrderSplit {
 
 // PRD Part 36 §2.2: Payment split — auto-settlement to merchant wallets
 model PaymentSplit {
-  id              String   @id @default(cuid())
-  orderSplitId    String
-  businessId      String
-  totalAmount     Float    @default(0)
-  commissionPct   Float    @default(2)
-  commissionAmount Float   @default(0)
-  merchantAmount  Float    @default(0)
-  settlementStatus String  @default("pending") // pending | settled | reversed
-  settledAt       DateTime?
-  reversedAt      DateTime?
-  createdAt       DateTime @default(now())
+  id               String    @id @default(cuid())
+  orderSplitId     String
+  businessId       String
+  totalAmount      Float     @default(0)
+  commissionPct    Float     @default(2)
+  commissionAmount Float     @default(0)
+  merchantAmount   Float     @default(0)
+  settlementStatus String    @default("pending") // pending | settled | reversed
+  settledAt        DateTime?
+  reversedAt       DateTime?
+  createdAt        DateTime  @default(now())
 
   @@index([orderSplitId])
   @@index([businessId])
@@ -815,52 +819,52 @@ model PaymentSplit {
 
 // PRD Part 36 §3.1: Return request — on-spot rejection with instant refund
 model ReturnRequest {
-  id              String   @id @default(cuid())
-  orderSplitId    String
-  customerPhone   String?
-  reason          String   // damaged | wrong_product | quality_issue | other
-  refundAmount    Float    @default(0)
-  refundStatus    String   @default("pending") // pending | refunded | denied
-  refundedAt      DateTime?
-  stockRestored   Boolean  @default(false)
-  createdAt       DateTime @default(now())
+  id            String    @id @default(cuid())
+  orderSplitId  String
+  customerPhone String?
+  reason        String // damaged | wrong_product | quality_issue | other
+  refundAmount  Float     @default(0)
+  refundStatus  String    @default("pending") // pending | refunded | denied
+  refundedAt    DateTime?
+  stockRestored Boolean   @default(false)
+  createdAt     DateTime  @default(now())
 
   @@index([orderSplitId])
 }
 
 // PRD Part 36 §3.2: Customer trust score — anti-fraud return shield
 model CustomerTrustScore {
-  id              String   @id @default(cuid())
-  customerPhone   String   @unique
-  trustScore      Float    @default(5.0) // 0-5 stars
-  totalOrders     Int      @default(0)
-  totalReturns    Int      @default(0)
-  consecutiveReturns Int   @default(0)
-  codLocked       Boolean  @default(false) // locked after 3 consecutive returns
-  lastReturnAt    DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                 String    @id @default(cuid())
+  customerPhone      String    @unique
+  trustScore         Float     @default(5.0) // 0-5 stars
+  totalOrders        Int       @default(0)
+  totalReturns       Int       @default(0)
+  consecutiveReturns Int       @default(0)
+  codLocked          Boolean   @default(false) // locked after 3 consecutive returns
+  lastReturnAt       DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   @@index([customerPhone])
 }
 
 // PRD Part 37 §3: Dual-profile switching — single phone number can be both customer and merchant
 model UserProfile {
-  id              String   @id @default(cuid())
-  phone           String   @unique // same phone for customer + merchant
-  role            String   @default("customer") // customer | merchant | dual
-  merchantId      String?  // linked Business ID if role includes merchant
-  customerName    String?
-  merchantName    String?
+  id               String    @id @default(cuid())
+  phone            String    @unique // same phone for customer + merchant
+  role             String    @default("customer") // customer | merchant | dual
+  merchantId       String? // linked Business ID if role includes merchant
+  customerName     String?
+  merchantName     String?
   // Security
-  pinHash         String?  // 4-6 digit master PIN hash
-  pinEnabled      Boolean  @default(false)
-  biometricEnabled Boolean @default(false)
+  pinHash          String? // 4-6 digit master PIN hash
+  pinEnabled       Boolean   @default(false)
+  biometricEnabled Boolean   @default(false)
   // Profile metadata
-  isSeller        Boolean  @default(false)
-  sellerSince     DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  isSeller         Boolean   @default(false)
+  sellerSince      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([phone])
 }

@@ -94,16 +94,21 @@ export function useRealtimeOrders(businessId: string | null | undefined) {
     // §NEW-ORDER: Real-time order push from the external Quick-Commerce frontend.
     socket.on('new-order', (event: NewOrderEvent) => {
       // Fetch the full order details
-      fetch('/api/customer-orders').then((r) => r.json()).then((allOrders: RealtimeOrder[]) => {
-        const newOrder = allOrders.find((o) => o.id === event.orderId)
-        if (newOrder) {
-          setRealtimeOrders((prev) => {
-            // Avoid duplicates
-            if (prev.some((o) => o.id === newOrder.id)) return prev
-            return [newOrder, ...prev]
-          })
-        }
-      })
+      // §PAGINATION: /api/customer-orders now returns { items, total, hasMore };
+      // extract `.items` defensively for backward compat with older servers.
+      fetch('/api/customer-orders')
+        .then((r) => r.json())
+        .then((res: { items?: RealtimeOrder[] } | RealtimeOrder[]) => {
+          const allOrders: RealtimeOrder[] = Array.isArray(res) ? res : (res?.items ?? [])
+          const newOrder = allOrders.find((o) => o.id === event.orderId)
+          if (newOrder) {
+            setRealtimeOrders((prev) => {
+              // Avoid duplicates
+              if (prev.some((o) => o.id === newOrder.id)) return prev
+              return [newOrder, ...prev]
+            })
+          }
+        })
 
       // §NOTIFICATION: Show toast + play sound
       toast.success('🛒 New Online Order!', {

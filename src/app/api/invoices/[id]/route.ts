@@ -3,6 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { recalculatePartyGrade } from '@/lib/grade-calculator'
 import { apiError } from '@/lib/api-error'
 import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
+import { requireRole } from '@/lib/auth/session'
 
 // GET /api/invoices/[id]
 // Security: verifies the invoice belongs to the current business.
@@ -91,6 +92,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 // DELETE /api/invoices/[id]
 // VOID/CANCEL an invoice with FULL atomic stock + balance + transaction reversal.
 //
+// §RBAC: Requires OWNER or ADMIN — voiding an invoice reverses stock, party
+// balance, and creates a reversal transaction. STAFF must not be able to void
+// invoices (cashiers could otherwise hide theft by voiding sales).
+//
 // §ATOMIC: All reversal operations (stock restore, party balance reversal,
 // reversal transaction, invoice status) happen inside a single $transaction.
 // If ANY step fails, ALL changes are rolled back — no inconsistent state.
@@ -106,6 +111,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 //   - Partial cash (amountDue < grandTotal): only the due portion reversed
 //   - Full cash (amountDue = 0): no balance change (was never owed)
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  // §RBAC: Require OWNER or ADMIN before performing any reversal logic.
+  const roleCheck = await requireRole(['OWNER', 'ADMIN'])
+  if (roleCheck instanceof NextResponse) return roleCheck
+
   const { id } = await params
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -171,18 +180,20 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       // §BALANCE-FIX: Previously only reversed for paymentMode==='credit' and
       // reversed by grandTotal. Now reverses by amountDue for ALL sales where
       // amountDue > 0 — correctly handling partial cash payments.
+      // §CONCURRENCY-FIX: Uses atomic `decrement` instead of read-then-write.
       let currentPartyBalance: number | null = null
       if (invoice.partyId && amountDue > 0) {
         const party = await tx.party.findFirst({
           where: { id: invoice.partyId, businessId: business.id },
         })
         if (party) {
-          const newBalance = party.balance.toNumber() - amountDue
-          await tx.party.updateMany({
-            where: { id: party.id, businessId: business.id },
-            data: { balance: newBalance },
+          // §ATOMIC: decrement is atomic at SQL level — safe against concurrent updates
+          const updated = await tx.party.update({
+            where: { id: party.id },
+            data: { balance: { decrement: amountDue } },
+            select: { balance: true },
           })
-          currentPartyBalance = newBalance
+          currentPartyBalance = updated.balance.toNumber()
         }
       } else if (invoice.party) {
         currentPartyBalance = invoice.party.balance.toNumber()

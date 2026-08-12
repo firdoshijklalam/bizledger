@@ -13,6 +13,13 @@ import { apiError } from '@/lib/api-error'
 
 export async function GET(req: NextRequest) {
   try {
+    // §AUTH: Require an authenticated business (any role). The GET handler
+    // previously had no auth — exposing any payment split's settlement
+    // details (commission, merchant amount, settlement status) to
+    // unauthenticated callers. Mirrors the auth posture of the POST handler.
+    const business = await getCurrentBusiness()
+    if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+
     const { searchParams } = new URL(req.url)
     const orderSplitId = searchParams.get('orderSplitId')?.trim()
 
@@ -23,8 +30,21 @@ export async function GET(req: NextRequest) {
       )
     }
 
+    // §OWNERSHIP: Verify the order split belongs to this business before
+    // serving the linked payment split.
+    const orderSplit = await db.orderSplit.findFirst({
+      where: { id: orderSplitId, businessId: business.id },
+      select: { id: true },
+    })
+    if (!orderSplit) {
+      return NextResponse.json(
+        { error: 'Payment split not found' },
+        { status: 404 }
+      )
+    }
+
     const paymentSplit = await db.paymentSplit.findFirst({
-      where: { orderSplitId },
+      where: { orderSplitId, businessId: business.id },
     })
     if (!paymentSplit) {
       return NextResponse.json(

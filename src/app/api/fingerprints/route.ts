@@ -7,6 +7,11 @@ import { apiError } from '@/lib/api-error'
 // GET    — list fingerprints for a party (?partyId=...).
 // POST   — register a fingerprint with role/linkedName/relation/scannerType.
 // DELETE — remove a fingerprint by ?id=...
+//
+// §AUTH: All handlers require an authenticated business (any role). The POST
+// handler additionally verifies the party belongs to the business. The GET
+// and DELETE handlers previously had no auth — exposing fingerprint records
+// (and allowing deletion) to unauthenticated callers.
 
 function hashFingerprint(rawHash: string): string {
   // §SECURITY: Use NEXTAUTH_SECRET from env. Non-obvious fallback if not set.
@@ -18,6 +23,12 @@ function hashFingerprint(rawHash: string): string {
 
 export async function GET(req: NextRequest) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { searchParams } = new URL(req.url)
     const partyId = searchParams.get('partyId')
     if (!partyId) {
@@ -26,8 +37,19 @@ export async function GET(req: NextRequest) {
         { status: 400 }
       )
     }
+
+    // §OWNERSHIP: Verify the party belongs to this business before listing
+    // its fingerprints.
+    const party = await db.party.findFirst({
+      where: { id: partyId, businessId: business.id },
+      select: { id: true },
+    })
+    if (!party) {
+      return NextResponse.json({ error: 'Party not found' }, { status: 404 })
+    }
+
     const records = await db.fingerprintRecord.findMany({
-      where: { partyId },
+      where: { partyId, businessId: business.id },
       orderBy: { createdAt: 'desc' },
     })
     return NextResponse.json({ count: records.length, fingerprints: records })
@@ -67,8 +89,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify party belongs to business.
-    const party = await db.party.findUnique({ where: { id: body.partyId } })
-    if (!party || party.businessId !== business.id) {
+    const party = await db.party.findFirst({ where: { id: body.partyId, businessId: business.id } })
+    if (!party) {
       return NextResponse.json({ error: 'Party not found' }, { status: 404 })
     }
 
@@ -120,6 +142,12 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    // §AUTH: Require an authenticated business (any role).
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
     if (!id) {
@@ -128,7 +156,13 @@ export async function DELETE(req: NextRequest) {
         { status: 400 }
       )
     }
-    const existing = await db.fingerprintRecord.findUnique({ where: { id } })
+
+    // §OWNERSHIP: Verify the fingerprint record belongs to this business
+    // before deleting. Previously used findUnique without businessId scoping —
+    // an unauthenticated caller could delete ANY fingerprint by id.
+    const existing = await db.fingerprintRecord.findFirst({
+      where: { id, businessId: business.id },
+    })
     if (!existing) {
       return NextResponse.json(
         { error: 'Fingerprint record not found' },

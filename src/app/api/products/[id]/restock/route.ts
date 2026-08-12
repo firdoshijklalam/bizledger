@@ -2,11 +2,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
+import { requireRole } from '@/lib/auth/session'
 
 // POST /api/products/[id]/restock — quick stock increment
 // Security: verifies the product belongs to the current business.
+// §RBAC: Requires OWNER or ADMIN — STAFF must not be able to manually
+// inflate stock levels (manual restock is an owner-controlled operation
+// because it directly affects inventory valuation and audit trail).
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §RBAC: Require OWNER or ADMIN.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const { id } = await params
     const body = await req.json()
     const addQty = Number(body.quantity)

@@ -169,7 +169,7 @@ model Party {
   gradeOverrideReason  String?
   // PRD Part 32 §3.2: AI Credit Trust Score (1-5 stars)
   creditTrustScore     Float    @default(3) // 1.0 - 5.0
-  maxCreditSuggestion  Float    @default(0) // AI-suggested max credit (₹)
+  maxCreditSuggestion  Decimal  @default(0) // AI-suggested max credit (₹)
   trustScoreUpdatedAt  DateTime?
   trustScoreReason     String?  // human-readable reason
   // §3: Cross-lingual phonetic search tags (JSON array of English phonetic variants)
@@ -429,7 +429,7 @@ model AppSettings {
   // PRD Part 32 §1: Biometric action gates config
   gateOwnerSwitch      Boolean  @default(true)  // Owner mode re-switching
   gateHighValueDiscount Boolean  @default(true)  // Discount above limit
-  gateDiscountLimit    Float    @default(5000)  // ₹ threshold for high-value discount gate
+  gateDiscountLimit    Decimal  @default(5000)  // ₹ threshold for high-value discount gate
   gateDataExport       Boolean  @default(true)  // JSON/CSV export or Telegram backup
   gateInventoryPrice   Boolean  @default(true)  // Purchase price / bulk stock edit
   gateDangerZone       Boolean  @default(true)  // Demo reset or khata delete
@@ -494,7 +494,7 @@ model DefaulterRegistry {
   fingerprintHash String?  // links to a fingerprint (if available)
   partyName       String
   partyPhone      String?
-  defaultAmount   Float    @default(0)
+  defaultAmount   Decimal  @default(0)
   merchantName    String   // merchant reporting the default
   merchantArea    String?  // local area for matching
   status          String   @default("active") // active | resolved | disputed
@@ -536,9 +536,9 @@ model CustomerOrder {
   customerLat   Float?
   customerLng   Float?
   items         String   // JSON array of {productId, name, quantity, unitPrice, total}
-  subtotal      Float    @default(0)
-  deliveryCharge Float   @default(0)
-  grandTotal    Float    @default(0)
+  subtotal      Decimal  @default(0)
+  deliveryCharge Decimal @default(0)
+  grandTotal    Decimal  @default(0)
   status        String   @default("pending")
   paymentMode   String   @default("cod")
   syncedTransactionId String?
@@ -546,7 +546,7 @@ model CustomerOrder {
   notes         String?
   source        String   @default("catalog")
   referrerBusinessId String?
-  commissionAmount Float @default(0)
+  commissionAmount Decimal @default(0)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -562,9 +562,9 @@ model CommissionLog {
   recipientBusinessId String // merchant who earned commission (referrer)
   payerBusinessId String   // merchant whose product was ordered
   customerOrderId String?
-  orderAmount     Float    @default(0)
+  orderAmount     Decimal  @default(0)
   commissionPct   Float    @default(2) // 1-3%
-  commissionAmount Float   @default(0)
+  commissionAmount Decimal   @default(0)
   status          String   @default("pending") // pending | paid
   createdAt       DateTime @default(now())
 
@@ -582,9 +582,9 @@ model SupplierCatalogItem {
   supplierId      String
   productName     String
   category        String?
-  basePrice       Float    @default(0)
-  transportFare   Float    @default(0)
-  coolieCharge    Float    @default(0)
+  basePrice       Decimal  @default(0)
+  transportFare   Decimal  @default(0)
+  coolieCharge    Decimal  @default(0)
   unit            String   @default("pcs")
   minOrderQty     Int      @default(1)
   notes           String?
@@ -608,7 +608,7 @@ model PurchaseOrder {
   supplierId    String
   poNumber      String
   status        String   @default("sent") // sent | dispatched | received | cancelled
-  totalAmount   Float    @default(0)
+  totalAmount   Decimal  @default(0)
   notes         String?
   dispatchedAt  DateTime?
   receivedAt    DateTime?
@@ -631,10 +631,10 @@ model PurchaseOrderItem {
   productName     String
   category        String?
   quantity        Int      @default(1)
-  unitPrice       Float    @default(0)
-  transportFare   Float    @default(0)
-  coolieCharge    Float    @default(0)
-  totalCost       Float    @default(0)
+  unitPrice       Decimal  @default(0)
+  transportFare   Decimal  @default(0)
+  coolieCharge    Decimal  @default(0)
+  totalCost       Decimal  @default(0)
   matchedProductId String?
 
   purchaseOrder PurchaseOrder       @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
@@ -738,8 +738,8 @@ model OrderSplit {
   items           String   // JSON array of items for this shop
   subtotal        Decimal  @default(0)
   commissionPct   Float    @default(2)
-  commissionAmount Float   @default(0)
-  merchantAmount  Float    @default(0) // subtotal - commission
+  commissionAmount Decimal   @default(0)
+  merchantAmount  Decimal  @default(0) // subtotal - commission
   status          String   @default("pending") // pending | confirmed | delivered | returned | cancelled
   deliveryOtp     String?  // 4-digit OTP for delivery verification
   otpVerifiedAt   DateTime?
@@ -756,10 +756,10 @@ model PaymentSplit {
   id              String   @id @default(cuid())
   orderSplitId    String
   businessId      String
-  totalAmount     Float    @default(0)
+  totalAmount     Decimal    @default(0)
   commissionPct   Float    @default(2)
-  commissionAmount Float   @default(0)
-  merchantAmount  Float    @default(0)
+  commissionAmount Decimal   @default(0)
+  merchantAmount  Decimal  @default(0)
   settlementStatus String  @default("pending") // pending | settled | reversed
   settledAt       DateTime?
   reversedAt      DateTime?
@@ -775,7 +775,7 @@ model ReturnRequest {
   orderSplitId    String
   customerPhone   String?
   reason          String   // damaged | wrong_product | quality_issue | other
-  refundAmount    Float    @default(0)
+  refundAmount    Decimal  @default(0)
   refundStatus    String   @default("pending") // pending | refunded | denied
   refundedAt      DateTime?
   stockRestored   Boolean  @default(false)

@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { requireRole } from '@/lib/auth/session'
 
 // /api/category-tree/[id] — update or delete a category node (PRD Part 35 §2).
 // PATCH: update name / parentId / sortOrder. Recalculates level on parent change
 //        and cascades new levels to all descendants.
 // DELETE: delete a category AND all its descendants (cascade — handled by Prisma onDelete: Cascade).
+//
+// §RBAC: Both handlers require OWNER/ADMIN. The category tree is a
+// business-wide structural configuration — STAFF must not be able to
+// reorganise or delete category nodes.
 
 // Recursively recompute descendant levels after a parent change.
 // Walks the subtree using parentId edges and updates each node's level.
@@ -48,6 +53,10 @@ async function collectDescendantIds(rootId: string): Promise<Set<string>> {
 // PATCH /api/category-tree/[id]
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §RBAC: Require OWNER or ADMIN.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const { id } = await params
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business found' }, { status: 400 })
@@ -134,6 +143,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 // DELETE /api/category-tree/[id] — cascade delete via Prisma (onDelete: Cascade on parent relation).
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §RBAC: Require OWNER or ADMIN.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const { id } = await params
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business found' }, { status: 400 })

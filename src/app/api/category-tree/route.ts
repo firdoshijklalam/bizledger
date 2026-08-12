@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { requireRole } from '@/lib/auth/session'
 
 // /api/category-tree — CRUD for the nested category tree (PRD Part 35 §2).
 // GET: return the full nested category tree for the current business.
 //      Supports `?action=seed` to seed default categories if the tree is empty.
 // POST: create a new category with `{ name, parentId? }`.
+//
+// §RBAC: POST requires OWNER/ADMIN. The category tree is a business-wide
+// structural configuration that affects product organization, sourcing, and
+// reports — STAFF must not be able to restructure it.
 
 type CategoryNode = {
   id: string
@@ -122,6 +127,10 @@ export async function GET(req: NextRequest) {
 // POST /api/category-tree — create a category
 export async function POST(req: NextRequest) {
   try {
+    // §RBAC: Require OWNER or ADMIN.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business found' }, { status: 400 })
 

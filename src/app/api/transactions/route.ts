@@ -5,30 +5,48 @@ import { generateToken, generateInvoiceNumber } from '@/lib/utils'
 import { apiError } from '@/lib/api-error'
 
 // GET /api/transactions
+// §PAGINATION: Supports ?page (1-based) + ?limit (default 50, max 200).
+// Returns { items, total, hasMore } — useFetch auto-extracts `.items`
+// for backward compatibility with existing array-typed consumers.
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const partyId = searchParams.get('partyId')
+  const page = Math.max(1, Number(searchParams.get('page')) || 1)
+  const limit = Math.min(200, Math.max(1, Number(searchParams.get('limit')) || 50))
+  const skip = (page - 1) * limit
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
-  const transactions = await db.transaction.findMany({
-    where: {
-      businessId: business.id,
-      ...(partyId ? { partyId } : {}),
-    },
-    include: { party: true },
-    orderBy: { createdAt: 'desc' },
-    take: 200,
-  })
-  return NextResponse.json(transactions)
+  const where = {
+    businessId: business.id,
+    ...(partyId ? { partyId } : {}),
+  }
+
+  const [items, total] = await Promise.all([
+    db.transaction.findMany({
+      where,
+      include: { party: true },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    db.transaction.count({ where }),
+  ])
+  return NextResponse.json({ items, total, hasMore: skip + limit < total })
 }
 
 // POST /api/transactions
+// §CONCURRENCY-FIX: Uses Prisma's atomic `increment`/`decrement` operators which
+// translate to `UPDATE ... SET balance = balance ± amount` at the SQL level.
+// This is atomic and safe against concurrent payments — no lost updates.
+// Previously used read-then-write (fetch balance, compute new, write back) which
+// had a race condition: two concurrent payments could both read the same balance,
+// compute different new balances, and the last write wins.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const business = await getCurrentBusiness()
-    if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
+    if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
     // §INPUT-VALIDATION: Amount must be a positive number
     const amount = Number(body.amount)
@@ -41,21 +59,36 @@ export async function POST(req: NextRequest) {
     }
     const partyId = body.partyId
 
-    // Update party balance — §2 FIX: default to 0 instead of null for walk-in customers
-    // §OWNERSHIP-CHECK: Verify the party belongs to the current business before modifying.
+    // §ATOMIC-BALANCE: Use atomic increment/decrement inside a transaction.
+    // credit (money in) reduces receivable balance → decrement
+    // debit (money out) increases payable balance → increment
+    // sale type does not affect balance (handled via invoice)
     let balanceAfter: number = 0
+    let partyExists = false
+
     if (partyId) {
+      // Verify ownership first (read-only check)
       const party = await db.party.findFirst({ where: { id: partyId, businessId: business.id } })
       if (party) {
-        // credit (money in) reduces receivable balance; debit (money out) increases payable
-        const newBalance =
-          body.type === 'credit'
-            ? party.balance.toNumber() - amount
-            : body.type === 'debit'
-            ? party.balance.toNumber() + amount
-            : party.balance.toNumber()
-        await db.party.updateMany({ where: { id: partyId, businessId: business.id }, data: { balance: newBalance } })
-        balanceAfter = newBalance
+        partyExists = true
+        // §ATOMIC: Use $transaction with atomic increment/decrement.
+        // The UPDATE is atomic at the SQL level — concurrent payments are safe.
+        const result = await db.$transaction(async (tx) => {
+          // Atomically update balance
+          const updated = await tx.party.update({
+            where: { id: partyId },
+            data: {
+              balance: body.type === 'credit'
+                ? { decrement: amount }
+                : body.type === 'debit'
+                ? { increment: amount }
+                : {},
+            },
+            select: { balance: true },
+          })
+          return updated.balance.toNumber()
+        })
+        balanceAfter = result
       }
     }
 
@@ -73,7 +106,7 @@ export async function POST(req: NextRequest) {
     })
 
     // Trigger grade recalculation for this party (fire-and-forget)
-    if (partyId) {
+    if (partyId && partyExists) {
       recalculatePartyGrade(partyId).catch((e) => console.error('Grade recalc error:', e))
     }
 

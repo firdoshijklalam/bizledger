@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
 import { apiError } from '@/lib/api-error'
+import { requireRole } from '@/lib/auth/session'
 
 // /api/products/[id] — CRUD for a single product.
 // Security: all operations verify the product belongs to the current business.
+// §RBAC: PUT (adjust stock, prices, retail config) and DELETE require
+// OWNER/ADMIN. STAFF users must not be able to adjust stock levels (manual
+// restock is owner-controlled), alter prices, or delete products.
 
 async function getBusinessId() {
   const business = await getCurrentBusiness()
@@ -39,6 +43,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 // PUT /api/products/[id]
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §RBAC: Require OWNER or ADMIN — STAFF must not adjust stock or alter prices.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const { id } = await params
     const businessId = await getBusinessId()
     if (!businessId) return NextResponse.json({ error: 'No business' }, { status: 400 })
@@ -101,6 +109,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 // DELETE /api/products/[id]
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §RBAC: Require OWNER or ADMIN — destructive operation.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const { id } = await params
     const businessId = await getBusinessId()
     if (!businessId) return NextResponse.json({ error: 'No business' }, { status: 400 })

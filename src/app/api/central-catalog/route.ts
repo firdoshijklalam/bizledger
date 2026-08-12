@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
+// §VERCEL-LIMIT: Allow up to 20s for multi-shop geo-query aggregation
+export const maxDuration = 20
+
 // GET /api/central-catalog — PRD Part 36 §1.1
 // Merged catalog from ALL shops within the customer's geo-fence.
 // Query params:

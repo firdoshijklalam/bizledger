@@ -16,9 +16,28 @@ function boundedRandom(min: number, max: number): number {
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §AUTH: Require an authenticated business (any role). The GET handler
+    // previously had no auth — exposing any product's latest media asset
+    // (including processed image URLs, mesh data, quality scores) to
+    // unauthenticated callers. Mirrors the auth posture of the POST handler.
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
     const { id } = await params
+
+    // §OWNERSHIP: findFirst scoped to businessId — never findUnique by id alone.
+    const product = await db.product.findFirst({
+      where: { id, businessId: business.id },
+      select: { id: true },
+    })
+    if (!product) {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
+
     const latest = await db.productMediaAsset.findFirst({
-      where: { productId: id },
+      where: { productId: id, businessId: business.id },
       orderBy: { createdAt: 'desc' },
     })
     return NextResponse.json({ asset: latest })

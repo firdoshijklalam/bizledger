@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import ZAI from 'z-ai-web-dev-sdk'
 import { getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { checkRateLimit, getClientId, RATE_LIMITS } from '@/lib/rate-limit'
+
+// §VERCEL-LIMIT: Allow up to 30s for VLM OCR processing
+export const maxDuration = 30
 
 // POST /api/ocr — scan a bill/receipt image and extract structured data using VLM
 // Body: { image: "data:image/jpeg;base64,..." }
@@ -14,6 +18,28 @@ export async function POST(req: NextRequest) {
     const business = await getCurrentBusiness()
     if (!business) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+
+    // §RATE-LIMIT: 5 OCR requests per minute per user (expensive VLM call).
+    const clientId = getClientId(req, business.id)
+    const rateResult = await checkRateLimit(
+      clientId,
+      RATE_LIMITS.OCR.name,
+      RATE_LIMITS.OCR.limit,
+      RATE_LIMITS.OCR.window
+    )
+    if (!rateResult.success) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Please try again later.' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(Math.ceil(rateResult.reset / 1000) || 60),
+            'X-RateLimit-Limit': String(rateResult.limit),
+            'X-RateLimit-Remaining': String(rateResult.remaining),
+          },
+        }
+      )
     }
 
     const body = await req.json()

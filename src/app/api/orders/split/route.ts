@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { checkRateLimit, getClientId, RATE_LIMITS } from '@/lib/rate-limit'
 
 // POST /api/orders/split — PRD Part 36 §2.1
 // Auto-splits a global cart order by shop.
@@ -39,6 +40,29 @@ function generateOtp(): string {
 
 export async function POST(req: NextRequest) {
   try {
+    // §RATE-LIMIT: 10 split orders per hour per IP — prevents spam multi-shop
+    // orders from anonymous marketplace clients before any DB work runs.
+    const clientId = getClientId(req)
+    const rateResult = await checkRateLimit(
+      clientId,
+      RATE_LIMITS.PUBLIC_ORDER.name,
+      RATE_LIMITS.PUBLIC_ORDER.limit,
+      RATE_LIMITS.PUBLIC_ORDER.window
+    )
+    if (!rateResult.success) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Please try again later.' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(Math.ceil(rateResult.reset / 1000) || 60),
+            'X-RateLimit-Limit': String(rateResult.limit),
+            'X-RateLimit-Remaining': String(rateResult.remaining),
+          },
+        }
+      )
+    }
+
     const body = await req.json()
     const customerName = String(body.customerName || 'Walk-in Customer')
     const customerPhone = body.customerPhone ? String(body.customerPhone) : null

@@ -4,12 +4,20 @@ import { generateToken, generateInvoiceNumber } from '@/lib/utils'
 import { recalculatePartyGrade } from '@/lib/grade-calculator'
 import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
 
+// §VERCEL-LIMIT: Allow up to 20s for invoice creation (stock validation + transaction with many items)
+export const maxDuration = 20
+
 // GET /api/invoices — optimized with pagination
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const partyId = searchParams.get('partyId')
   const limit = Math.min(Number(searchParams.get('limit')) || 50, 200)
-  const offset = Number(searchParams.get('offset')) || 0
+  // §PAGINATION: ?page (1-based) is an alias for ?offset (offset = (page-1) × limit).
+  // If both are provided, ?page wins.
+  const pageParam = searchParams.get('page')
+  const offset = pageParam
+    ? Math.max(0, (Math.max(1, Number(pageParam)) - 1) * limit)
+    : Number(searchParams.get('offset')) || 0
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 

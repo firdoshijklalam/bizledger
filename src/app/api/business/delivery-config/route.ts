@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { requireRole } from '@/lib/auth/session'
 
 // GET /api/business/delivery-config — owner: current delivery radius, location, serviceable areas.
 // PUT /api/business/delivery-config — owner: update delivery radius / lat / lng / serviceableAreas.
+// §RBAC: PUT requires OWNER/ADMIN. Delivery configuration (radius, lat/lng,
+// serviceable areas) controls marketplace reach — a STAFF user must not be
+// able to silently shrink or extend the delivery zone.
 
 export async function GET() {
   try {
@@ -32,6 +36,10 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
+    // §RBAC: Require OWNER or ADMIN.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const body = await req.json()
     const existing = await getCurrentBusiness()
     if (!existing) {

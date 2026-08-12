@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
 import { apiError } from '@/lib/api-error'
+import { requireRole } from '@/lib/auth/session'
 
 // /api/parties/[id] — CRUD for a single party.
 // Security: all operations verify the party belongs to the current business.
+// §RBAC: PUT (modify party — name, credit limit, grade override) and DELETE
+// (remove party ledger) require OWNER/ADMIN. STAFF must not be able to alter
+// credit limits (would allow self-approving credit) or wipe a customer ledger.
 
 async function getBusinessId() {
   const business = await getCurrentBusiness()
@@ -56,6 +60,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 // PUT /api/parties/[id]
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §RBAC: Require OWNER or ADMIN — STAFF must not modify credit limits or grades.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const { id } = await params
     const businessId = await getBusinessId()
     if (!businessId) return NextResponse.json({ error: 'No business' }, { status: 400 })
@@ -105,6 +113,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 // DELETE /api/parties/[id]
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    // §RBAC: Require OWNER or ADMIN — destructive operation.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const { id } = await params
     const businessId = await getBusinessId()
     if (!businessId) return NextResponse.json({ error: 'No business' }, { status: 400 })

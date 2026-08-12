@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     const catA = (targetCategory||'').trim().toLowerCase(), catB = (it.category||'').trim().toLowerCase()
     if (catA && catB && catA !== catB) continue
     const s = sMap.get(it.supplierId)
-    const landed = calcLandedCost({ basePrice: it.basePrice, transportFare: it.transportFare, coolieCharge: it.coolieCharge, quantity })
+    const landed = calcLandedCost({ basePrice: it.basePrice.toNumber(), transportFare: it.transportFare.toNumber(), coolieCharge: it.coolieCharge.toNumber(), quantity })
     matches.push({ catalogItemId: it.id, supplierId: it.supplierId, supplierName: s?.name || 'Unknown', supplierPhone: s?.phone || null, basePrice: it.basePrice, transportFare: it.transportFare, coolieCharge: it.coolieCharge, perUnitLandedCost: landed.perUnitCost, totalCostForQty: landed.totalCost, isBestChoice: false, similarity: Math.round(sim*100)/100 })
   }
   matches.sort((a, b) => a.perUnitLandedCost - b.perUnitLandedCost)

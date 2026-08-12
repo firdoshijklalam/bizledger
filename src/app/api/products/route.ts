@@ -5,14 +5,19 @@ import { generateSearchTags, phoneticMatch } from '@/lib/transliteration'
 import { apiError } from '@/lib/api-error'
 
 // GET /api/products — optimized with pagination + field selection
-// Supports ?q=search&phonetic=true&lowStock=true&limit=50&offset=0
+// Supports ?q=search&phonetic=true&lowStock=true&limit=50&offset=0&page=1
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const lowStock = searchParams.get('lowStock') === 'true'
   const q = searchParams.get('q') || ''
   const usePhonetic = searchParams.get('phonetic') === 'true'
   const limit = Math.min(Number(searchParams.get('limit')) || 50, 200)
-  const offset = Number(searchParams.get('offset')) || 0
+  // §PAGINATION: ?page (1-based) is an alias for ?offset (offset = (page-1) × limit).
+  // If both are provided, ?page wins.
+  const pageParam = searchParams.get('page')
+  const offset = pageParam
+    ? Math.max(0, (Math.max(1, Number(pageParam)) - 1) * limit)
+    : Number(searchParams.get('offset')) || 0
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 

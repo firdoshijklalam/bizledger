@@ -11,7 +11,12 @@ export async function GET(req: NextRequest) {
   const q = searchParams.get('q') || ''
   const usePhonetic = searchParams.get('phonetic') === 'true'
   const limit = Math.min(Number(searchParams.get('limit')) || 50, 200)
-  const offset = Number(searchParams.get('offset')) || 0
+  // §PAGINATION: ?page (1-based) is an alias for ?offset (offset = (page-1) × limit).
+  // If both are provided, ?page wins.
+  const pageParam = searchParams.get('page')
+  const offset = pageParam
+    ? Math.max(0, (Math.max(1, Number(pageParam)) - 1) * limit)
+    : Number(searchParams.get('offset')) || 0
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 

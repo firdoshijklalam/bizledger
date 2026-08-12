@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { requireRole } from '@/lib/auth/session'
 
 // PRD Part 37 §1.1 — Merchant Control Toggles
 // GET  /api/settings/toggles
@@ -13,6 +14,11 @@ import { apiError } from '@/lib/api-error'
 //     • If offlineOnlyMode = true  → force onlineSalesEnabled = false (no online sales).
 //     • If onlineSalesEnabled = true → force offlineOnlyMode = false.
 //   Returns the updated toggle states.
+//
+// §RBAC: PUT requires OWNER/ADMIN. These toggles control whether the
+// business participates in the public marketplace (onlineSalesEnabled /
+// offlineOnlyMode) and whether cloud sync is active — a STAFF user must not
+// be able to take the business offline or alter sync behavior.
 
 async function getOrCreateSettings(businessId: string) {
   const existing = await db.appSettings.findUnique({ where: { businessId } })
@@ -41,6 +47,10 @@ export async function GET() {
 
 export async function PUT(req: NextRequest) {
   try {
+    // §RBAC: Require OWNER or ADMIN.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const business = await getCurrentBusiness()
     if (!business) {
       return NextResponse.json({ error: 'No business found' }, { status: 400 })

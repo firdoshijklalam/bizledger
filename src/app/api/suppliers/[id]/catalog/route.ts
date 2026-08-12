@@ -41,9 +41,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // Resolve prices for each catalog item
   const resolved = await Promise.all(
     items.map(async (it) => {
-      const resolved = await resolveCatalogPrice(it.id, buyerId, buyerGroup, it.basePrice)
+      const resolved = await resolveCatalogPrice(it.id, buyerId, buyerGroup, it.basePrice.toNumber())
       const effectiveBase = resolved.price
-      const landed = effectiveBase + it.transportFare + it.coolieCharge
+      const landed = effectiveBase + it.transportFare.toNumber() + it.coolieCharge.toNumber()
       return {
         ...it,
         supplierName: supplier?.name,
@@ -52,7 +52,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         defaultBasePrice: it.basePrice,      // original kept for reference
         priceSource: resolved.source,        // 'buyer' | 'group' | 'default'
         perUnitLandedCost: landed,
-        originalLandedCost: it.basePrice + it.transportFare + it.coolieCharge,
+        originalLandedCost: it.basePrice.toNumber() + it.transportFare.toNumber() + it.coolieCharge.toNumber(),
       }
     })
   )

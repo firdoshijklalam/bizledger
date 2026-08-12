@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { requireRole } from '@/lib/auth/session'
 
 // GET /api/app-settings
 export async function GET() {
@@ -15,8 +16,15 @@ export async function GET() {
 }
 
 // PUT /api/app-settings
+// §RBAC: Modifying app settings (PIN, biometric gates, invoice prefix,
+// external scanner, defaulter registry) is an OWNER/ADMIN action. STAFF
+// must not be able to flip these toggles or change the invoice prefix
+// (which is used to generate sequential invoice numbers).
 export async function PUT(req: NextRequest) {
   try {
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
     const body = await req.json()
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })

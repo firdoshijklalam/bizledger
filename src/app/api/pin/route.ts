@@ -10,6 +10,7 @@ import {
   getLockoutMessage,
   getClientIP,
 } from '@/lib/security'
+import { checkRateLimit, getClientId, RATE_LIMITS } from '@/lib/rate-limit'
 
 function hashPin(pin: string): string {
   // §SECURITY: Use NEXTAUTH_SECRET from env. If not set, use a non-obvious
@@ -30,6 +31,30 @@ export async function POST(req: NextRequest) {
     // accessible without authentication. businessId comes from session.
     const user = await requireAuth()
     if (user instanceof NextResponse) return user
+
+    // §RATE-LIMIT: 5 PIN attempts per 15 minutes per IP. This is a distributed
+    // (Redis-backed) guard layered on top of the in-memory brute-force protection
+    // below — it prevents a distributed attacker from bypassing per-instance state.
+    const pinClientId = getClientId(req)
+    const pinRateResult = await checkRateLimit(
+      pinClientId,
+      RATE_LIMITS.PIN.name,
+      RATE_LIMITS.PIN.limit,
+      RATE_LIMITS.PIN.window
+    )
+    if (!pinRateResult.success) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Please try again later.' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(Math.ceil(pinRateResult.reset / 1000) || 60),
+            'X-RateLimit-Limit': String(pinRateResult.limit),
+            'X-RateLimit-Remaining': String(pinRateResult.remaining),
+          },
+        }
+      )
+    }
 
     const body = await req.json()
     const businessId = user.businessId
