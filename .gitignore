@@ -69,5 +69,9 @@ start-server*
 *.png
 fab-*.png
 data-*.png
+# §PWA-ICONS: Exception — PWA icons must be committed (required for installability)
+!public/icon-192.png
+!public/icon-512.png
+!public/apple-touch-icon.png
 tool-results/
 .github/workflows/ci.yml
