@@ -22,7 +22,7 @@ export async function GET() {
       name: p.name,
       unit: p.unit,
       totalSold: p.invoiceItems.reduce((s, it) => s + it.quantity, 0),
-      revenue: p.invoiceItems.reduce((s, it) => s + it.total, 0),
+      revenue: p.invoiceItems.reduce((s, it) => s + it.total.toNumber(), 0),
       stock: p.stock,
     }))
     .filter((p) => p.totalSold > 0)
@@ -31,8 +31,8 @@ export async function GET() {
 
   // Top debtors
   const topDebtors = parties
-    .filter((p) => p.balance > 0)
-    .sort((a, b) => b.balance - a.balance)
+    .filter((p) => p.balance.toNumber() > 0)
+    .sort((a, b) => b.balance.toNumber() - a.balance.toNumber())
     .slice(0, 5)
     .map((p) => ({ id: p.id, name: p.name, balance: p.balance, grade: p.qualityGrade }))
 
@@ -46,28 +46,28 @@ export async function GET() {
   const now = new Date()
   const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
   const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const thisMonthRevenue = invoices.filter((i) => new Date(i.createdAt) >= thisMonthStart).reduce((s, i) => s + i.grandTotal, 0)
+  const thisMonthRevenue = invoices.filter((i) => new Date(i.createdAt) >= thisMonthStart).reduce((s, i) => s + i.grandTotal.toNumber(), 0)
   const lastMonthRevenue = invoices
     .filter((i) => {
       const d = new Date(i.createdAt)
       return d >= lastMonthStart && d < thisMonthStart
     })
-    .reduce((s, i) => s + i.grandTotal, 0)
+    .reduce((s, i) => s + i.grandTotal.toNumber(), 0)
   const revenueGrowth = lastMonthRevenue > 0 ? Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100) : (thisMonthRevenue > 0 ? 100 : 0)
 
   // Payment collection rate
-  const totalBilled = invoices.reduce((s, i) => s + i.grandTotal, 0)
-  const totalCollected = invoices.reduce((s, i) => s + i.amountPaid, 0)
+  const totalBilled = invoices.reduce((s, i) => s + i.grandTotal.toNumber(), 0)
+  const totalCollected = invoices.reduce((s, i) => s + i.amountPaid.toNumber(), 0)
   const collectionRate = totalBilled > 0 ? Math.round((totalCollected / totalBilled) * 100) : 0
 
   // Overdue invoices
-  const overdueInvoices = invoices.filter((i) => i.status !== 'paid' && i.amountDue > 0)
+  const overdueInvoices = invoices.filter((i) => i.status !== 'paid' && i.amountDue.toNumber() > 0)
 
   // Slow-moving products (no sales in 30 days but have stock)
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000)
   const slowMoving = products
     .filter((p) => p.stock > 0 && !p.invoiceItems.some((it) => new Date(it.invoice.createdAt) >= thirtyDaysAgo))
-    .map((p) => ({ id: p.id, name: p.name, stock: p.stock, stockValue: p.stock * p.purchasePrice }))
+    .map((p) => ({ id: p.id, name: p.name, stock: p.stock, stockValue: p.stock * p.purchasePrice.toNumber() }))
     .sort((a, b) => b.stockValue - a.stockValue)
 
   return NextResponse.json({
@@ -82,7 +82,7 @@ export async function GET() {
     },
     collectionRate,
     overdueCount: overdueInvoices.length,
-    overdueAmount: overdueInvoices.reduce((s, i) => s + i.amountDue, 0),
+    overdueAmount: overdueInvoices.reduce((s, i) => s + i.amountDue.toNumber(), 0),
     slowMoving,
     summary: {
       totalParties: parties.length,

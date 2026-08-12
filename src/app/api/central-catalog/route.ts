@@ -166,13 +166,13 @@ export async function GET(req: NextRequest) {
         id: p.id,
         name: p.name,
         category: p.category || 'General',
-        salePrice: p.salePrice,
-        mrp: p.mrp,
+        salePrice: p.salePrice.toNumber(),
+        mrp: p.mrp ? p.mrp.toNumber() : null,
         unit: p.unit,
         stock: p.stock,
         retailEnabled: p.retailEnabled,
         retailUnit: p.retailUnit,
-        retailSalePrice: p.retailSalePrice,
+        retailSalePrice: p.retailSalePrice ? p.retailSalePrice.toNumber() : null,
         description: p.description,
         storeSlug: meta.storeSlug,
         businessId: p.businessId,
@@ -180,7 +180,7 @@ export async function GET(req: NextRequest) {
         isSponsored: meta.isSponsored,
         tier: isTop ? 'top' : 'bottom',
         shopName: meta.shopName,
-        _sortPrice: p.salePrice,
+        _sortPrice: p.salePrice.toNumber(),
       }
     })
 

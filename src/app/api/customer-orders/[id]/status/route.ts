@@ -90,7 +90,7 @@ async function syncCompletedOrder(order: any, businessId: string) {
     where: {
       businessId,
       OR: [
-        { name: { equals: order.customerName, mode: 'insensitive' } },
+        { name: { equals: order.customerName } },
         ...(order.customerPhone ? [{ phone: order.customerPhone }] : []),
       ],
     },

@@ -70,7 +70,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if ('amountPaid' in updateData || 'amountDue' in updateData) {
       const paid = Number(updateData.amountPaid ?? existing.amountPaid)
       const total = existing.grandTotal
-      const due = Math.max(0, total - paid)
+      const due = Math.max(0, total.toNumber() - paid)
       updateData.amountPaid = paid
       updateData.amountDue = due
       updateData.status = due <= 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid'
@@ -144,7 +144,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       })
       if (party) {
         // Credit sale increased balance by grandTotal; reverse it.
-        const newBalance = party.balance - invoice.grandTotal
+        const newBalance = party.balance.toNumber() - invoice.grandTotal.toNumber()
         await db.party.updateMany({
           where: { id: party.id, businessId: business.id },
           data: { balance: newBalance },

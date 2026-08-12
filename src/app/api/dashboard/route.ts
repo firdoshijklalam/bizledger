@@ -237,7 +237,7 @@ export async function GET(req: NextRequest) {
     const d = new Date()
     d.setMonth(d.getMonth() - i)
     const pastInvoices = invoices.filter((inv) => new Date(inv.createdAt) <= d)
-    const soldValue = pastInvoices.reduce((s, inv) => s + (inv.items?.reduce((ss, it) => ss + it.total, 0) || 0), 0)
+    const soldValue = pastInvoices.reduce((s, inv) => s + (inv.items?.reduce((ss, it) => ss + num(it.total), 0) || 0), 0)
     const trendValue = Math.max(0, inventoryValue + soldValue * 0.1 - i * 500)
     inventoryTrend.push({
       month: d.toLocaleDateString('en-IN', { month: 'short' }),

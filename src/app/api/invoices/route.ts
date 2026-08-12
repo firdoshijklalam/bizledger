@@ -100,6 +100,20 @@ export async function POST(req: NextRequest) {
     // from the product record. For now, we accept client-provided unitPrice
     // (POS allows custom pricing), but the TOTALS are always recalculated.
 
+    // §PRODUCT-NAME: Fetch product names from DB — the InvoiceItem.name field
+    // is required by the schema, but the client does not send it. We fetch
+    // the name from the product record (business-scoped for ownership safety)
+    // so the invoice item has a durable label even if the product is later
+    // renamed or deleted.
+    const _productIds = items.map((i: any) => i.productId).filter(Boolean)
+    const _products = _productIds.length > 0
+      ? await db.product.findMany({
+          where: { id: { in: _productIds }, businessId: business.id },
+          select: { id: true, name: true },
+        })
+      : []
+    const productNameMap = Object.fromEntries(_products.map((p) => [p.id, p.name]))
+
     // §STEP-1: Calculate per-item line totals (server-authoritative)
     const serverItems = items.map((i: any) => {
       const qty = Number(i.quantity)
@@ -107,7 +121,12 @@ export async function POST(req: NextRequest) {
       const itemDiscount = Number(i.discount) || 0
       const gstRate = Math.min(100, Math.max(0, Number(i.gstRate) || 0))
       const lineTotal = Math.max(0, qty * unitPrice - itemDiscount)
-      return { ...i, _serverTotal: lineTotal, _serverGstRate: gstRate }
+      return {
+        ...i,
+        _serverTotal: lineTotal,
+        _serverGstRate: gstRate,
+        _serverName: i.name || (i.productId ? productNameMap[i.productId] : undefined) || 'Unnamed Product',
+      }
     })
 
     // §STEP-2: Calculate subtotal (server-authoritative)
@@ -230,7 +249,7 @@ export async function POST(req: NextRequest) {
           items: {
             create: serverItems.map((i: any) => ({
               productId: i.productId || null,
-              name: i.name,
+              name: i._serverName, // §PRODUCT-NAME: from DB (server-authoritative)
               quantity: Number(i.quantity),
               unitPrice: Number(i.unitPrice),
               discount: Number(i.discount) || 0,
@@ -307,14 +326,21 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 3. Update party balance if credit
-      // §OWNERSHIP: Party ownership was verified BEFORE the transaction (line 148-156).
-      // This update is safe because we already confirmed the party belongs to this business.
-      // Using updateMany with businessId as an extra safety net.
-      if (body.partyId && body.paymentMode === 'credit') {
+      // 3. Update party balance for the UNPAID portion
+      // §BALANCE-FIX: The party balance must reflect the amount the customer
+      // still owes (amountDue), regardless of paymentMode. Previously this
+      // only ran for paymentMode==='credit' — which meant partial cash
+      // payments (amountPaid < grandTotal) left the customer's balance at 0
+      // even though they owed amountDue. Now we update by amountDue:
+      //   - Credit sale (amountPaid=0): amountDue=grandTotal → balance += grandTotal
+      //   - Partial cash (amountPaid<grandTotal): balance += amountDue
+      //   - Full cash (amountPaid=grandTotal): amountDue=0 → no change
+      // §OWNERSHIP: Party ownership verified BEFORE the transaction. Using
+      // updateMany with businessId as an extra safety net.
+      if (body.partyId && amountDue > 0) {
         await tx.party.updateMany({
           where: { id: body.partyId, businessId: business.id },
-          data: { balance: { increment: grandTotal } },
+          data: { balance: { increment: amountDue } },
         })
       }
 

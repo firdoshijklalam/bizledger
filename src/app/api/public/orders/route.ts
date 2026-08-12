@@ -90,9 +90,9 @@ export async function POST(req: NextRequest) {
       }
 
       // Use the product's actual price as the source of truth
-      const correctPrice = product.retailEnabled && product.retailSalePrice
+      const correctPrice = (product.retailEnabled && product.retailSalePrice
         ? product.retailSalePrice
-        : product.salePrice
+        : product.salePrice).toNumber()
       const itemTotal = correctPrice * item.quantity
       subtotal += itemTotal
 

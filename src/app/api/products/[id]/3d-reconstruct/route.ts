@@ -4,7 +4,7 @@
 // GET: return the latest media asset for the product.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -46,10 +46,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'Product not found' }, { status: 404 })
     }
 
-    // 2. Single-tenant dev: first business is current
-    const business = await db.business.findFirst({ orderBy: { createdAt: 'asc' } })
+    // 2. §AUTH: Use session-authenticated business, not a hardcoded fallback.
+    const business = await getCurrentBusiness()
     if (!business) {
-      return NextResponse.json({ error: 'No business found' }, { status: 400 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // 3. Resolve input payload

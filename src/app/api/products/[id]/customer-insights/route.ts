@@ -87,7 +87,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const existing = partyMap.get(party.id)
     if (existing) {
       existing.totalQuantity += item.quantity
-      existing.totalSpend += item.total
+      existing.totalSpend += item.total.toNumber()
       existing.purchaseCount += 1
       if (item.invoice.createdAt < new Date(existing.firstPurchase)) {
         existing.firstPurchase = item.invoice.createdAt.toISOString()
@@ -101,7 +101,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         partyName: party.name,
         partyPhone: party.phone,
         totalQuantity: item.quantity,
-        totalSpend: item.total,
+        totalSpend: item.total.toNumber(),
         purchaseCount: 1,
         firstPurchase: item.invoice.createdAt.toISOString(),
         lastPurchase: item.invoice.createdAt.toISOString(),

@@ -50,10 +50,10 @@ export async function POST(req: NextRequest) {
         // credit (money in) reduces receivable balance; debit (money out) increases payable
         const newBalance =
           body.type === 'credit'
-            ? party.balance - amount
+            ? party.balance.toNumber() - amount
             : body.type === 'debit'
-            ? party.balance + amount
-            : party.balance
+            ? party.balance.toNumber() + amount
+            : party.balance.toNumber()
         await db.party.updateMany({ where: { id: partyId, businessId: business.id }, data: { balance: newBalance } })
         balanceAfter = newBalance
       }

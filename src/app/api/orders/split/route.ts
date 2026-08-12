@@ -146,7 +146,7 @@ export async function POST(req: NextRequest) {
           const isLooseOrder =
             product.retailEnabled &&
             product.retailSalePrice != null &&
-            Math.abs(Number(it.unitPrice) - product.retailSalePrice) < 0.01
+            Math.abs(Number(it.unitPrice) - product.retailSalePrice.toNumber()) < 0.01
 
           if (isLooseOrder && product.conversionFactor) {
             let currentLoose = product.looseStock || 0

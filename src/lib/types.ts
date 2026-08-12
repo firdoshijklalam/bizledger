@@ -72,6 +72,8 @@ export interface Party {
   gradeOverrideReason?: string | null
   // §3: phonetic search tags (JSON array string from transliteration)
   searchTags?: string | null
+  // §DYNAMIC-PRICING: tier label for group-based custom pricing
+  buyerGroup?: string | null
   createdAt: string
   updatedAt: string
 }

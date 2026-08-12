@@ -53,11 +53,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // Otherwise, use wholesalePrice (legacy behavior).
   let fallback: number
   if (mode === 'sale') {
-    fallback = product.salePrice ?? product.wholesalePrice ?? 0
+    fallback = product.salePrice?.toNumber() ?? product.wholesalePrice?.toNumber() ?? 0
   } else if (mode === 'mrp') {
-    fallback = product.mrp ?? product.salePrice ?? 0
+    fallback = product.mrp?.toNumber() ?? product.salePrice?.toNumber() ?? 0
   } else if (mode === 'wholesale') {
-    fallback = product.wholesalePrice ?? product.salePrice ?? 0
+    fallback = product.wholesalePrice?.toNumber() ?? product.salePrice?.toNumber() ?? 0
   } else if (mode === 'retail-sale') {
     // §RETAIL-ISOLATION: Retail sale fallback is the product's retailSalePrice
     fallback = (product as any).retailSalePrice ?? product.salePrice ?? 0
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // §RETAIL-ISOLATION: Retail MRP fallback is the product's retailMrp
     fallback = (product as any).retailMrp ?? product.mrp ?? 0
   } else {
-    fallback = product.wholesalePrice ?? product.salePrice ?? 0
+    fallback = product.wholesalePrice?.toNumber() ?? product.salePrice?.toNumber() ?? 0
   }
 
   const resolved = await resolveProductPrice(id, buyerId, buyerGroup, fallback, mode)

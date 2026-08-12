@@ -98,26 +98,26 @@ export async function GET(req: NextRequest) {
     })
 
     // ---- Aggregate ----
-    const grossSales = invoices.reduce((s, i) => s + (i.grandTotal || 0), 0)
-    const netSales = grossSales - invoices.reduce((s, i) => s + (i.discountAmount || 0), 0)
+    const grossSales = invoices.reduce((s, i) => s + (i.grandTotal?.toNumber() ?? 0), 0)
+    const netSales = grossSales - invoices.reduce((s, i) => s + (i.discountAmount?.toNumber() ?? 0), 0)
 
     // Cash/UPI received: from invoices' paymentMode + amountPaid
     const byPaymentMode = { cash: 0, upi: 0, credit: 0, cheque: 0 }
     for (const inv of invoices) {
       const mode = (inv.paymentMode || 'cash') as keyof typeof byPaymentMode
-      if (mode in byPaymentMode) byPaymentMode[mode] += inv.amountPaid || 0
+      if (mode in byPaymentMode) byPaymentMode[mode] += (inv.amountPaid?.toNumber() ?? 0)
     }
 
     // Credit given today = invoices where paymentMode = credit (the due portion)
     const creditGiven = invoices
       .filter((i) => i.paymentMode === 'credit')
-      .reduce((s, i) => s + (i.amountDue || 0), 0)
+      .reduce((s, i) => s + (i.amountDue?.toNumber() ?? 0), 0)
 
     // Due collected today = transactions type=credit (money in) — these are
     // "Payment In" / due collection receipts, NOT new product sales.
     const dueCollected = transactions
       .filter((t) => t.type === 'credit')
-      .reduce((s, t) => s + (t.amount || 0), 0)
+      .reduce((s, t) => s + (t.amount?.toNumber() ?? 0), 0)
 
     // Cash/UPI received also includes due-collection transactions.
     // We approximate by adding due-collected transactions to cash (since
@@ -130,7 +130,7 @@ export async function GET(req: NextRequest) {
     const byCategory: Record<string, number> = {}
     for (const t of transactions) {
       const cat = t.category || (t.type === 'credit' ? 'Payment In' : t.type === 'debit' ? 'Payment Out' : t.type)
-      byCategory[cat] = (byCategory[cat] || 0) + (t.amount || 0)
+      byCategory[cat] = (byCategory[cat] || 0) + (t.amount?.toNumber() ?? 0)
     }
 
     return NextResponse.json({

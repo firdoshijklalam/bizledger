@@ -6,6 +6,7 @@
  * These tests verify the invoice calculation logic WITHOUT a database
  * connection — they test the mathematical formulas directly.
  */
+export {}
 
 interface InvoiceItem {
   total: number

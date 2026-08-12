@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const refundAmount = orderSplit.subtotal
+    const refundAmount = orderSplit.subtotal.toNumber()
     const now = new Date()
 
     // 1. Create the ReturnRequest.
@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
         const isLooseOrder =
           product.retailEnabled &&
           product.retailSalePrice != null &&
-          Math.abs(Number(it.unitPrice) - product.retailSalePrice) < 0.01
+          Math.abs(Number(it.unitPrice) - product.retailSalePrice.toNumber()) < 0.01
 
         if (isLooseOrder) {
           // Restore loose stock first; if loose stock exceeds one bulk unit,

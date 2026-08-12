@@ -4,7 +4,7 @@
 // POST:   create a new media asset record (manual uploads / internal use).
 
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -31,10 +31,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'Product not found' }, { status: 404 })
     }
 
-    // Single-tenant dev: first business
-    const business = await db.business.findFirst({ orderBy: { createdAt: 'asc' } })
+    // §AUTH: Use session-authenticated business, not a hardcoded fallback.
+    const business = await getCurrentBusiness()
     if (!business) {
-      return NextResponse.json({ error: 'No business found' }, { status: 400 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const asset = await db.productMediaAsset.create({

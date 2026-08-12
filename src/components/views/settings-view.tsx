@@ -11,7 +11,7 @@ import {
   Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette, Mic, Keyboard,
   AlertCircle, CheckCircle2, QrCode, ChevronDown, ChevronUp, Lock, Fingerprint,
   Store, MapPin, Navigation, Star, TrendingUp, ShoppingCart, Crown, ExternalLink,
-  Smartphone, Radio, Globe, Server, Ban, Cloud, User, Volume2,
+  Smartphone, Radio, Globe, Server, Ban, Cloud, User, Volume2, LogOut, Loader2,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { useState, useMemo, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import type { Business, AppSettingsData } from '@/lib/types'
 import { PALETTES, usePaletteStore } from '@/store/palette-store'
 import { useVoiceSettings } from '@/store/voice-settings-store'
@@ -46,12 +47,33 @@ export function SettingsView() {
   const { globalVoiceEnabled, tapToVoiceEnabled, setGlobalVoice, setTapToVoice, soundBoxEnabled, setSoundBoxEnabled } = useVoiceSettings()
   const { channels, toggleChannel } = useNotificationStore()
   const triggerGate = useGateTrigger()
+  const router = useRouter()
   const [showNotifChannels, setShowNotifChannels] = useState(false)
   // PRD Part 30 §1.2: PIN-guarded reset modal
   const [showResetModal, setShowResetModal] = useState(false)
   const [resetPin, setResetPin] = useState('')
   const [resetting, setResetting] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const [tab, setTab] = useState<'profile' | 'preferences' | 'data' | 'marketplace' | 'security'>('profile')
+
+  // §AUTH-LOGOUT: Sign out the current user — clears the session cookie via
+  // the logout API, then redirects to /login. The back button after logout
+  // cannot access protected data because /api/business returns 401 without
+  // a valid session.
+  const handleLogout = async () => {
+    if (!confirm('Are you sure you want to sign out?')) return
+    setLoggingOut(true)
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+      toast.success('Signed out successfully')
+      router.replace('/login')
+      router.refresh()
+    } catch {
+      toast.error('Failed to sign out')
+    } finally {
+      setLoggingOut(false)
+    }
+  }
 
   const { data: settings } = useFetch<AppSettingsData & { id: string }>('/api/app-settings', [])
 
@@ -1032,6 +1054,21 @@ export function SettingsView() {
 
               <Button onClick={savePrefs} className="w-full h-11">
                 <Save className="w-4 h-4 mr-1.5" /> Save Security Settings
+              </Button>
+
+              {/* §AUTH-LOGOUT: Sign out button — clears session, redirects to /login */}
+              <Button
+                onClick={handleLogout}
+                disabled={loggingOut}
+                variant="destructive"
+                className="w-full h-11"
+              >
+                {loggingOut ? (
+                  <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                ) : (
+                  <LogOut className="w-4 h-4 mr-1.5" />
+                )}
+                {loggingOut ? 'Signing out…' : 'Sign Out'}
               </Button>
             </Card>
 

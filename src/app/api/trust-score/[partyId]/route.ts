@@ -49,7 +49,7 @@ async function computeAndPersist(partyId: string) {
   let paidCount = 0
   for (const inv of invoices) {
     const match = creditTxns.find(
-      (t) => t.invoiceId === inv.id || (t.amount > 0 && Math.abs(t.amount - inv.grandTotal) < 1)
+      (t) => t.invoiceId === inv.id || (t.amount.toNumber() > 0 && Math.abs(t.amount.toNumber() - inv.grandTotal.toNumber()) < 1)
     )
     if (match && match.createdAt.getTime() >= inv.createdAt.getTime()) {
       const days =
@@ -83,7 +83,7 @@ async function computeAndPersist(partyId: string) {
   // 5. total credit volume.
   const totalVolume = invoices
     .filter((i) => i.paymentMode === 'credit' || i.status !== 'paid')
-    .reduce((s, i) => s + i.grandTotal, 0)
+    .reduce((s, i) => s + i.grandTotal.toNumber(), 0)
 
   // 6. grade baseline.
   const baseline = GRADE_BASELINE[party.qualityGrade?.toUpperCase() ?? 'C'] ?? 3

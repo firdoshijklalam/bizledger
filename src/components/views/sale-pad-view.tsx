@@ -334,7 +334,8 @@ export function SalePadView() {
     }
   }, [customer])
 
-  const setCart = (items: CartItem[]) => updateActiveCartCb((c) => ({ ...c, items }))
+  const setCart = (items: CartItem[] | ((prev: CartItem[]) => CartItem[])) =>
+    updateActiveCartCb((c) => ({ ...c, items: typeof items === 'function' ? items(c.items) : items }))
   const setCustomer = (p: Party | null) => updateActiveCartCb((c) => ({ ...c, customer: p }))
   const setPaymentMode = (m: PaymentMode) => updateActiveCartCb((c) => ({ ...c, paymentMode: m }))
 
@@ -365,6 +366,7 @@ export function SalePadView() {
   const splitUpi = storeSplitUpi
   const setSplitUpi = setStoreSplitUpi
   const splitCredit = ''
+  const setSplitCredit = (_v: string) => { /* no-op: credit split is derived, not stored */ }
   const splitChequeNo = storeSplitChequeNo
   const setSplitChequeNo = setStoreSplitChequeNo
   // §2: Sub-categories — dynamically derived from products based on selected main category

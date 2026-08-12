@@ -1,21 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
-// GET /api/business — get the current business (single-tenant dev).
-// Security: prefers "Sharma Trading Co." (the owner's business) over demo shops.
+// GET /api/business — get the current user's business (session-authenticated).
+// Security: uses getCurrentBusiness() which reads the session cookie → User →
+// businessId. Returns 401 if not authenticated. NO hardcoded fallback.
 export async function GET() {
   try {
-    let business = await db.business.findFirst({
-      where: { name: 'Sharma Trading Co.' },
-    })
+    const business = await getCurrentBusiness()
     if (!business) {
-      business = await db.business.findFirst({
-        orderBy: { createdAt: 'asc' },
-      })
-    }
-    if (!business) {
-      return NextResponse.json(null)
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
     return NextResponse.json(business)
   } catch (e: any) {
@@ -23,23 +17,15 @@ export async function GET() {
   }
 }
 
-// PUT /api/business — update business profile
-// Security: only updates the current (Sharma) business, never demo shops.
+// PUT /api/business — update business profile (session-authenticated).
+// Security: only updates the authenticated user's business. NO hardcoded fallback.
 export async function PUT(req: NextRequest) {
   try {
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
     const body = await req.json()
-    // Prefer Sharma Trading Co., fallback to first by creation order
-    let existing = await db.business.findFirst({
-      where: { name: 'Sharma Trading Co.' },
-    })
-    if (!existing) {
-      existing = await db.business.findFirst({
-        orderBy: { createdAt: 'asc' },
-      })
-    }
-    if (!existing) {
-      return NextResponse.json({ error: 'No business found' }, { status: 404 })
-    }
     // Only update non-null fields (partial update)
     const data: Record<string, any> = {}
     const fields = ['name', 'ownerName', 'phone', 'email', 'address', 'state', 'gstin', 'pan', 'upiId', 'currency', 'logoUrl', 'storeSlug', 'deliveryRadiusKm', 'latitude', 'longitude']
@@ -47,7 +33,7 @@ export async function PUT(req: NextRequest) {
       if (body[f] !== undefined) data[f] = body[f]
     }
     const updated = await db.business.update({
-      where: { id: existing.id },
+      where: { id: business.id },
       data,
     })
     return NextResponse.json(updated)

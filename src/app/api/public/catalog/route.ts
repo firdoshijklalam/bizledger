@@ -141,7 +141,7 @@ export async function GET(req: NextRequest) {
       const lowStock = p.stock > 0 && p.stock <= p.lowStockThreshold
       // Discount % for display (MRP vs salePrice)
       const discountPct = p.mrp && p.mrp > p.salePrice
-        ? Math.round(((p.mrp - p.salePrice) / p.mrp) * 100)
+        ? Math.round(((p.mrp.toNumber() - p.salePrice.toNumber()) / p.mrp.toNumber()) * 100)
         : 0
 
       return {

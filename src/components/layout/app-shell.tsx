@@ -129,10 +129,19 @@ export function AppShell() {
 
     const bootstrap = async () => {
       try {
-        let biz = await fetch('/api/business').then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`)
-          return r.json()
-        })
+        const bizRes = await fetch('/api/business')
+        // §AUTH-REDIRECT: If the session is invalid (401), redirect to /login.
+        // This prevents the back-button-after-logout from showing cached
+        // business data — the SPA re-bootstraps on history navigation and
+        // immediately bounces to the login page.
+        if (bizRes.status === 401) {
+          if (typeof window !== 'undefined') {
+            window.location.replace('/login')
+          }
+          return
+        }
+        if (!bizRes.ok) throw new Error(`HTTP ${bizRes.status}`)
+        let biz = await bizRes.json()
         if (!biz) {
           await fetch('/api/seed', { method: 'POST' })
           biz = await fetch('/api/business').then((r) => r.json())

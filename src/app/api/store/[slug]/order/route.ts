@@ -119,7 +119,7 @@ export async function POST(
         // Check if this is a loose/retail order (unitPrice matches retailSalePrice)
         const isLooseOrder = product.retailEnabled &&
           product.retailSalePrice &&
-          Math.abs(Number(it.unitPrice) - product.retailSalePrice) < 0.01
+          Math.abs(Number(it.unitPrice) - product.retailSalePrice.toNumber()) < 0.01
 
         if (isLooseOrder && product.conversionFactor) {
           // Loose order: reduce looseStock, auto-convert bulk if needed

@@ -6,6 +6,7 @@
  * Tests that client-provided totals are NEVER trusted — the server
  * recalculates everything from quantity × unitPrice.
  */
+export {}
 
 interface ClientItem {
   quantity: number

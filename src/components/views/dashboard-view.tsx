@@ -3,7 +3,7 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
-import type { DashboardStats, Product } from '@/lib/types'
+import type { DashboardStats, Party, Product } from '@/lib/types'
 import { formatCurrency, formatDate, GRADE_META, timeAgo } from '@/lib/utils'
 import {
   TrendingUp, TrendingDown, Wallet, Heart, AlertTriangle, Package,

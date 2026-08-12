@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import type { CustomPrice } from '@prisma/client'
 
 /**
  * §DYNAMIC-PRICING: Price resolution hierarchy.
@@ -52,37 +53,38 @@ export interface ResolvedPrice {
  * retail (kg) tab.
  */
 function getPriceForMode(
-  cp: {
-    customPrice: number
-    customSalePrice: number | null
-    customMrp: number | null
-    customWholesalePrice: number | null
-    customRetailSalePrice: number | null
-    customRetailMrp: number | null
-  },
+  cp: Pick<
+    CustomPrice,
+    | 'customPrice'
+    | 'customSalePrice'
+    | 'customMrp'
+    | 'customWholesalePrice'
+    | 'customRetailSalePrice'
+    | 'customRetailMrp'
+  >,
   mode?: PriceMode,
 ): number | null {
   switch (mode) {
     case 'sale':
       // §LEGACY: If customSalePrice is null, fall back to customPrice (old single-price records)
-      return cp.customSalePrice ?? cp.customPrice
+      return (cp.customSalePrice ?? cp.customPrice).toNumber()
     case 'mrp':
-      return cp.customMrp
+      return cp.customMrp?.toNumber() ?? null
     case 'wholesale':
       // §LEGACY: If customWholesalePrice is null, fall back to customPrice
-      return cp.customWholesalePrice ?? cp.customPrice
+      return (cp.customWholesalePrice ?? cp.customPrice).toNumber()
     case 'retail-sale':
       // §RETAIL-ISOLATION: NO fallback to bulk customPrice — retail prices
       // are completely separate. If no retail-specific price is set, return
       // null so the caller uses the product's default retailSalePrice.
-      return cp.customRetailSalePrice
+      return cp.customRetailSalePrice?.toNumber() ?? null
     case 'retail-mrp':
       // §RETAIL-ISOLATION: Same — no fallback to bulk customMrp.
-      return cp.customRetailMrp
+      return cp.customRetailMrp?.toNumber() ?? null
     case 'default':
     default:
       // Legacy behavior — return the generic customPrice
-      return cp.customPrice
+      return cp.customPrice.toNumber()
   }
 }
 
@@ -115,13 +117,13 @@ export async function resolveProductPrice(
           source: 'buyer',
           customPriceId: cp.id,
           customPrices: {
-            salePrice: cp.customSalePrice,
-            mrp: cp.customMrp,
-            wholesalePrice: cp.customWholesalePrice,
-            legacyPrice: cp.customPrice,
+            salePrice: cp.customSalePrice?.toNumber() ?? null,
+            mrp: cp.customMrp?.toNumber() ?? null,
+            wholesalePrice: cp.customWholesalePrice?.toNumber() ?? null,
+            legacyPrice: cp.customPrice.toNumber(),
             // §RETAIL-ISOLATION: Include retail-specific prices
-            retailSalePrice: cp.customRetailSalePrice,
-            retailMrp: cp.customRetailMrp,
+            retailSalePrice: cp.customRetailSalePrice?.toNumber() ?? null,
+            retailMrp: cp.customRetailMrp?.toNumber() ?? null,
           },
         }
       }
@@ -140,13 +142,13 @@ export async function resolveProductPrice(
           source: 'group',
           customPriceId: cp.id,
           customPrices: {
-            salePrice: cp.customSalePrice,
-            mrp: cp.customMrp,
-            wholesalePrice: cp.customWholesalePrice,
-            legacyPrice: cp.customPrice,
+            salePrice: cp.customSalePrice?.toNumber() ?? null,
+            mrp: cp.customMrp?.toNumber() ?? null,
+            wholesalePrice: cp.customWholesalePrice?.toNumber() ?? null,
+            legacyPrice: cp.customPrice.toNumber(),
             // §RETAIL-ISOLATION: Include retail-specific prices
-            retailSalePrice: cp.customRetailSalePrice,
-            retailMrp: cp.customRetailMrp,
+            retailSalePrice: cp.customRetailSalePrice?.toNumber() ?? null,
+            retailMrp: cp.customRetailMrp?.toNumber() ?? null,
           },
         }
       }
@@ -221,17 +223,17 @@ export async function resolveProductPricesBatch(
     if (bp) {
       result.set(productId, {
         // §MULTI-PRICE: Return the full record so the caller can pick the right field
-        price: bp.customSalePrice ?? bp.customWholesalePrice ?? bp.customPrice,
+        price: (bp.customSalePrice ?? bp.customWholesalePrice ?? bp.customPrice).toNumber(),
         source: 'buyer',
         customPriceId: bp.id,
         customPrices: {
-          salePrice: bp.customSalePrice,
-          mrp: bp.customMrp,
-          wholesalePrice: bp.customWholesalePrice,
-          legacyPrice: bp.customPrice,
+          salePrice: bp.customSalePrice?.toNumber() ?? null,
+          mrp: bp.customMrp?.toNumber() ?? null,
+          wholesalePrice: bp.customWholesalePrice?.toNumber() ?? null,
+          legacyPrice: bp.customPrice.toNumber(),
           // §RETAIL-ISOLATION: Include retail-specific prices
-          retailSalePrice: bp.customRetailSalePrice,
-          retailMrp: bp.customRetailMrp,
+          retailSalePrice: bp.customRetailSalePrice?.toNumber() ?? null,
+          retailMrp: bp.customRetailMrp?.toNumber() ?? null,
         },
       })
       continue
@@ -239,17 +241,17 @@ export async function resolveProductPricesBatch(
     const gp = groupMap.get(productId)
     if (gp) {
       result.set(productId, {
-        price: gp.customSalePrice ?? gp.customWholesalePrice ?? gp.customPrice,
+        price: (gp.customSalePrice ?? gp.customWholesalePrice ?? gp.customPrice).toNumber(),
         source: 'group',
         customPriceId: gp.id,
         customPrices: {
-          salePrice: gp.customSalePrice,
-          mrp: gp.customMrp,
-          wholesalePrice: gp.customWholesalePrice,
-          legacyPrice: gp.customPrice,
+          salePrice: gp.customSalePrice?.toNumber() ?? null,
+          mrp: gp.customMrp?.toNumber() ?? null,
+          wholesalePrice: gp.customWholesalePrice?.toNumber() ?? null,
+          legacyPrice: gp.customPrice.toNumber(),
           // §RETAIL-ISOLATION: Include retail-specific prices
-          retailSalePrice: gp.customRetailSalePrice,
-          retailMrp: gp.customRetailMrp,
+          retailSalePrice: gp.customRetailSalePrice?.toNumber() ?? null,
+          retailMrp: gp.customRetailMrp?.toNumber() ?? null,
         },
       })
       continue

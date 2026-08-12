@@ -18,7 +18,7 @@ export async function GET() {
 
   const now = new Date()
   const reminders = parties
-    .filter((p) => p.balance > 0)
+    .filter((p) => p.balance.toNumber() > 0)
     .map((p) => {
       const oldestInvoice = p.invoices.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0]
       const daysOverdue = oldestInvoice

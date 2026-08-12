@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     // Build the fallback map (product → default wholesale price)
     const productIdsWithFallback = products.map((p) => ({
       productId: p.id,
-      fallback: p.wholesalePrice ?? p.salePrice ?? 0,
+      fallback: Number(p.wholesalePrice ?? p.salePrice ?? 0),
     }))
 
     // §BATCH-RESOLVE: Single call — 2 DB queries total (buyer + group)

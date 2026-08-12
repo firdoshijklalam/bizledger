@@ -84,7 +84,7 @@ export function useFetch<T>(url: string | null, deps: any[] = []) {
   const setData = useCallback(
     (updater: T | ((prev: T | null) => T)) => {
       queryClient.setQueryData<T>(queryKey, (prev) =>
-        typeof updater === 'function' ? (updater as (prev: T | null) => T)(prev) : updater,
+        typeof updater === 'function' ? (updater as (prev: T | null) => T)(prev ?? null) : updater,
       )
     },
     [queryClient, queryKey],

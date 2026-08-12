@@ -31,7 +31,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 })
       return NextResponse.json({ ...product, images: [] })
     } catch (e2: any) {
-      return apiError(e3, "Database error")
+      return apiError(e2, "Database error")
     }
   }
 }
@@ -49,8 +49,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const body = await req.json()
 
     // §INPUT-VALIDATION: Validate numeric fields — reject negative values
-    const purchasePrice = body.purchasePrice !== undefined ? Number(body.purchasePrice) : existing.purchasePrice
-    const salePrice = body.salePrice !== undefined ? Number(body.salePrice) : existing.salePrice
+    const purchasePrice = body.purchasePrice !== undefined ? Number(body.purchasePrice) : existing.purchasePrice.toNumber()
+    const salePrice = body.salePrice !== undefined ? Number(body.salePrice) : existing.salePrice.toNumber()
     const stock = body.stock !== undefined ? Number(body.stock) : existing.stock
     const gstRate = body.gstRate !== undefined ? Number(body.gstRate) : existing.gstRate
     if (purchasePrice < 0) return NextResponse.json({ error: 'Purchase price cannot be negative' }, { status: 400 })

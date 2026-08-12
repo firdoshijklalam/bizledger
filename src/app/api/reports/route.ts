@@ -22,11 +22,11 @@ export async function GET() {
 
   const totalRevenue = invoices
     .filter((i) => i.type === 'sales' || i.type === 'retail')
-    .reduce((s, i) => s + i.subtotal, 0)
+    .reduce((s, i) => s + i.subtotal.toNumber(), 0)
   const totalGst = invoices
     .filter((i) => i.type === 'sales' || i.type === 'retail')
-    .reduce((s, i) => s + i.gstAmount, 0)
-  const totalDiscount = invoices.reduce((s, i) => s + i.discountAmount, 0)
+    .reduce((s, i) => s + i.gstAmount.toNumber(), 0)
+  const totalDiscount = invoices.reduce((s, i) => s + i.discountAmount.toNumber(), 0)
   // §ACCOUNTING: Net Revenue = Total Sales (subtotal) − Discounts Given.
   // This is the actual revenue realized after discounts, before COGS.
   const netRevenue = totalRevenue - totalDiscount
@@ -36,22 +36,22 @@ export async function GET() {
   // 'debit' type is a legacy catch-all — count it as indirect expense.
   const cogs = transactions
     .filter((t) => t.type === 'purchase')
-    .reduce((s, t) => s + t.amount, 0)
+    .reduce((s, t) => s + t.amount.toNumber(), 0)
   const indirectExpenses = transactions
     .filter((t) => t.type === 'expense' || t.type === 'debit')
-    .reduce((s, t) => s + t.amount, 0)
+    .reduce((s, t) => s + t.amount.toNumber(), 0)
   const totalExpense = cogs + indirectExpenses
   // §ACCOUNTING: Gross Profit = Net Revenue − COGS.
   // Net Profit = Gross Profit − Indirect Expenses.
   const grossProfit = netRevenue - cogs
   const netProfit = grossProfit - indirectExpenses
-  const totalReceivable = parties.filter((p) => p.balance > 0).reduce((s, p) => s + p.balance, 0)
-  const totalPayable = parties.filter((p) => p.balance < 0).reduce((s, p) => s + Math.abs(p.balance), 0)
+  const totalReceivable = parties.filter((p) => p.balance.toNumber() > 0).reduce((s, p) => s + p.balance.toNumber(), 0)
+  const totalPayable = parties.filter((p) => p.balance.toNumber() < 0).reduce((s, p) => s + Math.abs(p.balance.toNumber()), 0)
 
   // GST breakdown
   const gstBreakdown = invoices
     .filter((i) => i.isGst)
-    .flatMap((i) => i.items.map((it) => ({ rate: it.gstRate, taxable: it.total, gst: (it.total * it.gstRate) / 100 })))
+    .flatMap((i) => i.items.map((it) => ({ rate: it.gstRate.toNumber(), taxable: it.total.toNumber(), gst: (it.total.toNumber() * it.gstRate.toNumber()) / 100 })))
   const gstByRate = gstBreakdown.reduce((acc, g) => {
     const key = String(g.rate)
     if (!acc[key]) acc[key] = { rate: g.rate, taxable: 0, gst: 0 }
@@ -64,7 +64,7 @@ export async function GET() {
   const stockAgeing = products.map((p) => ({
     name: p.name,
     stock: p.stock,
-    value: p.stock * p.purchasePrice,
+    value: p.stock * p.purchasePrice.toNumber(),
     threshold: p.lowStockThreshold,
     status: p.stock <= p.lowStockThreshold ? 'low' : p.stock <= p.lowStockThreshold * 2 ? 'medium' : 'good',
   }))
@@ -73,7 +73,7 @@ export async function GET() {
   const gradeDist = (['A', 'B', 'C', 'D', 'E'] as const).map((grade) => ({
     grade,
     count: parties.filter((p) => p.qualityGrade === grade).length,
-    balance: parties.filter((p) => p.qualityGrade === grade).reduce((s, p) => s + Math.max(0, p.balance), 0),
+    balance: parties.filter((p) => p.qualityGrade === grade).reduce((s, p) => s + Math.max(0, p.balance.toNumber()), 0),
   }))
 
   // Party ledger summary
@@ -107,8 +107,8 @@ export async function GET() {
     outstanding: {
       totalReceivable,
       totalPayable,
-      receivables: parties.filter((p) => p.balance > 0).map((p) => ({ name: p.name, amount: p.balance, grade: p.qualityGrade })),
-      payables: parties.filter((p) => p.balance < 0).map((p) => ({ name: p.name, amount: Math.abs(p.balance) })),
+      receivables: parties.filter((p) => p.balance.toNumber() > 0).map((p) => ({ name: p.name, amount: p.balance, grade: p.qualityGrade })),
+      payables: parties.filter((p) => p.balance.toNumber() < 0).map((p) => ({ name: p.name, amount: Math.abs(p.balance.toNumber()) })),
     },
     stockAgeing,
     gradeDistribution: gradeDist,

@@ -109,7 +109,7 @@ export async function recalculatePartyGrade(partyId: string): Promise<GradeResul
     return {
       grade: party.qualityGrade as QualityGrade,
       avgPaymentDays: party.avgPaymentDays ?? 0,
-      outstandingRatio: party.balance / Math.max(1, party.balance + 1),
+      outstandingRatio: party.balance.toNumber() / Math.max(1, party.balance.toNumber() + 1),
       avgDiscountPct: party.avgDiscountPct,
       transactionCount: party.transactions.length,
       isNew: false,
@@ -130,12 +130,12 @@ export async function recalculatePartyGrade(partyId: string): Promise<GradeResul
     : null
 
   // Outstanding ratio: |balance| / lifetime total volume
-  const lifetimeTotal = party.invoices.reduce((s, i) => s + i.grandTotal, 0) + Math.abs(party.openingBalance)
-  const outstandingRatio = lifetimeTotal > 0 ? Math.abs(party.balance) / lifetimeTotal : 0
+  const lifetimeTotal = party.invoices.reduce((s, i) => s + i.grandTotal.toNumber(), 0) + Math.abs(party.openingBalance.toNumber())
+  const outstandingRatio = lifetimeTotal > 0 ? Math.abs(party.balance.toNumber()) / lifetimeTotal : 0
 
   // Avg discount % across invoices
   const avgDiscountPct = party.invoices.length > 0
-    ? (party.invoices.reduce((s, i) => s + (i.subtotal > 0 ? (i.discountAmount / i.subtotal) * 100 : 0), 0) / party.invoices.length)
+    ? (party.invoices.reduce((s, i) => s + (i.subtotal.toNumber() > 0 ? (i.discountAmount.toNumber() / i.subtotal.toNumber()) * 100 : 0), 0) / party.invoices.length)
     : party.avgDiscountPct
 
   const result = scoreToGrade(avgPaymentDays, outstandingRatio, avgDiscountPct, txCount)

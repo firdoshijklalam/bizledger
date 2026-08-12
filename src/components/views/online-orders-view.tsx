@@ -165,7 +165,7 @@ export function OnlineOrdersView() {
         <EmptyState
           icon={ShoppingBag}
           title={`No ${TABS.find((t) => t.id === activeTab)?.label || ''} orders`}
-          subtitle="New orders from the customer app will appear here instantly"
+          description="New orders from the customer app will appear here instantly"
         />
       ) : (
         <div className="space-y-3">
