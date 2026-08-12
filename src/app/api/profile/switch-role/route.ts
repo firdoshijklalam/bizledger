@@ -54,6 +54,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const business = await getCurrentBusiness()
+    if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+
     const body = await req.json() as {
       phone: string
       customerName?: string
@@ -68,8 +71,6 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
-
-    const business = await getCurrentBusiness()
     const pinHash = hashPin(body.pin)
     const biometricEnabled = body.biometricEnabled ?? false
     const now = new Date()

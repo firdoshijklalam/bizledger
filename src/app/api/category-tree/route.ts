@@ -99,7 +99,7 @@ async function seedDefaultCategories(businessId: string) {
 export async function GET(req: NextRequest) {
   try {
     const business = await getCurrentBusiness()
-    if (!business) return NextResponse.json({ error: 'No business found' }, { status: 400 })
+    if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
     const { searchParams } = new URL(req.url)
     const action = searchParams.get('action')
@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
     if (user instanceof NextResponse) return user
 
     const business = await getCurrentBusiness()
-    if (!business) return NextResponse.json({ error: 'No business found' }, { status: 400 })
+    if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
     const body = await req.json()
     const name: string = (body.name ?? '').toString().trim()

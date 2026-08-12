@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const business = await getCurrentBusiness()
-    if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
+    if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
     // Generate a simulated fingerprint hash (in production, scanner SDK provides this)
     const rawHash = body.hash || randomBytes(32).toString('hex')
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
 // GET /api/biometric — check if biometric is enabled
 export async function GET() {
   const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json({ enabled: false })
+  if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const settings = await db.appSettings.findUnique({ where: { businessId: business.id } })
   const count = await db.fingerprintRecord.count({ where: { businessId: business.id } })

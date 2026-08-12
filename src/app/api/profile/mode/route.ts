@@ -30,7 +30,7 @@ export async function GET() {
   try {
     const business = await getCurrentBusiness()
     if (!business) {
-      return NextResponse.json({ appMode: 'merchant' }, { status: 200 })
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
     const settings = await db.appSettings.findUnique({ where: { businessId: business.id } })
     if (!settings) {

@@ -4,7 +4,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 // GET /api/insights — smart business insights: top products, debtors, stock alerts, revenue trends
 export async function GET() {
   const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json(null)
+  if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const [parties, products, invoices, transactions] = await Promise.all([
     db.party.findMany({ where: { businessId: business.id } }),

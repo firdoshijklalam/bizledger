@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   const months = [1, 3, 6].includes(Number(monthsParam)) ? Number(monthsParam) : 3
 
   const business = await getCurrentBusiness()
-  if (!business) return NextResponse.json([])
+  if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const products = await db.product.findMany({
     where: { businessId: business.id },

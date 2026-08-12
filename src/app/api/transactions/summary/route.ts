@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
 
   const business = await getCurrentBusiness()
   if (!business) {
-    return NextNextEmpty()
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }
 
   const { start, end } = getRangeBounds(range, startDate, endDate)
