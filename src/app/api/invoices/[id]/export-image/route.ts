@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/invoices/[id]/export-image?format=jpg|pdf
 // PRD Part 38 §5.1: HTML-to-Canvas Invoice Exporter for WhatsApp HD image sharing
@@ -26,7 +27,12 @@ export async function GET(
     })
     if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
 
-    const html = generateInvoiceHTML(invoice, business)
+    // §DECIMAL-SAFETY: Convert all Prisma Decimal fields to numbers before HTML
+    // generation. This prevents [object Object] or string concatenation in the
+    // invoice template. The invoice object is not returned to the client — only
+    // the generated HTML is returned as a base64 data URL.
+    const safeInvoice = serializeDecimals(invoice)
+    const html = generateInvoiceHTML(safeInvoice, business)
     const htmlBase64 = Buffer.from(html).toString('base64')
     const dataUrl = `data:text/html;base64,${htmlBase64}`
 

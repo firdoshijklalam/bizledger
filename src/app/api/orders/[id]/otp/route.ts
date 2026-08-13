@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import type { PaymentSplit } from '@prisma/client'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // POST /api/orders/[id]/otp — verify delivery OTP for an order split (PRD Part 36 §2.2).
 //   Body: { otp: "1234" }
@@ -96,7 +97,7 @@ export async function POST(
       return { updated, settledPayment }
     })
 
-    return NextResponse.json({
+    return NextResponse.json(serializeDecimals({
       ok: true,
       delivered: true,
       orderSplit: {
@@ -113,7 +114,7 @@ export async function POST(
             commissionAmount: result.settledPayment.commissionAmount,
           }
         : null,
-    })
+    }))
   } catch (e) {
     return apiError(e, "Request failed")
   }

@@ -4,6 +4,7 @@ import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
 import { formatCurrency, formatDate, GRADE_META } from '@/lib/utils'
+import { toNumber } from '@/lib/numeric'
 import { motion } from 'framer-motion'
 import {
   FileText, FileSpreadsheet, Printer, TrendingUp, TrendingDown,
@@ -113,7 +114,7 @@ export function ReportsView() {
     allProducts.forEach((p) => {
       const c = p.category || 'Uncategorized'
       if (!map[c]) map[c] = { value: 0, count: 0 }
-      map[c].value += (p.salePrice - p.purchasePrice) * p.stock
+      map[c].value += (toNumber(p.salePrice) - toNumber(p.purchasePrice)) * toNumber(p.stock)
       map[c].count += 1
     })
     return Object.entries(map)
