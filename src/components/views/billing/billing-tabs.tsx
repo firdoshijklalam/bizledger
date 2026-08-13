@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
 import { formatCurrency } from '@/lib/utils'
+import { toNumber } from '@/lib/numeric'
 
 export function BillingTabs() {
   // §2: Read from cart-store (same as Quick Sale) — real-time sync
@@ -56,7 +57,7 @@ export function BillingTabs() {
             ? (cart.customer.name.length > 10 ? cart.customer.name.substring(0, 10) + '…' : cart.customer.name)
             : `পার্সন ${carts.indexOf(cart) + 1}`
           const itemCount = cart.items.length
-          const cartTotal = cart.items.reduce((s, i) => s + i.total, 0)
+          const cartTotal = cart.items.reduce((s, i) => s + toNumber(i.total), 0)
 
           return (
             <div

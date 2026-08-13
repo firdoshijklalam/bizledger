@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { toNumber } from '@/lib/numeric'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -214,7 +215,10 @@ export function StoreCatalogView({ slug, invoiceToken }: StoreCatalogViewProps) 
   }
 
   const cartCount = cart.reduce((sum, it) => sum + it.quantity, 0)
-  const subtotal = cart.reduce((sum, it) => sum + it.total, 0)
+  // §FRONTEND-NUMERIC-FIX: cart items are seeded from StoreProduct.salePrice
+  // (API Decimal), which may arrive as a string; coerce via toNumber() to
+  // prevent string concatenation in the subtotal reduce.
+  const subtotal = cart.reduce((sum, it) => sum + toNumber(it.total), 0)
   const delivery = Number(deliveryCharge) || 0
   const grandTotal = subtotal + delivery
 

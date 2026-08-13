@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/customer-orders — owner: list customer orders for the current business.
 // §PAGINATION: Supports ?page (1-based) + ?limit (default 50, max 200).
@@ -38,7 +39,9 @@ export async function GET(req: NextRequest) {
       ...o,
       items: o.items ? JSON.parse(o.items) : [],
     }))
-    return NextResponse.json({ items, total, hasMore: skip + limit < total })
+    // §DECIMAL-FIX-C: items array contains CustomerOrder records with raw
+    // Decimal fields (subtotal, deliveryCharge, grandTotal, commissionAmount).
+    return NextResponse.json(serializeDecimals({ items, total, hasMore: skip + limit < total }))
   } catch (e) {
     return apiError(e, "Request failed")
   }

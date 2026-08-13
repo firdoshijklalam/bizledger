@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { resolveCatalogPrice } from '@/lib/price-resolver'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/suppliers/[id]/catalog
 // §DYNAMIC-PRICING: resolves custom prices for the AUTHENTICATED BUYER.
@@ -56,12 +57,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       }
     })
   )
-  return NextResponse.json(resolved)
+  return NextResponse.json(serializeDecimals(resolved))
 }
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params; const body = await req.json()
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
   const item = await db.supplierCatalogItem.create({ data: { businessId: business.id, supplierId: id, productName: body.productName, category: body.category || null, basePrice: Number(body.basePrice) || 0, transportFare: Number(body.transportFare) || 0, coolieCharge: Number(body.coolieCharge) || 0, unit: body.unit || 'pcs', minOrderQty: Number(body.minOrderQty) || 1, notes: body.notes || null, matchedProductId: body.matchedProductId || null } })
-  return NextResponse.json(item)
+  // §DECIMAL-FIX-D: basePrice, transportFare, coolieCharge are Decimal
+  return NextResponse.json(serializeDecimals(item))
 }

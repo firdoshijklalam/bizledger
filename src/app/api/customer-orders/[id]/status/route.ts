@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 /**
  * PATCH /api/customer-orders/[id]/status — update order status.
@@ -67,10 +68,12 @@ export async function PATCH(
       data: { status },
     })
 
-    return NextResponse.json({
+    // §DECIMAL-FIX-C: CustomerOrder.subtotal/deliveryCharge/grandTotal/
+    // commissionAmount are raw Decimals — wrap whole payload.
+    return NextResponse.json(serializeDecimals({
       ...updated,
       items: updated.items ? JSON.parse(updated.items) : [],
-    })
+    }))
   } catch (e) {
     console.error('Order status update error:', e)
     return apiError(e, "Request failed")
@@ -224,7 +227,9 @@ async function syncCompletedOrder(order: any, businessId: string) {
     return { order: updatedOrder, transaction, invoice, party }
   })
 
-  return NextResponse.json({
+  // §DECIMAL-FIX-C: result.order is a CustomerOrder with raw Decimal fields
+  // (subtotal, deliveryCharge, grandTotal, commissionAmount).
+  return NextResponse.json(serializeDecimals({
     ...result.order,
     items: result.order.items ? JSON.parse(result.order.items) : [],
     synced: {
@@ -234,5 +239,5 @@ async function syncCompletedOrder(order: any, businessId: string) {
       partyName: result.party.name,
       stockDeducted: !result.order.source || (result.order.source !== 'quick-commerce' && result.order.source !== 'catalog'),
     },
-  })
+  }))
 }

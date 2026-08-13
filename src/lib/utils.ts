@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { toNumber } from '@/lib/numeric'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -13,13 +14,25 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   AED: 'AED',
 }
 
-export function formatCurrency(amount: number, currency = 'INR'): string {
+/**
+ * Format a number as currency for DISPLAY ONLY.
+ * §SAFETY: This function accepts any value (number, string, Decimal, null)
+ * and converts it to a number via toNumber() before formatting.
+ * §RULE: NEVER use the output of formatCurrency() in arithmetic — it returns
+ * a string like "₹1,234.50" which would cause string concatenation.
+ *
+ * @param amount - Any numeric value (number, string, Decimal, null)
+ * @param currency - Currency code (default: INR)
+ * @returns Formatted string like "₹1,234.50" or "-₹660"
+ */
+export function formatCurrency(amount: number | string | null | undefined, currency = 'INR'): string {
+  const num = toNumber(amount)
   const symbol = CURRENCY_SYMBOLS[currency] ?? ''
   const formatted = new Intl.NumberFormat('en-IN', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
-  }).format(Math.abs(amount))
-  const sign = amount < 0 ? '-' : ''
+  }).format(Math.abs(num))
+  const sign = num < 0 ? '-' : ''
   return `${sign}${symbol}${formatted}`
 }
 

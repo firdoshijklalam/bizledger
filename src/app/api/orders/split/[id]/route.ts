@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/orders/split/[id] — return a specific order split with its items,
 // linked payment split, and return requests.
@@ -57,7 +58,10 @@ export async function GET(
       parsedItems = []
     }
 
-    return NextResponse.json({
+    // §DECIMAL-FIX-C: split.subtotal/commissionAmount/merchantAmount,
+    // paymentSplit.totalAmount/commissionAmount/merchantAmount, and
+    // returnRequests[].refundAmount are raw Decimals — wrap whole payload.
+    return NextResponse.json(serializeDecimals({
       id: split.id,
       parentOrderId: split.parentOrderId,
       businessId: split.businessId,
@@ -86,7 +90,7 @@ export async function GET(
           }
         : null,
       returnRequests,
-    })
+    }))
   } catch (e) {
     return apiError(e, "Request failed")
   }
@@ -138,7 +142,9 @@ export async function PATCH(
       parsedItems = []
     }
 
-    return NextResponse.json({
+    // §DECIMAL-FIX-C: orderSplit.subtotal/commissionAmount/merchantAmount
+    // are raw Decimals — wrap whole payload.
+    return NextResponse.json(serializeDecimals({
       ok: true,
       orderSplit: {
         id: updated.id,
@@ -155,7 +161,7 @@ export async function PATCH(
         otpVerifiedAt: updated.otpVerifiedAt,
         updatedAt: updated.updatedAt,
       },
-    })
+    }))
   } catch (e) {
     return apiError(e, "Request failed")
   }

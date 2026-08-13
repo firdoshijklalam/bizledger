@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // POST /api/returns — create a return request (PRD Part 36 §3.1).
 //   Body: { orderSplitId, customerPhone, reason }
@@ -48,7 +49,8 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
     })
 
-    return NextResponse.json({ returns })
+    // §DECIMAL-FIX-C: ReturnRequest.refundAmount is a Decimal — wrap to convert to number.
+    return NextResponse.json(serializeDecimals({ returns }))
   } catch (e) {
     return apiError(e, "Request failed")
   }

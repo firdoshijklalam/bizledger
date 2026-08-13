@@ -24,6 +24,7 @@ import { LoadingState, EmptyState } from '@/components/shared/states'
 import { useScrollRetention } from '@/hooks/use-scroll-retention'
 import { useScrollStore } from '@/store/scroll-store'
 import { useRealtimeOrders } from '@/hooks/use-realtime-orders'
+import { toNumber } from '@/lib/numeric'
 import { useMemo, useState, useEffect, useRef } from 'react'
 
 type ChartType = 'revenue' | 'profit' | 'cashflow' | 'collections' | 'categories' | 'inventory'
@@ -779,13 +780,13 @@ export function DashboardView() {
               <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
                 <p className="text-[9px] text-muted-foreground">Total In</p>
                 <p className="text-sm font-bold tabular text-emerald-600">
-                  +{formatCurrency(data.recentTransactions.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0), currency)}
+                  +{formatCurrency(data.recentTransactions.filter(t => t.type === 'credit').reduce((s, t) => s + toNumber(t.amount), 0), currency)}
                 </p>
               </div>
               <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
                 <p className="text-[9px] text-muted-foreground">Total Out</p>
                 <p className="text-sm font-bold tabular text-red-600">
-                  -{formatCurrency(data.recentTransactions.filter(t => t.type !== 'credit').reduce((s, t) => s + t.amount, 0), currency)}
+                  -{formatCurrency(data.recentTransactions.filter(t => t.type !== 'credit').reduce((s, t) => s + toNumber(t.amount), 0), currency)}
                 </p>
               </div>
             </div>

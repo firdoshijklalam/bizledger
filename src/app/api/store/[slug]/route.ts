@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/store/[slug] — PUBLIC customer-facing store catalog.
 // Fetches the Business by storeSlug and returns only in-stock products.
@@ -86,7 +87,9 @@ export async function GET(
       isPublished: p.isPublished,
     }))
 
-    return NextResponse.json({
+    // §DECIMAL-FIX-C: products array contains raw Decimal fields
+    // (salePrice, mrp, wholesalePrice, gstRate, retailSalePrice).
+    return NextResponse.json(serializeDecimals({
       id: business.id,
       name: business.name,
       ownerName: business.ownerName,
@@ -100,7 +103,7 @@ export async function GET(
       latitude: business.latitude,
       longitude: business.longitude,
       products,
-    })
+    }))
   } catch (e) {
     return apiError(e, "Request failed")
   }

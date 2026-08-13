@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/reminders — list parties with overdue balances + invoice due info
 // §PAGINATION: Supports ?page (1-based) + ?limit (default 50, max 200).
@@ -48,5 +49,6 @@ export async function GET(req: NextRequest) {
 
   const total = reminders.length
   const items = reminders.slice(skip, skip + limit)
-  return NextResponse.json({ items, total, hasMore: skip + limit < total })
+  // §DECIMAL-FIX-D: items[].balance is raw Decimal (p.balance)
+  return NextResponse.json(serializeDecimals({ items, total, hasMore: skip + limit < total }))
 }

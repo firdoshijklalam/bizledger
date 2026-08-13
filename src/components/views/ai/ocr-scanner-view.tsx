@@ -3,6 +3,7 @@
 import { useAppStore } from '@/store/app-store'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
 import { formatCurrency } from '@/lib/utils'
+import { toNumber } from '@/lib/numeric'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ScanLine, Camera, Upload, CheckCircle2, X, FileText, Loader2,
@@ -225,7 +226,9 @@ export function OcrScannerView() {
   }
 
   const calculatedTotal = useMemo(() => {
-    const itemsTotal = editItems.reduce((s, it) => s + it.total, 0)
+    // §FRONTEND-NUMERIC-FIX: OCR API may return item.total as a string;
+    // coerce via toNumber() to prevent string concatenation (0 + "55" = "055").
+    const itemsTotal = editItems.reduce((s, it) => s + toNumber(it.total), 0)
     const tax = Number(editCgst) + Number(editSgst)
     return itemsTotal + tax
   }, [editItems, editCgst, editSgst])

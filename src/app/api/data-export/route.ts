@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
 import { requireRole } from '@/lib/auth/session'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/data-export?format=json|csv
 // §SECURITY: Exports ALL business data (customers, products, invoices, transactions).
@@ -66,7 +67,10 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  return new NextResponse(JSON.stringify(data, null, 2), {
+  // §DECIMAL-FIX-D: parties (balance, creditLimit, openingBalance), products (salePrice, etc.),
+  // invoices + items (grandTotal, amountDue, unitPrice, total, etc.), transactions (amount, balanceAfter)
+  // are all Prisma Decimal fields. serializeDecimals converts them to numbers before JSON.stringify.
+  return new NextResponse(JSON.stringify(serializeDecimals(data), null, 2), {
     headers: {
       'Content-Type': 'application/json',
       'Content-Disposition': `attachment; filename="${business.name.replace(/\s+/g, '_')}_Backup_${new Date().toISOString().split('T')[0]}.json"`,

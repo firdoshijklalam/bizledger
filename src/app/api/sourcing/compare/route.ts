@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { productSimilarity, SIMILARITY_THRESHOLD, calcLandedCost } from '@/lib/landed-cost'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const productId = searchParams.get('productId')
@@ -28,5 +29,6 @@ export async function GET(req: NextRequest) {
   }
   matches.sort((a, b) => a.perUnitLandedCost - b.perUnitLandedCost)
   if (matches.length > 0) matches[0].isBestChoice = true
-  return NextResponse.json({ productName: targetName, category: targetCategory, matches })
+  // §DECIMAL-FIX-D: matches[].{basePrice,transportFare,coolieCharge} are raw Decimals
+  return NextResponse.json(serializeDecimals({ productName: targetName, category: targetCategory, matches }))
 }

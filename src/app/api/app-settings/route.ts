@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 import { requireRole } from '@/lib/auth/session'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/app-settings
 export async function GET() {
@@ -10,9 +11,11 @@ export async function GET() {
   const settings = await db.appSettings.findUnique({ where: { businessId: business.id } })
   if (!settings) {
     const created = await db.appSettings.create({ data: { businessId: business.id } })
-    return NextResponse.json(created)
+    // §DECIMAL-FIX-D: gateDiscountLimit is Decimal
+    return NextResponse.json(serializeDecimals(created))
   }
-  return NextResponse.json(settings)
+  // §DECIMAL-FIX-D: gateDiscountLimit is Decimal
+  return NextResponse.json(serializeDecimals(settings))
 }
 
 // PUT /api/app-settings
@@ -72,7 +75,8 @@ export async function PUT(req: NextRequest) {
         defaulterRegistryEnabled: body.defaulterRegistryEnabled ?? true,
       },
     })
-    return NextResponse.json(updated)
+    // §DECIMAL-FIX-D: gateDiscountLimit is Decimal
+    return NextResponse.json(serializeDecimals(updated))
   } catch (e) {
     return apiError(e, "Request failed")
   }

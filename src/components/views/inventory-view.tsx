@@ -5,6 +5,7 @@ import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiDelete } from '@/hooks/use-fetch'
 import type { Product } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
+import { toNumber } from '@/lib/numeric'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Package, Plus, AlertTriangle, Search, Trash2, Tag } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -103,7 +104,9 @@ export function InventoryView() {
     return {
       total: products.length,
       lowStock: products.filter((p) => p.stock <= p.lowStockThreshold).length,
-      value: products.reduce((s, p) => s + p.stock * p.purchasePrice, 0),
+      // §FRONTEND-NUMERIC-FIX: purchasePrice may arrive as string from /api/products;
+      // coerce via toNumber() to prevent string concatenation in stock value sum.
+      value: products.reduce((s, p) => s + toNumber(p.stock) * toNumber(p.purchasePrice), 0),
     }
   }, [products])
 
@@ -266,7 +269,7 @@ export function InventoryView() {
                               </span>
                               <span className="text-muted-foreground">·</span>
                               <span className="font-semibold tabular">{formatCurrency(p.salePrice, currency)}</span>
-                              {p.mrp && p.mrp > p.salePrice && (
+                              {p.mrp && toNumber(p.mrp) > toNumber(p.salePrice) && (
                                 <span className="text-[10px] text-muted-foreground line-through">{formatCurrency(p.mrp, currency)}</span>
                               )}
                             </div>

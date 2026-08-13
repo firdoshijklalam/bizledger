@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 /**
  * GET /api/fulfillment/list
@@ -61,7 +62,8 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    return NextResponse.json({ items: result })
+    // §DECIMAL-FIX-D: Invoice + InvoiceItem have many Decimal fields (grandTotal, amountDue, unitPrice, total, etc.)
+    return NextResponse.json(serializeDecimals({ items: result }))
   }
 
   // §ONLINE-ORDERS: Fetch customer orders
@@ -78,5 +80,6 @@ export async function GET(req: NextRequest) {
     orderBy: { createdAt: 'desc' },
   }).catch(() => [])
 
-  return NextResponse.json({ items: orders || [] })
+  // §DECIMAL-FIX-D: CustomerOrder has Decimal fields (subtotal, deliveryCharge, grandTotal, commissionAmount)
+  return NextResponse.json(serializeDecimals({ items: orders || [] }))
 }

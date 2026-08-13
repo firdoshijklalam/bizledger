@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // POST /api/payments/split — simulate payment split settlement (PRD Part 36 §2.2).
 //   Body: { orderSplitId }
@@ -53,7 +54,9 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    return NextResponse.json({
+    // §DECIMAL-FIX-C: paymentSplit.totalAmount/commissionAmount/merchantAmount
+    // are raw Decimals — wrap whole payload.
+    return NextResponse.json(serializeDecimals({
       id: paymentSplit.id,
       orderSplitId: paymentSplit.orderSplitId,
       businessId: paymentSplit.businessId,
@@ -65,7 +68,7 @@ export async function GET(req: NextRequest) {
       settledAt: paymentSplit.settledAt,
       reversedAt: paymentSplit.reversedAt,
       createdAt: paymentSplit.createdAt,
-    })
+    }))
   } catch (e) {
     return apiError(e, "Request failed")
   }
@@ -131,13 +134,14 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    return NextResponse.json({
+    // §DECIMAL-FIX-C: updated.merchantAmount/commissionAmount are raw Decimals.
+    return NextResponse.json(serializeDecimals({
       ok: true,
       merchantAmount: updated.merchantAmount,
       commissionAmount: updated.commissionAmount,
       settledAt: updated.settledAt,
       settlementStatus: updated.settlementStatus,
-    })
+    }))
   } catch (e) {
     return apiError(e, "Request failed")
   }

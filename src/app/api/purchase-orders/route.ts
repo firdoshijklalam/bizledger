@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { calcLandedCost } from '@/lib/landed-cost'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 export async function GET() {
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json([])
   const pos = await db.purchaseOrder.findMany({ where: { businessId: business.id }, include: { items: true, supplier: true }, orderBy: { createdAt: 'desc' } })
-  return NextResponse.json(pos)
+  // §DECIMAL-FIX-D: totalAmount + items.{unitPrice,transportFare,coolieCharge,totalCost} are Decimal
+  return NextResponse.json(serializeDecimals(pos))
 }
 export async function POST(req: NextRequest) {
   const body = await req.json(); const business = await getCurrentBusiness()
@@ -17,5 +19,6 @@ export async function POST(req: NextRequest) {
   let totalAmount = 0
   const itemsData = (body.items as any[]).map(it => { const q=Number(it.quantity)||0, up=Number(it.unitPrice)||0, tf=Number(it.transportFare)||0, cc=Number(it.coolieCharge)||0; const l=calcLandedCost({basePrice:up,transportFare:tf,coolieCharge:cc,quantity:q}); totalAmount+=l.totalCost; return { catalogItemId: it.catalogItemId||null, productName: String(it.productName||''), category: it.category?String(it.category):null, quantity:q, unitPrice:up, transportFare:tf, coolieCharge:cc, totalCost:l.totalCost, matchedProductId: it.matchedProductId?String(it.matchedProductId):null } })
   const po = await db.purchaseOrder.create({ data: { businessId: business.id, supplierId: body.supplierId, poNumber, status: 'sent', totalAmount, notes: body.notes?String(body.notes):null, items: { create: itemsData } }, include: { items: true, supplier: true } })
-  return NextResponse.json(po)
+  // §DECIMAL-FIX-D: totalAmount + items.{unitPrice,transportFare,coolieCharge,totalCost} are Decimal
+  return NextResponse.json(serializeDecimals(po))
 }

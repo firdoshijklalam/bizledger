@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/store/[slug]/order — OWNER view: list last 50 orders for this store.
 //   §SECURITY: Requires authentication + the store must belong to the
@@ -36,7 +37,9 @@ export async function GET(
       ...o,
       items: o.items ? JSON.parse(o.items) : [],
     }))
-    return NextResponse.json(parsed)
+    // §DECIMAL-FIX-C: orders array contains CustomerOrder records with raw
+    // Decimal fields (subtotal, deliveryCharge, grandTotal, commissionAmount).
+    return NextResponse.json(serializeDecimals(parsed))
   } catch (e) {
     return apiError(e, "Request failed")
   }
@@ -166,11 +169,13 @@ export async function POST(
       })
     )
 
-    return NextResponse.json({
+    // §DECIMAL-FIX-C: order is a CustomerOrder with raw Decimal fields
+    // (subtotal, deliveryCharge, grandTotal, commissionAmount).
+    return NextResponse.json(serializeDecimals({
       ...order,
       items: JSON.parse(order.items),
       commissionLogId,
-    })
+    }))
   } catch (e) {
     return apiError(e, "Request failed")
   }

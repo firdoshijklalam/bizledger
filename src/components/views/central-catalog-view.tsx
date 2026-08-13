@@ -26,6 +26,7 @@ import {
 import { useFetch, apiPost, apiDelete } from '@/hooks/use-fetch'
 import { toast } from 'sonner'
 import { formatCurrency } from '@/lib/utils'
+import { toNumber } from '@/lib/numeric'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -822,7 +823,9 @@ export function CentralCatalogView() {
   }
 
   const cartCount = cart.reduce((sum, it) => sum + it.quantity, 0)
-  const subtotal = cart.reduce((sum, it) => sum + it.total, 0)
+  // §FRONTEND-NUMERIC-FIX: cart items are seeded from CatalogProduct.salePrice
+  // (API Decimal → string); coerce via toNumber() to prevent string concat.
+  const subtotal = cart.reduce((sum, it) => sum + toNumber(it.total), 0)
   const delivery = 0 // free hyperlocal delivery for demo
   const grandTotal = subtotal + delivery
 
@@ -844,7 +847,9 @@ export function CentralCatalogView() {
         groups.push(g)
       }
       g.items.push(it)
-      g.subtotal += it.total
+      // §FRONTEND-NUMERIC-FIX: it.total may be a string (seeded from
+      // p.salePrice Decimal); coerce via toNumber() to keep additive sum safe.
+      g.subtotal += toNumber(it.total)
     }
     groups.sort((a, b) => {
       const aTop = a.isFavorite || a.isSponsored ? 0 : 1
@@ -997,9 +1002,9 @@ export function CentralCatalogView() {
   // Render: ORDER CONFIRMATION SCREEN
   // -------------------------------------------------------------------------
   if (orderResult) {
-    const totalSubtotal = orderResult.splits.reduce((s, x) => s + x.subtotal, 0)
-    const totalCommission = orderResult.splits.reduce((s, x) => s + x.commissionAmount, 0)
-    const totalMerchant = orderResult.splits.reduce((s, x) => s + x.merchantAmount, 0)
+    const totalSubtotal = orderResult.splits.reduce((s, x) => s + toNumber(x.subtotal), 0)
+    const totalCommission = orderResult.splits.reduce((s, x) => s + toNumber(x.commissionAmount), 0)
+    const totalMerchant = orderResult.splits.reduce((s, x) => s + toNumber(x.merchantAmount), 0)
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-background to-muted/30 flex flex-col">

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 import { checkRateLimit, getClientId, RATE_LIMITS } from '@/lib/rate-limit'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // POST /api/orders/split — PRD Part 36 §2.1
 // Auto-splits a global cart order by shop.
@@ -247,7 +248,10 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    return NextResponse.json({ ok: true, splits, parentOrders })
+    // §DECIMAL-FIX-C: splits (OrderSpread + nested paymentSplit) and parentOrders
+    // (CustomerOrder) contain raw Decimal fields: subtotal, deliveryCharge,
+    // grandTotal, commissionAmount, merchantAmount. Wrap whole payload.
+    return NextResponse.json(serializeDecimals({ ok: true, splits, parentOrders }))
   } catch (e) {
     return apiError(e, "Request failed")
   }

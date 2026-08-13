@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { requireRole } from '@/lib/auth/session'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // Single defaulter record (PRD Part 32 §3).
 // PATCH  — update status (active → resolved | disputed) + optional notes.
@@ -45,7 +46,8 @@ export async function PATCH(
         notes: body.notes ? `${existing.notes ?? ''}\n[Update: ${status}] ${body.notes}`.trim() : existing.notes,
       },
     })
-    return NextResponse.json({ ok: true, defaulter: updated })
+    // §DECIMAL-FIX-C: updated is a DefaulterRegistry with defaultAmount Decimal.
+    return NextResponse.json(serializeDecimals({ ok: true, defaulter: updated }))
   } catch (e) {
     return apiError(e, "Request failed")
   }

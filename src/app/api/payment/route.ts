@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/payment?token=TOKEN — public endpoint, returns invoice data for payment landing page
 export async function GET(req: NextRequest) {
@@ -16,7 +17,9 @@ export async function GET(req: NextRequest) {
   const business = await db.business.findUnique({ where: { id: invoice.businessId } })
   if (!business) return NextResponse.json({ error: 'Business not found' }, { status: 404 })
 
-  return NextResponse.json({
+  // §DECIMAL-FIX-C: invoice.grandTotal/amountPaid/amountDue and
+  // items[].unitPrice/total/gstRate are raw Decimals — wrap whole payload.
+  return NextResponse.json(serializeDecimals({
     invoice: {
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
@@ -39,5 +42,5 @@ export async function GET(req: NextRequest) {
       address: business.address,
       currency: business.currency,
     },
-  })
+  }))
 }

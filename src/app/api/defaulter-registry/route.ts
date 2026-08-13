@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/auth/session'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // Shared Defaulter Registry (PRD Part 32 §3).
 // GET  — lookup by fingerprintHash / phone / name; ?action=seed seeds 3 demo
@@ -73,7 +74,9 @@ export async function GET(req: NextRequest) {
         orderBy: { reportedAt: 'desc' },
         take: 50,
       })
-      return NextResponse.json({ count: matches.length, defaulters: matches })
+      // §DECIMAL-FIX-C: matches are DefaulterRegistry records with
+      // defaultAmount Decimal — wrap whole payload.
+      return NextResponse.json(serializeDecimals({ count: matches.length, defaulters: matches }))
     }
 
     // Default: return last 20 defaulters.
@@ -81,7 +84,9 @@ export async function GET(req: NextRequest) {
       orderBy: { reportedAt: 'desc' },
       take: 20,
     })
-    return NextResponse.json({ count: defaulters.length, defaulters })
+    // §DECIMAL-FIX-C: defaulters are DefaulterRegistry records with
+    // defaultAmount Decimal — wrap whole payload.
+    return NextResponse.json(serializeDecimals({ count: defaulters.length, defaulters }))
   } catch (e) {
     return apiError(e, "Request failed")
   }
@@ -113,7 +118,8 @@ export async function POST(req: NextRequest) {
         status: body.status ?? 'active',
       },
     })
-    return NextResponse.json({ ok: true, defaulter: record })
+    // §DECIMAL-FIX-C: record is a DefaulterRegistry with defaultAmount Decimal.
+    return NextResponse.json(serializeDecimals({ ok: true, defaulter: record }))
   } catch (e) {
     return apiError(e, "Request failed")
   }

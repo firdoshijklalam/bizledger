@@ -18,6 +18,7 @@ import { FullScreenPicker } from '@/components/shared/full-screen-picker'
 import { useBillingStore } from '@/store/billing-store'
 import { useGateTrigger } from '@/store/biometric-gate-store'
 import { useFetch as useFetchHook } from '@/hooks/use-fetch'
+import { toNumber } from '@/lib/numeric'
 
 interface LineItem {
   productId?: string
@@ -85,13 +86,16 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
 
   const currency = business?.currency || 'INR'
 
-  const subtotal = items.reduce((s, i) => s + i.total, 0)
+  // §FRONTEND-NUMERIC-FIX: LineItem.total / gstRate may originate from
+  // Product.salePrice (Prisma Decimal → string). Coerce via toNumber() before
+  // the additive reduce to prevent string concatenation (0 + "55" = "055").
+  const subtotal = items.reduce((s, i) => s + toNumber(i.total), 0)
   const discountAmount =
     discountMode === 'percent'
       ? (subtotal * (Number(discountValue) || 0)) / 100
       : Number(discountValue) || 0
   const taxable = Math.max(0, subtotal - discountAmount)
-  const gstAmount = items.reduce((s, i) => s + (i.total * i.gstRate) / 100, 0) * (taxable / Math.max(subtotal, 1))
+  const gstAmount = items.reduce((s, i) => s + (toNumber(i.total) * toNumber(i.gstRate)) / 100, 0) * (taxable / Math.max(subtotal, 1))
   const grandTotal = taxable + (isGst ? gstAmount : 0)
 
   const addProduct = (p: Product) => {

@@ -3,6 +3,7 @@
 import { useAppStore } from '@/store/app-store'
 import { useFetch } from '@/hooks/use-fetch'
 import { formatCurrency, GRADE_META } from '@/lib/utils'
+import { toNumber } from '@/lib/numeric'
 import { motion } from 'framer-motion'
 import { Bell, MessageCircle, Phone, Clock, CheckCircle2, Send, FileText, Sparkles, X, Loader2 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
@@ -129,7 +130,7 @@ export function RemindersView() {
           {data.length} {data.length === 1 ? 'party has' : 'parties have'} overdue payments
         </p>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Total outstanding: {formatCurrency(data.reduce((s, r) => s + r.balance, 0), currency)}
+          Total outstanding: {formatCurrency(data.reduce((s, r) => s + toNumber(r.balance), 0), currency)}
         </p>
       </div>
 
