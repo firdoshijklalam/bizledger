@@ -75,6 +75,14 @@ export const DECIMAL_FIELDS = new Set([
 export function serializeDecimals<T>(data: T): T {
   if (data === null || data === undefined) return data
 
+  // §DECIMAL-CHECK: Check for Prisma Decimal objects FIRST — they are
+  // typeof 'object' but have a toNumber() method. Must check before the
+  // generic object branch, otherwise the Decimal is treated as a plain
+  // object and its non-enumerable properties are lost.
+  if (isDecimalLike(data)) {
+    return data.toNumber() as unknown as T
+  }
+
   if (Array.isArray(data)) {
     return data.map((item) => serializeDecimals(item)) as unknown as T
   }
@@ -87,7 +95,18 @@ export function serializeDecimals<T>(data: T): T {
     for (const key of Object.keys(data)) {
       const value = (data as any)[key]
       if (value !== null && value !== undefined) {
-        result[key] = convertValue(value, key) ?? serializeDecimals(value)
+        // §RECURSIVE: First check if the value itself is a Decimal, then
+        // check if it's a string in a known Decimal field, then recurse
+        if (isDecimalLike(value)) {
+          result[key] = value.toNumber()
+        } else {
+          const converted = convertValue(value, key)
+          if (converted !== value) {
+            result[key] = converted
+          } else {
+            result[key] = serializeDecimals(value)
+          }
+        }
       } else {
         result[key] = value
       }
