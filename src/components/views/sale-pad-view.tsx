@@ -315,10 +315,10 @@ export function SalePadView() {
         productId: i.productId,
         name: i.name,
         quantity: i.quantity,
-        unitPrice: i.price,
+        unitPrice: Number(i.price) || 0,
         gstRate: i.gstRate,
         discount: 0,
-        total: i.total,
+        total: Number(i.total) || 0,
       })),
       paymentMode,
     })
@@ -649,7 +649,7 @@ export function SalePadView() {
   // §1 FIX: Grid click always increments by whole integer (1). Fractional inputs
   // (0.5, 1.5, etc.) are only permitted via manual text input in the qty field.
   const addToCart = (p: Product) => {
-    const price = getPrice(p)
+    const price = Number(getPrice(p)) || 0
     const unit = getPriceUnit(p)
     const key = getCartKey(p.id, mode)
     const existing = cart.find((i) => i.cartKey === key)
@@ -662,7 +662,7 @@ export function SalePadView() {
               ...i,
               quantity: newQty,
               qtyStr: String(newQty),
-              total: i.manualOverride ? i.total : newQty * i.price,
+              total: i.manualOverride ? Number(i.total) : newQty * Number(i.price),
             }
           : i
       ))
@@ -675,7 +675,7 @@ export function SalePadView() {
         price,
         quantity: 1,
         qtyStr: '1',
-        total: price,
+        total: Number(price),
         manualOverride: false,
         gstRate: (p as any).gstRate || 0,
         mrp: (p as any).mrp || 0,
@@ -696,7 +696,7 @@ export function SalePadView() {
         const newQty = Math.max(0, Number((i.quantity + delta).toFixed(3)))
         // Sync qtyStr with the new numeric quantity
         if (i.manualOverride) return { ...i, quantity: newQty, qtyStr: String(newQty) }
-        return { ...i, quantity: newQty, qtyStr: String(newQty), total: newQty * i.price }
+        return { ...i, quantity: newQty, qtyStr: String(newQty), total: newQty * Number(i.price) }
       })
       // §3: only remove if qty is genuinely 0 (not while typing decimals like 0.5)
       .filter((i) => i.quantity > 0)
@@ -730,7 +730,7 @@ export function SalePadView() {
         // Keep qtyStr as the raw sanitized string (preserves '0.', '.5', etc.)
         // Recalculate total = price × quantity (unless manual override on total)
         if (i.manualOverride) return { ...i, quantity: qty, qtyStr: sanitized }
-        return { ...i, quantity: qty, qtyStr: sanitized, total: qty * i.price }
+        return { ...i, quantity: qty, qtyStr: sanitized, total: qty * Number(i.price) }
       })
       // DO NOT filter here — keep the item even if qty is 0 so the owner
       // can continue typing (e.g. "0" then ".5"). Removal handled on blur.
@@ -796,7 +796,7 @@ export function SalePadView() {
         setCart(prev => prev.map((i) => {
           const u = updates[i.cartKey]
           if (!u || u.price === i.price) return i
-          return { ...i, price: u.price, total: u.price * i.quantity }
+          return { ...i, price: u.price, total: Number(u.price) * Number(i.quantity) }
         }))
         const appliedCount = Object.values(updates).filter((u) => u.source !== 'default').length
         if (appliedCount > 0 && customer) {
@@ -820,7 +820,7 @@ export function SalePadView() {
   const resetManualTotal = (cartKey: string) => {
     setCart(cart.map((i) =>
       i.cartKey === cartKey
-        ? { ...i, total: i.quantity * i.price, manualOverride: false }
+        ? { ...i, total: Number(i.quantity) * Number(i.price), manualOverride: false }
         : i
     ))
   }
@@ -852,23 +852,26 @@ export function SalePadView() {
 
   // §3: Calculation Pipeline — ALL wrapped in useMemo for performance
   // Prevents expensive re-calculations on every keystroke/render cycle
-  const subtotal = useMemo(() => cart.reduce((s, i) => s + i.total, 0), [cart])
+  // §DECIMAL-SAFETY: Use Number() to coerce all cart values to numbers.
+  // Prisma Decimal fields can arrive as strings from the API — without
+  // Number(), reduce() would do string concatenation (0 + "55" = "055").
+  const subtotal = useMemo(() => cart.reduce((s, i) => s + Number(i.total || 0), 0), [cart])
 
   const globalGstNum = Number(globalGstRate) || 0
   const gstAmount = useMemo(() => {
     if (globalGstNum > 0) {
       return cart.reduce((s, i) => {
         if (i.itemGstManuallyDisabled) return s
-        if (i.itemGstEnabled) return s + (i.total * i.itemGstRate) / 100
+        if (i.itemGstEnabled) return s + (Number(i.total || 0) * Number(i.itemGstRate || 0)) / 100
         if (!masterGstOn) return s
-        return s + (i.total * globalGstNum) / 100
+        return s + (Number(i.total || 0) * globalGstNum) / 100
       }, 0)
     }
     return cart.reduce((s, i) => {
       if (i.itemGstManuallyDisabled) return s
-      if (i.itemGstEnabled) return s + (i.total * i.itemGstRate) / 100
+      if (i.itemGstEnabled) return s + (Number(i.total || 0) * Number(i.itemGstRate || 0)) / 100
       if (!masterGstOn) return s
-      return s + (i.total * (i.gstRate || 0)) / 100
+      return s + (Number(i.total || 0) * Number(i.gstRate || 0)) / 100
     }, 0)
   }, [cart, globalGstNum, masterGstOn])
 
@@ -888,8 +891,9 @@ export function SalePadView() {
   const roundedTotal = useMemo(() => preDeliveryTotal + deliveryChargeNum, [preDeliveryTotal, deliveryChargeNum])
 
   const autoDiscountTotal = useMemo(() => cart.reduce((s, i) => {
-    const effectiveMrp = i.itemMode === 'retail' ? i.retailMrp : i.mrp
-    if (effectiveMrp > 0 && effectiveMrp > i.price) return s + (effectiveMrp - i.price) * i.quantity
+    const effectiveMrp = Number(i.itemMode === 'retail' ? i.retailMrp : i.mrp) || 0
+    const itemPrice = Number(i.price) || 0
+    if (effectiveMrp > 0 && effectiveMrp > itemPrice) return s + (effectiveMrp - itemPrice) * Number(i.quantity || 0)
     return s
   }, 0), [cart])
 
@@ -1160,10 +1164,10 @@ export function SalePadView() {
           productId: i.productId,
           name: i.name,
           quantity: i.quantity,
-          unitPrice: i.price,
+          unitPrice: Number(i.price) || 0,
           discount: 0,
           gstRate: 0,
-          total: i.total,
+          total: Number(i.total) || 0,
         })),
         discountMode,
         discountValue: discountNum,
@@ -1248,10 +1252,10 @@ export function SalePadView() {
           productId: i.productId,
           name: i.name,
           quantity: i.quantity,
-          unitPrice: i.price,
+          unitPrice: Number(i.price) || 0,
           discount: 0,
           gstRate: 0,
-          total: i.total,
+          total: Number(i.total) || 0,
         })),
         discountMode,
         discountValue: discountNum,
@@ -1363,7 +1367,7 @@ export function SalePadView() {
           {carts.map((c, cartIndex) => {
             const active = c.id === activeCartId
             const itemCount = c.items.length
-            const cartTotal = c.items.reduce((s, i) => s + i.total, 0)
+            const cartTotal = c.items.reduce((s, i) => s + Number(i.total || 0), 0)
             // §1: Dynamic Tab Name — use index+1 for position-based labeling.
             // If a customer is selected, show their name. Otherwise 'পার্সন N' (N = index+1).
             const tabLabel = c.customer?.name || `পার্সন ${cartIndex + 1}`
@@ -1652,7 +1656,7 @@ export function SalePadView() {
         ) : (
           <div className="grid grid-cols-2 gap-2">
             {filteredProducts.map((p) => {
-              const price = getPrice(p)
+              const price = Number(getPrice(p)) || 0
               const unit = getPriceUnit(p)
               const inCart = cart.find((i) => i.cartKey === getCartKey(p.id, mode))
               return (
@@ -2391,7 +2395,7 @@ export function SalePadView() {
               ) : (
                 <div className="space-y-2 max-h-72 overflow-y-auto">
                   {heldQueue.map((c, hqIndex) => {
-                    const cartTotal = c.items.reduce((s, i) => s + i.total, 0)
+                    const cartTotal = c.items.reduce((s, i) => s + Number(i.total || 0), 0)
                     return (
                       <div key={c.id} className="p-3 rounded-xl bg-amber-500/5 border border-amber-400/30">
                         <div className="flex items-center justify-between">

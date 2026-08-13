@@ -4,6 +4,7 @@ import { recalculatePartyGrade } from '@/lib/grade-calculator'
 import { apiError } from '@/lib/api-error'
 import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
 import { requireRole } from '@/lib/auth/session'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/invoices/[id]
 // Security: verifies the invoice belongs to the current business.
@@ -18,7 +19,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       include: { party: true, items: { include: { product: true } } },
     })
     if (!invoice) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    return NextResponse.json(invoice)
+    return NextResponse.json(serializeDecimals(invoice))
   } catch (e: any) {
     // Fallback: try without product relation on items (may not exist in Neon yet)
     try {
@@ -27,13 +28,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         include: { party: true, items: true },
       })
       if (!invoice) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-      return NextResponse.json(invoice)
+      return NextResponse.json(serializeDecimals(invoice))
     } catch (e2: any) {
       // Last resort: invoice without relations
       try {
         const invoice = await db.invoice.findFirst({ where: { id, businessId: business.id } })
         if (!invoice) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-        return NextResponse.json({ ...invoice, party: null, items: [] })
+        return NextResponse.json(serializeDecimals({ ...invoice, party: null, items: [] }))
       } catch (e3: any) {
         return apiError(e3, "Database error")
       }
@@ -83,7 +84,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       include: { party: true, items: true },
     })
 
-    return NextResponse.json(updated)
+    return NextResponse.json(serializeDecimals(updated))
   } catch (e: any) {
     return apiError(e, "Update failed")
   }
@@ -239,7 +240,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       metadata: JSON.stringify({ invoiceNumber: invoice.invoiceNumber, grandTotal: invoice.grandTotal, partyId: invoice.partyId }),
     })
 
-    return NextResponse.json({ ok: true, invoice: voided })
+    return NextResponse.json(serializeDecimals({ ok: true, invoice: voided }))
   } catch (e: any) {
     return apiError(e, "Void failed")
   }

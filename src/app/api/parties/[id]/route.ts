@@ -3,6 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
 import { apiError } from '@/lib/api-error'
 import { requireRole } from '@/lib/auth/session'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // /api/parties/[id] — CRUD for a single party.
 // Security: all operations verify the party belongs to the current business.
@@ -31,7 +32,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       },
     })
     if (!party) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    return NextResponse.json(party)
+    return NextResponse.json(serializeDecimals(party))
   } catch (e: any) {
     // Fallback: try without partyNotes (may not exist in Neon yet)
     try {
@@ -43,13 +44,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         },
       })
       if (!party) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-      return NextResponse.json({ ...party, partyNotes: [] })
+      return NextResponse.json(serializeDecimals({ ...party, partyNotes: [] }))
     } catch (e2: any) {
       // Last resort: return party without any relations
       try {
         const party = await db.party.findFirst({ where: { id, businessId } })
         if (!party) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-        return NextResponse.json({ ...party, transactions: [], invoices: [], partyNotes: [] })
+        return NextResponse.json(serializeDecimals({ ...party, transactions: [], invoices: [], partyNotes: [] }))
       } catch (e3: any) {
         return apiError(e3, "Database error")
       }
@@ -104,7 +105,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         ...(searchTags ? { searchTags } : {}),
       },
     })
-    return NextResponse.json(updated)
+    return NextResponse.json(serializeDecimals(updated))
   } catch (e) {
     return apiError(e, "Request failed")
   }

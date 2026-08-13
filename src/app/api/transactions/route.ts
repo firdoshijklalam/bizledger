@@ -3,6 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { recalculatePartyGrade } from '@/lib/grade-calculator'
 import { generateToken, generateInvoiceNumber } from '@/lib/utils'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/transactions
 // §PAGINATION: Supports ?page (1-based) + ?limit (default 50, max 200).
@@ -32,7 +33,10 @@ export async function GET(req: NextRequest) {
     }),
     db.transaction.count({ where }),
   ])
-  return NextResponse.json({ items, total, hasMore: skip + limit < total })
+  // §DECIMAL-FIX-B: items[].amount/balanceAfter and nested items[].party.balance/
+  // party.openingBalance/party.creditLimit are raw Prisma Decimals. Wrapping the
+  // entire response object is safe — serializeDecimals is idempotent on numbers/booleans.
+  return NextResponse.json(serializeDecimals({ items, total, hasMore: skip + limit < total }))
 }
 
 // POST /api/transactions
@@ -110,7 +114,8 @@ export async function POST(req: NextRequest) {
       recalculatePartyGrade(partyId).catch((e) => console.error('Grade recalc error:', e))
     }
 
-    return NextResponse.json(txn)
+    // §DECIMAL-FIX-B: txn.amount/balanceAfter are returned by Prisma as Decimal objects.
+    return NextResponse.json(serializeDecimals(txn))
   } catch (e) {
     return apiError(e, "Request failed")
   }

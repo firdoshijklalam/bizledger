@@ -3,6 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { generateToken, generateInvoiceNumber } from '@/lib/utils'
 import { recalculatePartyGrade } from '@/lib/grade-calculator'
 import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // §VERCEL-LIMIT: Allow up to 20s for invoice creation (stock validation + transaction with many items)
 export const maxDuration = 20
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
     db.invoice.count({ where }),
   ])
 
-  return NextResponse.json({ items: invoices, total: totalCount, hasMore: offset + limit < totalCount })
+  return NextResponse.json(serializeDecimals({ items: invoices, total: totalCount, hasMore: offset + limit < totalCount }))
 }
 
 // POST /api/invoices
@@ -386,7 +387,7 @@ export async function POST(req: NextRequest) {
       metadata: JSON.stringify({ invoiceNumber, grandTotal, partyId: body.partyId, type: body.type || 'sales' }),
     })
 
-    return NextResponse.json(invoice)
+    return NextResponse.json(serializeDecimals(invoice))
   } catch (e) {
     console.error('Invoice create error:', e)
     // §SECURITY: Don't expose internal DB error details in production

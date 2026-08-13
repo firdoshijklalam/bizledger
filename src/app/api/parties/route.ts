@@ -3,6 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
 import { generateSearchTags, phoneticMatch } from '@/lib/transliteration'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/parties — optimized with pagination + field selection
 export async function GET(req: NextRequest) {
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
   // Phonetic search (PRD v2 §12.2) — Bengali ↔ English sound matching
   if (q && usePhonetic) {
     const ranked = phoneticSearch(parties, q)
-    return NextResponse.json({ items: ranked.map((r) => r.item), total: totalCount, hasMore: offset + limit < totalCount })
+    return NextResponse.json(serializeDecimals({ items: ranked.map((r) => r.item), total: totalCount, hasMore: offset + limit < totalCount }))
   }
 
   // §1: Fallback — if contains search returned 0 results, try phoneticMatch
@@ -60,11 +61,11 @@ export async function GET(req: NextRequest) {
     })
     const phoneticMatches = allParties.filter((p) => phoneticMatch(q, p.name))
     if (phoneticMatches.length > 0) {
-      return NextResponse.json({ items: phoneticMatches, total: phoneticMatches.length, hasMore: false })
+      return NextResponse.json(serializeDecimals({ items: phoneticMatches, total: phoneticMatches.length, hasMore: false }))
     }
   }
 
-  return NextResponse.json({ items: result, total: totalCount, hasMore: offset + limit < totalCount })
+  return NextResponse.json(serializeDecimals({ items: result, total: totalCount, hasMore: offset + limit < totalCount }))
 }
 
 // POST /api/parties — create party
@@ -101,7 +102,7 @@ export async function POST(req: NextRequest) {
         searchTags,
       },
     })
-    return NextResponse.json(party)
+    return NextResponse.json(serializeDecimals(party))
   } catch (e) {
     return apiError(e, "Failed to create party")
   }

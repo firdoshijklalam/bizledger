@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/insights — smart business insights: top products, debtors, stock alerts, revenue trends
 export async function GET() {
@@ -73,7 +74,8 @@ export async function GET() {
   return NextResponse.json({
     currency,
     topProducts,
-    topDebtors,
+    // §DECIMAL-FIX-B: topDebtors[].balance is a raw Prisma Decimal.
+    topDebtors: serializeDecimals(topDebtors),
     stockAlerts,
     revenue: {
       thisMonth: thisMonthRevenue,

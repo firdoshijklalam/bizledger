@@ -3,6 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { phoneticSearch } from '@/lib/phonetic'
 import { generateSearchTags, phoneticMatch } from '@/lib/transliteration'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/products — optimized with pagination + field selection
 // Supports ?q=search&phonetic=true&lowStock=true&limit=50&offset=0&page=1
@@ -50,7 +51,7 @@ export async function GET(req: NextRequest) {
   // Phonetic search (PRD v2 §12.2) — on the fetched chunk only
   if (q && usePhonetic) {
     const ranked = phoneticSearch(result as any[], q)
-    return NextResponse.json({ items: ranked.map((r) => r.item), total: totalCount, hasMore: offset + limit < totalCount })
+    return NextResponse.json({ items: serializeDecimals(ranked.map((r) => r.item)), total: totalCount, hasMore: offset + limit < totalCount })
   }
 
   // §1: Fallback — if contains search returned 0 results, try phoneticMatch
@@ -61,11 +62,11 @@ export async function GET(req: NextRequest) {
     })
     const phoneticMatches = allProducts.filter((p) => phoneticMatch(q, p.name))
     if (phoneticMatches.length > 0) {
-      return NextResponse.json({ items: phoneticMatches, total: phoneticMatches.length, hasMore: false })
+      return NextResponse.json({ items: serializeDecimals(phoneticMatches), total: phoneticMatches.length, hasMore: false })
     }
   }
 
-  return NextResponse.json({ items: result, total: totalCount, hasMore: offset + limit < totalCount })
+  return NextResponse.json({ items: serializeDecimals(result), total: totalCount, hasMore: offset + limit < totalCount })
 }
 
 // POST /api/products
@@ -122,7 +123,7 @@ export async function POST(req: NextRequest) {
         searchTags,
       },
     })
-    return NextResponse.json(product)
+    return NextResponse.json(serializeDecimals(product))
   } catch (e) {
     return apiError(e, "Failed to create product")
   }

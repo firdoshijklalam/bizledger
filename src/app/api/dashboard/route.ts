@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // GET /api/dashboard?range=1d|2d|3d|5d|7d|1m|3m|6m|1y|custom&startDate=...&endDate=...
 //
@@ -266,7 +267,10 @@ export async function GET(req: NextRequest) {
       lowStockCount,
       healthScore,
       topDebtors,
-      recentTransactions,
+      // §DECIMAL-FIX-B: recentTransactions contains raw Prisma records with Decimal
+      // `amount`/`balanceAfter` and nested `party.balance`/`party.openingBalance`.
+      // topDebtors already uses num() so no conversion needed there.
+      recentTransactions: serializeDecimals(recentTransactions),
       salesTrend,
       gradeDistribution: gradeDist,
       partyCount,

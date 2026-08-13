@@ -3,6 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
 import { apiError } from '@/lib/api-error'
 import { requireRole } from '@/lib/auth/session'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // /api/products/[id] — CRUD for a single product.
 // Security: all operations verify the product belongs to the current business.
@@ -27,13 +28,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       include: { images: { orderBy: { order: 'asc' } } },
     })
     if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    return NextResponse.json(product)
+    return NextResponse.json(serializeDecimals(product))
   } catch (e: any) {
     // Fallback: return product without images relation (may not exist in Neon yet)
     try {
       const product = await db.product.findFirst({ where: { id, businessId } })
       if (!product) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-      return NextResponse.json({ ...product, images: [] })
+      return NextResponse.json(serializeDecimals({ ...product, images: [] }))
     } catch (e2: any) {
       return apiError(e2, "Database error")
     }
@@ -100,7 +101,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         ...(searchTags ? { searchTags } : {}),
       },
     })
-    return NextResponse.json(updated)
+    return NextResponse.json(serializeDecimals(updated))
   } catch (e) {
     return apiError(e, "Request failed")
   }

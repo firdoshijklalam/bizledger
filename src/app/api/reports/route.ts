@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { serializeDecimals } from '@/lib/decimal-serializer'
 
 // §VERCEL-LIMIT: Allow up to 30s for report aggregation across many invoices/items
 export const maxDuration = 30
@@ -143,17 +144,21 @@ export async function GET() {
       totalGst,
       breakdown: Object.values(gstByRate),
     },
-    partyLedger,
-    outstanding: {
+    // §DECIMAL-FIX-B: partyLedger.balance and outstanding.receivables[].amount
+    // are raw Prisma Decimals; recentInvoices.total/due are raw Prisma Decimals.
+    // payables[].amount is already a number (Math.abs(...toNumber())) but
+    // serializeDecimals is idempotent and leaves numbers as-is.
+    partyLedger: serializeDecimals(partyLedger),
+    outstanding: serializeDecimals({
       totalReceivable,
       totalPayable,
       receivables: parties.filter((p) => p.balance.toNumber() > 0).map((p) => ({ name: p.name, amount: p.balance, grade: p.qualityGrade })),
       payables: parties.filter((p) => p.balance.toNumber() < 0).map((p) => ({ name: p.name, amount: Math.abs(p.balance.toNumber()) })),
-    },
+    }),
     stockAgeing,
     gradeDistribution: gradeDist,
     invoiceCount: allInvoices.length,
-    recentInvoices: allInvoices.map((i) => ({
+    recentInvoices: serializeDecimals(allInvoices.map((i) => ({
       id: i.id,
       number: i.invoiceNumber,
       party: i.party?.name || 'Walk-in',
@@ -161,6 +166,6 @@ export async function GET() {
       due: i.amountDue,
       status: i.status,
       date: i.createdAt,
-    })),
+    }))),
   })
 }
