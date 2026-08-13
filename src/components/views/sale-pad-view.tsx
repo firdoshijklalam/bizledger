@@ -174,7 +174,7 @@ const CartRow = memo(function CartRow({
         </button>
         {hasMrpDiscount && (
           <span className="text-emerald-600 font-medium">
-            ছাড় ₹{((effectiveMrp - item.price) * item.quantity).toFixed(2)}
+            ছাড় ₹{((Number(effectiveMrp) - Number(item.price)) * Number(item.quantity || 0)).toFixed(2)}
           </span>
         )}
       </div>

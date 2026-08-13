@@ -75,3 +75,4 @@ data-*.png
 !public/apple-touch-icon.png
 tool-results/
 .github/workflows/ci.yml
+.zscripts/dev.pid
