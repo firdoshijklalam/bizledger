@@ -43,7 +43,7 @@ function getRatelimiter(name: string, limit: number, window: string): Ratelimit 
 /**
  * Check if a request is allowed under the rate limit.
  * Returns `{ success: boolean, limit, remaining, reset }`.
- * If Redis is not configured, always returns success (no rate limiting).
+ * If Redis is not configured or connection fails, returns success (fail-open).
  */
 export async function checkRateLimit(
   identifier: string,
@@ -56,7 +56,14 @@ export async function checkRateLimit(
     // §FALLBACK: No Redis configured — allow all requests (dev mode)
     return { success: true, limit, remaining: limit, reset: 0 }
   }
-  return ratelimiter.limit(identifier)
+  try {
+    return await ratelimiter.limit(identifier)
+  } catch (e) {
+    // §FAIL-OPEN: If Redis connection fails, allow the request through.
+    // This prevents a Redis outage from locking users out of the app.
+    console.error(`Rate limit check failed for ${limiterName}:`, e)
+    return { success: true, limit, remaining: limit, reset: 0 }
+  }
 }
 
 /**
