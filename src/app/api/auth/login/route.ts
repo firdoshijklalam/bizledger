@@ -28,13 +28,13 @@ export async function POST(req: NextRequest) {
     // §DISTRIBUTED-RATE-LIMIT: Check Upstash Redis first (serverless-safe).
     // Falls back to in-memory if Redis is not configured.
     const rateResult = await checkRateLimit(ip, RATE_LIMITS.LOGIN.name, RATE_LIMITS.LOGIN.limit, RATE_LIMITS.LOGIN.window)
-    console.log("RATE_LIMIT_DEBUG:", JSON.stringify(rateResult)); if (!rateResult.success) {
+    if (!rateResult.success) {
       return NextResponse.json(
         { error: 'Too many login attempts. Please try again later.' },
         {
           status: 429,
           headers: {
-            'Retry-After': String(Math.ceil(rateResult.reset / 1000) || 900),
+            'Retry-After': String(Math.max(1, Math.ceil((rateResult.reset - Date.now()) / 1000)) || 900),
             'X-RateLimit-Limit': String(rateResult.limit),
             'X-RateLimit-Remaining': String(rateResult.remaining),
           },
