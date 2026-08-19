@@ -109,7 +109,8 @@ export async function POST(req: NextRequest) {
 
     return response
   } catch (e) {
-    return apiError(e, 'Login failed')
+    const errMsg = e instanceof Error ? e.message : String(e)
+    return NextResponse.json({ error: 'Login failed', debug: process.env.NODE_ENV === 'production' ? errMsg : undefined }, { status: 500 })
   }
 }
 
