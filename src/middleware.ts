@@ -82,7 +82,7 @@ export function middleware(req: NextRequest) {
   )
   response.headers.set('X-XSS-Protection', '1; mode=block')
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
-  response.headers.set('Permissions-Policy', 'geolocation=(self), camera=(), microphone=()')
+  response.headers.set('Permissions-Policy', 'geolocation=(self), camera=(), microphone=(self)')
 
   return response
 }

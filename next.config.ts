@@ -26,7 +26,9 @@ const nextConfig: NextConfig = {
           // Controls how much referrer info is sent with requests
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           // Restricts browser features (camera, mic, geolocation, etc.)
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          // §MIC-FIX: microphone=(self) allows same-origin SpeechRecognition access.
+          // camera=() still blocks camera (not needed for this app).
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=()' },
           // §CORS-FIX: Removed wildcard '*' — same-origin app doesn't need CORS.
         ],
       },

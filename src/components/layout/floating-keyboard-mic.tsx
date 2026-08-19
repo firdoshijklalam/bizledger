@@ -181,10 +181,18 @@ export function FloatingKeyboardMic() {
   const startListening = useCallback(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SpeechRecognition) {
-      toast.error('ভয়েস ইনপুট এই ব্রাউজারে সাপোর্ট করে না')
+      const lang = languageRef.current
+      toast.error(lang === 'bn' ? 'ভয়েস ইনপুট এই ব্রাউজারে সাপোর্ট করে না' : lang === 'hi' ? 'वॉइस इनपुट इस ब्राउज़र में समर्थित नहीं है' : 'Voice input is not supported in this browser')
       return
     }
-    if (recognitionRef.current) { try { recognitionRef.current.stop() } catch {} }
+    // §PREVENT-DUPLICATE: If already listening, don't start a new session.
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop() } catch {}
+      recognitionRef.current = null
+      setListening(false)
+      // Return early — the user can tap again to start a fresh session.
+      return
+    }
 
     // §GLOBAL-BINDING: Check if there's ANY target input to inject text into.
     // Priority: document.activeElement (the truly focused field) > registered ref.
@@ -270,12 +278,30 @@ export function FloatingKeyboardMic() {
       }
     }
     recognition.onerror = (e: any) => {
-      toast.error('ভয়েস ব্যর্থ: ' + (e.error || 'unknown'))
+      // §ERROR-HANDLING: Provide user-friendly messages for common errors.
+      // Clear recognitionRef to prevent stale references.
+      recognitionRef.current = null
+      const errorType = e?.error || 'unknown'
+      const lang = languageRef.current
+      if (errorType === 'not-allowed' || errorType === 'permission-denied') {
+        toast.error(lang === 'bn' ? 'মাইক্রোফোন অনুমতি প্রয়োজন। ব্রাউজার সেটিংসে অনুমতি দিন।' : lang === 'hi' ? 'माइक्रोफ़ोन अनुमति आवश्यक। ब्राउज़र सेटिंग्स में अनुमति दें।' : 'Microphone permission required. Please allow in browser settings.')
+      } else if (errorType === 'no-speech') {
+        // No speech detected — don't show error, just silently stop
+      } else if (errorType === 'aborted') {
+        // User cancelled — don't show error
+      } else if (errorType === 'network') {
+        toast.error(lang === 'bn' ? 'নেটওয়ার্ক ত্রুটি। আবার চেষ্টা করুন।' : lang === 'hi' ? 'नेटवर्क त्रुटि। पुनः प्रयास करें।' : 'Network error. Please try again.')
+      } else if (errorType === 'audio-capture') {
+        toast.error(lang === 'bn' ? 'মাইক্রোফোন ব্যস্ত। অন্য অ্যাপ বন্ধ করুন।' : lang === 'hi' ? 'माइक्रोफ़ोन व्यस्त। अन्य ऐप बंद करें।' : 'Microphone busy. Close other apps using it.')
+      } else {
+        toast.error(lang === 'bn' ? 'ভয়েস ব্যর্থ: ' + errorType : lang === 'hi' ? 'वॉइस विफल: ' + errorType : 'Voice failed: ' + errorType)
+      }
       setListening(false)
     }
     recognition.onend = () => {
-      setListening(false)
+      // §CLEANUP: Always clear recognitionRef on end to prevent stale references.
       recognitionRef.current = null
+      setListening(false)
       // §GLOBAL-BINDING: Restore focus to document.activeElement if it's an input,
       // otherwise fall back to the registered ref. This keeps the keyboard open
       // so the user can continue typing after voice input.
@@ -289,11 +315,20 @@ export function FloatingKeyboardMic() {
     try {
       recognition.start()
       setListening(true)
+      const lang = languageRef.current
       toast.info(lang === 'bn' ? 'বলুন...' : lang === 'hi' ? 'बोलिए...' : 'Speak...', { duration: 1500 })
     } catch (e: any) {
-      // recognition.start() can throw if already started or permission denied
+      // recognition.start() can throw if:
+      // - Already started (InvalidStateError) — clear ref and ignore
+      // - Permission denied — onerror will fire with 'not-allowed'
+      // - Browser doesn't support — unlikely since we checked above
       recognitionRef.current = null
-      toast.error('ভয়েস শুরু করা যায়নি: ' + (e?.message || 'unknown error'))
+      const lang = languageRef.current
+      const errMsg = e?.name === 'InvalidStateError' ? null : (e?.message || 'unknown error')
+      if (errMsg) {
+        toast.error(lang === 'bn' ? 'ভয়েস শুরু করা যায়নি: ' + errMsg : lang === 'hi' ? 'वॉइस शुरू नहीं हो सकी: ' + errMsg : 'Could not start voice: ' + errMsg)
+      }
+      setListening(false)
     }
   }, [])
 
