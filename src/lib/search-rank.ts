@@ -1,19 +1,25 @@
 'use client'
 
 /**
- * §WEIGHTED-SEARCH: Positional weighting + cross-lingual highlighting.
+ * §DETERMINISTIC-SEARCH: Positional weighting + cross-lingual highlighting.
  *
- * Three requirements from the client:
- * 1. HIGHLIGHTING (min 2 chars): Highlight ONLY the matching substring.
- *    Match can be anywhere (beginning, middle, end).
- * 2. SORTING PRIORITY: Prefix matches (index 0) > Infix matches (middle)
- *    > Suffix matches (end).
- * 3. CROSS-LINGUAL HIGHLIGHTING: English query → Bengali name (or vice versa)
- *    must phonetically match AND highlight the corresponding substring in
- *    the target language.
+ * §DESIGN-PRINCIPLE: Fuzzy matching MUST NOT create search results.
+ * Only exact, token, prefix, and alias matches can generate candidates.
+ * Fuzzy is used ONLY for highlight range generation on already-matched items.
  *
- * §GRAPHENE-SAFE: All Bengali text handling uses Intl.Segmenter (grapheme
- * clusters) so combining marks (virama, vowel signs) are never split.
+ * Match hierarchy (lower score = better):
+ *   0.0 = Exact full-query substring match (prefix position)
+ *   1.0 = Exact full-query substring match (infix position)
+ *   2.0 = Exact full-query substring match (suffix position)
+ *   3.0 = Token match (all query tokens found in name, prefix positions)
+ *   4.0 = Token match (some query tokens found in name)
+ *   5.0 = searchTag match (query token found in searchTags)
+ *   6.0 = Secondary field match (phone, sku, etc.)
+ *   7.0 = Bengali-normalized match (vowel variant equivalence)
+ *   8.0 = Cross-lingual alias match (via searchTags)
+ *
+ * Items that don't match ANY of these are FILTERED OUT.
+ * No fuzzy matching generates candidates.
  */
 
 import { transliterateBengaliToEnglish, transliterateEnglishToBengali } from './transliteration'
@@ -24,30 +30,89 @@ export type MatchPosition = 'prefix' | 'infix' | 'suffix' | 'none'
 
 export interface RankedMatch<T> {
   item: T
-  /** Position of the match in the PRIMARY text field (name/title). */
   position: MatchPosition
-  /** Character index where the match starts (-1 if no match). */
   matchIndex: number
-  /** The matched substring length (0 if no match). */
   matchLength: number
-  /** The text that was matched against (for highlighting). */
   matchedText: string
-  /** A sort score: lower = better. Prefix=0, Infix=1, Suffix=2, None=3. */
   score: number
+}
+
+// ─── Bengali vowel normalization ───────────────────────────────────────────
+
+/**
+ * §BENGALI-NORMALIZE: Normalize common Bengali vowel variations for
+ * phonetic equivalent matching within Bengali script.
+ *
+ * Example: ফিরদৌস → ফেরদৌস (ি ≈ ে in certain contexts)
+ * The normalization makes both produce the same canonical form.
+ */
+function normalizeBengaliVowels(text: string): string {
+  let result = text.normalize('NFC')
+  // Common vowel sign equivalences (phonetically similar in Bengali):
+  // ি (i) ≈ ে (e) — common in names: ফিরদৌস/ফেরদৌস, সিমেন্ট/সেমেন্ট
+  result = result.replace(/ি/g, 'ে')
+  // ৌ (ou) ≈ ো (o) — দৌস/দোস
+  result = result.replace(/ৌ/g, 'ো')
+  // ী (ii) ≈ ি (i) — less common but valid
+  result = result.replace(/ী/g, 'ি')
+  return result
+}
+
+/**
+ * §COMMON-BENGALI-WORDS: Map common Bengali product/word names to their
+ * English equivalents. This is used for cross-lingual search of English
+ * product names when the user searches in Bengali.
+ *
+ * This is NOT a general transliteration — it's a controlled dictionary
+ * of verified equivalents. Transliteration is unreliable for these words
+ * (e.g., সিমেন্ট → 'siment' ≠ 'cement'), so we use explicit mappings.
+ */
+const COMMON_BENGALI_WORDS: Record<string, string[]> = {
+  'সিমেন্ট': ['cement'],
+  'চাল': ['rice'],
+  'ভাত': ['rice'],
+  'তেল': ['oil'],
+  'সরিষার তেল': ['mustard oil'],
+  'পানি': ['water'],
+  'লবণ': ['salt'],
+  'চিনি': ['sugar'],
+  'আটা': ['flour'],
+  'ডাল': ['lentil', 'dal'],
+  'ব্রেড': ['bread'],
+  'দুধ': ['milk'],
+  'ডিম': ['egg'],
+  'পেঁয়াজ': ['onion'],
+  'আলু': ['potato'],
+  'রসুন': ['garlic'],
+  'আদা': ['ginger'],
+  'মরিচ': ['chili', 'chilli'],
+  'হালদি': ['turmeric'],
+  'জিরা': ['cumin'],
+  'ধনে': ['coriander'],
+  'চায়': ['tea'],
+  'কাগজ': ['paper'],
+  'বাল্ব': ['bulb'],
+  'চেয়ার': ['chair'],
+  কাচ: ['glass'],
+  থালা: ['plate'],
+  গ্লাস: ['glass'],
+  বালতি: ['bucket'],
+  ছাতা: ['umbrella'],
+  জুতো: ['shoe'],
+  সাবান: ['soap'],
+}
+
+/**
+ * Get English equivalents for a Bengali query word.
+ * Returns an array of English words that should be searched.
+ */
+function getBengaliEnglishEquivalents(word: string): string[] {
+  const normalized = word.normalize('NFC').toLowerCase().trim()
+  return COMMON_BENGALI_WORDS[normalized] || []
 }
 
 // ─── Position detection ────────────────────────────────────────────────────
 
-/**
- * Find the position of a case-insensitive substring match.
- * Returns the match index and position classification.
- *
- * §RULE: A match at index 0 is "prefix". A match ending at the string's
- * last character is "suffix". Everything else is "infix".
- *
- * Edge case: if the query equals the entire text, it's classified as "prefix"
- * (index 0 takes priority).
- */
 export function findMatchPosition(text: string, query: string): {
   index: number
   position: MatchPosition
@@ -56,8 +121,8 @@ export function findMatchPosition(text: string, query: string): {
   if (!text || !query || query.trim().length < 2) {
     return { index: -1, position: 'none', length: 0 }
   }
-  const t = text.toLowerCase()
-  const q = query.toLowerCase().trim()
+  const t = text.normalize('NFC').toLowerCase()
+  const q = query.normalize('NFC').toLowerCase().trim()
   if (q.length < 2) {
     return { index: -1, position: 'none', length: 0 }
   }
@@ -77,21 +142,39 @@ export function findMatchPosition(text: string, query: string): {
   return { index: idx, position, length: q.length }
 }
 
+/**
+ * §BENGALI-VARIANT-MATCH: Try matching with Bengali vowel normalization.
+ * This handles cases like ফিরদৌস vs ফেরদৌস where the only difference
+ * is vowel signs (ি vs ে, ৌ vs ো).
+ */
+function findBengaliVariantMatch(text: string, query: string): {
+  index: number
+  position: MatchPosition
+  length: number
+} | null {
+  if (!text || !query || query.trim().length < 2) return null
+  const isBengali = /[\u0980-\u09FF]/.test(query)
+  if (!isBengali) return null
+
+  const normalizedText = normalizeBengaliVowels(text).toLowerCase()
+  const normalizedQuery = normalizeBengaliVowels(query).toLowerCase().trim()
+
+  if (normalizedQuery.length < 2) return null
+
+  const idx = normalizedText.indexOf(normalizedQuery)
+  if (idx < 0) return null
+
+  const end = idx + normalizedQuery.length
+  let position: MatchPosition
+  if (idx === 0) position = 'prefix'
+  else if (end === normalizedText.length) position = 'suffix'
+  else position = 'infix'
+
+  return { index: idx, position, length: normalizedQuery.length }
+}
+
 // ─── Cross-lingual match finding ───────────────────────────────────────────
 
-/**
- * §CROSS-LINGUAL: Find a match between the query and text across scripts.
- *
- * If the query is English and the text is Bengali (or vice versa), we
- * transliterate and find the matching substring position in the ORIGINAL
- * text (not the transliteration).
- *
- * Returns the character index range [start, end) in the ORIGINAL text that
- * corresponds to the matched query, or null if no cross-lingual match.
- *
- * §GRAPHENE-SAFE: Uses Intl.Segmenter to map between transliterated and
- * original text so Bengali combining characters are never split.
- */
 export function findCrossLingualMatch(
   text: string,
   query: string
@@ -102,26 +185,21 @@ export function findCrossLingualMatch(
   const isQueryBengali = /[\u0980-\u09FF]/.test(q)
   const isTextBengali = /[\u0980-\u09FF]/.test(text)
 
-  // Same script → not cross-lingual (handled by findMatchPosition)
+  // Same script → not cross-lingual
   if (isQueryBengali === isTextBengali) return null
 
-  // Transliterate the query to the OTHER script
   let transliteratedQuery: string
   if (isQueryBengali) {
-    // Query is Bengali, text is English → transliterate query to English
     transliteratedQuery = transliterateBengaliToEnglish(q)
   } else {
-    // Query is English, text is Bengali → transliterate query to Bengali
     transliteratedQuery = transliterateEnglishToBengali(q)
   }
 
   if (!transliteratedQuery || transliteratedQuery.trim().length < 2) return null
 
-  // Try to find the transliterated query in the text
-  const tq = transliteratedQuery.toLowerCase().trim()
-  const t = text.toLowerCase()
+  const tq = transliteratedQuery.normalize('NFC').toLowerCase().trim()
+  const t = text.normalize('NFC').toLowerCase()
 
-  // Direct substring match of transliterated query in text
   let idx = t.indexOf(tq)
   if (idx >= 0) {
     const end = idx + tq.length
@@ -130,54 +208,6 @@ export function findCrossLingualMatch(
     else if (end === t.length) position = 'suffix'
     else position = 'infix'
     return { start: idx, end, position }
-  }
-
-  // §FUZZY-CROSS-LINGUAL: The transliteration might not be exact (e.g.,
-  // "Firdos" transliterates to "ফির্দোস" but the saved name might be
-  // "ফেরদৌস"). Try a grapheme-by-grapheme fuzzy match that tolerates
-  // vowel differences.
-  //
-  // We use a sliding window approach: for each starting position in the
-  // text, try to match the query's consonants in order (skipping vowels).
-  // This is more tolerant than exact substring matching.
-  const textGraphemes = getGraphemeStrings(text)
-  const queryGraphemes = getGraphemeStrings(transliteratedQuery)
-
-  // Build consonant-only skeletons (strip vowels)
-  const queryConsonants = queryGraphemes.filter((g) => !isVowelGrapheme(g))
-  if (queryConsonants.length < 2) return null
-
-  // Slide through text graphemes, try to find a window where consonants
-  // match in order.
-  let bestStart = -1
-  let bestEnd = -1
-  for (let start = 0; start < textGraphemes.length; start++) {
-    let qi = 0
-    let end = start
-    for (let ti = start; ti < textGraphemes.length && qi < queryConsonants.length; ti++) {
-      if (graphemesMatch(textGraphemes[ti], queryConsonants[qi])) {
-        qi++
-        end = ti + 1
-      }
-    }
-    if (qi === queryConsonants.length) {
-      // Found a match from `start` to `end`
-      // Convert grapheme indices to character indices
-      const charStart = graphemeIndexToCharIndex(text, start)
-      const charEnd = graphemeIndexToCharIndex(text, end)
-      if (bestStart < 0 || (charEnd - charStart) < (bestEnd - bestStart)) {
-        bestStart = charStart
-        bestEnd = charEnd
-      }
-    }
-  }
-
-  if (bestStart >= 0) {
-    let position: MatchPosition
-    if (bestStart === 0) position = 'prefix'
-    else if (bestEnd === text.length) position = 'suffix'
-    else position = 'infix'
-    return { start: bestStart, end: bestEnd, position }
   }
 
   return null
@@ -207,274 +237,82 @@ function graphemeIndexToCharIndex(text: string, graphemeIdx: number): number {
 }
 
 function isVowelGrapheme(g: string): boolean {
-  // English vowels
   if (/^[aeiou]$/i.test(g)) return true
-  // Bengali vowels and vowel signs
   if (/^[অআইঈউঊঋএঐওঔািীুূৃেৈোৌংঃঁ]$/.test(g)) return true
   return false
 }
 
 function graphemesMatch(a: string, b: string): boolean {
   if (a === b) return true
-  // §PHONETIC-EQUIVALENCE: Treat common phonetic equivalents as equal.
-  // e.g., "শ" ≈ "স" (both /sh/~/s/), "ি" ≈ "ে" (i~e), etc.
   const al = a.toLowerCase()
   const bl = b.toLowerCase()
   if (al === bl) return true
-  // Bengali consonant equivalence
   const bnEquiv: Record<string, string[]> = {
-    'শ': ['স', 'ষ'],
-    'স': ['শ', 'ষ'],
-    'ষ': ['শ', 'স'],
-    'ন': ['ণ'],
-    'ণ': ['ন'],
-    'ব': ['ভ'],
-    'ভ': ['ব'],
+    'শ': ['স', 'ষ'], 'স': ['শ', 'ষ'], 'ষ': ['শ', 'স'],
+    'ন': ['ণ'], 'ণ': ['ন'], 'ব': ['ভ'], 'ভ': ['ব'],
   }
   if (bnEquiv[a]?.includes(b)) return true
-  // English consonant equivalence
-  const enEquiv: Record<string, string[]> = {
-    's': ['sh'],
-    'v': ['b'],
-    'j': ['z'],
-  }
+  const enEquiv: Record<string, string[]> = { 's': ['sh'], 'v': ['b'], 'j': ['z'] }
   if (enEquiv[al]?.includes(bl)) return true
   if (enEquiv[bl]?.includes(al)) return true
   return false
 }
 
-// ─── Ranking ───────────────────────────────────────────────────────────────
+// ─── Token matching ────────────────────────────────────────────────────────
 
 /**
- * §WEIGHTED-SORT: Rank items by match position.
- *
- * Priority: prefix (0) > infix (1) > suffix (2) > none (3).
- * Within the same position, shorter match index wins (earlier in the string).
- *
- * @param items - The items to rank.
- * @param query - The search query.
- * @param getTextField - Function to extract the primary text field (name) from an item.
- * @param getSearchFields - Optional additional fields to search (phone, sku, etc.).
+ * §TOKEN-MATCH: Check if query tokens match candidate tokens.
+ * Returns match count and best position.
  */
-export function rankByPosition<T>(
-  items: T[],
-  query: string,
-  getTextField: (item: T) => string,
-  getSearchFields?: (item: T) => string[]
-): RankedMatch<T>[] {
-  if (!query || query.trim().length < 2) return []
+function tokenMatch(queryTokens: string[], candidateTokens: string[]): {
+  matchCount: number
+  bestPosition: MatchPosition
+  bestIndex: number
+} {
+  let matchCount = 0
+  let bestPosition: MatchPosition = 'none'
+  let bestIndex = -1
 
-  const q = query.trim()
-  const ranked: RankedMatch<T>[] = []
+  for (const qt of queryTokens) {
+    if (qt.length < 2) continue
+    const qtLower = qt.toLowerCase()
 
-  for (const item of items) {
-    const primaryText = getTextField(item) || ''
-
-    // 1. Try exact substring match in the primary field
-    const exact = findMatchPosition(primaryText, q)
-    if (exact.index >= 0) {
-      // §EXACT-NAME-BONUS: If the query equals the ENTIRE name (case-insensitive),
-      // give a -0.5 bonus so it ranks above other prefix matches.
-      // Example: query "Alam" → "Alam" (exact name) ranks above "Alam Khan" (prefix).
-      const isExactName = primaryText.toLowerCase().trim() === q.toLowerCase().trim()
-      const exactNameBonus = isExactName ? -0.5 : 0
-      ranked.push({
-        item,
-        position: exact.position,
-        matchIndex: exact.index,
-        matchLength: exact.length,
-        matchedText: primaryText.substring(exact.index, exact.index + exact.length),
-        score: positionToScore(exact.position) + exactNameBonus,
-      })
-      continue
-    }
-
-    // 2. Try cross-lingual match in the primary field
-    const cross = findCrossLingualMatch(primaryText, q)
-    if (cross) {
-      ranked.push({
-        item,
-        position: cross.position,
-        matchIndex: cross.start,
-        matchLength: cross.end - cross.start,
-        matchedText: primaryText.substring(cross.start, cross.end),
-        score: positionToScore(cross.position) + 0.5, // slight penalty for cross-lingual
-      })
-      continue
-    }
-
-    // 3. Try exact substring match in secondary search fields
-    if (getSearchFields) {
-      const fields = getSearchFields(item)
-      let found = false
-      for (const field of fields) {
-        if (!field) continue
-        const fieldMatch = findMatchPosition(field, q)
-        if (fieldMatch.index >= 0) {
-          ranked.push({
-            item,
-            position: fieldMatch.position,
-            matchIndex: fieldMatch.index,
-            matchLength: fieldMatch.length,
-            matchedText: field.substring(fieldMatch.index, fieldMatch.index + fieldMatch.length),
-            score: positionToScore(fieldMatch.position) + 0.3, // penalty for secondary field
-          })
-          found = true
-          break
+    // Check each candidate token
+    for (let i = 0; i < candidateTokens.length; i++) {
+      const ct = candidateTokens[i].toLowerCase()
+      if (ct === qtLower) {
+        matchCount++
+        if (i === 0 && bestPosition !== 'prefix') {
+          bestPosition = 'prefix'
+          bestIndex = 0
         }
+        break
       }
-      if (found) continue
-    }
-
-    // 4. §SMART-FUZZY-FALLBACK: Items found by usePhoneticSearch via fuzzy
-    //    matching but without an exact substring/cross-lingual/field match.
-    //    We include them ONLY if they can be highlighted — i.e., at least
-    //    one word in the query has a consecutive consonant match OR an exact
-    //    word match in the primary text. This prevents false positives like
-    //    "Das" matching "Maa Lakshmi Bhandar" (no consecutive consonant match)
-    //    while allowing "Firdaus Alam" to match "Firdosh Alam" (Alam is exact,
-    //    Fird is a consonant match).
-    //
-    // §SCORING-FIX: The fallback now assigns PROPER scores based on the BEST
-    // word match position (prefix < infix < suffix) instead of always 3.
-    // It also adds a MULTI-TOKEN BONUS so items matching MORE query tokens
-    // rank higher than items matching fewer tokens.
-    // Example: query "Firdous Alam"
-    //   - "Firdous Alam" (full match, caught in step 1) → score 0
-    //   - "Alam" (1 token "alam" prefix match) → score 3.0 (prefix) + 0 bonus = 3.0
-    //   - "Firdosh Alam" (2 tokens: "firdos" fuzzy prefix + "alam" exact suffix)
-    //     → bestWordScore = 2.0 (suffix) + 0.5 multi-token bonus = 2.5
-    //     → ranks ABOVE "Alam" (3.0) ✓
-    const words = q.split(/\s+/).filter((w) => w.length >= 2)
-    let hasHighlightableMatch = false
-    // §BASE-PENALTY: Step 4 matches start at 2.0 so they NEVER tie with
-    // step 1 (full exact match, score 0-2). This ensures a full-query
-    // exact match always ranks above a per-word match.
-    //   Step 4 prefix word match  → 2.0 + 0     = 2.0
-    //   Step 4 infix word match   → 2.0 + 1     = 3.0
-    //   Step 4 suffix word match  → 2.0 + 2     = 4.0
-    //   Step 4 fuzzy prefix       → 2.0 + 0 + 1 = 3.0
-    //   Multi-token bonus: -0.5 per extra token
-    const STEP4_BASE = 2.0
-    let bestWordScore = 99.0 // worst initially
-    let tokenMatchCount = 0
-    let bestMatchIndex = -1
-
-    for (const word of words) {
-      let wordScore: number | null = null
-      let wordIdx = -1
-
-      // 4a. Exact word match in primary text
-      const wordExact = findMatchPosition(primaryText, word)
-      if (wordExact.index >= 0) {
-        wordScore = STEP4_BASE + positionToScore(wordExact.position)
-        wordIdx = wordExact.index
-      }
-
-      // 4b. Cross-lingual word match (small penalty — preserves position hierarchy)
-      // §POSITION-DOMINATES: Penalty is 0.3 (not 0.5) so cross-lingual prefix (2.3)
-      // still ranks above exact infix (3.0). This ensures the user's rule
-      // (prefix > infix > suffix) is NEVER violated by match type.
-      if (wordScore === null) {
-        const wordCross = findCrossLingualMatch(primaryText, word)
-        if (wordCross) {
-          wordScore = STEP4_BASE + positionToScore(wordCross.position) + 0.3
-          wordIdx = wordCross.start
+      // Token prefix match (candidate starts with query token)
+      if (ct.startsWith(qtLower) && qtLower.length >= 3) {
+        matchCount++
+        if (i === 0 && bestPosition !== 'prefix') {
+          bestPosition = 'prefix'
+          bestIndex = 0
         }
+        break
       }
-
-      // 4c. Consonant-skeleton fuzzy match (small penalty — preserves position hierarchy)
-      // §POSITION-DOMINATES: Penalty is 0.5 (not 1.0) so fuzzy prefix (2.5)
-      // still ranks above exact infix (3.0). This ensures the user's rule
-      // (prefix > infix > suffix) is NEVER violated by match type.
-      //
-      // Full hierarchy within step 4:
-      //   exact prefix (2.0) < cross-lingual prefix (2.3) < fuzzy prefix (2.5)
-      //   < exact infix (3.0) < cross-lingual infix (3.3) < fuzzy infix (3.5)
-      //   < exact suffix (4.0) < cross-lingual suffix (4.3) < fuzzy suffix (4.5)
-      //   < secondary field (4.5+)
-      if (wordScore === null) {
-        const fuzzy = findFuzzyHighlightRange(primaryText, word)
-        if (fuzzy) {
-          // Classify the fuzzy match position
-          const fuzzyEnd = fuzzy.end
-          let fuzzyPos: MatchPosition
-          if (fuzzy.start === 0) fuzzyPos = 'prefix'
-          else if (fuzzyEnd === primaryText.length) fuzzyPos = 'suffix'
-          else fuzzyPos = 'infix'
-          wordScore = STEP4_BASE + positionToScore(fuzzyPos) + 0.5 // small penalty for fuzzy
-          wordIdx = fuzzy.start
+      // Query token starts with candidate token (for short candidates like "Alam")
+      if (qtLower.startsWith(ct) && ct.length >= 3) {
+        matchCount++
+        if (bestPosition === 'none') {
+          bestPosition = i === 0 ? 'prefix' : 'infix'
+          bestIndex = i
         }
-      }
-
-      if (wordScore !== null) {
-        hasHighlightableMatch = true
-        tokenMatchCount++
-        if (wordScore < bestWordScore) {
-          bestWordScore = wordScore
-          bestMatchIndex = wordIdx
-        }
+        break
       }
     }
-
-    // Also check secondary search fields for word matches
-    if (!hasHighlightableMatch && getSearchFields) {
-      const fields = getSearchFields(item)
-      for (const field of fields) {
-        if (!field) continue
-        for (const word of words) {
-          if (field.toLowerCase().includes(word.toLowerCase())) {
-            hasHighlightableMatch = true
-            bestWordScore = STEP4_BASE + 2.7 // secondary field — worst (above fuzzy suffix 4.5)
-            tokenMatchCount++
-            break
-          }
-        }
-        if (hasHighlightableMatch) break
-      }
-    }
-
-    if (hasHighlightableMatch) {
-      // §MULTI-TOKEN-BONUS: Each additional matching token improves the score.
-      // §POSITION-DOMINATES: Bonus is 0.25 per extra token — deliberately SMALL
-      // so it can NEVER override a position tier (which are 1.0 apart).
-      // Max bonus for 4 tokens = 0.75 < 1.0 tier gap.
-      // This ensures the user's rule is strictly followed:
-      //   prefix highlight → infix highlight → suffix highlight
-      // Token count only breaks ties WITHIN the same position tier.
-      const multiTokenBonus = tokenMatchCount > 1 ? (tokenMatchCount - 1) * 0.25 : 0
-      const finalScore = bestWordScore - multiTokenBonus
-      ranked.push({
-        item,
-        position: 'none' as MatchPosition,
-        matchIndex: bestMatchIndex,
-        matchLength: 0,
-        matchedText: '',
-        score: finalScore,
-      })
-    }
-    // If no highlightable match, the item is FILTERED OUT — not returned.
   }
 
-  // §SORT-PRIORITY (user's rule):
-  // 1. score (ascending) — prefix (0) < infix (1) < suffix (2) < step4 (2+)
-  // 2. matchIndex (ascending) — earlier match in the name wins
-  // 3. matchedText LENGTH (descending) — longer match wins (more specific)
-  // 4. name LENGTH (ascending) — shorter name wins (more concise match)
-  //    e.g., "Alam" ranks above "Alam Khan" at the same position
-  ranked.sort((a, b) => {
-    if (a.score !== b.score) return a.score - b.score
-    if (a.matchIndex !== b.matchIndex) return a.matchIndex - b.matchIndex
-    const aLen = (a.matchedText || '').length
-    const bLen = (b.matchedText || '').length
-    if (aLen !== bLen) return bLen - aLen // longer match first
-    const aNameLen = (a.item as any)?.name?.length || 0
-    const bNameLen = (b.item as any)?.name?.length || 0
-    return aNameLen - bNameLen // shorter name first
-  })
-
-  return ranked
+  return { matchCount, bestPosition, bestIndex }
 }
+
+// ─── Ranking ───────────────────────────────────────────────────────────────
 
 function positionToScore(position: MatchPosition): number {
   switch (position) {
@@ -485,31 +323,240 @@ function positionToScore(position: MatchPosition): number {
   }
 }
 
+/**
+ * §DETERMINISTIC-RANK: Rank items by deterministic match hierarchy.
+ *
+ * NO FUZZY MATCHING — fuzzy does NOT create candidates.
+ * Only exact, token, prefix, searchTag, and secondary field matches generate results.
+ */
+export function rankByPosition<T>(
+  items: T[],
+  query: string,
+  getTextField: (item: T) => string,
+  getSearchFields?: (item: T) => string[]
+): RankedMatch<T>[] {
+  if (!query || query.trim().length < 2) return []
+
+  const q = query.trim()
+  const queryTokens = q.split(/\s+/).filter((w) => w.length >= 2)
+  const ranked: RankedMatch<T>[] = []
+
+  for (const item of items) {
+    const primaryText = getTextField(item) || ''
+
+    // ── LEVEL 1-3: Exact full-query substring match in primary field ──
+    const exact = findMatchPosition(primaryText, q)
+    if (exact.index >= 0) {
+      ranked.push({
+        item,
+        position: exact.position,
+        matchIndex: exact.index,
+        matchLength: exact.length,
+        matchedText: primaryText.substring(exact.index, exact.index + exact.length),
+        score: positionToScore(exact.position),
+      })
+      continue
+    }
+
+    // ── LEVEL 7: Bengali-normalized match (vowel variant) ──
+    const bnVariant = findBengaliVariantMatch(primaryText, q)
+    if (bnVariant) {
+      ranked.push({
+        item,
+        position: bnVariant.position,
+        matchIndex: bnVariant.index,
+        matchLength: bnVariant.length,
+        matchedText: primaryText.substring(bnVariant.index, bnVariant.index + bnVariant.length),
+        score: positionToScore(bnVariant.position) + 7.0,
+      })
+      continue
+    }
+
+    // ── LEVEL 8: Bengali→English common word match ──
+    // Check if the query (or any query token) is a common Bengali word
+    // with a known English equivalent (e.g., সিমেন্ট → cement)
+    const queryWords = q.split(/\s+/).filter((w) => w.length >= 2)
+    let bnEnMatched = false
+    for (const word of queryWords) {
+      const equivalents = getBengaliEnglishEquivalents(word)
+      for (const eq of equivalents) {
+        // Check primary field
+        const eqMatch = findMatchPosition(primaryText, eq)
+        if (eqMatch.index >= 0) {
+          ranked.push({
+            item,
+            position: eqMatch.position,
+            matchIndex: eqMatch.index,
+            matchLength: eqMatch.length,
+            matchedText: primaryText.substring(eqMatch.index, eqMatch.index + eqMatch.length),
+            score: positionToScore(eqMatch.position) + 8.0,
+          })
+          bnEnMatched = true
+          break
+        }
+        // Check searchTags/secondary fields
+        if (getSearchFields) {
+          const fields = getSearchFields(item)
+          for (const field of fields) {
+            if (!field) continue
+            const fieldEqMatch = findMatchPosition(field, eq)
+            if (fieldEqMatch.index >= 0) {
+              ranked.push({
+                item,
+                position: fieldEqMatch.position,
+                matchIndex: -1,
+                matchLength: fieldEqMatch.length,
+                matchedText: field.substring(fieldEqMatch.index, fieldEqMatch.index + fieldEqMatch.length),
+                score: positionToScore(fieldEqMatch.position) + 8.5,
+              })
+              bnEnMatched = true
+              break
+            }
+          }
+          if (bnEnMatched) break
+        }
+      }
+      if (bnEnMatched) break
+    }
+    if (bnEnMatched) continue
+
+    // ── LEVEL 2: Cross-lingual match in primary field ──
+    const cross = findCrossLingualMatch(primaryText, q)
+    if (cross) {
+      ranked.push({
+        item,
+        position: cross.position,
+        matchIndex: cross.start,
+        matchLength: cross.end - cross.start,
+        matchedText: primaryText.substring(cross.start, cross.end),
+        score: positionToScore(cross.position) + 2.0,
+      })
+      continue
+    }
+
+    // ── LEVEL 4-5: Token-based matching ──
+    if (queryTokens.length > 0) {
+      const candidateTokens = primaryText.split(/\s+/).filter((w) => w.length >= 1)
+      const { matchCount, bestPosition, bestIndex } = tokenMatch(queryTokens, candidateTokens)
+
+      if (matchCount > 0) {
+        // §MULTI-TOKEN-BONUS: Each additional matching token improves score.
+        // But position still dominates (1.0 gap between tiers).
+        const multiTokenBonus = matchCount > 1 ? (matchCount - 1) * 0.25 : 0
+        const baseScore = 3.0 + positionToScore(bestPosition)
+        ranked.push({
+          item,
+          position: bestPosition,
+          matchIndex: bestIndex,
+          matchLength: 0,
+          matchedText: '',
+          score: baseScore - multiTokenBonus,
+        })
+        continue
+      }
+
+      // ── LEVEL 5: Token match against searchTags ──
+      if (getSearchFields) {
+        const fields = getSearchFields(item)
+        let tagMatched = false
+        for (const field of fields) {
+          if (!field) continue
+          // Exact substring in searchTag
+          const tagExact = findMatchPosition(field, q)
+          if (tagExact.index >= 0) {
+            ranked.push({
+              item,
+              position: tagExact.position,
+              matchIndex: -1,
+              matchLength: tagExact.length,
+              matchedText: field.substring(tagExact.index, tagExact.index + tagExact.length),
+              score: positionToScore(tagExact.position) + 5.0,
+            })
+            tagMatched = true
+            break
+          }
+          // Per-token match against searchTags
+          for (const qt of queryTokens) {
+            if (qt.length < 2) continue
+            const tagTokenMatch = findMatchPosition(field, qt)
+            if (tagTokenMatch.index >= 0) {
+              ranked.push({
+                item,
+                position: tagTokenMatch.position,
+                matchIndex: -1,
+                matchLength: tagTokenMatch.length,
+                matchedText: field.substring(tagTokenMatch.index, tagTokenMatch.index + tagTokenMatch.length),
+                score: positionToScore(tagTokenMatch.position) + 5.5,
+              })
+              tagMatched = true
+              break
+            }
+          }
+          if (tagMatched) break
+        }
+        if (tagMatched) continue
+
+        // ── LEVEL 6: Secondary field exact match (phone, sku, etc.) ──
+        let fieldMatched = false
+        for (const field of fields) {
+          if (!field) continue
+          const fieldMatch = findMatchPosition(field, q)
+          if (fieldMatch.index >= 0) {
+            ranked.push({
+              item,
+              position: fieldMatch.position,
+              matchIndex: fieldMatch.index,
+              matchLength: fieldMatch.length,
+              matchedText: field.substring(fieldMatch.index, fieldMatch.index + fieldMatch.length),
+              score: positionToScore(fieldMatch.position) + 6.0,
+            })
+            fieldMatched = true
+            break
+          }
+          // Per-token match against secondary fields
+          for (const qt of queryTokens) {
+            if (qt.length < 2) continue
+            const tokenFieldMatch = findMatchPosition(field, qt)
+            if (tokenFieldMatch.index >= 0) {
+              ranked.push({
+                item,
+                position: tokenFieldMatch.position,
+                matchIndex: tokenFieldMatch.index,
+                matchLength: tokenFieldMatch.length,
+                matchedText: field.substring(tokenFieldMatch.index, tokenFieldMatch.index + tokenFieldMatch.length),
+                score: positionToScore(tokenFieldMatch.position) + 6.5,
+              })
+              fieldMatched = true
+              break
+            }
+          }
+          if (fieldMatched) break
+        }
+        if (fieldMatched) continue
+      }
+    }
+
+    // ── NO MATCH: Item is FILTERED OUT ──
+    // Fuzzy matching does NOT create candidates.
+  }
+
+  // Sort by score (ascending = best first), then by match length (descending),
+  // then by name length (ascending = shorter name first)
+  ranked.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score
+    const aLen = (a.matchedText || '').length
+    const bLen = (b.matchedText || '').length
+    if (aLen !== bLen) return bLen - aLen
+    const aNameLen = (a.item as any)?.name?.length || 0
+    const bNameLen = (b.item as any)?.name?.length || 0
+    return aNameLen - bNameLen
+  })
+
+  return ranked
+}
+
 // ─── Highlighting (grapheme-safe, cross-lingual) ──────────────────────────
 
-/**
- * §HIGHLIGHT: Highlight the matching substring(s) in the text.
- *
- * For same-script matches: highlights the exact substring.
- * For cross-lingual matches: highlights the corresponding substring in the
- * original text (found via transliteration + grapheme mapping).
- * For fuzzy/phonetic matches: highlights the best-matching portion of the
- * text using subsequence matching (e.g., "Firdaus" highlights "Firdo" in
- * "Firdosh" because the consonant skeleton "frd" matches).
- *
- * §MULTI-WORD: For multi-word queries like "Firdaus Alam", ALL matching
- * words are highlighted. Each word is matched independently — exact
- * substring first, then cross-lingual, then consonant-skeleton fuzzy.
- *
- * §MIN-2-CHARS: Only highlights if the query is 2+ characters.
- * §GRAPHENE-SAFE: Uses Intl.Segmenter so Bengali combining characters
- * (virama, vowel marks) are never split.
- *
- * Returns { before, match, after, matched } where `match` is a single
- * highlighted segment. For multi-word queries, this returns the FIRST
- * match — but the caller (highlightWeighted) handles multi-segment
- * highlighting by calling this function for each word.
- */
 export function highlightSubstring(text: string, query: string): {
   before: string
   match: string
@@ -522,7 +569,7 @@ export function highlightSubstring(text: string, query: string): {
 
   const q = query.trim()
 
-  // 1. Try exact substring match (same script) for the FULL query
+  // 1. Exact substring match
   const exact = findMatchPosition(text, q)
   if (exact.index >= 0) {
     return {
@@ -533,7 +580,18 @@ export function highlightSubstring(text: string, query: string): {
     }
   }
 
-  // 2. Try cross-lingual match for the FULL query
+  // 2. Bengali variant match
+  const bnVariant = findBengaliVariantMatch(text, q)
+  if (bnVariant) {
+    return {
+      before: text.substring(0, bnVariant.index),
+      match: text.substring(bnVariant.index, bnVariant.index + bnVariant.length),
+      after: text.substring(bnVariant.index + bnVariant.length),
+      matched: true,
+    }
+  }
+
+  // 3. Cross-lingual match
   const cross = findCrossLingualMatch(text, q)
   if (cross) {
     return {
@@ -544,38 +602,31 @@ export function highlightSubstring(text: string, query: string): {
     }
   }
 
-  // 3. §MULTI-WORD: Try each word separately.
-  // For "Firdaus Alam", try "Firdaus" and "Alam" independently.
-  // Collect ALL highlight ranges, then merge them.
+  // 4. Per-word match
   const words = q.split(/\s+/).filter((w) => w.length >= 2)
   if (words.length > 0) {
     const ranges: Array<{ start: number; end: number }> = []
 
     for (const word of words) {
-      // 3a. Try exact substring match for this word
       const wordExact = findMatchPosition(text, word)
       if (wordExact.index >= 0) {
         ranges.push({ start: wordExact.index, end: wordExact.index + wordExact.length })
         continue
       }
-      // 3b. Try cross-lingual match for this word
+      const wordBnVariant = findBengaliVariantMatch(text, word)
+      if (wordBnVariant) {
+        ranges.push({ start: wordBnVariant.index, end: wordBnVariant.index + wordBnVariant.length })
+        continue
+      }
       const wordCross = findCrossLingualMatch(text, word)
       if (wordCross) {
         ranges.push({ start: wordCross.start, end: wordCross.end })
         continue
       }
-      // 3c. Try consonant-skeleton fuzzy match for this word
-      const fuzzy = findFuzzyHighlightRange(text, word)
-      if (fuzzy) {
-        ranges.push(fuzzy)
-        continue
-      }
     }
 
     if (ranges.length > 0) {
-      // Sort ranges by start position
       ranges.sort((a, b) => a.start - b.start)
-      // Merge overlapping/adjacent ranges
       const merged: Array<{ start: number; end: number }> = []
       for (const r of ranges) {
         if (merged.length > 0 && r.start <= merged[merged.length - 1].end) {
@@ -584,19 +635,6 @@ export function highlightSubstring(text: string, query: string): {
           merged.push({ ...r })
         }
       }
-      // Build the result with ALL highlighted segments
-      // Return the first segment as before/match/after — the caller
-      // (highlightWeighted) handles rendering multiple segments.
-      // Actually, for multiple segments we need a different approach.
-      // Let's return a combined result where `match` contains all
-      // highlighted text with markers. But the return type is
-      // { before, match, after } — so for multiple ranges, we'll
-      // return the first range and let highlightWeighted handle the rest.
-      // 
-      // Actually, the simplest fix: return ALL ranges via a custom format.
-      // But since the return type is fixed, let's return the first range
-      // for backward compat. The highlightWeighted function will be updated
-      // to handle multi-range highlighting directly.
       const first = merged[0]
       return {
         before: text.substring(0, first.start),
@@ -607,59 +645,74 @@ export function highlightSubstring(text: string, query: string): {
     }
   }
 
-  // 4. No match — return text as-is (no highlighting)
   return { before: text, match: '', after: '', matched: false }
 }
 
 /**
  * §MULTI-RANGE-HIGHLIGHT: Find ALL highlight ranges in the text for a query.
- * Returns an array of { start, end } ranges that should be highlighted.
- * Used by highlightWeighted to render multiple highlighted segments.
+ * Uses the SAME matching as rankByPosition — no separate highlight algorithm.
  */
 export function findAllHighlightRanges(text: string, query: string): Array<{ start: number; end: number }> {
   if (!text || !query || query.trim().length < 2) return []
 
-  const q = query.trim()
+  const q = query.normalize('NFC').trim()
+  const normalizedText = text.normalize('NFC')
   const ranges: Array<{ start: number; end: number }> = []
 
-  // 1. Try exact substring match for the FULL query
-  const exact = findMatchPosition(text, q)
+  // 1. Exact full-query match
+  const exact = findMatchPosition(normalizedText, q)
   if (exact.index >= 0) {
     ranges.push({ start: exact.index, end: exact.index + exact.length })
     return ranges
   }
 
-  // 2. Try cross-lingual match for the FULL query
-  const cross = findCrossLingualMatch(text, q)
+  // 2. Bengali variant match (full query)
+  const bnVariant = findBengaliVariantMatch(normalizedText, q)
+  if (bnVariant) {
+    ranges.push({ start: bnVariant.index, end: bnVariant.index + bnVariant.length })
+    return ranges
+  }
+
+  // 2b. Bengali→English common word match (e.g., সিমেন্ট → cement)
+  const queryWords = q.split(/\s+/).filter((w) => w.length >= 2)
+  for (const word of queryWords) {
+    const equivalents = getBengaliEnglishEquivalents(word)
+    for (const eq of equivalents) {
+      const eqMatch = findMatchPosition(normalizedText, eq)
+      if (eqMatch.index >= 0) {
+        ranges.push({ start: eqMatch.index, end: eqMatch.index + eqMatch.length })
+        return ranges
+      }
+    }
+  }
+
+  // 3. Cross-lingual match (full query)
+  const cross = findCrossLingualMatch(normalizedText, q)
   if (cross) {
     ranges.push({ start: cross.start, end: cross.end })
     return ranges
   }
 
-  // 3. Try each word separately
+  // 4. Per-word match
   const words = q.split(/\s+/).filter((w) => w.length >= 2)
   for (const word of words) {
-    // 3a. Exact substring
-    const wordExact = findMatchPosition(text, word)
+    const wordExact = findMatchPosition(normalizedText, word)
     if (wordExact.index >= 0) {
       ranges.push({ start: wordExact.index, end: wordExact.index + wordExact.length })
       continue
     }
-    // 3b. Cross-lingual
-    const wordCross = findCrossLingualMatch(text, word)
+    const wordBnVariant = findBengaliVariantMatch(normalizedText, word)
+    if (wordBnVariant) {
+      ranges.push({ start: wordBnVariant.index, end: wordBnVariant.index + wordBnVariant.length })
+      continue
+    }
+    const wordCross = findCrossLingualMatch(normalizedText, word)
     if (wordCross) {
       ranges.push({ start: wordCross.start, end: wordCross.end })
       continue
     }
-    // 3c. Consonant-skeleton fuzzy
-    const fuzzy = findFuzzyHighlightRange(text, word)
-    if (fuzzy) {
-      ranges.push(fuzzy)
-      continue
-    }
   }
 
-  // Sort and merge overlapping ranges
   if (ranges.length === 0) return []
   ranges.sort((a, b) => a.start - b.start)
   const merged: Array<{ start: number; end: number }> = []
@@ -671,76 +724,4 @@ export function findAllHighlightRanges(text: string, query: string): Array<{ sta
     }
   }
   return merged
-}
-
-/**
- * §FUZZY-HIGHLIGHT-RANGE: Find the best matching range in text for a query
- * using Longest Common Substring (LCS) at the character level.
- *
- * §PREFIX-PRIORITY: Starts matching from index 0 of the text. The algorithm
- * walks both strings character-by-character, finding the longest contiguous
- * matching run. This prioritizes prefix matches naturally.
- *
- * Example: text="Firdosh", query="firdouse"
- *   → Match starts at index 0: "F","i","r","d" match (4 chars)
- *   → Then "o" matches "o" (5 chars)
- *   → Then "s" matches "s" (6 chars)
- *   → Then "h" vs "u" — mismatch. Stop.
- *   → Longest run = "Firdos" (6 chars) → highlight "Firdos" in "Firdosh"
- *
- * Example: text="Maa Lakshmi Bhandar", query="Das"
- *   → No 3+ char contiguous match → null (prevents false positives)
- */
-function findFuzzyHighlightRange(text: string, query: string): { start: number; end: number } | null {
-  if (!text || !query || query.length < 3) return null
-
-  const t = text.toLowerCase()
-  const q = query.toLowerCase()
-
-  // §LCS-WITH-SKIP: Find the longest contiguous character match.
-  // Also supports "skip-one" in the query: if the query has an extra char
-  // that doesn't match, skip it and try continuing.
-  // Example: query="firdouse", text="firdosh"
-  //   → Exact match: "firdo" (5 chars, stops at 'u' vs 's')
-  //   → Skip 'u' in query: "firdos" (6 chars in text) ✓
-  let bestStart = -1
-  let bestLength = 0
-
-  for (let ti = 0; ti < t.length; ti++) {
-    // Try exact contiguous match from this position
-    let matchLen = 0
-    for (let offset = 0; ti + offset < t.length && offset < q.length; offset++) {
-      if (t[ti + offset] === q[offset]) {
-        matchLen++
-      } else {
-        break
-      }
-    }
-    if (matchLen >= 3 && matchLen > bestLength) {
-      bestLength = matchLen
-      bestStart = ti
-    }
-
-    // §SKIP-ONE: Allow 1 extra char in the query to be skipped.
-    // After a mismatch, skip the next query char and try continuing.
-    if (matchLen >= 2 && matchLen < q.length - 1) {
-      let skipMatchLen = matchLen
-      for (let offset = matchLen + 1; ti + skipMatchLen < t.length && offset < q.length; offset++) {
-        const textIdx = ti + skipMatchLen
-        if (textIdx < t.length && t[textIdx] === q[offset]) {
-          skipMatchLen++
-        } else {
-          break
-        }
-      }
-      if (skipMatchLen > bestLength && skipMatchLen >= 3) {
-        bestLength = skipMatchLen
-        bestStart = ti
-      }
-    }
-  }
-
-  if (bestStart < 0 || bestLength < 3) return null
-
-  return { start: bestStart, end: bestStart + bestLength }
 }

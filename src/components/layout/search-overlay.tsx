@@ -10,7 +10,6 @@ import { formatCurrency, formatDate, getGradeMeta } from '@/lib/utils'
 import { highlightWeighted } from '@/lib/highlight'
 import { rankByPosition } from '@/lib/search-rank'
 import { useVoiceInput } from '@/hooks/use-voice-input'
-import { usePhoneticSearch } from '@/hooks/use-phonetic-search'
 
 export function SearchOverlay() {
   const { showSearch, setShowSearch, setActiveView, setSelectedPartyId, setSelectedProductId, setSelectedInvoiceId, setOverlayInvoiceId } = useAppStore()
@@ -47,70 +46,50 @@ export function SearchOverlay() {
     })
   }, [showSearch])
 
-  // §SEARCH-CONSISTENCY: Use the SAME usePhoneticSearch hook as local search
-  // (khata-view, inventory-view). This guarantees global and local search use
-  // the EXACT SAME fuzzy/phonetic algorithm — no more inconsistency.
-  // The hook returns matched items in priority order:
-  //   1. Exact substring matches
-  //   2. Fuse.js fuzzy matches (tolerant — "Firdaus" matches "Firdosh")
-  //   3. Phonetic matches (cross-lingual consonant skeleton)
-  //
-  // §ALL-CATEGORIES: Each category uses getName/getSearchValues to ensure
-  // ALL relevant fields are searched:
-  //   - Parties: name + phone
-  //   - Products: name + sku + category + subCategory
-  //   - Invoices: invoiceNumber + party.name (so searching "Amit" finds
-  //     invoices for Amit Trading)
-  //   - Transactions: description + category + party.name (so searching
-  //     "Amit" finds transactions for Amit Trading)
-  const partyMatches = usePhoneticSearch(parties, q, { searchFields: ['phone'] })
-  const productMatches = usePhoneticSearch(products, q, { searchFields: ['sku', 'category', 'subCategory'] })
-  const invoiceMatches = usePhoneticSearch(invoices, q, {
-    getName: (i: any) => i.invoiceNumber || '',
-    getSearchValues: (i: any) => [i.party?.name || ''],
-  })
-  const txnMatches = usePhoneticSearch(txns, q, {
-    getName: (t: any) => t.description || t.type || '',
-    getSearchValues: (t: any) => [t.category || '', t.party?.name || ''],
-  })
-
-  // §WEIGHTED-SORT: Rank the matched results by positional weighting.
-  // Priority: prefix (index 0) > infix (middle) > suffix (end).
-  // rankByPosition is applied ON TOP of the matched results from
-  // usePhoneticSearch — it doesn't filter, it only sorts.
+  // §DETERMINISTIC-SEARCH: Single-stage search using rankByPosition directly.
+  // No Fuse.js, no usePhoneticSearch — these caused false positives.
+  // rankByPosition handles: exact match, Bengali variant match, cross-lingual,
+  // token match, searchTag match, and secondary field match.
+  // Fuzzy matching does NOT create candidates — only deterministic matches do.
   const rankedResults = useMemo(() => {
     if (!q.trim() || q.trim().length < 2) return { parties: [], products: [], invoices: [], txns: [] }
 
-    // Rank parties by position (prefix > infix > suffix)
+    // Rank ALL parties — searchTags included as secondary fields
     const partyRanked = rankByPosition(
-      partyMatches,
+      parties,
       q,
       (p) => p.name,
-      (p) => [p.phone || '']
+      (p) => {
+        const tags = Array.isArray(p.searchTags) ? p.searchTags : []
+        return [p.phone || '', ...tags.map((t: string) => t)]
+      }
     )
     const allParties = partyRanked.map((r) => r.item)
 
-    // Rank products by position
+    // Rank ALL products — searchTags included for cross-lingual (e.g. সিমেন্ট → cement)
     const productRanked = rankByPosition(
-      productMatches,
+      products,
       q,
       (p) => p.name,
-      (p) => [p.sku || '', p.category || '', p.subCategory || '']
+      (p) => {
+        const tags = Array.isArray(p.searchTags) ? p.searchTags : []
+        return [p.sku || '', p.category || '', p.subCategory || '', ...tags.map((t: string) => t)]
+      }
     )
     const allProducts = productRanked.map((r) => r.item)
 
-    // Rank invoices by position
+    // Rank ALL invoices — search invoiceNumber + party.name
     const invoiceRanked = rankByPosition(
-      invoiceMatches,
+      invoices,
       q,
       (i) => i.invoiceNumber,
       (i) => [i.party?.name || '']
     )
     const allInvoices = invoiceRanked.map((r) => r.item)
 
-    // Rank txns by position
+    // Rank ALL transactions — search description + category + party.name
     const txnRanked = rankByPosition(
-      txnMatches,
+      txns,
       q,
       (t) => t.description || t.type,
       (t) => [t.category || '', (t as any).party?.name || '']
@@ -123,7 +102,7 @@ export function SearchOverlay() {
       invoices: allInvoices.slice(0, 4),
       txns: allTxns.slice(0, 4),
     }
-  }, [q, partyMatches, productMatches, invoiceMatches, txnMatches])
+  }, [q, parties, products, invoices, txns])
 
   const close = () => {
     setQ('')
