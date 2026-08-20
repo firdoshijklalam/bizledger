@@ -10,6 +10,7 @@ import { formatCurrency, formatDate, getGradeMeta } from '@/lib/utils'
 import { highlightWeighted } from '@/lib/highlight'
 import { rankByPosition } from '@/lib/search-rank'
 import { useVoiceInput } from '@/hooks/use-voice-input'
+import { generateSearchTags } from '@/lib/transliteration'
 
 export function SearchOverlay() {
   const { showSearch, setShowSearch, setActiveView, setSelectedPartyId, setSelectedProductId, setSelectedInvoiceId, setOverlayInvoiceId } = useAppStore()
@@ -30,15 +31,26 @@ export function SearchOverlay() {
       fetch('/api/invoices').then((r) => r.json()),
       fetch('/api/transactions').then((r) => r.json()),
     ]).then(([p, pr, inv, tx]) => {
-      const partyList = (Array.isArray(p) ? p : (p?.items || [])).map((x: any) => ({
-        ...x,
-        // §3: Parse searchTags JSON string → array for Fuse.js
-        searchTags: x.searchTags ? (typeof x.searchTags === 'string' ? (() => { try { return JSON.parse(x.searchTags) } catch { return [] } })() : x.searchTags) : [],
-      }))
-      const prodList = (Array.isArray(pr) ? pr : (pr?.items || [])).map((x: any) => ({
-        ...x,
-        searchTags: x.searchTags ? (typeof x.searchTags === 'string' ? (() => { try { return JSON.parse(x.searchTags) } catch { return [] } })() : x.searchTags) : [],
-      }))
+      // §AUTO-TAGS: For items with empty searchTags, generate them on the fly.
+      // Many production parties/products were created before the searchTags
+      // feature was added — they have empty tags. We generate tags here
+      // using the same generateSearchTags function that the API uses on create.
+      const ensureTags = (x: any) => {
+        let tags: string[] = []
+        if (x.searchTags) {
+          try {
+            tags = typeof x.searchTags === 'string' ? JSON.parse(x.searchTags) : x.searchTags
+            if (!Array.isArray(tags)) tags = []
+          } catch { tags = [] }
+        }
+        // If tags are empty, generate them from the name
+        if (tags.length === 0 && x.name) {
+          tags = generateSearchTags(x.name)
+        }
+        return { ...x, searchTags: tags }
+      }
+      const partyList = (Array.isArray(p) ? p : (p?.items || [])).map(ensureTags)
+      const prodList = (Array.isArray(pr) ? pr : (pr?.items || [])).map(ensureTags)
       setParties(partyList)
       setProducts(prodList)
       setInvoices(Array.isArray(inv) ? inv : (inv?.items || []))

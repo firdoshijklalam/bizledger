@@ -493,6 +493,46 @@ export function rankByPosition<T>(
             }
           }
           if (tagMatched) break
+
+          // §CONTROLLED-FUZZY-TAGS: Controlled fuzzy matching ONLY within
+          // searchTags (not name fields). searchTags are explicitly designed
+          // as phonetic aliases, so a controlled fuzzy match against them
+          // is safe. This handles "Abdullah" (query) vs "abdulah" (tag, 1 L)
+          // and "দৌস" (query) vs "dous" (tag, transliterated).
+          // The match must be >= 60% of the query length and >= 3 chars.
+          if (field.length >= 3 && q.length >= 3) {
+            const fuzzyTag = findFuzzyHighlightRange(field, q)
+            if (fuzzyTag) {
+              ranked.push({
+                item,
+                position: 'infix' as MatchPosition,
+                matchIndex: -1,
+                matchLength: fuzzyTag.end - fuzzyTag.start,
+                matchedText: field.substring(fuzzyTag.start, fuzzyTag.end),
+                score: 5.8, // between token tag match (5.5) and secondary (6.0)
+              })
+              tagMatched = true
+              break
+            }
+            // Per-token fuzzy match against searchTags
+            for (const qt of queryTokens) {
+              if (qt.length < 3) continue
+              const fuzzyTagToken = findFuzzyHighlightRange(field, qt)
+              if (fuzzyTagToken) {
+                ranked.push({
+                  item,
+                  position: 'infix' as MatchPosition,
+                  matchIndex: -1,
+                  matchLength: fuzzyTagToken.end - fuzzyTagToken.start,
+                  matchedText: field.substring(fuzzyTagToken.start, fuzzyTagToken.end),
+                  score: 5.9,
+                })
+                tagMatched = true
+                break
+              }
+            }
+            if (tagMatched) break
+          }
         }
         if (tagMatched) continue
 
@@ -724,4 +764,65 @@ export function findAllHighlightRanges(text: string, query: string): Array<{ sta
     }
   }
   return merged
+}
+
+// ─── Controlled fuzzy matching (for searchTags ONLY) ──────────────────────
+
+/**
+ * §CONTROLLED-FUZZY: Find the best matching range in text for a query
+ * using Longest Common Substring (LCS) with skip-one.
+ *
+ * This is used ONLY within searchTags (trusted phonetic aliases), NOT
+ * on arbitrary name fields. This prevents false positives while allowing
+ * 1-2 character variations like "Abdullah" vs "abdulah" (1 L vs 2 Ls).
+ *
+ * §MIN-RATIO: Requires at least 60% of the query to match contiguously.
+ */
+function findFuzzyHighlightRange(text: string, query: string): { start: number; end: number } | null {
+  if (!text || !query || query.length < 3) return null
+
+  const t = text.normalize('NFC').toLowerCase()
+  const q = query.normalize('NFC').toLowerCase()
+
+  let bestStart = -1
+  let bestLength = 0
+
+  for (let ti = 0; ti < t.length; ti++) {
+    // Try exact contiguous match from this position
+    let matchLen = 0
+    for (let offset = 0; ti + offset < t.length && offset < q.length; offset++) {
+      if (t[ti + offset] === q[offset]) {
+        matchLen++
+      } else {
+        break
+      }
+    }
+    if (matchLen >= 3 && matchLen > bestLength) {
+      bestLength = matchLen
+      bestStart = ti
+    }
+
+    // §SKIP-ONE: Allow 1 extra char in the query to be skipped.
+    if (matchLen >= 2 && matchLen < q.length - 1) {
+      let skipMatchLen = matchLen
+      for (let offset = matchLen + 1; ti + skipMatchLen < t.length && offset < q.length; offset++) {
+        const textIdx = ti + skipMatchLen
+        if (textIdx < t.length && t[textIdx] === q[offset]) {
+          skipMatchLen++
+        } else {
+          break
+        }
+      }
+      if (skipMatchLen > bestLength && skipMatchLen >= 3) {
+        bestLength = skipMatchLen
+        bestStart = ti
+      }
+    }
+  }
+
+  // §MIN-RATIO: Require at least 60% of the query to match.
+  if (bestStart < 0 || bestLength < 3) return null
+  if (bestLength < Math.ceil(q.length * 0.6)) return null
+
+  return { start: bestStart, end: bestStart + bestLength }
 }
