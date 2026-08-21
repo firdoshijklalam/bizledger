@@ -1,23 +1,19 @@
 'use client'
 
 import React from 'react'
-import { highlightSubstring, findAllHighlightRanges } from './search-rank'
+import { computeHighlightRanges, type VisibleRange } from './search-engine'
 
 /**
- * §FUZZY-HIGHLIGHT: Highlight matched characters in search results.
+ * §HIGHLIGHT: Render visible text with highlighted segments.
  *
- * Handles two matching scenarios:
- * 1. Exact substring (case-insensitive): query "Fi" in "Firdosh" → <mark>Fi</mark>rdosh
- * 2. Fuzzy subsequence: query "Fidohhi" in "Firdosh" → <mark>Fi</mark>r<mark>do</mark>sh
+ * The preferred path is for callers to pass `ranges` directly (from a
+ * SearchMatch.highlightRanges). When ranges are not available, we compute
+ * them on the fly via `computeHighlightRanges` — useful for components that
+ * do not have access to a SearchMatch (e.g., the khata-view search bar).
  *
- * §CRITICAL: Cross-lingual highlighting (English query → Bengali text) is
- * DISABLED because proportional position mapping breaks Bengali combining
- * characters (virama, vowel marks, etc.). The search STILL WORKS via Fuse.js
- * + phonetic matching — results are found and shown — but the Bengali text
- * is displayed as-is without highlighting, so characters never break.
- *
- * Bengali combining characters are also protected in buildSegments via
- * Intl.Segmenter (when available) to never split mid-grapheme.
+ * §GRAPHENE-SAFE: Ranges are computed against NFC-normalized text, so
+ * Bengali combining marks (virama, vowel signs) stay attached to their
+ * base consonant.
  */
 
 interface HighlightSegment {
@@ -42,216 +38,72 @@ function segmentsToReact(segments: HighlightSegment[]): React.ReactNode {
   })
 }
 
-/**
- * §GRAPHENE-SAFE: Split text into grapheme clusters so combining marks
- * (Bengali virama, vowel signs, etc.) never get separated from their base
- * consonant. Uses Intl.Segmenter when available; falls back to char-by-char.
- */
-function getGraphemes(text: string): Array<{ char: string; start: number; end: number }> {
-  if (typeof Intl !== 'undefined' && (Intl as any).Segmenter) {
-    const segmenter = new (Intl as any).Segmenter(undefined, { granularity: 'grapheme' })
-    const result: Array<{ char: string; start: number; end: number }> = []
-    for (const seg of segmenter.segment(text)) {
-      result.push({ char: seg.segment, start: seg.index, end: seg.index + seg.segment.length })
-    }
-    return result
-  }
-  // Fallback: char-by-char (less safe for combining marks, but works for ASCII)
-  const result: Array<{ char: string; start: number; end: number }> = []
-  for (let i = 0; i < text.length; i++) {
-    result.push({ char: text[i], start: i, end: i + 1 })
-  }
-  return result
-}
-
-/**
- * Build segments from a set of character indices to highlight.
- * §GRAPHENE-SAFE: Uses grapheme clusters so combining marks are never split
- * from their base character.
- */
-function buildSegments(text: string, highlightSet: Set<number>): HighlightSegment[] {
-  if (highlightSet.size === 0) return [{ text, highlight: false }]
-
-  const graphemes = getGraphemes(text)
+function buildSegmentsFromRanges(text: string, ranges: VisibleRange[]): HighlightSegment[] {
+  if (!ranges || ranges.length === 0) return [{ text, highlight: false }]
+  const sorted = [...ranges].sort((a, b) => a.start - b.start)
   const segments: HighlightSegment[] = []
-  let currentText = ''
-  let currentHighlight = graphemes.length > 0 && graphemes[0].start <= [...highlightSet][0] && highlightSet.has(graphemes[0].start)
-
-  for (const g of graphemes) {
-    // A grapheme is highlighted if ANY of its character positions are in the set
-    let isHighlight = false
-    for (let i = g.start; i < g.end; i++) {
-      if (highlightSet.has(i)) { isHighlight = true; break }
+  let lastEnd = 0
+  for (const r of sorted) {
+    const start = Math.max(0, Math.min(r.start, text.length))
+    const end = Math.max(start, Math.min(r.end, text.length))
+    if (start > lastEnd) {
+      segments.push({ text: text.substring(lastEnd, start), highlight: false })
     }
-
-    if (isHighlight === currentHighlight) {
-      currentText += g.char
-    } else {
-      if (currentText) segments.push({ text: currentText, highlight: currentHighlight })
-      currentText = g.char
-      currentHighlight = isHighlight
+    if (end > start) {
+      segments.push({ text: text.substring(start, end), highlight: true })
     }
+    lastEnd = end
   }
-  if (currentText) segments.push({ text: currentText, highlight: currentHighlight })
+  if (lastEnd < text.length) {
+    segments.push({ text: text.substring(lastEnd), highlight: false })
+  }
   return segments
 }
 
 /**
- * Find all case-insensitive substring match positions.
- * Returns a Set of character indices that are part of a match.
+ * Highlight text using precomputed ranges (preferred).
  */
-function findSubstringPositions(text: string, query: string): Set<number> {
-  const result = new Set<number>()
-  const t = text.toLowerCase()
-  const q = query.toLowerCase()
-  let idx = 0
-  while (true) {
-    const found = t.indexOf(q, idx)
-    if (found < 0) break
-    for (let i = found; i < found + q.length; i++) {
-      result.add(i)
-    }
-    idx = found + q.length
-  }
-  return result
+export function highlightRanges(text: string, ranges: VisibleRange[]): React.ReactNode {
+  if (!text) return text
+  if (!ranges || ranges.length === 0) return text
+  return segmentsToReact(buildSegmentsFromRanges(text, ranges))
 }
 
 /**
- * Find fuzzy subsequence match positions.
- * Walks through the text and matches query characters in order (not necessarily
- * consecutive). Returns positions of matched characters.
- */
-function findFuzzyPositions(text: string, query: string): Set<number> {
-  const result = new Set<number>()
-  const t = text.toLowerCase()
-  const q = query.toLowerCase()
-  let qi = 0
-  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
-    if (t[ti] === q[qi]) {
-      result.add(ti)
-      qi++
-    }
-  }
-  // Only return if we matched at least 60% of query characters
-  if (result.size < Math.ceil(q.length * 0.6)) return new Set()
-  return result
-}
-
-/**
- * highlightFuzzyFromQuery — the main highlighting function.
+ * §HIGHLIGHT-WEIGHTED: Highlight text by computing ranges from the query.
+ * This is the backward-compat entry point used by `khata-view.tsx` and the
+ * old search-overlay implementation.
  *
- * §CRITICAL: Only highlights same-script matches (exact substring + fuzzy).
- * Cross-lingual highlighting is DISABLED to prevent Bengali character
- * breaking. The search still finds cross-lingual results via Fuse.js +
- * phonetic matching — they just display without highlighting.
- */
-export function highlightFuzzyFromQuery(text: string, query: string): React.ReactNode {
-  if (!text || !query || !query.trim()) return text
-
-  const q = query.trim()
-
-  // 1. Try exact substring match (case-insensitive) — same script only
-  let positions = findSubstringPositions(text, q)
-  if (positions.size > 0) {
-    return segmentsToReact(buildSegments(text, positions))
-  }
-
-  // 2. Try fuzzy subsequence match — same script only
-  positions = findFuzzyPositions(text, q)
-  if (positions.size > 0) {
-    return segmentsToReact(buildSegments(text, positions))
-  }
-
-  // 3. Cross-lingual: NO highlighting. Display the text as-is.
-  // The search still works (Fuse.js + phonetic found the result),
-  // but we don't highlight to avoid breaking Bengali combining characters.
-  return text
-}
-
-/**
- * §CROSS-LINGUAL-HIGHLIGHT: highlightWeighted — the NEW highlighting function
- * that supports cross-lingual (English ↔ Bengali) highlighting.
- *
- * Uses `highlightSubstring` from search-rank.ts which:
- * 1. Finds exact substring match (same script) — highlights it.
- * 2. Finds cross-lingual match (English query → Bengali text or vice versa)
- *    via transliteration + grapheme-safe mapping — highlights the
- *    corresponding substring in the original text.
- * 3. Returns text as-is if no match.
- *
- * §MIN-2-CHARS: Only highlights if query is 2+ characters.
- * §GRAPHENE-SAFE: Bengali combining characters (virama, vowel marks) are
- * never split — Intl.Segmenter is used for all grapheme mapping.
+ * Internally delegates to `computeHighlightRanges` from the new search engine.
  */
 export function highlightWeighted(text: string, query: string): React.ReactNode {
   if (!text || !query || !query.trim()) return text
-
-  // §MULTI-RANGE: Find ALL highlight ranges (exact, cross-lingual, fuzzy)
-  // and render each as a <mark> element. This handles multi-word queries
-  // like "Firdaus Alam" where "Firdo" is fuzzy-matched and "Alam" is
-  // exact-matched — both get highlighted.
-  const ranges = findAllHighlightRanges(text, query)
-
-  if (ranges.length === 0) {
-    // Fallback to single-range highlightSubstring (backward compat)
-    const { before, match, after, matched } = highlightSubstring(text, query)
-    if (!matched) return text
-    return (
-      <>
-        {before}
-        <mark
-          className="bg-transparent text-primary font-bold"
-          style={{ background: 'transparent' }}
-        >
-          {match}
-        </mark>
-        {after}
-      </>
-    )
-  }
-
-  // Render multiple highlighted segments
-  const segments: React.ReactNode[] = []
-  let lastEnd = 0
-  for (let i = 0; i < ranges.length; i++) {
-    const r = ranges[i]
-    // Text before this range
-    if (r.start > lastEnd) {
-      segments.push(<React.Fragment key={`t${i}`}>{text.substring(lastEnd, r.start)}</React.Fragment>)
-    }
-    // The highlighted range
-    segments.push(
-      <mark
-        key={`m${i}`}
-        className="bg-transparent text-primary font-bold"
-        style={{ background: 'transparent' }}
-      >
-        {text.substring(r.start, r.end)}
-      </mark>
-    )
-    lastEnd = r.end
-  }
-  // Trailing text
-  if (lastEnd < text.length) {
-    segments.push(<React.Fragment key="trail">{text.substring(lastEnd)}</React.Fragment>)
-  }
-
-  return <>{segments}</>
+  const ranges = computeHighlightRanges(text, query)
+  if (ranges.length === 0) return text
+  return segmentsToReact(buildSegmentsFromRanges(text, ranges))
 }
 
-// Keep highlightMatch for backward compatibility
-export function highlightMatch(text: string, query: string): React.ReactNode {
-  return highlightFuzzyFromQuery(text, query)
-}
+// ─── Backward-compat exports ──────────────────────────────────────────────
 
-// Keep highlightFuzzy for backward compatibility
+/**
+ * Highlight text given Fuse.js-style [start, end] indices (legacy).
+ */
 export function highlightFuzzy(text: string, indices: Array<[number, number]>): React.ReactNode {
   if (!text || !indices || indices.length === 0) return text
-  const highlightSet = new Set<number>()
-  for (const [start, end] of indices) {
-    for (let i = start; i <= end && i < text.length; i++) {
-      highlightSet.add(i)
-    }
-  }
-  return segmentsToReact(buildSegments(text, highlightSet))
+  const ranges: VisibleRange[] = indices.map(([s, e]) => ({ start: s, end: e + 1 }))
+  return segmentsToReact(buildSegmentsFromRanges(text, ranges))
+}
+
+/**
+ * Legacy: simple case-insensitive substring highlight.
+ */
+export function highlightMatch(text: string, query: string): React.ReactNode {
+  return highlightWeighted(text, query)
+}
+
+/**
+ * Legacy: fuzzy subsequence highlight.
+ */
+export function highlightFuzzyFromQuery(text: string, query: string): React.ReactNode {
+  return highlightWeighted(text, query)
 }

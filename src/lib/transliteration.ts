@@ -361,7 +361,14 @@ const REVERSE_VOWEL_STANDALONE: Record<string, string> = {
 }
 const REVERSE_VOWEL_SIGN: Record<string, string> = {
   // Vowel signs (মাত্রা) — used when vowel follows a consonant
-  a: '', // inherent vowel — no sign needed (consonant has built-in অ)
+  // §LONG-A: English 'a' is pronounced as long "aah" (আ sound) in Bengali
+  // transliteration, NOT the short inherent "o" (অ sound). So 'a' after a
+  // consonant maps to 'া' (আ vowel sign), NOT '' (inherent).
+  // This makes "Das" → "দাস" (with া), not "দস" (inherent).
+  // For names where the inherent short "o" is intended (rare in English names),
+  // the alias generation in search-engine.ts still generates the inherent-vowel
+  // variant via the Bengali vowel normalization paths.
+  a: 'া',
   'aa': 'া', e: 'ে', 'ee': 'ী', i: 'ি', 'ii': 'ী',
   u: 'ু', 'uu': 'ূ', 'oo': 'ু', o: 'ো', 'oi': 'ৈ', 'ou': 'ৌ',
   'ri': 'ৃ',

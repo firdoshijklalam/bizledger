@@ -12,7 +12,7 @@
     "db:migrate": "prisma migrate dev --schema prisma/schema.dev.prisma",
     "db:reset": "prisma migrate reset --schema prisma/schema.dev.prisma",
     "postinstall": "prisma generate --schema prisma/schema.dev.prisma",
-    "test": "npx tsx tests/unit/invoice-calculation.test.ts && npx tsx tests/unit/server-authoritative-invoice.test.ts && npx tsx tests/unit/reports-accounting.test.ts && npx tsx tests/unit/concurrent-payments.test.ts && npx tsx tests/unit/pos-cart-calculations.test.ts && npx tsx tests/unit/financial-numeric-safety.test.ts && npx tsx tests/integration/cross-tenant.test.ts && npx tsx tests/integration/security-ownership.test.ts && npx tsx tests/integration/rbac-authorization.test.ts",
+    "test": "npx tsx tests/unit/invoice-calculation.test.ts && npx tsx tests/unit/server-authoritative-invoice.test.ts && npx tsx tests/unit/reports-accounting.test.ts && npx tsx tests/unit/concurrent-payments.test.ts && npx tsx tests/unit/pos-cart-calculations.test.ts && npx tsx tests/unit/financial-numeric-safety.test.ts && npx tsx tests/unit/search-engine.test.ts && npx tsx tests/unit/search-engine-v2.test.ts && npx tsx tests/integration/cross-tenant.test.ts && npx tsx tests/integration/security-ownership.test.ts && npx tsx tests/integration/rbac-authorization.test.ts",
     "test:unit": "npx tsx tests/unit/invoice-calculation.test.ts && npx tsx tests/unit/server-authoritative-invoice.test.ts",
     "test:integration": "npx tsx tests/integration/cross-tenant.test.ts && npx tsx tests/integration/security-ownership.test.ts"
   },
