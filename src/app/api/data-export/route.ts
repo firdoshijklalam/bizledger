@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
 import { requireRole } from '@/lib/auth/session'
 import { serializeDecimals } from '@/lib/decimal-serializer'
+import { escapeCsvField } from '@/lib/reports-csv'
 
 // GET /api/data-export?format=json|csv
 // §SECURITY: Exports ALL business data (customers, products, invoices, transactions).
@@ -46,22 +47,32 @@ export async function GET(req: NextRequest) {
   }
 
   if (format === 'csv') {
-    // Build a simple CSV of transactions
-    const rows = [['Date', 'Type', 'Party', 'Amount', 'Description']]
+    // §CSV-EXPORT: Build a CSV of transactions with proper RFC 4180 escaping
+    // and UTF-8 BOM for Excel compatibility (Bengali text renders correctly).
+    //
+    // §BUGFIX: Previously this route joined values with commas without escaping,
+    // broke on party names containing commas/quotes/newlines, and lacked a BOM
+    // (so Bengali text mis-rendered in Excel). Now uses the shared escapeCsvField
+    // helper from reports-csv.ts and prepends the UTF-8 BOM.
+    const rows: string[][] = [['Date', 'Type', 'Party', 'Amount', 'Description']]
     for (const t of transactions) {
       const party = parties.find((p) => p.id === t.partyId)
       rows.push([
         new Date(t.createdAt).toISOString().split('T')[0],
         t.type,
         party?.name || '',
-        String(t.amount),
-        (t.description || '').replace(/,/g, ';'),
+        // §DECIMAL-SAFE: t.amount is a Prisma Decimal — toNumber() before stringification
+        // to avoid Decimal object stringification quirks.
+        String((t as any).amount?.toNumber ? (t as any).amount.toNumber() : t.amount),
+        t.description || '',
       ])
     }
-    const csv = rows.map((r) => r.join(',')).join('\n')
+    // §RFC4180: Escape each field per RFC 4180 (commas, quotes, newlines).
+    // §BOM: Prepend UTF-8 BOM (0xFEFF) so Excel decodes Bengali correctly.
+    const csv = '\uFEFF' + rows.map((r) => r.map(escapeCsvField).join(',')).join('\r\n')
     return new NextResponse(csv, {
       headers: {
-        'Content-Type': 'text/csv',
+        'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="${business.name.replace(/\s+/g, '_')}_Data_${new Date().toISOString().split('T')[0]}.csv"`,
       },
     })

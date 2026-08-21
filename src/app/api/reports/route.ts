@@ -2,11 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 import { serializeDecimals } from '@/lib/decimal-serializer'
+import { parseReportDateRange } from '@/lib/reports-csv'
 
 // §VERCEL-LIMIT: Allow up to 30s for report aggregation across many invoices/items
 export const maxDuration = 30
 
 // GET /api/reports — aggregated report data
+//
+// §QUERY-PARAMS:
+//   - ?start=YYYY-MM-DD&end=YYYY-MM-DD   (optional date range)
+//   When provided, the report filters invoices + transactions by createdAt.
+//   When omitted, the report includes all-time data (backward compatible).
 //
 // §ACCOUNTING-FIXES:
 // 1. Voided invoices (status='void') are EXCLUDED from all sales/GST/revenue/profit
@@ -19,31 +25,62 @@ export const maxDuration = 30
 //    COGS is based on the product's current purchasePrice. This is a simplification
 //    of weighted-average cost. For exact FIFO/weighted-average, a stock movement
 //    ledger would be needed (future enhancement).
-export async function GET() {
+export async function GET(req: NextRequest) {
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+
+  // §DATE-RANGE: Parse optional start/end query params. Returns null when no
+  // valid range is provided → the API defaults to all-time (backward compatible).
+  const url = new URL(req.url)
+  const dateRange = parseReportDateRange(url.searchParams)
 
   const parties = await db.party.findMany({ where: { businessId: business.id } })
   const products = await db.product.findMany({ where: { businessId: business.id } })
 
   // §VOID-EXCLUSION: Only include non-voided invoices in financial calculations.
+  // §DATE-FILTER: When a date range is provided, only include invoices whose
+  //   createdAt falls within [start, end] (inclusive on both ends).
+  const dateWhere = dateRange
+    ? {
+        businessId: business.id,
+        status: { not: 'void' },
+        createdAt: { gte: dateRange.start, lte: dateRange.end },
+      }
+    : { businessId: business.id, status: { not: 'void' } }
+
   const invoices = await db.invoice.findMany({
-    where: { businessId: business.id, status: { not: 'void' } },
+    where: dateWhere,
     include: { party: true, items: true },
     orderBy: { createdAt: 'desc' },
   })
 
   // §VOID-INCLUSIVE: For the invoice count and recent list, include ALL invoices
   // (even voided) so the merchant can see voided invoices in the UI.
+  // Date filter still applies (only invoices within the range are shown).
+  const allInvoicesWhere = dateRange
+    ? {
+        businessId: business.id,
+        createdAt: { gte: dateRange.start, lte: dateRange.end },
+      }
+    : { businessId: business.id }
+
   const allInvoices = await db.invoice.findMany({
-    where: { businessId: business.id },
+    where: allInvoicesWhere,
     include: { party: true },
     orderBy: { createdAt: 'desc' },
     take: 10,
   })
 
+  // §DATE-FILTER: Transactions are also filtered by the date range when provided.
+  const txnWhere = dateRange
+    ? {
+        businessId: business.id,
+        createdAt: { gte: dateRange.start, lte: dateRange.end },
+      }
+    : { businessId: business.id }
+
   const transactions = await db.transaction.findMany({
-    where: { businessId: business.id },
+    where: txnWhere,
     include: { party: true },
     orderBy: { createdAt: 'desc' },
   })

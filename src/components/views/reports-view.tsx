@@ -21,6 +21,7 @@ import {
   Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { useMemo, useState, useEffect } from 'react'
+import { buildReportCsv, computeRangeDates, computeGstRangeDates, type ReportType } from '@/lib/reports-csv'
 
 const PIE_COLORS = ['#10b981', '#14b8a6', '#f59e0b', '#f97316', '#ef4444']
 
@@ -53,12 +54,51 @@ type StockMovement = 'all' | 'fast' | 'slow' | 'non-moving'
 export function ReportsView() {
   const { business, setActiveView, reportsDateRange, setReportsDateRange, reportsTab, setReportsTab } = useAppStore()
   const { t } = useI18n()
-  const { data, loading } = useFetch<ReportData>('/api/reports', [])
+
+  // Active report tab — declared FIRST because the reportsUrl useMemo below
+  // depends on it. (React Hooks rule: hooks must be called in the same order
+  // every render, but the dependencies inside useMemo can reference any
+  // variable declared above the useMemo call.)
+  const [activeReport, setActiveReport] = useState<'pl' | 'gst' | 'party' | 'outstanding' | 'stock' | 'grade'>('pl')
+
+  // P&L date filter (PRD Part 19 §1)
+  const [plRange, setPlRange] = useState<PLRange>('month')
+  const [plCustomStart, setPlCustomStart] = useState('')
+  const [plCustomEnd, setPlCustomEnd] = useState('')
+
+  // GST date filter (PRD Part 19 §2)
+  const [gstRange, setGstRange] = useState<GSTRange>('month')
+  const [gstCustomStart, setGstCustomStart] = useState('')
+  const [gstCustomEnd, setGstCustomEnd] = useState('')
+
+  // §REPORTS-URL: Build the /api/reports URL with date-range query params
+  // for the currently active report. The API filters invoices + transactions
+  // by the start/end dates. When the active report is not P&L or GST (which
+  // are the only date-filterable reports), no date params are sent.
+  //
+  // §BUGFIX: Previously the P&L and GST date filter buttons (Today/Week/Month/
+  // 3 Months/Custom) were cosmetic — they updated local state but the API was
+  // always called without params. Now the URL reflects the selected range.
+  const reportsUrl = useMemo(() => {
+    const params = new URLSearchParams()
+    if (activeReport === 'pl') {
+      const { start, end } = computeRangeDates(plRange, plCustomStart, plCustomEnd)
+      if (start) params.set('start', start)
+      if (end) params.set('end', end)
+    } else if (activeReport === 'gst') {
+      const { start, end } = computeGstRangeDates(gstRange, gstCustomStart, gstCustomEnd)
+      if (start) params.set('start', start)
+      if (end) params.set('end', end)
+    }
+    const qs = params.toString()
+    return qs ? `/api/reports?${qs}` : '/api/reports'
+  }, [activeReport, plRange, plCustomStart, plCustomEnd, gstRange, gstCustomStart, gstCustomEnd])
+
+  const { data, loading } = useFetch<ReportData>(reportsUrl, [reportsUrl])
   // §HEALTH-BANNER: fetch dashboard stats for the Business Health score context
   const { data: dashData } = useFetch<{ healthScore?: number; totalReceivable?: number } & Record<string, unknown>>('/api/dashboard?range=7d', [])
   const [healthBannerDismissed, setHealthBannerDismissed] = useState(false)
   const { data: allProducts } = useFetch<any[]>('/api/products', [])
-  const [activeReport, setActiveReport] = useState<'pl' | 'gst' | 'party' | 'outstanding' | 'stock' | 'grade'>('pl')
 
   // §REPORTS-ROUTING: Auto-select a report tab passed from the dashboard
   // (e.g. 'outstanding' from Top Debtors, 'party' from Top Buyers).
@@ -71,11 +111,6 @@ export function ReportsView() {
     return () => clearTimeout(t)
   }, [reportsTab, setReportsTab, setActiveReport])
 
-  // P&L date filter (PRD Part 19 §1)
-  const [plRange, setPlRange] = useState<PLRange>('month')
-  const [plCustomStart, setPlCustomStart] = useState('')
-  const [plCustomEnd, setPlCustomEnd] = useState('')
-
   // §REPORTS-ROUTING: Auto-apply date range passed from dashboard cards.
   // When the dashboard Expense/Revenue card passes a reportsDateRange, apply
   // it to the P&L filter on mount, then clear the param.
@@ -87,11 +122,6 @@ export function ReportsView() {
     }, 0)
     return () => clearTimeout(t)
   }, [reportsDateRange, setReportsDateRange])
-
-  // GST date filter (PRD Part 19 §2)
-  const [gstRange, setGstRange] = useState<GSTRange>('month')
-  const [gstCustomStart, setGstCustomStart] = useState('')
-  const [gstCustomEnd, setGstCustomEnd] = useState('')
 
   // Party Ledger (PRD Part 19 §3)
   const [partySeg, setPartySeg] = useState<PartySegment>('all')
@@ -159,35 +189,31 @@ export function ReportsView() {
     setTimeout(() => window.print(), 200)
   }
 
-  const exportExcel = (type: string) => {
-    toast.success(`Excel export started for ${type}`)
-    const rows: string[] = []
-    if (type === 'P&L') {
-      rows.push('Metric,Amount')
-      rows.push(`Total Sales (Gross),${data.profitLoss.revenue}`)
-      rows.push(`Discounts Given,${data.profitLoss.discount}`)
-      rows.push(`Net Revenue,${data.profitLoss.netRevenue}`)
-      rows.push(`Purchase Cost (COGS),${data.profitLoss.cogs}`)
-      rows.push(`Gross Profit,${data.profitLoss.grossProfit}`)
-      rows.push(`Indirect Expenses,${data.profitLoss.indirectExpenses}`)
-      rows.push(`Net Profit,${data.profitLoss.netProfit}`)
-      rows.push(`GST Collected,${data.profitLoss.gst}`)
-    } else if (type === 'Party Ledger') {
-      rows.push('Name,Type,Grade,Balance,Phone')
-      data.partyLedger.forEach((p) => rows.push(`${p.name},${p.type},${p.grade},${p.balance},${p.phone || ''}`))
-    } else if (type === 'Outstanding') {
-      rows.push('Name,Amount,Type')
-      data.outstanding.receivables.forEach((r) => rows.push(`${r.name},${r.amount},Receivable`))
-      data.outstanding.payables.forEach((p) => rows.push(`${p.name},${p.amount},Payable`))
+  const exportExcel = (label: string) => {
+    // §REPORT-TYPE-MAP: Map the human-readable report label to the ReportType
+    // enum understood by buildReportCsv. All 6 report types are now supported
+    // — previously GST/Stock/Customer Quality produced empty CSVs.
+    const reportId = REPORTS.find((r) => r.label === label)?.id as ReportType | undefined
+    if (!reportId) {
+      toast.error(`Unknown report type: ${label}`)
+      return
     }
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv' })
+    toast.success(`Excel export started for ${label}`)
+    // §CSV-BUILD: Delegate to the shared helper which handles:
+    //   - All 6 report types (P&L, GST, Party, Outstanding, Stock, Grade)
+    //   - RFC 4180 escape (commas, quotes, newlines)
+    //   - UTF-8 BOM (so Excel renders Bengali correctly)
+    const csv = buildReportCsv(reportId, data as any)
+    // §ENCODING: The CSV string already starts with the UTF-8 BOM (\uFEFF).
+    // Blob with type 'text/csv;charset=utf-8' ensures the BOM is preserved.
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${bizName}_${type.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`
+    a.download = `${bizName}_${label.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`
     a.click()
     URL.revokeObjectURL(url)
-    toast.success(`${type} exported`)
+    toast.success(`${label} exported`)
   }
 
   const REPORTS = [
