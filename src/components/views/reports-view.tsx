@@ -618,6 +618,17 @@ export function ReportsView() {
               </button>
             </div>
             <div className="space-y-2 max-h-[60vh] overflow-y-auto scroll-area">
+              {filteredPartyLedger.length === 0 && (
+                <div className="text-center py-8 text-sm text-muted-foreground">
+                  {partySearch.trim()
+                    ? `No parties match "${partySearch}"`
+                    : partySeg === 'customers'
+                    ? 'No customers yet — add your first customer from Khata'
+                    : partySeg === 'suppliers'
+                    ? 'No suppliers yet — add your first supplier from Khata'
+                    : 'No parties yet — add your first customer or supplier from Khata'}
+                </div>
+              )}
               {filteredPartyLedger.map((p) => {
                 const meta = GRADE_META[p.grade]
                 return (
@@ -689,6 +700,11 @@ export function ReportsView() {
                 <>
                   <h3 className="text-sm font-semibold mb-3">Receivables</h3>
                   <div className="space-y-2 max-h-72 overflow-y-auto scroll-area">
+                    {data.outstanding.receivables.length === 0 && (
+                      <div className="text-center py-6 text-sm text-muted-foreground">
+                        ✓ No outstanding receivables — all customers have paid their dues.
+                      </div>
+                    )}
                     {data.outstanding.receivables.map((r, i) => {
                       const party = data.partyLedger.find((p) => p.name === r.name)
                       return (
@@ -725,6 +741,11 @@ export function ReportsView() {
                 <>
                   <h3 className="text-sm font-semibold mb-3">Payables</h3>
                   <div className="space-y-2 max-h-72 overflow-y-auto scroll-area">
+                    {data.outstanding.payables.length === 0 && (
+                      <div className="text-center py-6 text-sm text-muted-foreground">
+                        ✓ No outstanding payables — all suppliers have been paid.
+                      </div>
+                    )}
                     {data.outstanding.payables.map((p, i) => {
                       const party = data.partyLedger.find((pp) => pp.name === p.name)
                       return (
@@ -770,6 +791,13 @@ export function ReportsView() {
 
             <h3 className="text-sm font-semibold mb-4">{t('rep.stockAgeing')}</h3>
             <div className="space-y-2 max-h-[60vh] overflow-y-auto scroll-area">
+              {filteredStockAgeing.length === 0 && (
+                <div className="text-center py-8 text-sm text-muted-foreground">
+                  {stockMovement === 'all'
+                    ? 'No products yet — add your first product from Inventory'
+                    : `No ${stockMovement === 'fast' ? 'fast-moving' : stockMovement === 'slow' ? 'slow-moving' : 'non-moving'} products found`}
+                </div>
+              )}
               {filteredStockAgeing.map((s) => (
                 <div
                   key={s.name}

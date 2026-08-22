@@ -2,13 +2,26 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
 import { requireRole } from '@/lib/auth/session'
-import { serializeDecimals } from '@/lib/decimal-serializer'
 import { escapeCsvField } from '@/lib/reports-csv'
+import { buildBackupEnvelope, BACKUP_FORMAT, BACKUP_VERSION } from '@/lib/backup-format'
 
 // GET /api/data-export?format=json|csv
-// §SECURITY: Exports ALL business data (customers, products, invoices, transactions).
-// This endpoint requires OWNER or ADMIN role — no one else should be able to
-// export the entire business database.
+//
+// §SECURITY:
+// - Requires OWNER or ADMIN role (requireRole).
+// - Exports ONLY the authenticated user's business data (tenant isolation).
+// - §SECRETS-STRIPPED: The JSON format uses an allow-list sanitizer that
+//   NEVER includes passwordHash, tokenHash, pinHash, fingerprintHash,
+//   qrToken, or paymentLandingToken. New secret fields added to the schema
+//   in the future are automatically excluded (allow-list, not deny-list).
+//
+// §VERSIONED-BACKUP: The JSON format is now a versioned backup envelope:
+//   { format: "bizledger-backup", version: 1, createdAt, business, settings,
+//     parties, products, invoices, invoiceItems, transactions, categories,
+//     customPrices, staff, partyNotes, stockMovements }
+// This format can be imported via /api/data-import.
+//
+// §CSV: The CSV format remains a transactions-only flat file (not a backup).
 export async function GET(req: NextRequest) {
   // §AUTH: Require OWNER or ADMIN role
   const user = await requireRole(['OWNER', 'ADMIN'])
@@ -21,12 +34,35 @@ export async function GET(req: NextRequest) {
   const business = await db.business.findUnique({ where: { id: user.businessId } })
   if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
-  const [parties, products, invoices, transactions] = await Promise.all([
+  // §PARALLEL-QUERIES: Fetch all business-owned entities in parallel.
+  // Each query is scoped by businessId (tenant isolation).
+  const [
+    settings,
+    parties,
+    products,
+    invoices,
+    transactions,
+    categories,
+    customPrices,
+    staff,
+    partyNotes,
+    stockMovements,
+  ] = await Promise.all([
+    db.appSettings.findUnique({ where: { businessId: business.id } }),
     db.party.findMany({ where: { businessId: business.id } }),
     db.product.findMany({ where: { businessId: business.id } }),
     db.invoice.findMany({ where: { businessId: business.id }, include: { items: true } }),
     db.transaction.findMany({ where: { businessId: business.id } }),
+    db.category.findMany({ where: { businessId: business.id } }),
+    db.customPrice.findMany({ where: { businessId: business.id } }),
+    db.staff.findMany({ where: { businessId: business.id } }),
+    db.partyNote.findMany({ where: { party: { businessId: business.id } } }),
+    db.stockMovement.findMany({ where: { businessId: business.id } }),
   ])
+
+  // §FLATTEN-INVOICE-ITEMS: Extract items from invoices (include: { items: true })
+  // into a flat array for the backup envelope.
+  const invoiceItems = invoices.flatMap((inv) => inv.items || [])
 
   // §AUDIT-LOG: Log the data export (critical security event)
   await logAudit({
@@ -34,26 +70,21 @@ export async function GET(req: NextRequest) {
     action: AUDIT_ACTIONS.DATA_EXPORT,
     entityType: ENTITY_TYPES.EXPORT,
     description: `Data export (${format.toUpperCase()}): ${parties.length} parties, ${products.length} products, ${invoices.length} invoices, ${transactions.length} transactions`,
-    metadata: JSON.stringify({ format, partyCount: parties.length, productCount: products.length, invoiceCount: invoices.length, transactionCount: transactions.length }),
+    metadata: JSON.stringify({
+      format,
+      partyCount: parties.length,
+      productCount: products.length,
+      invoiceCount: invoices.length,
+      transactionCount: transactions.length,
+      invoiceItemCount: invoiceItems.length,
+      categoryCount: categories.length,
+      staffCount: staff.length,
+    }),
   })
-
-  const data = {
-    business,
-    exportedAt: new Date().toISOString(),
-    parties,
-    products,
-    invoices,
-    transactions,
-  }
 
   if (format === 'csv') {
     // §CSV-EXPORT: Build a CSV of transactions with proper RFC 4180 escaping
     // and UTF-8 BOM for Excel compatibility (Bengali text renders correctly).
-    //
-    // §BUGFIX: Previously this route joined values with commas without escaping,
-    // broke on party names containing commas/quotes/newlines, and lacked a BOM
-    // (so Bengali text mis-rendered in Excel). Now uses the shared escapeCsvField
-    // helper from reports-csv.ts and prepends the UTF-8 BOM.
     const rows: string[][] = [['Date', 'Type', 'Party', 'Amount', 'Description']]
     for (const t of transactions) {
       const party = parties.find((p) => p.id === t.partyId)
@@ -61,30 +92,42 @@ export async function GET(req: NextRequest) {
         new Date(t.createdAt).toISOString().split('T')[0],
         t.type,
         party?.name || '',
-        // §DECIMAL-SAFE: t.amount is a Prisma Decimal — toNumber() before stringification
-        // to avoid Decimal object stringification quirks.
         String((t as any).amount?.toNumber ? (t as any).amount.toNumber() : t.amount),
         t.description || '',
       ])
     }
-    // §RFC4180: Escape each field per RFC 4180 (commas, quotes, newlines).
-    // §BOM: Prepend UTF-8 BOM (0xFEFF) so Excel decodes Bengali correctly.
     const csv = '\uFEFF' + rows.map((r) => r.map(escapeCsvField).join(',')).join('\r\n')
     return new NextResponse(csv, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${business.name.replace(/\s+/g, '_')}_Data_${new Date().toISOString().split('T')[0]}.csv"`,
+        'Content-Disposition': `attachment; filename="${business.name.replace(/\s+/g, '_')}_Transactions_${new Date().toISOString().split('T')[0]}.csv"`,
       },
     })
   }
 
-  // §DECIMAL-FIX-D: parties (balance, creditLimit, openingBalance), products (salePrice, etc.),
-  // invoices + items (grandTotal, amountDue, unitPrice, total, etc.), transactions (amount, balanceAfter)
-  // are all Prisma Decimal fields. serializeDecimals converts them to numbers before JSON.stringify.
-  return new NextResponse(JSON.stringify(serializeDecimals(data), null, 2), {
+  // §VERSIONED-BACKUP: Build the sanitized, versioned backup envelope.
+  // Secrets are stripped by the allow-list sanitizers in buildBackupEnvelope().
+  const envelope = buildBackupEnvelope({
+    business,
+    settings,
+    parties,
+    products,
+    invoices,
+    invoiceItems,
+    transactions,
+    categories,
+    customPrices,
+    staff,
+    partyNotes,
+    stockMovements,
+  })
+
+  return new NextResponse(JSON.stringify(envelope, null, 2), {
     headers: {
       'Content-Type': 'application/json',
-      'Content-Disposition': `attachment; filename="${business.name.replace(/\s+/g, '_')}_Backup_${new Date().toISOString().split('T')[0]}.json"`,
+      'Content-Disposition': `attachment; filename="${business.name.replace(/\s+/g, '_')}_Backup_v${BACKUP_VERSION}_${new Date().toISOString().split('T')[0]}.json"`,
+      // §CACHE-CONTROL: Never cache a backup file (contains business data)
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
     },
   })
 }

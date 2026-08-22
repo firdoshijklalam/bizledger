@@ -30,6 +30,7 @@ import { PALETTES, usePaletteStore } from '@/store/palette-store'
 import { useVoiceSettings } from '@/store/voice-settings-store'
 import { useNotificationStore } from '@/store/notification-store'
 import { useGateTrigger } from '@/store/biometric-gate-store'
+import { ImportBackupModal } from '@/components/shared/import-backup-modal'
 
 const TABS = [
   { id: 'profile', labelKey: 'set.profile', icon: Building2 },
@@ -54,6 +55,8 @@ export function SettingsView() {
   const [resetPin, setResetPin] = useState('')
   const [resetting, setResetting] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
+  // §IMPORT-MODAL: State for the Import Backup modal (upload → validate → preview → import)
+  const [showImportModal, setShowImportModal] = useState(false)
   const [tab, setTab] = useState<'profile' | 'preferences' | 'data' | 'marketplace' | 'security'>('profile')
 
   // §AUTH-LOGOUT: Sign out the current user — clears the session cookie via
@@ -700,10 +703,14 @@ export function SettingsView() {
 
         {tab === 'data' && (
           <div className="space-y-3">
-            {/* PRD Part 30 §1.1: Local Export — Manager/Sales restricted */}
+            {/* §FULL-BACKUP: Versioned JSON backup with all business entities.
+                Secrets (passwordHash, pinHash, tokenHash, fingerprintHash,
+                qrToken, paymentLandingToken) are stripped by an allow-list. */}
             <Card className="p-5">
-              <h3 className="text-sm font-semibold mb-1">Local Export</h3>
-              <p className="text-[11px] text-muted-foreground mb-4">Download your business data for backup.</p>
+              <h3 className="text-sm font-semibold mb-1">Full Backup</h3>
+              <p className="text-[11px] text-muted-foreground mb-4">
+                Download a complete, versioned backup of your business data. Includes parties, products, invoices, transactions, categories, staff, and more. Secret fields are automatically stripped.
+              </p>
               <div className="space-y-2">
                 <Button
                   variant="outline"
@@ -711,7 +718,7 @@ export function SettingsView() {
                   disabled={userRole !== 'owner'}
                   className="w-full h-11 justify-start disabled:opacity-40"
                 >
-                  <Download className="w-4 h-4 mr-2" /> {t('set.exportJson')}
+                  <Download className="w-4 h-4 mr-2" /> Export Full Backup (JSON)
                   {userRole !== 'owner' && <span className="ml-auto text-[9px] text-muted-foreground">Owner only</span>}
                 </Button>
                 <Button
@@ -720,10 +727,29 @@ export function SettingsView() {
                   disabled={userRole !== 'owner'}
                   className="w-full h-11 justify-start disabled:opacity-40"
                 >
-                  <FileText className="w-4 h-4 mr-2" /> {t('set.exportCsv')}
+                  <FileText className="w-4 h-4 mr-2" /> Export Transactions (CSV)
                   {userRole !== 'owner' && <span className="ml-auto text-[9px] text-muted-foreground">Owner only</span>}
                 </Button>
               </div>
+            </Card>
+
+            {/* §IMPORT-RESTORE: Upload a backup file to restore business data.
+                Full flow: upload → validate → preview (new/existing counts) →
+                choose strategy → biometric gate → atomic import → result. */}
+            <Card className="p-5">
+              <h3 className="text-sm font-semibold mb-1">Import / Restore</h3>
+              <p className="text-[11px] text-muted-foreground mb-4">
+                Restore your business data from a BizLedger backup file. All imported records are scoped to the current business — cross-tenant injection is prevented.
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => setShowImportModal(true)}
+                disabled={userRole !== 'owner'}
+                className="w-full h-11 justify-start disabled:opacity-40"
+              >
+                <Upload className="w-4 h-4 mr-2" /> Import Backup
+                {userRole !== 'owner' && <span className="ml-auto text-[9px] text-muted-foreground">Owner only</span>}
+              </Button>
             </Card>
 
             {/* Cloud Backup */}
@@ -1310,6 +1336,10 @@ export function SettingsView() {
           at the bottom) can be scrolled above the virtual keyboard.
           Uses 50vh — enough to clear any mobile keyboard height. */}
       <div className="h-[50vh] shrink-0" aria-hidden="true" />
+
+      {/* §IMPORT-MODAL: Rendered at the Settings root so it overlays everything.
+          Full flow: upload → validate → preview → biometric gate → atomic import. */}
+      <ImportBackupModal open={showImportModal} onClose={() => setShowImportModal(false)} />
     </div>
   )
 }
