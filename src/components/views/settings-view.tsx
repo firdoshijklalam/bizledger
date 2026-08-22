@@ -791,7 +791,7 @@ export function SettingsView() {
             <Card className="p-5">
               <h3 className="text-sm font-semibold mb-1">Tools</h3>
               <p className="text-[11px] text-muted-foreground mb-4">Download import templates with the correct columns and a sample row.</p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 mb-4">
                 {([
                   { type: 'customers', label: 'Customer Template' },
                   { type: 'suppliers', label: 'Supplier Template' },
@@ -808,6 +808,26 @@ export function SettingsView() {
                   </Button>
                 ))}
               </div>
+              {/* §IMPORT-HISTORY: Show recent imports with counts + status */}
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  try {
+                    const res = await fetch('/api/import-history')
+                    const data = await res.json()
+                    if (data.items?.length === 0) {
+                      toast.info('No imports yet')
+                    } else {
+                      const latest = data.items[0]
+                      const statusEmoji = latest.status === 'COMPLETED' ? '✅' : latest.status === 'ROLLED_BACK' ? '⚠️' : '⏳'
+                      toast.success(`${statusEmoji} Last import: ${latest.importType} from ${latest.sourceFileName} — ${latest.importedCount} imported, ${latest.skippedCount} skipped, ${latest.failedCount} errors`)
+                    }
+                  } catch (e) { toast.error('Failed: ' + String(e)) }
+                }}
+                className="w-full h-9 text-xs"
+              >
+                <Database className="w-3.5 h-3.5 mr-1.5" /> View Import History
+              </Button>
             </Card>
 
             {/* §CLOUD-BACKUP: Simulated — labeled "Coming Soon" so users know it's not functional yet. */}

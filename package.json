@@ -12,7 +12,7 @@
     "db:migrate": "prisma migrate dev --schema prisma/schema.dev.prisma",
     "db:reset": "prisma migrate reset --schema prisma/schema.dev.prisma",
     "postinstall": "prisma generate --schema prisma/schema.dev.prisma",
-    "test": "npx tsx tests/unit/invoice-calculation.test.ts && npx tsx tests/unit/server-authoritative-invoice.test.ts && npx tsx tests/unit/reports-accounting.test.ts && npx tsx tests/unit/reports-export.test.ts && npx tsx tests/unit/reports-performance.test.ts && npx tsx tests/unit/backup-import.test.ts && npx tsx tests/unit/external-import.test.ts && npx tsx tests/unit/concurrent-payments.test.ts && npx tsx tests/unit/pos-cart-calculations.test.ts && npx tsx tests/unit/financial-numeric-safety.test.ts && npx tsx tests/unit/search-engine.test.ts && npx tsx tests/unit/search-engine-v2.test.ts && npx tsx tests/integration/cross-tenant.test.ts && npx tsx tests/integration/security-ownership.test.ts && npx tsx tests/integration/rbac-authorization.test.ts",
+    "test": "npx tsx tests/unit/invoice-calculation.test.ts && npx tsx tests/unit/server-authoritative-invoice.test.ts && npx tsx tests/unit/reports-accounting.test.ts && npx tsx tests/unit/reports-export.test.ts && npx tsx tests/unit/reports-performance.test.ts && npx tsx tests/unit/backup-import.test.ts && npx tsx tests/unit/external-import.test.ts && npx tsx tests/unit/xlsx-import.test.ts && npx tsx tests/unit/concurrent-payments.test.ts && npx tsx tests/unit/pos-cart-calculations.test.ts && npx tsx tests/unit/financial-numeric-safety.test.ts && npx tsx tests/unit/search-engine.test.ts && npx tsx tests/unit/search-engine-v2.test.ts && npx tsx tests/integration/cross-tenant.test.ts && npx tsx tests/integration/security-ownership.test.ts && npx tsx tests/integration/rbac-authorization.test.ts",
     "test:unit": "npx tsx tests/unit/invoice-calculation.test.ts && npx tsx tests/unit/server-authoritative-invoice.test.ts",
     "test:integration": "npx tsx tests/integration/cross-tenant.test.ts && npx tsx tests/integration/security-ownership.test.ts"
   },
@@ -87,6 +87,7 @@
     "tailwindcss-animate": "^1.0.7",
     "uuid": "^11.1.0",
     "vaul": "^1.1.2",
+    "xlsx": "^0.18.5",
     "z-ai-web-dev-sdk": "^0.0.18",
     "zod": "^4.0.2",
     "zustand": "^5.0.6"

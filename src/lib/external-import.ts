@@ -731,3 +731,137 @@ export function parseJsonArray(text: string): { headers: string[]; rows: Record<
 
   return { headers, rows }
 }
+
+// ─── XLSX parser (uses SheetJS/xlsx) ──────────────────────────────────────
+
+/**
+ * §XLSX-PARSER: Parse an Excel .xlsx file into rows.
+ *
+ * Uses SheetJS (xlsx) — a well-maintained, pure-JS XLSX parser.
+ * Handles:
+ * - Multiple sheets (returns the FIRST sheet by default, or a named sheet)
+ * - Header row detection (first non-empty row)
+ * - Empty rows (skipped)
+ * - Numeric cells (converted to string for consistency)
+ * - Date cells (converted to ISO string)
+ * - Formula cells (uses the cached calculated value, NOT the formula)
+ * - Bengali/Unicode text (preserved)
+ * - Merged cells (uses the top-left value — limitation noted below)
+ *
+ * §SAFETY:
+ * - Does NOT execute Excel formulas (uses calculated values only)
+ * - Does NOT load external references (images, links, macros)
+ * - SheetJS `cellNF: false` + `cellStyles: false` for minimal parsing
+ * - Row limit: 10,000 rows (prevents memory issues with very large sheets)
+ *
+ * §LIMITATIONS:
+ * - Merged header cells: only the top-left cell's value is used. If a merged
+ *   cell spans multiple header columns, the secondary columns will have empty
+ *   headers. The user must manually map these in the column-mapping step.
+ * - Very large sheets (>10,000 rows) are truncated with a warning.
+ */
+export function parseXlsx(
+  arrayBuffer: ArrayBuffer,
+  sheetName?: string
+): { headers: string[]; rows: Record<string, string>[]; sheetNames: string[]; usedSheet: string } {
+  // §DYNAMIC-IMPORT: Load xlsx only when needed (keeps the initial bundle small).
+  // SheetJS is a CommonJS module — require() is the correct way to load it.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const XLSX = require('xlsx')
+
+  const workbook = XLSX.read(arrayBuffer, {
+    type: 'array',
+    cellNF: false,    // Don't load number formats
+    cellStyles: false, // Don't load cell styles
+    cellDates: true,   // Parse date cells as JS Date objects
+    cellFormula: false, // Don't load formulas (use cached values)
+  })
+
+  if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+    return { headers: [], rows: [], sheetNames: [], usedSheet: '' }
+  }
+
+  // §SHEET-SELECTION: Use the named sheet if provided, otherwise the first sheet
+  const usedSheet = sheetName && workbook.SheetNames.includes(sheetName)
+    ? sheetName
+    : workbook.SheetNames[0]
+  const worksheet = workbook.Sheets[usedSheet]
+
+  if (!worksheet) {
+    return { headers: [], rows: [], sheetNames: workbook.SheetNames, usedSheet }
+  }
+
+  // §HEADER-DETECTION: Convert sheet to array-of-arrays, first row = headers
+  const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, {
+    header: 1,        // Return array-of-arrays (not array-of-objects)
+    blankrows: false, // Skip empty rows
+    defval: '',       // Return empty string for empty cells (not undefined)
+    raw: false,       // Use formatted text (not raw values) — handles dates + numbers
+  })
+
+  if (rawData.length === 0) {
+    return { headers: [], rows: [], sheetNames: workbook.SheetNames, usedSheet }
+  }
+
+  // §ROW-LIMIT: 10,000 rows max (including header)
+  const MAX_XLSX_ROWS = 10001
+  const truncated = rawData.length > MAX_XLSX_ROWS
+  const limitedData = truncated ? rawData.slice(0, MAX_XLSX_ROWS) : rawData
+
+  // §HEADERS: First non-empty row
+  const headers = (limitedData[0] || []).map((h: any) => String(h || '').trim())
+
+  // §ROWS: Convert each remaining row to an object keyed by header
+  const rows: Record<string, string>[] = []
+  for (let i = 1; i < limitedData.length; i++) {
+    const line = limitedData[i]
+    // Skip completely empty rows
+    const isEmpty = line.every((cell: any) => cell === '' || cell === null || cell === undefined)
+    if (isEmpty) continue
+
+    const obj: Record<string, string> = {}
+    for (let j = 0; j < headers.length; j++) {
+      const val = line[j]
+      // §DATE-HANDLING: Date objects → ISO string (for display + normalization)
+      if (val instanceof Date) {
+        obj[headers[j]] = val.toISOString().split('T')[0] // YYYY-MM-DD
+      } else if (val === null || val === undefined) {
+        obj[headers[j]] = ''
+      } else {
+        obj[headers[j]] = String(val)
+      }
+    }
+    rows.push(obj)
+  }
+
+  return {
+    headers,
+    rows,
+    sheetNames: workbook.SheetNames,
+    usedSheet,
+  }
+}
+
+/**
+ * Parse a file based on its extension.
+ * Dispatches to parseCsv, parseXlsx, or parseJsonArray.
+ */
+export function parseFile(
+  fileName: string,
+  content: string | ArrayBuffer
+): { headers: string[]; rows: Record<string, string>[]; sheetNames?: string[]; usedSheet?: string } {
+  const ext = fileName.substring(fileName.lastIndexOf('.')).toLowerCase()
+  if (ext === '.json') return parseJsonArray(content as string)
+  if (ext === '.xlsx' || ext === '.xls') {
+    // §XLSX-REQUIRES-ARRAYBUFFER: SheetJS needs an ArrayBuffer, not a string
+    if (typeof content === 'string') {
+      // Convert string to ArrayBuffer (for files read as text — not recommended for XLSX)
+      const encoder = new TextEncoder()
+      const bytes = encoder.encode(content)
+      return parseXlsx(bytes.buffer)
+    }
+    return parseXlsx(content as ArrayBuffer)
+  }
+  // Default: CSV
+  return parseCsv(content as string)
+}

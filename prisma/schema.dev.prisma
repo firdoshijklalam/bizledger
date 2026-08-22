@@ -492,6 +492,27 @@ model BackupLog {
   @@index([businessId])
 }
 
+// §IMPORT-HISTORY: Audit trail of all external imports
+model ImportHistory {
+  id              String   @id @default(cuid())
+  businessId      String
+  userId          String?
+  importType      String   // customers | suppliers | products | opening-balances | bizledger-backup
+  sourceFileName  String
+  sourceFormat    String   // csv | xlsx | json
+  rowCount        Int      @default(0)
+  importedCount   Int      @default(0)
+  skippedCount    Int      @default(0)
+  failedCount     Int      @default(0)
+  status          String   @default("PREVIEW") // PREVIEW | RUNNING | COMPLETED | FAILED | ROLLED_BACK
+  errorReportJson String?
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  @@index([businessId])
+  @@index([createdAt])
+}
+
 // PRD Part 32 §3.1: Shared Defaulter Registry (cloud-synced across merchant group)
 model DefaulterRegistry {
   id              String   @id @default(cuid())

@@ -138,6 +138,22 @@ export async function POST(req: NextRequest) {
   const importStrategy = strategy || 'add-new'
   const resolutions = duplicateResolutions || {}
 
+  // §IMPORT-HISTORY: Create a history record when the import starts (status=RUNNING).
+  // Updated to COMPLETED or FAILED after the transaction.
+  const sourceFileName = body.sourceFileName || 'unknown'
+  const sourceFormat = body.sourceFormat || 'csv'
+  const historyRecord = await db.importHistory.create({
+    data: {
+      businessId: business.id,
+      userId: user.id,
+      importType: entityType,
+      sourceFileName,
+      sourceFormat,
+      rowCount: validatedRows.length,
+      status: 'RUNNING',
+    },
+  })
+
   try {
     const result = await performExternalImport(
       validatedRows,
@@ -146,6 +162,19 @@ export async function POST(req: NextRequest) {
       importStrategy,
       resolutions
     )
+
+    // §IMPORT-HISTORY: Update to COMPLETED with counts + error report
+    await db.importHistory.update({
+      where: { id: historyRecord.id },
+      data: {
+        importedCount: result.imported,
+        skippedCount: result.skipped,
+        failedCount: result.errors.length,
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        errorReportJson: result.errors.length > 0 ? JSON.stringify(result.errors) : null,
+      },
+    })
 
     // §AUDIT-LOG
     await logAudit({
@@ -165,6 +194,15 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, result })
   } catch (e: any) {
+    // §IMPORT-HISTORY: Update to FAILED (rolled back)
+    await db.importHistory.update({
+      where: { id: historyRecord.id },
+      data: {
+        status: 'ROLLED_BACK',
+        completedAt: new Date(),
+      },
+    }).catch(() => {}) // best-effort — don't mask the original error
+
     return NextResponse.json(
       { ok: false, error: `Import failed and was rolled back: ${e.message}` },
       { status: 500 }

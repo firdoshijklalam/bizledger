@@ -208,7 +208,7 @@ export function ReportsView() {
       toast.error(`Unknown report type: ${label}`)
       return
     }
-    toast.success(`Excel export started for ${label}`)
+    toast.success(`CSV export started for ${label}`)
     // §CSV-BUILD: Delegate to the shared helper which handles:
     //   - All 6 report types (P&L, GST, Party, Outstanding, Stock, Grade)
     //   - RFC 4180 escape (commas, quotes, newlines)

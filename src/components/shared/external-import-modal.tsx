@@ -11,8 +11,7 @@ import { useGateTrigger } from '@/store/biometric-gate-store'
 import {
   IMPORTABLE_FIELDS,
   autoDetectColumns,
-  parseCsv,
-  parseJsonArray,
+  parseFile,
   type ImportEntityType,
   type ColumnMappingSuggestion,
 } from '@/lib/external-import'
@@ -111,15 +110,15 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
     setStep('upload')
   }
 
-  // §STEP-2: Upload + parse file
+  // §STEP-2: Upload + parse file (CSV/XLSX/JSON)
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
     if (!f) return
 
-    const validExtensions = ['.csv', '.json']
+    const validExtensions = ['.csv', '.xlsx', '.xls', '.json']
     const ext = f.name.substring(f.name.lastIndexOf('.')).toLowerCase()
     if (!validExtensions.includes(ext)) {
-      toast.error('Please select a .csv or .json file')
+      toast.error('Please select a .csv, .xlsx, or .json file')
       return
     }
 
@@ -132,8 +131,16 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
     setError(null)
 
     try {
-      const text = await f.text()
-      const parsed = ext === '.json' ? parseJsonArray(text) : parseCsv(text)
+      // §XLSX-REQUIRES-ARRAYBUFFER: XLSX files must be read as ArrayBuffer
+      // (SheetJS needs binary data, not text). CSV/JSON can be read as text.
+      let content: string | ArrayBuffer
+      if (ext === '.xlsx' || ext === '.xls') {
+        content = await f.arrayBuffer()
+      } else {
+        content = await f.text()
+      }
+
+      const parsed = parseFile(f.name, content)
 
       if (parsed.rows.length === 0) {
         setError('No data rows found in file')
@@ -198,7 +205,15 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
           const res = await fetch('/api/external-import', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ step: 'import', entityType, rows, mapping, strategy: 'add-new' }),
+            body: JSON.stringify({
+              step: 'import',
+              entityType,
+              rows,
+              mapping,
+              strategy: 'add-new',
+              sourceFileName: fileName || 'unknown',
+              sourceFormat: fileName?.endsWith('.xlsx') ? 'xlsx' : fileName?.endsWith('.json') ? 'json' : 'csv',
+            }),
           })
           const json = await res.json()
           if (!res.ok || !json.ok) {
@@ -288,11 +303,11 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
                   <div className="text-center py-6">
                     <Upload className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
                     <p className="text-sm font-medium mb-1">Select a file to import</p>
-                    <p className="text-xs text-muted-foreground mb-4">Supports .csv and .json (max 10MB, 10,000 rows)</p>
+                    <p className="text-xs text-muted-foreground mb-4">Supports .csv, .xlsx, and .json (max 10MB, 10,000 rows)</p>
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".csv,.json,application/json,text/csv"
+                      accept=".csv,.xlsx,.xls,.json,application/json,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       onChange={handleFileSelect}
                       className="hidden"
                     />

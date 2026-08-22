@@ -532,6 +532,29 @@ model BackupLog {
   @@index([businessId])
 }
 
+// §IMPORT-HISTORY: Audit trail of all external imports (customers/suppliers/products/opening-balances).
+// Records what was imported, from which file, how many rows, and the result.
+// Error reports can be downloaded from the errorReportJson field.
+model ImportHistory {
+  id              String   @id @default(cuid())
+  businessId      String
+  userId          String?  // the User who performed the import (null if unknown)
+  importType      String   // customers | suppliers | products | opening-balances | bizledger-backup
+  sourceFileName  String   // original uploaded filename
+  sourceFormat    String   // csv | xlsx | json
+  rowCount        Int      @default(0) // total rows in the file
+  importedCount   Int      @default(0) // successfully inserted/updated
+  skippedCount    Int      @default(0) // skipped (existing, add-new strategy)
+  failedCount     Int      @default(0) // validation or DB errors
+  status          String   @default("PREVIEW") // PREVIEW | RUNNING | COMPLETED | FAILED | ROLLED_BACK
+  errorReportJson String?  // JSON array of {row, name, problem} for failed rows
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  @@index([businessId])
+  @@index([createdAt])
+}
+
 // PRD Part 32 §3.1: Shared Defaulter Registry (cloud-synced across merchant group)
 model DefaulterRegistry {
   id              String   @id @default(cuid())
