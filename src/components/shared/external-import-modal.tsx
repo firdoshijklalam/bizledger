@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Upload, FileCheck, AlertTriangle, CheckCircle, Loader2, Database, ArrowRight, ArrowLeft, Download, ChevronDown } from 'lucide-react'
+import { X, Upload, FileCheck, FileSpreadsheet, AlertTriangle, CheckCircle, Loader2, Database, ArrowRight, ArrowLeft, Download, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
@@ -12,11 +12,14 @@ import {
   IMPORTABLE_FIELDS,
   autoDetectColumns,
   parseFile,
+  parseXlsx,
+  getXlsxSheetMetadata,
   type ImportEntityType,
   type ColumnMappingSuggestion,
+  type SheetMetadata,
 } from '@/lib/external-import'
 
-type Step = 'select-type' | 'upload' | 'mapping' | 'preview' | 'importing' | 'done' | 'error'
+type Step = 'select-type' | 'upload' | 'select-sheet' | 'mapping' | 'preview' | 'importing' | 'done' | 'error'
 
 interface PreviewData {
   ok: boolean
@@ -86,6 +89,11 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
   // §DUPLICATE-RESOLUTIONS: Per-row decision for POSSIBLE_MATCH rows.
   // Key = matchedRecordId (the existing record's ID), Value = 'skip' | 'merge' | 'new'
   const [duplicateResolutions, setDuplicateResolutions] = useState<Record<string, 'skip' | 'merge' | 'new'>>({})
+  // §XLSX-SHEET-SELECTION: When an XLSX with multiple sheets is uploaded,
+  // the user must choose which sheet to import. Stored as ArrayBuffer for re-parsing.
+  const [xlsxArrayBuffer, setXlsxArrayBuffer] = useState<ArrayBuffer | null>(null)
+  const [sheetMetadata, setSheetMetadata] = useState<SheetMetadata[]>([])
+  const [selectedSheet, setSelectedSheet] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -101,6 +109,9 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
     setResult(null)
     setError(null)
     setDuplicateResolutions({})
+    setXlsxArrayBuffer(null)
+    setSheetMetadata([])
+    setSelectedSheet(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [initialType])
 
@@ -138,37 +149,87 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
     try {
       // §XLSX-REQUIRES-ARRAYBUFFER: XLSX files must be read as ArrayBuffer
       // (SheetJS needs binary data, not text). CSV/JSON can be read as text.
-      let content: string | ArrayBuffer
       if (ext === '.xlsx' || ext === '.xls') {
-        content = await f.arrayBuffer()
+        const arrayBuffer = await f.arrayBuffer()
+
+        // §XLSX-SHEET-DETECTION: Get metadata for all sheets to determine
+        // if sheet selection is needed.
+        const metadata = getXlsxSheetMetadata(arrayBuffer)
+        const nonEmptySheets = metadata.filter((s) => !s.isEmpty)
+
+        if (nonEmptySheets.length === 0) {
+          setError('All sheets in the workbook are empty')
+          setStep('error')
+          return
+        }
+
+        if (nonEmptySheets.length === 1) {
+          // §AUTO-SELECT: Only one non-empty sheet → auto-select and proceed
+          const sheetName = nonEmptySheets[0].name
+          const parsed = parseXlsx(arrayBuffer, sheetName)
+          setXlsxArrayBuffer(arrayBuffer)
+          setSheetMetadata(metadata)
+          setSelectedSheet(sheetName)
+          applyParsedData(parsed.headers, parsed.rows)
+        } else {
+          // §MULTI-SHEET: Multiple non-empty sheets → show selection UI
+          setXlsxArrayBuffer(arrayBuffer)
+          setSheetMetadata(metadata)
+          setSelectedSheet(null)
+          setStep('select-sheet')
+        }
       } else {
-        content = await f.text()
-      }
+        // CSV/JSON: parse directly
+        const content = await f.text()
+        const parsed = parseFile(f.name, content)
 
-      const parsed = parseFile(f.name, content)
+        if (parsed.rows.length === 0) {
+          setError('No data rows found in file')
+          setStep('error')
+          return
+        }
 
-      if (parsed.rows.length === 0) {
-        setError('No data rows found in file')
-        setStep('error')
-        return
-      }
-
-      setHeaders(parsed.headers)
-      setRows(parsed.rows)
-
-      // §AUTO-DETECT: Suggest column mapping
-      if (entityType) {
-        const detected = autoDetectColumns(parsed.headers, entityType)
-        setSuggestions(detected)
-        const initialMapping: Record<string, string> = {}
-        detected.forEach((s) => {
-          initialMapping[s.sourceHeader] = s.suggestedField || '__ignore__'
-        })
-        setMapping(initialMapping)
-        setStep('mapping')
+        applyParsedData(parsed.headers, parsed.rows)
       }
     } catch (e: any) {
       setError(e.message || 'Failed to parse file')
+      setStep('error')
+    }
+  }
+
+  // §HELPER: Apply parsed headers + rows and auto-detect mapping
+  const applyParsedData = (parsedHeaders: string[], parsedRows: Record<string, string>[]) => {
+    if (parsedRows.length === 0) {
+      setError('No data rows found in file')
+      setStep('error')
+      return
+    }
+
+    setHeaders(parsedHeaders)
+    setRows(parsedRows)
+
+    // §AUTO-DETECT: Suggest column mapping
+    if (entityType) {
+      const detected = autoDetectColumns(parsedHeaders, entityType)
+      setSuggestions(detected)
+      const initialMapping: Record<string, string> = {}
+      detected.forEach((s) => {
+        initialMapping[s.sourceHeader] = s.suggestedField || '__ignore__'
+      })
+      setMapping(initialMapping)
+      setStep('mapping')
+    }
+  }
+
+  // §SHEET-SELECTION: When user selects a sheet from the multi-sheet UI
+  const handleSheetSelect = (sheetName: string) => {
+    if (!xlsxArrayBuffer) return
+    try {
+      const parsed = parseXlsx(xlsxArrayBuffer, sheetName)
+      setSelectedSheet(sheetName)
+      applyParsedData(parsed.headers, parsed.rows)
+    } catch (e: any) {
+      setError(e.message || 'Failed to parse sheet')
       setStep('error')
     }
   }
@@ -326,6 +387,59 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
                       <Download className="w-3.5 h-3.5 mr-1" /> Download Template
                     </Button>
                   </div>
+                </div>
+              )}
+
+              {/* §XLSX-SHEET-SELECTION: When an XLSX with multiple non-empty sheets is uploaded,
+                  show this step so the user can choose which sheet to import. */}
+              {step === 'select-sheet' && sheetMetadata.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <FileSpreadsheet className="w-4 h-4 text-amber-600" />
+                    Select Sheet
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Workbook: <span className="font-medium text-foreground">{fileName}</span> — {sheetMetadata.filter((s) => !s.isEmpty).length} sheets with data found.
+                    Choose which sheet to import.
+                  </p>
+                  <div className="space-y-2">
+                    {sheetMetadata.map((sheet) => (
+                      <button
+                        key={sheet.name}
+                        onClick={() => !sheet.isEmpty && handleSheetSelect(sheet.name)}
+                        disabled={sheet.isEmpty}
+                        className={`w-full text-left p-3 rounded-xl border transition-colors ${
+                          sheet.isEmpty
+                            ? 'border-border opacity-40 cursor-not-allowed'
+                            : selectedSheet === sheet.name
+                            ? 'border-primary bg-primary/5'
+                            : 'border-border hover:bg-muted/50 cursor-pointer'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{sheet.name}</p>
+                            {sheet.headers.length > 0 && (
+                              <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                                Columns: {sheet.headers.join(', ')}{sheet.columnCount > 5 ? '…' : ''}
+                              </p>
+                            )}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className={`text-xs font-semibold tabular ${sheet.isEmpty ? 'text-muted-foreground' : 'text-foreground'}`}>
+                              {sheet.isEmpty ? 'Empty' : `${sheet.rowCount} rows`}
+                            </p>
+                            {!sheet.isEmpty && (
+                              <p className="text-[10px] text-muted-foreground">{sheet.columnCount} cols</p>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <Button variant="outline" onClick={() => setStep('upload')} className="w-full h-10">
+                    <ArrowLeft className="w-4 h-4 mr-1" /> Back to Upload
+                  </Button>
                 </div>
               )}
 

@@ -865,3 +865,69 @@ export function parseFile(
   // Default: CSV
   return parseCsv(content as string)
 }
+
+// ─── XLSX sheet metadata ──────────────────────────────────────────────────
+
+export interface SheetMetadata {
+  name: string
+  rowCount: number
+  columnCount: number
+  headers: string[]
+  isEmpty: boolean
+}
+
+/**
+ * §SHEET-METADATA: Get metadata for all sheets in an XLSX workbook.
+ * Used by the UI to show sheet names, row counts, and column counts
+ * in the sheet selection step.
+ */
+export function getXlsxSheetMetadata(arrayBuffer: ArrayBuffer): SheetMetadata[] {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const XLSX = require('xlsx')
+
+  const workbook = XLSX.read(arrayBuffer, {
+    type: 'array',
+    cellNF: false,
+    cellStyles: false,
+    cellDates: true,
+    cellFormula: false,
+  })
+
+  if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+    return []
+  }
+
+  return workbook.SheetNames.map((sheetName: string) => {
+    const worksheet = workbook.Sheets[sheetName]
+    if (!worksheet) {
+      return { name: sheetName, rowCount: 0, columnCount: 0, headers: [], isEmpty: true }
+    }
+
+    const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      blankrows: false,
+      defval: '',
+      raw: false,
+    })
+
+    if (rawData.length === 0) {
+      return { name: sheetName, rowCount: 0, columnCount: 0, headers: [], isEmpty: true }
+    }
+
+    const headers = (rawData[0] || []).map((h: any) => String(h || '').trim()).filter((h: string) => h !== '')
+    // Count non-empty data rows (exclude header)
+    let dataRows = 0
+    for (let i = 1; i < rawData.length; i++) {
+      const isEmpty = rawData[i].every((cell: any) => cell === '' || cell === null || cell === undefined)
+      if (!isEmpty) dataRows++
+    }
+
+    return {
+      name: sheetName,
+      rowCount: dataRows,
+      columnCount: headers.length,
+      headers: headers.slice(0, 5), // preview first 5 headers
+      isEmpty: dataRows === 0 || headers.length === 0,
+    }
+  })
+}
