@@ -160,7 +160,8 @@ export async function POST(req: NextRequest) {
       entityType,
       business.id,
       importStrategy,
-      resolutions
+      resolutions,
+      body.__forceRollback === true
     )
 
     // §IMPORT-HISTORY: Update to COMPLETED with counts + error report
@@ -223,7 +224,8 @@ async function performExternalImport(
   entityType: ImportEntityType,
   businessId: string,
   strategy: 'add-new' | 'merge',
-  resolutions: Record<string, 'merge' | 'new' | 'skip'>
+  resolutions: Record<string, 'merge' | 'new' | 'skip'>,
+  forceRollback: boolean
 ): Promise<ExternalImportResult> {
   const result: ExternalImportResult = { imported: 0, skipped: 0, errors: [] }
 
@@ -291,6 +293,14 @@ async function performExternalImport(
         await createParty(tx, row.mappedData, entityType, businessId)
       }
       result.imported++
+
+      // §ROLLBACK-TEST: When forceRollback=true AND this is the first
+      // successfully imported row, throw a simulated DB error to prove the
+      // $transaction rolls back. This is ONLY for testing — never active
+      // in production (guarded by NODE_ENV !== 'production').
+      if (forceRollback && process.env.NODE_ENV !== 'production' && result.imported === 1) {
+        throw new Error('SIMULATED_DB_FAILURE: Testing $transaction rollback after 1 successful insert')
+      }
     }
   })
 
