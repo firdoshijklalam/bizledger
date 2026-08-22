@@ -297,11 +297,10 @@ export function ReportsView() {
         })}
       </div>
 
-      {/* Export buttons */}
-      <div className="grid grid-cols-3 gap-2 action-buttons">
-        <Button variant="outline" onClick={() => exportPdf(REPORTS.find((r) => r.id === activeReport)!.label)} className="h-11 flex-col text-xs">
-          <FileText className="w-4 h-4 mb-0.5" /> {t('rep.downloadPdf')}
-        </Button>
+      {/* §EXPORT-BUTTONS: Only 2 buttons — "Export CSV" (contextual per-report CSV download)
+          and "Print" (browser print-to-PDF). The old "Download PDF" button was removed
+          because it was a duplicate of Print (both called window.print()). */}
+      <div className="grid grid-cols-2 gap-2 action-buttons">
         <Button variant="outline" onClick={() => exportExcel(REPORTS.find((r) => r.id === activeReport)!.label)} className="h-11 flex-col text-xs">
           <FileSpreadsheet className="w-4 h-4 mb-0.5" /> {t('rep.exportExcel')}
         </Button>

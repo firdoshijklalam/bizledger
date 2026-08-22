@@ -31,6 +31,8 @@ import { useVoiceSettings } from '@/store/voice-settings-store'
 import { useNotificationStore } from '@/store/notification-store'
 import { useGateTrigger } from '@/store/biometric-gate-store'
 import { ImportBackupModal } from '@/components/shared/import-backup-modal'
+import { ExternalImportModal } from '@/components/shared/external-import-modal'
+import type { ImportEntityType } from '@/lib/external-import'
 
 const TABS = [
   { id: 'profile', labelKey: 'set.profile', icon: Building2 },
@@ -57,6 +59,9 @@ export function SettingsView() {
   const [loggingOut, setLoggingOut] = useState(false)
   // §IMPORT-MODAL: State for the Import Backup modal (upload → validate → preview → import)
   const [showImportModal, setShowImportModal] = useState(false)
+  // §EXTERNAL-IMPORT-MODAL: State for the external import wizard (CSV/XLSX/JSON → field mapping → preview → import)
+  const [showExternalImportModal, setShowExternalImportModal] = useState(false)
+  const [externalImportType, setExternalImportType] = useState<ImportEntityType>('customers')
   const [tab, setTab] = useState<'profile' | 'preferences' | 'data' | 'marketplace' | 'security'>('profile')
 
   // §AUTH-LOGOUT: Sign out the current user — clears the session cookie via
@@ -733,13 +738,12 @@ export function SettingsView() {
               </div>
             </Card>
 
-            {/* §IMPORT-RESTORE: Upload a backup file to restore business data.
-                Full flow: upload → validate → preview (new/existing counts) →
-                choose strategy → biometric gate → atomic import → result. */}
+            {/* §RESTORE: Import a BizLedger-generated backup to restore business data.
+                This is SEPARATE from the external import system below. */}
             <Card className="p-5">
-              <h3 className="text-sm font-semibold mb-1">Import / Restore</h3>
+              <h3 className="text-sm font-semibold mb-1">Restore</h3>
               <p className="text-[11px] text-muted-foreground mb-4">
-                Restore your business data from a BizLedger backup file. All imported records are scoped to the current business — cross-tenant injection is prevented.
+                Restore from a BizLedger backup file (.json). Includes all entities, relationships, and balances.
               </p>
               <Button
                 variant="outline"
@@ -747,102 +751,80 @@ export function SettingsView() {
                 disabled={userRole !== 'owner'}
                 className="w-full h-11 justify-start disabled:opacity-40"
               >
-                <Upload className="w-4 h-4 mr-2" /> Import Backup
+                <Upload className="w-4 h-4 mr-2" /> Import BizLedger Backup
                 {userRole !== 'owner' && <span className="ml-auto text-[9px] text-muted-foreground">Owner only</span>}
               </Button>
             </Card>
 
-            {/* Cloud Backup */}
+            {/* §IMPORT-DATA: Import from other software (CSV/JSON → field mapping → preview → import).
+                This is the NEW external import system for migrating from other apps. */}
             <Card className="p-5">
-              <h3 className="text-sm font-semibold mb-1">Cloud Backup</h3>
-              <p className="text-[11px] text-muted-foreground mb-4">Send your data to Telegram or Google Drive.</p>
+              <h3 className="text-sm font-semibold mb-1">Import Data (from other software)</h3>
+              <p className="text-[11px] text-muted-foreground mb-4">
+                Migrate customers, suppliers, products, or opening balances from CSV/JSON. Includes auto column detection, duplicate detection, and preview.
+              </p>
               <div className="space-y-2">
-                <Button variant="outline" onClick={() => {
-                  // PRD Part 32 §1.3: Data Export gate for Telegram backup
-                  const doBackup = async () => {
-                    try {
-                      toast.loading('Sending to Telegram…')
-                      const res = await fetch('/api/backup/telegram', { method: 'POST' })
-                      const data = await res.json()
-                      toast.dismiss()
-                      if (data.ok) {
-                        toast.success(`Sent to Telegram — ${data.records?.parties || 0} parties, ${data.records?.invoices || 0} invoices`)
-                        // PRD Part 30 §1.1: Push notification on backup
-                        useNotificationStore.getState().addNotification({
-                          id: crypto.randomUUID(),
-                          type: 'backup',
-                          title: 'Telegram ব্যাকআপ সম্পন্ন ✅',
-                          body: `${data.records?.parties || 0} parties, ${data.records?.invoices || 0} invoices sent to Telegram.`,
-                          time: 'এইমাত্র',
-                          read: false,
-                          action: { view: 'settings' },
-                        })
-                        triggerRefresh()
-                      } else throw new Error(data.error)
-                    } catch (e) { toast.dismiss(); toast.error('Failed: ' + String(e)) }
-                  }
-                  if (gateConfig.gateDataExport) {
-                    triggerGate('data_export', 'Send business data backup to Telegram', doBackup)
-                  } else {
-                    doBackup()
-                  }
-                }} className="w-full h-11 justify-start">
+                {([
+                  { type: 'customers', label: 'Import Customers', icon: '👥' },
+                  { type: 'suppliers', label: 'Import Suppliers', icon: '🚚' },
+                  { type: 'products', label: 'Import Products', icon: '📦' },
+                  { type: 'opening-balances', label: 'Import Opening Balances', icon: '💰' },
+                ] as const).map((item) => (
+                  <Button
+                    key={item.type}
+                    variant="outline"
+                    onClick={() => {
+                      setExternalImportType(item.type)
+                      setShowExternalImportModal(true)
+                    }}
+                    disabled={userRole !== 'owner'}
+                    className="w-full h-11 justify-start disabled:opacity-40"
+                  >
+                    <span className="mr-2">{item.icon}</span> {item.label}
+                    {userRole !== 'owner' && <span className="ml-auto text-[9px] text-muted-foreground">Owner only</span>}
+                  </Button>
+                ))}
+              </div>
+            </Card>
+
+            {/* §TOOLS: Templates + Import History */}
+            <Card className="p-5">
+              <h3 className="text-sm font-semibold mb-1">Tools</h3>
+              <p className="text-[11px] text-muted-foreground mb-4">Download import templates with the correct columns and a sample row.</p>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { type: 'customers', label: 'Customer Template' },
+                  { type: 'suppliers', label: 'Supplier Template' },
+                  { type: 'products', label: 'Product Template' },
+                  { type: 'opening-balances', label: 'Opening Balance Template' },
+                ] as const).map((item) => (
+                  <Button
+                    key={item.type}
+                    variant="ghost"
+                    onClick={() => window.open(`/api/import-templates?type=${item.type}`, '_blank')}
+                    className="h-9 text-xs"
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1.5" /> {item.label}
+                  </Button>
+                ))}
+              </div>
+            </Card>
+
+            {/* §CLOUD-BACKUP: Simulated — labeled "Coming Soon" so users know it's not functional yet. */}
+            <Card className="p-5 opacity-60">
+              <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
+                Cloud Backup
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Coming Soon</span>
+              </h3>
+              <p className="text-[11px] text-muted-foreground mb-4">Cloud backup to Telegram and Google Drive is under development. Use "Export Full Backup" to download a local backup for now.</p>
+              <div className="space-y-2">
+                <Button variant="outline" disabled className="w-full h-11 justify-start">
                   <Upload className="w-4 h-4 mr-2" /> Send to Telegram
+                  <span className="ml-auto text-[9px] text-muted-foreground">Coming Soon</span>
                 </Button>
-                <Button variant="outline" onClick={() => {
-                  // PRD Part 32 §1.3: Data Export gate for Drive backup
-                  const doBackup = async () => {
-                    try {
-                      toast.loading('Uploading to Google Drive…')
-                      const res = await fetch('/api/backup/drive', { method: 'POST' })
-                      const data = await res.json()
-                      toast.dismiss()
-                      if (data.ok) {
-                        toast.success(`Uploaded to Drive — ${data.records?.products || 0} products, ${data.records?.transactions || 0} transactions`)
-                        useNotificationStore.getState().addNotification({
-                          id: crypto.randomUUID(),
-                          type: 'backup',
-                          title: 'Google Drive ব্যাকআপ সম্পন্ন ✅',
-                          body: `${data.records?.products || 0} products, ${data.records?.transactions || 0} transactions uploaded.`,
-                          time: 'এইমাত্র',
-                          read: false,
-                          action: { view: 'settings' },
-                        })
-                        triggerRefresh()
-                      } else throw new Error(data.error)
-                    } catch (e) { toast.dismiss(); toast.error('Failed: ' + String(e)) }
-                  }
-                  if (gateConfig.gateDataExport) {
-                    triggerGate('data_export', 'Upload business data backup to Google Drive', doBackup)
-                  } else {
-                    doBackup()
-                  }
-                }} className="w-full h-11 justify-start">
+                <Button variant="outline" disabled className="w-full h-11 justify-start">
                   <Upload className="w-4 h-4 mr-2" /> Backup to Google Drive
-                </Button>
-                <Button variant="outline" onClick={async () => {
-                  try {
-                    const res = await fetch('/api/backup/list')
-                    const logs = await res.json()
-                    if (logs.length === 0) {
-                      toast.info('No cloud backups yet')
-                    } else {
-                      const latest = logs[0]
-                      toast.success(`Last backup: ${latest.channel} — ${new Date(latest.date).toLocaleString()}`)
-                      // PRD Part 30 §1.1: Push notification on restore check
-                      useNotificationStore.getState().addNotification({
-                        id: crypto.randomUUID(),
-                        type: 'backup',
-                        title: 'ব্যাকআপ রিস্টোর চেক ✅',
-                        body: `সর্বশেষ ব্যাকআপ: ${latest.channel} — ${new Date(latest.date).toLocaleString()}`,
-                        time: 'এইমাত্র',
-                        read: false,
-                        action: { view: 'settings' },
-                      })
-                    }
-                  } catch (e) { toast.error('Failed: ' + String(e)) }
-                }} className="w-full h-11 justify-start">
-                  <Database className="w-4 h-4 mr-2" /> Fetch Old Backup / Restore
+                  <span className="ml-auto text-[9px] text-muted-foreground">Coming Soon</span>
                 </Button>
               </div>
             </Card>
@@ -1340,6 +1322,7 @@ export function SettingsView() {
       {/* §IMPORT-MODAL: Rendered at the Settings root so it overlays everything.
           Full flow: upload → validate → preview → biometric gate → atomic import. */}
       <ImportBackupModal open={showImportModal} onClose={() => setShowImportModal(false)} />
+      <ExternalImportModal open={showExternalImportModal} onClose={() => setShowExternalImportModal(false)} initialType={externalImportType} />
     </div>
   )
 }
