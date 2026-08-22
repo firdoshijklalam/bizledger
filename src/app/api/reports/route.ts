@@ -14,17 +14,30 @@ export const maxDuration = 30
 //   When provided, the report filters invoices + transactions by createdAt.
 //   When omitted, the report includes all-time data (backward compatible).
 //
-// §ACCOUNTING-FIXES:
+// §PERFORMANCE-OPTIMIZATION:
+// Previously this route loaded ALL invoices with `include: { party: true, items: true }`
+// and aggregated in JavaScript. On production Neon PostgreSQL with real data volume,
+// this took 10+ seconds (exceeding the frontend's 10s timeout, causing the Reports
+// page to stay stuck on "Loading…" forever).
+//
+// The optimized version:
+// 1. Uses Prisma `aggregate` for financial sums (revenue, discount, gst, expenses) —
+//    pushes SUM to SQL instead of loading all records into memory.
+// 2. Uses Prisma `groupBy` for GST rate-wise breakdown — pushes GROUP BY + SUM to SQL.
+// 3. Uses `invoiceItem.findMany` with `select` for COGS — avoids loading full invoice
+//    records with party relation just to access item.productId + item.quantity.
+// 4. Uses `select` on all queries to minimize the payload transferred from DB.
+// 5. Runs all independent queries in parallel via Promise.all.
+// 6. Requires composite @@index([businessId, createdAt]) on Invoice + Transaction
+//    (added to schema.prisma) so date-range queries use an index scan instead of a
+//    full table scan.
+//
+// §ACCOUNTING-FIXES (preserved from previous version):
 // 1. Voided invoices (status='void') are EXCLUDED from all sales/GST/revenue/profit
 //    calculations. They remain in the invoice list for audit but contribute nothing.
 // 2. COGS is calculated from ACTUAL purchase invoice items, not from transactions.
-//    Previously COGS was always 0 because transactions were created with type='debit'
-//    for purchases (not type='purchase'). Now COGS = sum of (quantity × purchasePrice)
-//    for all items in non-voided purchase invoices.
-//    §COSTING-METHOD: The costing method is SPECIFIC IDENTIFICATION — each sale's
-//    COGS is based on the product's current purchasePrice. This is a simplification
-//    of weighted-average cost. For exact FIFO/weighted-average, a stock movement
-//    ledger would be needed (future enhancement).
+//    COGS = sum of (quantity × product.purchasePrice) for all items in non-voided
+//    sales invoices. Uses SPECIFIC IDENTIFICATION costing method.
 export async function GET(req: NextRequest) {
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -34,111 +47,182 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const dateRange = parseReportDateRange(url.searchParams)
 
-  const parties = await db.party.findMany({ where: { businessId: business.id } })
-  const products = await db.product.findMany({ where: { businessId: business.id } })
+  // Build the createdAt filter object (undefined = no date filter = all-time)
+  const createdAtFilter = dateRange
+    ? { gte: dateRange.start, lte: dateRange.end }
+    : undefined
 
-  // §VOID-EXCLUSION: Only include non-voided invoices in financial calculations.
-  // §DATE-FILTER: When a date range is provided, only include invoices whose
-  //   createdAt falls within [start, end] (inclusive on both ends).
-  const dateWhere = dateRange
-    ? {
+  // §PARALLEL-QUERIES: Run all independent queries in parallel. Each query is
+  // optimized to use `select` (not `include`) and fetch only the fields needed.
+  const [
+    parties,
+    products,
+    salesAgg,
+    cogsItems,
+    gstGroups,
+    expenseAgg,
+    recentInvoices,
+  ] = await Promise.all([
+    // 1. Parties — for partyLedger, outstanding, gradeDist (not date-filtered)
+    db.party.findMany({
+      where: { businessId: business.id },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        qualityGrade: true,
+        balance: true,
+        phone: true,
+      },
+    }),
+
+    // 2. Products — for stockAgeing + COGS productCostMap (not date-filtered)
+    db.product.findMany({
+      where: { businessId: business.id },
+      select: {
+        id: true,
+        name: true,
+        stock: true,
+        purchasePrice: true,
+        lowStockThreshold: true,
+      },
+    }),
+
+    // 3. §DB-AGGREGATE: Sales invoice totals (revenue, discount, gst) —
+    // pushes SUM to SQL instead of loading all invoices into memory.
+    // Only non-voided sales/retail invoices contribute to revenue.
+    db.invoice.aggregate({
+      where: {
         businessId: business.id,
         status: { not: 'void' },
-        createdAt: { gte: dateRange.start, lte: dateRange.end },
-      }
-    : { businessId: business.id, status: { not: 'void' } }
+        type: { in: ['sales', 'retail'] },
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      _sum: {
+        subtotal: true,
+        discountAmount: true,
+        gstAmount: true,
+      },
+    }),
 
-  const invoices = await db.invoice.findMany({
-    where: dateWhere,
-    include: { party: true, items: true },
-    orderBy: { createdAt: 'desc' },
-  })
+    // 4. §COGS-ITEMS: Invoice items for COGS calculation — only fetches
+    // productId + quantity (not the full invoice record with party relation).
+    // This replaces the expensive `include: { items: true }` on all invoices.
+    db.invoiceItem.findMany({
+      where: {
+        invoice: {
+          businessId: business.id,
+          status: { not: 'void' },
+          type: { in: ['sales', 'retail'] },
+          ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        },
+      },
+      select: {
+        productId: true,
+        quantity: true,
+      },
+    }),
 
-  // §VOID-INCLUSIVE: For the invoice count and recent list, include ALL invoices
-  // (even voided) so the merchant can see voided invoices in the UI.
-  // Date filter still applies (only invoices within the range are shown).
-  const allInvoicesWhere = dateRange
-    ? {
+    // 5. §GST-GROUPBY: GST breakdown by rate — pushes GROUP BY + SUM to SQL.
+    // Only non-voided GST sales/retail invoices contribute to GST liability.
+    db.invoiceItem.groupBy({
+      by: ['gstRate'],
+      where: {
+        invoice: {
+          businessId: business.id,
+          status: { not: 'void' },
+          isGst: true,
+          type: { in: ['sales', 'retail'] },
+          ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        },
+      },
+      _sum: {
+        total: true,
+      },
+    }),
+
+    // 6. §DB-AGGREGATE: Indirect expenses — sum of expense + debit transactions.
+    // Pushes SUM to SQL instead of loading all transactions into memory.
+    db.transaction.aggregate({
+      where: {
         businessId: business.id,
-        createdAt: { gte: dateRange.start, lte: dateRange.end },
-      }
-    : { businessId: business.id }
+        type: { in: ['expense', 'debit'] },
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      _sum: {
+        amount: true,
+      },
+    }),
 
-  const allInvoices = await db.invoice.findMany({
-    where: allInvoicesWhere,
-    include: { party: true },
-    orderBy: { createdAt: 'desc' },
-    take: 10,
-  })
-
-  // §DATE-FILTER: Transactions are also filtered by the date range when provided.
-  const txnWhere = dateRange
-    ? {
+    // 7. §RECENT-INVOICES: Recent 10 invoices (voided or not) for the list.
+    // Uses `select` with nested `select` on party for minimal payload.
+    db.invoice.findMany({
+      where: {
         businessId: business.id,
-        createdAt: { gte: dateRange.start, lte: dateRange.end },
-      }
-    : { businessId: business.id }
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        grandTotal: true,
+        amountDue: true,
+        status: true,
+        createdAt: true,
+        party: { select: { name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    }),
+  ])
 
-  const transactions = await db.transaction.findMany({
-    where: txnWhere,
-    include: { party: true },
-    orderBy: { createdAt: 'desc' },
-  })
+  // ─── Calculate financial totals from aggregate results ───────────────────
 
-  // §REVENUE: Only non-voided sales/retail invoices contribute to revenue.
-  const salesInvoices = invoices.filter((i) => i.type === 'sales' || i.type === 'retail')
-  const totalRevenue = salesInvoices.reduce((s, i) => s + i.subtotal.toNumber(), 0)
-  const totalGst = salesInvoices.reduce((s, i) => s + i.gstAmount.toNumber(), 0)
-  const totalDiscount = salesInvoices.reduce((s, i) => s + i.discountAmount.toNumber(), 0)
+  // §REVENUE: Total Sales (subtotal) from non-voided sales/retail invoices.
+  const totalRevenue = salesAgg._sum.subtotal?.toNumber() ?? 0
+  const totalGst = salesAgg._sum.gstAmount?.toNumber() ?? 0
+  const totalDiscount = salesAgg._sum.discountAmount?.toNumber() ?? 0
 
   // §NET-REVENUE: Total Sales (subtotal) − Discounts Given.
   const netRevenue = totalRevenue - totalDiscount
 
-  // §COGS: Cost of Goods Sold = sum of (item.quantity × product.purchasePrice) for
-  // all non-voided SALES invoices. This represents the cost of inventory that was
-  // sold during the period.
-  // §COSTING-METHOD: Specific identification using current purchasePrice. This is
-  // a simplification — for exact FIFO/weighted-average, a stock movement ledger
-  // would track the actual cost of each unit sold.
+  // §COGS: Cost of Goods Sold = sum of (item.quantity × product.purchasePrice)
+  // for all items in non-voided SALES invoices. Uses the current purchasePrice
+  // from the Product table (SPECIFIC IDENTIFICATION costing method).
   const productCostMap = new Map(products.map((p) => [p.id, p.purchasePrice.toNumber()]))
-  const cogs = salesInvoices.reduce((s, inv) => {
-    return s + inv.items.reduce((itemSum, it) => {
-      const costPerUnit = it.productId ? (productCostMap.get(it.productId) ?? 0) : 0
-      return itemSum + (it.quantity * costPerUnit)
-    }, 0)
+  const cogs = cogsItems.reduce((s, it) => {
+    const costPerUnit = it.productId ? (productCostMap.get(it.productId) ?? 0) : 0
+    return s + (it.quantity * costPerUnit)
   }, 0)
 
-  // §INDIRECT-EXPENSES: Transactions of type 'expense' or 'debit' (excluding
-  // purchase-type transactions which are inventory, not expenses).
-  const indirectExpenses = transactions
-    .filter((t) => t.type === 'expense' || t.type === 'debit')
-    .reduce((s, t) => s + t.amount.toNumber(), 0)
+  // §INDIRECT-EXPENSES: Sum of expense + debit transactions.
+  const indirectExpenses = expenseAgg._sum.amount?.toNumber() ?? 0
   const totalExpense = cogs + indirectExpenses
 
   // §PROFIT: Gross Profit = Net Revenue − COGS. Net Profit = Gross Profit − Indirect Expenses.
   const grossProfit = netRevenue - cogs
   const netProfit = grossProfit - indirectExpenses
 
-  const totalReceivable = parties.filter((p) => p.balance.toNumber() > 0).reduce((s, p) => s + p.balance.toNumber(), 0)
-  const totalPayable = parties.filter((p) => p.balance.toNumber() < 0).reduce((s, p) => s + Math.abs(p.balance.toNumber()), 0)
+  // §GST-BREAKDOWN: Convert groupBy results to the same format as before.
+  // gst = total × gstRate / 100 for each rate group.
+  const gstBreakdown = gstGroups.map((g) => {
+    const rate = g.gstRate.toNumber()
+    const taxable = g._sum.total?.toNumber() ?? 0
+    return {
+      rate,
+      taxable,
+      gst: (taxable * rate) / 100,
+    }
+  })
 
-  // §GST-BREAKDOWN: Only non-voided GST invoices contribute to GST liability.
-  const gstBreakdown = salesInvoices
-    .filter((i) => i.isGst)
-    .flatMap((i) => i.items.map((it) => ({
-      rate: it.gstRate.toNumber(),
-      taxable: it.total.toNumber(),
-      gst: (it.total.toNumber() * it.gstRate.toNumber()) / 100,
-    })))
-  const gstByRate = gstBreakdown.reduce((acc, g) => {
-    const key = String(g.rate)
-    if (!acc[key]) acc[key] = { rate: g.rate, taxable: 0, gst: 0 }
-    acc[key].taxable += g.taxable
-    acc[key].gst += g.gst
-    return acc
-  }, {} as Record<string, { rate: number; taxable: number; gst: number }>)
+  // §OUTSTANDING: Total receivable/payable from party balances (not date-filtered).
+  const totalReceivable = parties
+    .filter((p) => p.balance.toNumber() > 0)
+    .reduce((s, p) => s + p.balance.toNumber(), 0)
+  const totalPayable = parties
+    .filter((p) => p.balance.toNumber() < 0)
+    .reduce((s, p) => s + Math.abs(p.balance.toNumber()), 0)
 
-  // Stock ageing
+  // §STOCK-AGEING: From products (not date-filtered).
   const stockAgeing = products.map((p) => ({
     name: p.name,
     stock: p.stock,
@@ -147,14 +231,14 @@ export async function GET(req: NextRequest) {
     status: p.stock <= p.lowStockThreshold ? 'low' : p.stock <= p.lowStockThreshold * 2 ? 'medium' : 'good',
   }))
 
-  // Grade distribution
+  // §GRADE-DISTRIBUTION: From parties (not date-filtered).
   const gradeDist = (['A', 'B', 'C', 'D', 'E'] as const).map((grade) => ({
     grade,
     count: parties.filter((p) => p.qualityGrade === grade).length,
     balance: parties.filter((p) => p.qualityGrade === grade).reduce((s, p) => s + Math.max(0, p.balance.toNumber()), 0),
   }))
 
-  // Party ledger summary
+  // §PARTY-LEDGER: Summary of all parties.
   const partyLedger = parties.map((p) => ({
     id: p.id,
     name: p.name,
@@ -179,7 +263,7 @@ export async function GET(req: NextRequest) {
     },
     gst: {
       totalGst,
-      breakdown: Object.values(gstByRate),
+      breakdown: gstBreakdown,
     },
     // §DECIMAL-FIX-B: partyLedger.balance and outstanding.receivables[].amount
     // are raw Prisma Decimals; recentInvoices.total/due are raw Prisma Decimals.
@@ -194,8 +278,10 @@ export async function GET(req: NextRequest) {
     }),
     stockAgeing,
     gradeDistribution: gradeDist,
-    invoiceCount: allInvoices.length,
-    recentInvoices: serializeDecimals(allInvoices.map((i) => ({
+    // §INVOICE-COUNT: Preserved as recentInvoices.length (≤10) for backward compat.
+    // This field is in the response shape but not currently rendered in the UI.
+    invoiceCount: recentInvoices.length,
+    recentInvoices: serializeDecimals(recentInvoices.map((i) => ({
       id: i.id,
       number: i.invoiceNumber,
       party: i.party?.name || 'Walk-in',

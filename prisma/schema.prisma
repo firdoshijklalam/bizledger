@@ -368,6 +368,9 @@ model Transaction {
 
   @@index([businessId])
   @@index([partyId])
+  // §REPORTS-PERF: Composite index for date-range queries scoped by businessId.
+  // Used by /api/reports which filters by createdAt gte/lte within a business.
+  @@index([businessId, createdAt])
 }
 
 model Invoice {
@@ -412,6 +415,9 @@ model Invoice {
   @@unique([businessId, invoiceNumber])
   @@index([businessId])
   @@index([partyId])
+  // §REPORTS-PERF: Composite index for date-range queries scoped by businessId.
+  // Used by /api/reports which filters by createdAt gte/lte within a business.
+  @@index([businessId, createdAt])
 }
 
 model InvoiceItem {

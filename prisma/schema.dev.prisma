@@ -336,6 +336,8 @@ model Transaction {
 
   @@index([businessId])
   @@index([partyId])
+  // §REPORTS-PERF: Composite index for date-range queries scoped by businessId.
+  @@index([businessId, createdAt])
 }
 
 model Invoice {
@@ -376,6 +378,8 @@ model Invoice {
   @@index([partyId])
   // §UNIQUE-CONSTRAINT: Prevents duplicate invoice numbers within the same business.
   @@unique([businessId, invoiceNumber])
+  // §REPORTS-PERF: Composite index for date-range queries scoped by businessId.
+  @@index([businessId, createdAt])
 }
 
 model InvoiceItem {

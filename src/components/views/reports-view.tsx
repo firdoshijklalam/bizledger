@@ -15,7 +15,7 @@ import {
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { LoadingState } from '@/components/shared/states'
+import { LoadingState, ErrorState } from '@/components/shared/states'
 import { toast } from 'sonner'
 import {
   Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -94,7 +94,10 @@ export function ReportsView() {
     return qs ? `/api/reports?${qs}` : '/api/reports'
   }, [activeReport, plRange, plCustomStart, plCustomEnd, gstRange, gstCustomStart, gstCustomEnd])
 
-  const { data, loading } = useFetch<ReportData>(reportsUrl, [reportsUrl])
+  // §REPORTS-TIMEOUT: Reports API may take up to 30s on production Neon PostgreSQL
+  // with large datasets. The default 10s useFetch timeout is too short — use 30s
+  // matching the API route's maxDuration=30.
+  const { data, loading, error, refetch } = useFetch<ReportData>(reportsUrl, [reportsUrl], { timeoutMs: 30000 })
   // §HEALTH-BANNER: fetch dashboard stats for the Business Health score context
   const { data: dashData } = useFetch<{ healthScore?: number; totalReceivable?: number } & Record<string, unknown>>('/api/dashboard?range=7d', [])
   const [healthBannerDismissed, setHealthBannerDismissed] = useState(false)
@@ -180,6 +183,13 @@ export function ReportsView() {
     return stockAgeing
   }, [stockAgeing, stockMovement])
 
+  // §ERROR-FIRST: Check error BEFORE loading — if the request timed out or
+  // failed, show the ErrorState with a Retry button instead of getting stuck
+  // on "Loading…" forever. This is critical because TanStack Query sets
+  // `loading=false` + `error=<msg>` when the AbortController fires, and the
+  // previous `if (loading || !data)` guard would skip the error state and
+  // show LoadingState indefinitely (since !data is true when the query failed).
+  if (error) return <ErrorState message={error} onRetry={() => refetch()} />
   if (loading || !data) return <LoadingState />
   const currency = business?.currency || 'INR'
   const bizName = (business?.name || 'BizLedger').replace(/\s+/g, '_')

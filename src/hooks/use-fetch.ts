@@ -17,25 +17,38 @@ import { useCallback } from 'react'
  * API is unchanged from the old useFetch: returns { data, loading, error,
  * refetch, setData }. All existing components work without modification.
  *
- * Also preserves the old hook's defensive features:
- *   - 10s timeout via AbortController
- *   - JSON parse isolation
- *   - Paginated response extraction ({ items, total, hasMore } → items)
- *   - Per-item null/empty scrubbing
+ * §TIMEOUT:
+ *   - Default timeout is 10s (sufficient for most CRUD API calls).
+ *   - Callers that need a longer timeout (e.g. /api/reports which may take
+ *     10-30s for large datasets) can pass `{ timeoutMs: 30000 }` as the
+ *     third argument.
+ *   - When the timeout fires, the AbortController aborts the fetch. TanStack
+ *     Query catches the abort and sets `error` — the UI must check `error`
+ *     BEFORE checking `loading || !data` to avoid getting stuck on
+ *     "Loading…" forever.
+ *   - AbortError is converted to a user-friendly message so the ErrorState
+ *     UI shows "Request timed out" instead of a cryptic abort message.
  */
-export function useFetch<T>(url: string | null, deps: any[] = []) {
+export interface UseFetchOptions {
+  /** Timeout in milliseconds for the fetch request. Default: 10000 (10s). */
+  timeoutMs?: number
+}
+
+export function useFetch<T>(url: string | null, deps: any[] = [], options?: UseFetchOptions) {
   const { refreshKey } = useAppStore()
   const queryClient = useQueryClient()
 
-  // Build a stable query key: url + refreshKey + deps
-  const queryKey = [url, refreshKey, ...deps]
+  // Build a stable query key: url + refreshKey + deps + timeoutMs
+  // (timeoutMs is included so different timeouts create separate cache entries)
+  const timeoutMs = options?.timeoutMs ?? 10000
+  const queryKey = [url, refreshKey, timeoutMs, ...deps]
 
   const query = useQuery<T>({
     queryKey,
     queryFn: async () => {
       if (!url) return null as T
       const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 10000)
+      const timeout = setTimeout(() => controller.abort(), timeoutMs)
       try {
         const res = await fetch(url, { signal: controller.signal })
         clearTimeout(timeout)
@@ -68,12 +81,28 @@ export function useFetch<T>(url: string | null, deps: any[] = []) {
         return extracted as T
       } catch (e: any) {
         clearTimeout(timeout)
+        // §ABORT-FRIENDLY: Convert AbortError to a user-friendly message so the
+        // UI can display "Request timed out" instead of a cryptic error.
+        if (e?.name === 'AbortError') {
+          throw new Error('Request timed out. The server took too long to respond. Please try again.')
+        }
         throw e
       }
     },
     enabled: !!url,
     // Don't show loading on refetch if we have cached data (stale-while-revalidate)
     placeholderData: (prev) => prev,
+    // §RETRY: Disable TanStack Query's built-in retries for timed-out requests
+    // — the user should see the error immediately and click "Retry" manually.
+    // For other errors (HTTP 500, network failure), 1 retry is reasonable.
+    retry: (failureCount, error: any) => {
+      // Don't retry AbortError (timeout) — user should retry manually
+      if (error?.message?.includes('timed out')) return false
+      // Don't retry HTTP 4xx errors (client errors are not transient)
+      if (error?.message?.includes('HTTP 4')) return false
+      // Retry once for other errors (network blips, 5xx)
+      return failureCount < 1
+    },
   })
 
   const refetch = useCallback(async () => {
