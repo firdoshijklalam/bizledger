@@ -215,7 +215,7 @@ export async function POST(req: NextRequest) {
 interface ExternalImportResult {
   imported: number
   skipped: number
-  errors: Array<{ row: number; name: string; problem: string }>
+  errors: Array<{ row: number; name: string; field?: string; problem: string; suggestedFix?: string }>
 }
 
 async function performExternalImport(
@@ -234,7 +234,9 @@ async function performExternalImport(
         result.errors.push({
           row: row.rowNumber,
           name: row.mappedData.name || '(no name)',
+          field: row.errors[0]?.includes('Party Name') ? 'name' : row.errors[0]?.includes('Phone') ? 'phone' : row.errors[0]?.includes('GSTIN') ? 'gstin' : '',
           problem: row.errors.join('; '),
+          suggestedFix: row.errors[0]?.includes('Missing required field') ? 'Provide a value for this field' : 'Check the data format',
         })
         continue
       }
@@ -276,21 +278,19 @@ async function performExternalImport(
         continue
       }
 
-      // §NEW-RECORD: Create new party/product
-      try {
-        if (entityType === 'products') {
-          await createProduct(tx, row.mappedData, businessId)
-        } else {
-          await createParty(tx, row.mappedData, entityType, businessId)
-        }
-        result.imported++
-      } catch (e: any) {
-        result.errors.push({
-          row: row.rowNumber,
-          name: row.mappedData.name || '(no name)',
-          problem: e.message,
-        })
+      // §NEW-RECORD: Create new party/product.
+      // §ATOMIC: DB-level failures here MUST propagate to the $transaction
+      // so the entire import rolls back. We do NOT catch DB errors here —
+      // a unique constraint violation, type mismatch, or any other DB error
+      // means the data is inconsistent and the transaction must abort.
+      // (Row-level validation errors — missing required fields — are already
+      // caught above and correctly skipped without rollback.)
+      if (entityType === 'products') {
+        await createProduct(tx, row.mappedData, businessId)
+      } else {
+        await createParty(tx, row.mappedData, entityType, businessId)
       }
+      result.imported++
     }
   })
 

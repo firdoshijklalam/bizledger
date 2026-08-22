@@ -235,8 +235,8 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
   // §DOWNLOAD-ERROR-REPORT: Generate a CSV of error rows
   const downloadErrorReport = () => {
     if (!result?.result?.errors?.length) return
-    const csv = '\uFEFF' + ['Row,Name,Problem'].concat(
-      result.result.errors.map((e) => `${e.row},${e.name.replace(/,/g, ';')},${e.problem.replace(/,/g, ';')}`)
+    const csv = '\uFEFF' + ['Row,Name,Field,Problem,Suggested Fix'].concat(
+      result.result.errors.map((e: any) => `${e.row},${String(e.name || '').replace(/,/g, ';')},${String(e.field || '').replace(/,/g, ';')},${String(e.problem || '').replace(/,/g, ';')},${String(e.suggestedFix || '').replace(/,/g, ';')}`)
     ).join('\r\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)

@@ -32,6 +32,7 @@ import { useNotificationStore } from '@/store/notification-store'
 import { useGateTrigger } from '@/store/biometric-gate-store'
 import { ImportBackupModal } from '@/components/shared/import-backup-modal'
 import { ExternalImportModal } from '@/components/shared/external-import-modal'
+import { ImportHistoryModal } from '@/components/shared/import-history-modal'
 import type { ImportEntityType } from '@/lib/external-import'
 
 const TABS = [
@@ -62,6 +63,7 @@ export function SettingsView() {
   // §EXTERNAL-IMPORT-MODAL: State for the external import wizard (CSV/XLSX/JSON → field mapping → preview → import)
   const [showExternalImportModal, setShowExternalImportModal] = useState(false)
   const [externalImportType, setExternalImportType] = useState<ImportEntityType>('customers')
+  const [showImportHistoryModal, setShowImportHistoryModal] = useState(false)
   const [tab, setTab] = useState<'profile' | 'preferences' | 'data' | 'marketplace' | 'security'>('profile')
 
   // §AUTH-LOGOUT: Sign out the current user — clears the session cookie via
@@ -808,22 +810,10 @@ export function SettingsView() {
                   </Button>
                 ))}
               </div>
-              {/* §IMPORT-HISTORY: Show recent imports with counts + status */}
+              {/* §IMPORT-HISTORY: Opens a modal with a full table of past imports */}
               <Button
                 variant="outline"
-                onClick={async () => {
-                  try {
-                    const res = await fetch('/api/import-history')
-                    const data = await res.json()
-                    if (data.items?.length === 0) {
-                      toast.info('No imports yet')
-                    } else {
-                      const latest = data.items[0]
-                      const statusEmoji = latest.status === 'COMPLETED' ? '✅' : latest.status === 'ROLLED_BACK' ? '⚠️' : '⏳'
-                      toast.success(`${statusEmoji} Last import: ${latest.importType} from ${latest.sourceFileName} — ${latest.importedCount} imported, ${latest.skippedCount} skipped, ${latest.failedCount} errors`)
-                    }
-                  } catch (e) { toast.error('Failed: ' + String(e)) }
-                }}
+                onClick={() => setShowImportHistoryModal(true)}
                 className="w-full h-9 text-xs"
               >
                 <Database className="w-3.5 h-3.5 mr-1.5" /> View Import History
@@ -1343,6 +1333,7 @@ export function SettingsView() {
           Full flow: upload → validate → preview → biometric gate → atomic import. */}
       <ImportBackupModal open={showImportModal} onClose={() => setShowImportModal(false)} />
       <ExternalImportModal open={showExternalImportModal} onClose={() => setShowExternalImportModal(false)} initialType={externalImportType} />
+      <ImportHistoryModal open={showImportHistoryModal} onClose={() => setShowImportHistoryModal(false)} />
     </div>
   )
 }
