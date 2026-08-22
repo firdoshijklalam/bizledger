@@ -13,7 +13,7 @@ datasource db {
   // For migrations, if you encounter DDL errors with the pooled URL,
   // set DIRECT_URL to the non-pooled Neon endpoint in Vercel env vars
   // and uncomment the line below:
-  // directUrl = env("DIRECT_URL")
+  // directUrl = env("DIRECT_URL")  // uncomment if DDL fails on pooled Neon
 }
 
 model Business {
