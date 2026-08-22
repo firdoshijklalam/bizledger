@@ -120,14 +120,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       counts,
-      sampleRows: validatedRows.slice(0, 20).map((r) => ({
+      // §ALL-ROWS: Return ALL rows (not just first 20) so the UI can show
+      // Skip/Merge/Create New buttons for every POSSIBLE_MATCH row.
+      // Capped at 1000 to prevent payload explosion.
+      sampleRows: validatedRows.slice(0, 1000).map((r) => ({
         rowNumber: r.rowNumber,
-        name: r.mappedData.name || r.sourceData[Object.keys(r.sourceData)[0]],
+        name: r.mappedData.name || r.sourceData[Object.keys(r.sourceData)[0]] || '',
         phone: r.mappedData.phone || '',
         gstin: r.mappedData.gstin || '',
         status: r.status,
         duplicate: r.duplicate.status,
         duplicateMatch: r.duplicate.matchedRecordName,
+        duplicateMatchedId: r.duplicate.matchedRecordId,
         errors: r.errors,
         warnings: r.warnings,
       })),

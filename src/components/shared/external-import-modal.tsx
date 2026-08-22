@@ -37,6 +37,7 @@ interface PreviewData {
     status: string
     duplicate: string
     duplicateMatch?: string
+    duplicateMatchedId?: string
     errors: string[]
     warnings: string[]
   }>
@@ -82,6 +83,9 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
   const [suggestions, setSuggestions] = useState<ColumnMappingSuggestion[]>([])
   const [preview, setPreview] = useState<PreviewData | null>(null)
   const [result, setResult] = useState<ImportResult | null>(null)
+  // §DUPLICATE-RESOLUTIONS: Per-row decision for POSSIBLE_MATCH rows.
+  // Key = matchedRecordId (the existing record's ID), Value = 'skip' | 'merge' | 'new'
+  const [duplicateResolutions, setDuplicateResolutions] = useState<Record<string, 'skip' | 'merge' | 'new'>>({})
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -96,6 +100,7 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
     setPreview(null)
     setResult(null)
     setError(null)
+    setDuplicateResolutions({})
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [initialType])
 
@@ -213,6 +218,7 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
               strategy: 'add-new',
               sourceFileName: fileName || 'unknown',
               sourceFormat: fileName?.endsWith('.xlsx') ? 'xlsx' : fileName?.endsWith('.json') ? 'json' : 'csv',
+              duplicateResolutions,
             }),
           })
           const json = await res.json()
@@ -391,29 +397,77 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
                     </div>
                     {preview.counts.possibleMatches > 0 && (
                       <div className="pt-2 border-t border-border">
-                        <CountRow label="Possible duplicates (will be skipped)" value={preview.counts.possibleMatches} color="amber" />
+                        <CountRow label="Possible duplicates — choose action below" value={preview.counts.possibleMatches} color="amber" />
                       </div>
                     )}
                   </Card>
 
-                  {/* Sample rows */}
+                  {/* §DUPLICATE-RESOLUTION: Show all rows with Skip/Merge/Create New buttons for POSSIBLE_MATCH */}
                   {preview.sampleRows.length > 0 && (
                     <Card className="p-3">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Sample Rows (first 20)</p>
-                      <div className="space-y-1 max-h-[30vh] overflow-y-auto scroll-area">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">
+                        Records ({preview.sampleRows.length}{preview.sampleRows.length >= 1000 ? ' max' : ''})
+                      </p>
+                      <div className="space-y-1 max-h-[35vh] overflow-y-auto scroll-area">
                         {preview.sampleRows.map((r) => (
-                          <div key={r.rowNumber} className="flex items-center gap-2 text-xs p-1.5 rounded bg-muted/30">
-                            <span className="text-muted-foreground w-6 shrink-0">{r.rowNumber}</span>
-                            <span className="flex-1 truncate">{r.name}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                              r.duplicate === 'NEW' ? 'bg-emerald-100 text-emerald-700'
-                              : r.duplicate === 'EXACT_MATCH' ? 'bg-amber-100 text-amber-700'
-                              : 'bg-blue-100 text-blue-700'
-                            }`}>
-                              {r.duplicate === 'NEW' ? 'NEW' : r.duplicate === 'EXACT_MATCH' ? 'EXISTS' : 'POSSIBLE'}
-                            </span>
+                          <div key={r.rowNumber} className="text-xs p-2 rounded bg-muted/30 space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground w-6 shrink-0">{r.rowNumber}</span>
+                              <span className="flex-1 truncate font-medium">{r.name || '(empty)'}</span>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
+                                r.duplicate === 'NEW' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                                : r.duplicate === 'EXACT_MATCH' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                                : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                              }`}>
+                                {r.duplicate === 'NEW' ? 'NEW' : r.duplicate === 'EXACT_MATCH' ? 'EXISTS' : 'POSSIBLE'}
+                              </span>
+                            </div>
+                            {r.duplicateMatch && (
+                              <p className="text-[10px] text-muted-foreground pl-7">
+                                Matches: {r.duplicateMatch}
+                              </p>
+                            )}
+                            {r.status === 'ERROR' && r.errors.length > 0 && (
+                              <p className="text-[10px] text-red-600 pl-7">{r.errors.join('; ')}</p>
+                            )}
+                            {/* §RESOLUTION-BUTTONS: For POSSIBLE_MATCH, show Skip/Merge/Create New */}
+                            {r.duplicate === 'POSSIBLE_MATCH' && r.duplicateMatchedId && (
+                              <div className="flex gap-1 pl-7">
+                                <button
+                                  onClick={() => setDuplicateResolutions((prev) => ({ ...prev, [r.duplicateMatchedId!]: 'skip' }))}
+                                  className={`px-2 py-1 rounded text-[10px] font-medium ${duplicateResolutions[r.duplicateMatchedId] === 'skip' || !duplicateResolutions[r.duplicateMatchedId] ? 'bg-amber-200 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200' : 'bg-muted text-muted-foreground'}`}
+                                >
+                                  Skip
+                                </button>
+                                <button
+                                  onClick={() => setDuplicateResolutions((prev) => ({ ...prev, [r.duplicateMatchedId!]: 'merge' }))}
+                                  className={`px-2 py-1 rounded text-[10px] font-medium ${duplicateResolutions[r.duplicateMatchedId] === 'merge' ? 'bg-blue-200 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200' : 'bg-muted text-muted-foreground'}`}
+                                >
+                                  Merge
+                                </button>
+                                <button
+                                  onClick={() => setDuplicateResolutions((prev) => ({ ...prev, [r.duplicateMatchedId!]: 'new' }))}
+                                  className={`px-2 py-1 rounded text-[10px] font-medium ${duplicateResolutions[r.duplicateMatchedId] === 'new' ? 'bg-emerald-200 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200' : 'bg-muted text-muted-foreground'}`}
+                                >
+                                  Create New
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ))}
+                      </div>
+                    </Card>
+                  )}
+
+                  {/* §PRE-IMPORT-SUMMARY: Show resolved counts */}
+                  {preview.counts.possibleMatches > 0 && (
+                    <Card className="p-3">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Import Summary</p>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <CountRow label="New (will create)" value={preview.counts.new + Object.values(duplicateResolutions).filter((v) => v === 'new').length} color="emerald" />
+                        <CountRow label="Skipped (exact + skip)" value={preview.counts.exactMatches + Object.values(duplicateResolutions).filter((v) => v === 'skip' || !v).length} color="amber" />
+                        <CountRow label="Merged" value={Object.values(duplicateResolutions).filter((v) => v === 'merge').length} color="blue" />
+                        <CountRow label="Errors" value={preview.counts.errors} color="red" />
                       </div>
                     </Card>
                   )}
@@ -423,7 +477,7 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
                       <ArrowLeft className="w-4 h-4 mr-1" /> Back
                     </Button>
                     <Button onClick={handleImport} className="flex-1 h-10" disabled={preview.counts.valid === 0 && preview.counts.warnings === 0}>
-                      Import {preview.counts.new + preview.counts.exactMatches} records
+                      Import {preview.counts.new + Object.values(duplicateResolutions).filter((v) => v === 'new').length} new + {Object.values(duplicateResolutions).filter((v) => v === 'merge').length} merge
                     </Button>
                   </div>
                 </div>
@@ -483,6 +537,7 @@ function CountRow({ label, value, color }: { label: string; value: number; color
   const colorClass = color === 'emerald' ? 'text-emerald-600'
     : color === 'amber' ? 'text-amber-600'
     : color === 'red' ? 'text-red-600'
+    : color === 'blue' ? 'text-blue-600'
     : ''
   return (
     <div className="flex justify-between">
