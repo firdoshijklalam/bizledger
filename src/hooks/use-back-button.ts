@@ -45,6 +45,29 @@ const navStack: NavEntry[] = []
 // so the subscribe handler doesn't push a duplicate entry.
 let isRestoringFromHistory = false
 
+/**
+ * §NEXTJS-STATE-PRESERVATION: Next.js App Router stores its own internal
+ * routing state in `history.state` (fields like `__NA`, `__PRIVATE_NEXTJS_...`).
+ * If we call `pushState`/`replaceState` with ONLY our marker, we OVERWRITE
+ * Next.js's state — and on popstate, Next.js doesn't find its internal tree,
+ * causing a HARD NAVIGATION (full page reload).
+ *
+ * Fix: MERGE our marker with the existing `history.state` so Next.js's
+ * internal fields are preserved. Our `app: 'bizledger'` marker is just
+ * for our own popstate handler to identify our entries.
+ */
+function pushNavState(extra?: Record<string, unknown>) {
+  const current = window.history.state ?? {}
+  const merged = { ...current, app: 'bizledger', ...(extra ?? {}) }
+  window.history.pushState(merged, '')
+}
+
+function replaceNavState(extra?: Record<string, unknown>) {
+  const current = window.history.state ?? {}
+  const merged = { ...current, app: 'bizledger', ...(extra ?? {}) }
+  window.history.replaceState(merged, '')
+}
+
 export function useBackButton() {
 
   // Push initial marker on mount.
@@ -52,8 +75,9 @@ export function useBackButton() {
     if (typeof window === 'undefined') return
     // Replace the current entry with our marker so Back has something to pop.
     // We use replaceState (not pushState) so we don't add a duplicate entry.
-    // The state content is empty — we track logical state in navStack.
-    window.history.replaceState({ app: 'bizledger', initial: true }, '')
+    // §NEXTJS-PRESERVE: Merge with existing state to keep Next.js's internal
+    // routing fields (__NA, __PRIVATE_NEXTJS_INTERNALS_TREE).
+    replaceNavState({ initial: true })
     navStack.length = 0
     navStack.push({ type: 'view', view: 'dashboard' })
   }, [])
@@ -68,7 +92,7 @@ export function useBackButton() {
       // Push state when activeView changes.
       if (state.activeView !== prev.activeView) {
         navStack.push({ type: 'view', view: state.activeView })
-        window.history.pushState({ app: 'bizledger' }, '')
+        pushNavState()
       }
 
       // §OVERLAY-OPEN: Push when an overlay/dialog opens (null → non-null).
@@ -87,43 +111,43 @@ export function useBackButton() {
       // it as a no-op close, which is correct browser behavior.
       if (!prev.overlayPartyId && state.overlayPartyId) {
         navStack.push({ type: 'overlay', overlay: 'party' })
-        window.history.pushState({ app: 'bizledger' }, '')
+        pushNavState()
       }
       if (!prev.overlayInvoiceId && state.overlayInvoiceId) {
         navStack.push({ type: 'overlay', overlay: 'invoice' })
-        window.history.pushState({ app: 'bizledger' }, '')
+        pushNavState()
       }
       if (!prev.showSearch && state.showSearch) {
         navStack.push({ type: 'overlay', overlay: 'search' })
-        window.history.pushState({ app: 'bizledger' }, '')
+        pushNavState()
       }
       if (!prev.showPartyForm && state.showPartyForm) {
         navStack.push({ type: 'overlay', overlay: 'party-form' })
-        window.history.pushState({ app: 'bizledger' }, '')
+        pushNavState()
       }
       if (!prev.showProductForm && state.showProductForm) {
         navStack.push({ type: 'overlay', overlay: 'product-form' })
-        window.history.pushState({ app: 'bizledger' }, '')
+        pushNavState()
       }
       if (!prev.showInvoiceForm && state.showInvoiceForm) {
         navStack.push({ type: 'overlay', overlay: 'invoice-form' })
-        window.history.pushState({ app: 'bizledger' }, '')
+        pushNavState()
       }
       if (!prev.fabOpen && state.fabOpen) {
         navStack.push({ type: 'overlay', overlay: 'fab' })
-        window.history.pushState({ app: 'bizledger' }, '')
+        pushNavState()
       }
       if (!prev.globalFamilyModal && state.globalFamilyModal) {
         navStack.push({ type: 'overlay', overlay: 'family-modal' })
-        window.history.pushState({ app: 'bizledger' }, '')
+        pushNavState()
       }
       if (!prev.globalPartnerModal && state.globalPartnerModal) {
         navStack.push({ type: 'overlay', overlay: 'partner-modal' })
-        window.history.pushState({ app: 'bizledger' }, '')
+        pushNavState()
       }
       if (!prev.globalFingerprintModal && state.globalFingerprintModal) {
         navStack.push({ type: 'overlay', overlay: 'fingerprint-modal' })
-        window.history.pushState({ app: 'bizledger' }, '')
+        pushNavState()
       }
     })
 
@@ -152,19 +176,19 @@ export function useBackButton() {
           state.setSelectedPartyId(null)
           // Re-push so the browser stays on the current view.
           navStack.push({ type: 'view', view: state.activeView })
-          window.history.pushState({ app: 'bizledger' }, '')
+          pushNavState()
           return
         }
         if (state.selectedInvoiceId) {
           state.setSelectedInvoiceId(null)
           navStack.push({ type: 'view', view: state.activeView })
-          window.history.pushState({ app: 'bizledger' }, '')
+          pushNavState()
           return
         }
         if (state.selectedProductId) {
           state.setSelectedProductId(null)
           navStack.push({ type: 'view', view: state.activeView })
-          window.history.pushState({ app: 'bizledger' }, '')
+          pushNavState()
           return
         }
       }
