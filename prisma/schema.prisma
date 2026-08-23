@@ -10,10 +10,15 @@ datasource db {
   url      = env("DATABASE_URL")
   // §NEON-POOLER: In production, DATABASE_URL should use the Neon pooled
   // endpoint (-pooler in hostname) for serverless connection reuse.
-  // For migrations, if you encounter DDL errors with the pooled URL,
-  // set DIRECT_URL to the non-pooled Neon endpoint in Vercel env vars
-  // and uncomment the line below:
-  // directUrl = env("DIRECT_URL")  // uncomment if DDL fails on pooled Neon
+  // §MIGRATION-FIX: directUrl uses the NON-pooled Neon endpoint for
+  // prisma migrate deploy. PgBouncer (transaction mode) does NOT support
+  // pg_advisory_lock (a session-level lock Prisma uses to prevent concurrent
+  // migrations), causing intermittent P1002 timeout errors. The direct
+  // endpoint bypasses PgBouncer for migrations only — runtime queries
+  // still use the pooled DATABASE_URL for connection reuse.
+  // §REQUIRED: DIRECT_URL must be set in Vercel Environment Variables to the
+  // non-pooled Neon connection string (ep-xxx without "-pooler").
+  directUrl = env("DIRECT_URL")
 }
 
 model Business {
