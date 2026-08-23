@@ -294,8 +294,8 @@ async function performImport(
         if (opts.updateExisting) {
           await tx.category.upsert({
             where: { id: c.id },
-            update: { name: c.name, parentId: c.parentId, level: c.level, sortOrder: c.sortOrder, businessId },
-            create: { id: c.id, name: c.name, parentId: c.parentId, level: c.level, sortOrder: c.sortOrder, businessId },
+            update: { name: c.name, parentId: c.parentId ? (idMap.get(c.parentId) || c.parentId) : null, level: c.level, sortOrder: c.sortOrder, businessId },
+            create: { id: c.id, name: c.name, parentId: c.parentId ? (idMap.get(c.parentId) || c.parentId) : null, level: c.level, sortOrder: c.sortOrder, businessId },
           })
           idMap.set(c.id, c.id)
           result.imported.categories++
@@ -308,7 +308,7 @@ async function performImport(
         const newId = `${c.id}_imp`
         idMap.set(c.id, newId)
         await tx.category.create({
-          data: { id: newId, name: c.name, parentId: c.parentId, level: c.level, sortOrder: c.sortOrder, businessId },
+          data: { id: newId, name: c.name, parentId: c.parentId ? (idMap.get(c.parentId) || c.parentId) : null, level: c.level, sortOrder: c.sortOrder, businessId },
         })
         result.imported.categories++
       }
@@ -368,7 +368,7 @@ async function performImport(
               categoryPath: p.categoryPath, unit: p.unit, purchasePrice: p.purchasePrice,
               salePrice: p.salePrice, mrp: p.mrp, wholesalePrice: p.wholesalePrice,
               gstRate: p.gstRate, stock: p.stock, lowStockThreshold: p.lowStockThreshold,
-              supplierId: p.supplierId, retailEnabled: p.retailEnabled, retailUnit: p.retailUnit,
+              supplierId: p.supplierId ? (idMap.get(p.supplierId) || p.supplierId) : null, retailEnabled: p.retailEnabled, retailUnit: p.retailUnit,
               conversionFactor: p.conversionFactor, retailSalePrice: p.retailSalePrice,
               retailMrp: p.retailMrp, looseStock: p.looseStock, isPublished: p.isPublished,
               businessId,
@@ -378,7 +378,7 @@ async function performImport(
               categoryPath: p.categoryPath, unit: p.unit, purchasePrice: p.purchasePrice,
               salePrice: p.salePrice, mrp: p.mrp, wholesalePrice: p.wholesalePrice,
               gstRate: p.gstRate, stock: p.stock, lowStockThreshold: p.lowStockThreshold,
-              supplierId: p.supplierId, retailEnabled: p.retailEnabled, retailUnit: p.retailUnit,
+              supplierId: p.supplierId ? (idMap.get(p.supplierId) || p.supplierId) : null, retailEnabled: p.retailEnabled, retailUnit: p.retailUnit,
               conversionFactor: p.conversionFactor, retailSalePrice: p.retailSalePrice,
               retailMrp: p.retailMrp, looseStock: p.looseStock, isPublished: p.isPublished,
               businessId,
@@ -459,8 +459,8 @@ async function performImport(
         if (opts.updateExisting) {
           await tx.partyNote.upsert({
             where: { id: pn.id },
-            update: { partyId: pn.partyId, type: pn.type, content: pn.content, author: pn.author },
-            create: { id: pn.id, partyId: pn.partyId, type: pn.type, content: pn.content, author: pn.author },
+            update: { partyId: idMap.get(pn.partyId) || pn.partyId, type: pn.type, content: pn.content, author: pn.author },
+            create: { id: pn.id, partyId: idMap.get(pn.partyId) || pn.partyId, type: pn.type, content: pn.content, author: pn.author },
           })
           result.imported.partyNotes++
         } else {
@@ -483,7 +483,7 @@ async function performImport(
           await tx.invoice.upsert({
             where: { id: inv.id },
             update: {
-              partyId: inv.partyId, invoiceNumber: inv.invoiceNumber, type: inv.type,
+              partyId: inv.partyId ? (idMap.get(inv.partyId) || inv.partyId) : null, invoiceNumber: inv.invoiceNumber, type: inv.type,
               status: inv.status, isGst: inv.isGst, subtotal: inv.subtotal,
               discountValue: inv.discountValue, discountMode: inv.discountMode,
               discountAmount: inv.discountAmount, gstAmount: inv.gstAmount,
@@ -493,7 +493,7 @@ async function performImport(
               paidToName: inv.paidToName, paidToRole: inv.paidToRole, businessId,
             },
             create: {
-              id: inv.id, partyId: inv.partyId, invoiceNumber: inv.invoiceNumber, type: inv.type,
+              id: inv.id, partyId: inv.partyId ? (idMap.get(inv.partyId) || inv.partyId) : null, invoiceNumber: inv.invoiceNumber, type: inv.type,
               status: inv.status, isGst: inv.isGst, subtotal: inv.subtotal,
               discountValue: inv.discountValue, discountMode: inv.discountMode,
               discountAmount: inv.discountAmount, gstAmount: inv.gstAmount,
@@ -533,12 +533,12 @@ async function performImport(
           await tx.invoiceItem.upsert({
             where: { id: it.id },
             update: {
-              invoiceId: it.invoiceId, productId: it.productId, name: it.name,
+              invoiceId: idMap.get(it.invoiceId) || it.invoiceId, productId: it.productId ? (idMap.get(it.productId) || it.productId) : null, name: it.name,
               quantity: it.quantity, unitPrice: it.unitPrice, discount: it.discount,
               gstRate: it.gstRate, total: it.total, fulfilledQty: it.fulfilledQty,
             },
             create: {
-              id: it.id, invoiceId: it.invoiceId, productId: it.productId, name: it.name,
+              id: it.id, invoiceId: idMap.get(it.invoiceId) || it.invoiceId, productId: it.productId ? (idMap.get(it.productId) || it.productId) : null, name: it.name,
               quantity: it.quantity, unitPrice: it.unitPrice, discount: it.discount,
               gstRate: it.gstRate, total: it.total, fulfilledQty: it.fulfilledQty,
             },
@@ -568,12 +568,12 @@ async function performImport(
           await tx.transaction.upsert({
             where: { id: t.id },
             update: {
-              partyId: t.partyId, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter,
-              description: t.description, category: t.category, invoiceId: t.invoiceId, businessId,
+              partyId: t.partyId ? (idMap.get(t.partyId) || t.partyId) : null, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter,
+              description: t.description, category: t.category, invoiceId: t.invoiceId ? (idMap.get(t.invoiceId) || t.invoiceId) : null, businessId,
             },
             create: {
-              id: t.id, partyId: t.partyId, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter,
-              description: t.description, category: t.category, invoiceId: t.invoiceId, businessId,
+              id: t.id, partyId: t.partyId ? (idMap.get(t.partyId) || t.partyId) : null, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter,
+              description: t.description, category: t.category, invoiceId: t.invoiceId ? (idMap.get(t.invoiceId) || t.invoiceId) : null, businessId,
             },
           })
           result.imported.transactions++
@@ -600,12 +600,12 @@ async function performImport(
           await tx.stockMovement.upsert({
             where: { id: sm.id },
             update: {
-              productId: sm.productId, type: sm.type, quantity: sm.quantity,
+              productId: idMap.get(sm.productId) || sm.productId, type: sm.type, quantity: sm.quantity,
               balanceAfter: sm.balanceAfter, referenceId: sm.referenceId,
               referenceType: sm.referenceType, description: sm.description, businessId,
             },
             create: {
-              id: sm.id, productId: sm.productId, type: sm.type, quantity: sm.quantity,
+              id: sm.id, productId: idMap.get(sm.productId) || sm.productId, type: sm.type, quantity: sm.quantity,
               balanceAfter: sm.balanceAfter, referenceId: sm.referenceId,
               referenceType: sm.referenceType, description: sm.description, businessId,
             },
@@ -635,7 +635,7 @@ async function performImport(
           await tx.customPrice.upsert({
             where: { id: cp.id },
             update: {
-              productId: cp.productId, catalogItemId: cp.catalogItemId, buyerId: cp.buyerId,
+              productId: cp.productId ? (idMap.get(cp.productId) || cp.productId) : null, catalogItemId: cp.catalogItemId, buyerId: cp.buyerId ? (idMap.get(cp.buyerId) || cp.buyerId) : null,
               buyerGroupName: cp.buyerGroupName, customPrice: cp.customPrice,
               customSalePrice: cp.customSalePrice, customMrp: cp.customMrp,
               customWholesalePrice: cp.customWholesalePrice,
@@ -643,7 +643,7 @@ async function performImport(
               businessId,
             },
             create: {
-              id: cp.id, productId: cp.productId, catalogItemId: cp.catalogItemId, buyerId: cp.buyerId,
+              id: cp.id, productId: cp.productId ? (idMap.get(cp.productId) || cp.productId) : null, catalogItemId: cp.catalogItemId, buyerId: cp.buyerId ? (idMap.get(cp.buyerId) || cp.buyerId) : null,
               buyerGroupName: cp.buyerGroupName, customPrice: cp.customPrice,
               customSalePrice: cp.customSalePrice, customMrp: cp.customMrp,
               customWholesalePrice: cp.customWholesalePrice,
