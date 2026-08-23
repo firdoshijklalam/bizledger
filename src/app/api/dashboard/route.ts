@@ -71,87 +71,66 @@ export async function GET(req: NextRequest) {
     const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
     const rangeTxnWhere = { ...bizWhere, createdAt: { gte: rangeStart, lte: rangeEnd } }
 
-    // §COMBINED-PARTY: 1 raw SQL query replaces 4 separate Prisma queries
-    // (partyAgg, payableAgg, partyCount, gradeRaw).
-    const partyRow = await db.$queryRaw<Array<{
-      total_count: bigint; receivable_sum: bigint; payable_sum: bigint; overdue_count: bigint;
-      grade_a: bigint; grade_b: bigint; grade_c: bigint; grade_d: bigint; grade_e: bigint
-    }>>`
-      SELECT
-        COUNT(*)::bigint AS total_count,
-        COALESCE(SUM(CASE WHEN balance > 0 THEN balance ELSE 0 END), 0)::bigint AS receivable_sum,
-        COALESCE(SUM(CASE WHEN balance < 0 THEN balance ELSE 0 END), 0)::bigint AS payable_sum,
-        COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END)::bigint AS overdue_count,
-        COUNT(CASE WHEN "qualityGrade" = 'A' THEN 1 END)::bigint AS grade_a,
-        COUNT(CASE WHEN "qualityGrade" = 'B' THEN 1 END)::bigint AS grade_b,
-        COUNT(CASE WHEN "qualityGrade" = 'C' THEN 1 END)::bigint AS grade_c,
-        COUNT(CASE WHEN "qualityGrade" = 'D' THEN 1 END)::bigint AS grade_d,
-        COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END)::bigint AS grade_e
-      FROM "Party" WHERE "businessId" = ${business.id}
-    `
-
-    // §COMBINED-PRODUCT: 1 findMany replaces 3 queries (productCount,
-    // lowStockCount, inventoryProducts). Compute count + lowStockCount +
-    // inventoryValue in memory from the single result set.
-    // §SELECT-OPT: Only fetch fields needed for computation.
-    const allProducts = await db.product.findMany({
-      where: bizWhere,
-      select: { id: true, name: true, category: true, stock: true, purchasePrice: true, lowStockThreshold: true },
-    })
-    const productCount = allProducts.length
-    const lowStockCount = allProducts.filter(p => p.stock <= p.lowStockThreshold).length
-    const inventoryValue = allProducts.reduce((s, p) => s + (p.stock * num(p.purchasePrice)), 0)
-    const productMap = new Map(allProducts.map(p => [p.id, p]))
-
-    // §COMBINED-INVOICE: 1 raw SQL query replaces 5 separate Prisma queries
-    // (todaySalesAgg, monthlyAgg, rangeSalesAgg, invoiceCount, paidCount).
-    // Uses CASE WHEN to compute all date-range sums in a single table scan.
-    const invoiceRow = await db.$queryRaw<Array<{
-      today_sales: bigint; monthly_sales: bigint; range_sales: bigint;
-      total_count: bigint; paid_count: bigint
-    }>>`
-      SELECT
-        COALESCE(SUM(CASE WHEN "createdAt" >= ${today} THEN "grandTotal" ELSE 0 END), 0)::bigint AS today_sales,
-        COALESCE(SUM(CASE WHEN "createdAt" >= ${monthStart} THEN "grandTotal" ELSE 0 END), 0)::bigint AS monthly_sales,
-        COALESCE(SUM(CASE WHEN "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd} THEN "grandTotal" ELSE 0 END), 0)::bigint AS range_sales,
-        COUNT(*)::bigint AS total_count,
-        COUNT(CASE WHEN status = 'paid' THEN 1 END)::bigint AS paid_count
-      FROM "Invoice"
-      WHERE "businessId" = ${business.id} AND status != 'void'
-    `
-
-    // §COMBINED-TRANSACTION: 1 raw SQL query replaces 2 separate Prisma queries
-    // (rangeCollectionAgg, rangeExpenseAgg).
-    const txnRow = await db.$queryRaw<Array<{
-      collection_sum: bigint; expense_sum: bigint
-    }>>`
-      SELECT
-        COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0)::bigint AS collection_sum,
-        COALESCE(SUM(CASE WHEN type IN ('debit', 'expense', 'purchase') THEN amount ELSE 0 END), 0)::bigint AS expense_sum
-      FROM "Transaction"
-      WHERE "businessId" = ${business.id} AND "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd}
-    `
-
-    // §REMAINING-PARALLEL: The queries that can't be combined (list data with
-    // different WHERE clauses / JOINs) run in parallel. These are:
-    //   - topDebtorsRaw (top 5 by balance, with select)
-    //   - recentTransactions (latest 8, with party join)
-    //   - rangeInvoicesForTrend (date-filtered invoices for chart)
-    //   - rangeTxnsForTrend (date-filtered transactions for chart)
-    //   - topDataInvoices (invoices with items + party for top products/buyers)
-    // §MERGED: rangeInvoices and topDataInvoices previously fetched the same
-    // date-range invoices with different selects. Now merged into one query.
+    // §PARALLEL-ALL: ALL queries run in a SINGLE Promise.all — including the
+    // raw SQL aggregates. Previously the 4 raw SQL queries ran sequentially
+    // before the Promise.all, adding ~2s of serial latency. Running all 8
+    // queries in parallel reduces total time to the slowest single query.
     const [
+      partyRow, allProducts, invoiceRow, txnRow,
       topDebtorsRaw, recentTransactions,
       rangeInvoicesForTrend, rangeTxnsForTrend,
     ] = await Promise.all([
+      // §COMBINED-PARTY: 1 raw SQL query replaces 4 separate Prisma queries
+      db.$queryRaw<Array<{
+        total_count: bigint; receivable_sum: bigint; payable_sum: bigint; overdue_count: bigint;
+        grade_a: bigint; grade_b: bigint; grade_c: bigint; grade_d: bigint; grade_e: bigint
+      }>>`
+        SELECT
+          COUNT(*)::bigint AS total_count,
+          COALESCE(SUM(CASE WHEN balance > 0 THEN balance ELSE 0 END), 0)::bigint AS receivable_sum,
+          COALESCE(SUM(CASE WHEN balance < 0 THEN balance ELSE 0 END), 0)::bigint AS payable_sum,
+          COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END)::bigint AS overdue_count,
+          COUNT(CASE WHEN "qualityGrade" = 'A' THEN 1 END)::bigint AS grade_a,
+          COUNT(CASE WHEN "qualityGrade" = 'B' THEN 1 END)::bigint AS grade_b,
+          COUNT(CASE WHEN "qualityGrade" = 'C' THEN 1 END)::bigint AS grade_c,
+          COUNT(CASE WHEN "qualityGrade" = 'D' THEN 1 END)::bigint AS grade_d,
+          COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END)::bigint AS grade_e
+        FROM "Party" WHERE "businessId" = ${business.id}
+      `,
+      // §COMBINED-PRODUCT: 1 findMany replaces 3 queries (count, lowStock, inventory)
+      db.product.findMany({
+        where: bizWhere,
+        select: { id: true, name: true, category: true, stock: true, purchasePrice: true, lowStockThreshold: true },
+      }),
+      // §COMBINED-INVOICE: 1 raw SQL query replaces 5 separate Prisma queries
+      db.$queryRaw<Array<{
+        today_sales: bigint; monthly_sales: bigint; range_sales: bigint;
+        total_count: bigint; paid_count: bigint
+      }>>`
+        SELECT
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${today} THEN "grandTotal" ELSE 0 END), 0)::bigint AS today_sales,
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${monthStart} THEN "grandTotal" ELSE 0 END), 0)::bigint AS monthly_sales,
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd} THEN "grandTotal" ELSE 0 END), 0)::bigint AS range_sales,
+          COUNT(*)::bigint AS total_count,
+          COUNT(CASE WHEN status = 'paid' THEN 1 END)::bigint AS paid_count
+        FROM "Invoice"
+        WHERE "businessId" = ${business.id} AND status != 'void'
+      `,
+      // §COMBINED-TRANSACTION: 1 raw SQL query replaces 2 separate Prisma queries
+      db.$queryRaw<Array<{
+        collection_sum: bigint; expense_sum: bigint
+      }>>`
+        SELECT
+          COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0)::bigint AS collection_sum,
+          COALESCE(SUM(CASE WHEN type IN ('debit', 'expense', 'purchase') THEN amount ELSE 0 END), 0)::bigint AS expense_sum
+        FROM "Transaction"
+        WHERE "businessId" = ${business.id} AND "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd}
+      `,
+      // §LIST-QUERIES: Top debtors + recent transactions + chart trend data
       db.party.findMany({ where: { ...bizWhere, balance: { gt: 0 } }, select: { id: true, name: true, balance: true, qualityGrade: true }, orderBy: { balance: 'desc' }, take: 5 }),
       db.transaction.findMany({ where: bizWhere, select: { id: true, type: true, amount: true, createdAt: true, balanceAfter: true, partyId: true, invoiceId: true, party: { select: { id: true, name: true, balance: true, openingBalance: true } } }, orderBy: { createdAt: 'desc' }, take: 8 }),
       db.invoice.findMany({ where: { ...voidExclude, createdAt: { gte: rangeStart, lte: rangeEnd } }, select: { grandTotal: true, createdAt: true, paymentMode: true, partyId: true, party: { select: { name: true } }, items: { select: { productId: true, name: true, total: true, quantity: true } } }, orderBy: { createdAt: 'asc' } }),
       db.transaction.findMany({ where: rangeTxnWhere, select: { amount: true, createdAt: true, type: true }, orderBy: { createdAt: 'asc' } }),
-      // §MERGED: topDataInvoices was a separate query but is now the same as
-      // rangeInvoicesForTrend (same date range, same invoices, all fields).
-      // Using rangeInvoicesForTrend for both chart trend AND top products/buyers.
     ])
 
     const p = partyRow[0]
@@ -161,6 +140,10 @@ export async function GET(req: NextRequest) {
     const totalReceivable = num(p?.receivable_sum)
     const totalPayable = Math.abs(num(p?.payable_sum))
     const overdueCount = num(p?.overdue_count)
+    const productCount = allProducts.length
+    const lowStockCount = allProducts.filter(pr => pr.stock <= pr.lowStockThreshold).length
+    const inventoryValue = allProducts.reduce((s, pr) => s + (pr.stock * num(pr.purchasePrice)), 0)
+    const productMap = new Map(allProducts.map(pr => [pr.id, pr]))
     const topDebtors = topDebtorsRaw.map((d) => ({ id: d.id, name: d.name, balance: num(d.balance), grade: d.qualityGrade }))
     const gradeDist = (['A', 'B', 'C', 'D', 'E'] as const).map((grade) => ({
       grade,
