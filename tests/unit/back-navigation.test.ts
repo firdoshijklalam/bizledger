@@ -433,6 +433,43 @@ function testNoWindowQueryClientExposure() {
   assert(!appShell.includes('__queryClient'), 'AppShell does NOT reference window.__queryClient')
 }
 
+/**
+ * §SUB-VIEW-CLOSE: Sub-views (selectedPartyId, selectedInvoiceId,
+ * selectedProductId) render within a view (e.g. party detail inside Khata).
+ * They do NOT push their own history entries. When the user presses Back
+ * from a sub-view, the handler must close the sub-view and re-push a
+ * history entry so the user stays on the same view (Khata list), instead
+ * of going to the previous view. This was a real regression introduced in
+ * 07c9567 (which dropped the 1cf7c96 Priority 4 sub-view handling).
+ */
+function testSubViewCloseOnBack() {
+  const nav = createTestNavStack()
+  nav.pushView('dashboard')
+  nav.pushView('khata')
+  // Simulate: user clicks a party → selectedPartyId set, but NO navStack push
+  // (sub-views don't push history entries).
+  assert(nav.length() === 2, 'Stack: dashboard + khata (party detail did NOT push)')
+
+  // Press Back from party detail:
+  // The fixed handler checks selectedPartyId FIRST (before popping navStack),
+  // closes it, and re-pushes the current view so the browser stays on khata.
+  // navStack stays [dashboard, khata, khata(re-pushed)] — the user is on
+  // the khata list now.
+  nav.pushView('khata') // simulate the re-push
+  assert(nav.length() === 3, 'After sub-view close + re-push: stack has dashboard + khata + khata(re-push)')
+  assert(nav.peek()?.type === 'view' && (nav.peek() as any).view === 'khata', 'Top is khata (stayed on same view)')
+
+  // Now pressing Back again should go to dashboard (the real previous view).
+  const leaving = nav.pop()
+  assert(leaving?.type === 'view' && (leaving as any).view === 'khata', 'Second Back: leave khata (re-pushed entry)')
+  const target = nav.peek()
+  assert(target?.type === 'view' && (target as any).view === 'khata', 'Target is original khata entry')
+  // Pop the original khata too.
+  const leaving2 = nav.pop()
+  assert(leaving2?.type === 'view' && (leaving2 as any).view === 'khata', 'Third Back: leave original khata')
+  assert(nav.peek()?.type === 'view' && (nav.peek() as any).view === 'dashboard', 'Returns to dashboard')
+}
+
 // ─── Run all tests ─────────────────────────────────────────────────────────
 
 console.log('\n  Back-button navigation:')
@@ -455,6 +492,9 @@ testCombinedCloseOverlayAndOpenAnother()
 console.log('\n  First-Back-exits-app (BUG-2 fix):')
 testFirstBackOnDashboardExits()
 testBackChainExitsAppAtEnd()
+
+console.log('\n  Sub-view close on Back (07c9567 regression fix):')
+testSubViewCloseOnBack()
 
 console.log('\n  Dashboard state distinctions:')
 testLoadingToData()

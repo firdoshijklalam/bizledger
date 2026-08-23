@@ -137,6 +137,38 @@ export function useBackButton() {
     const handlePopState = () => {
       const state = useAppStore.getState()
 
+      // §SUB-VIEW-CLOSE: Sub-views (selectedPartyId, selectedInvoiceId,
+      // selectedProductId) render WITHIN a view (e.g. party detail inside
+      // Khata). They do NOT push their own history entries. When the user
+      // presses Back from a sub-view, the browser goes back to the previous
+      // view entry. We must close the sub-view and re-push a history entry
+      // so the user stays on the same view (instead of going to the previous
+      // view). This mirrors the original 1cf7c96 Priority 4 behavior.
+      // §GUARD: Only handle if a sub-view is open AND the navStack top is a
+      // view (not an overlay) — otherwise we'd interfere with overlay close.
+      const navTop = navStack[navStack.length - 1]
+      if (navTop?.type === 'view') {
+        if (state.selectedPartyId) {
+          state.setSelectedPartyId(null)
+          // Re-push so the browser stays on the current view.
+          navStack.push({ type: 'view', view: state.activeView })
+          window.history.pushState({ app: 'bizledger' }, '')
+          return
+        }
+        if (state.selectedInvoiceId) {
+          state.setSelectedInvoiceId(null)
+          navStack.push({ type: 'view', view: state.activeView })
+          window.history.pushState({ app: 'bizledger' }, '')
+          return
+        }
+        if (state.selectedProductId) {
+          state.setSelectedProductId(null)
+          navStack.push({ type: 'view', view: state.activeView })
+          window.history.pushState({ app: 'bizledger' }, '')
+          return
+        }
+      }
+
       // Pop the current entry (the one we're leaving).
       const leaving = navStack.pop()
 
