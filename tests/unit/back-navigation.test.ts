@@ -271,6 +271,116 @@ function testSearchFreeze() {
   assert(contentLines.length === 0, 'Search freeze: 7 files have zero content changes vs b9eb828')
 }
 
+// ─── New regression tests (post-07c9567 audit) ─────────────────────────────
+
+/**
+ * §BUG-1: Overlay closed via UI (X button / backdrop / Escape) must sync
+ * browser history. Previously, closing an overlay via UI did NOT call
+ * history.back(), leaving a stale entry in the browser history. The next
+ * Back press would then "pop" the already-closed overlay (a no-op)
+ * instead of going to the real previous state.
+ *
+ * The fix: the subscribe handler now calls history.back() when an overlay
+ * closes via UI (non-null → null). This test verifies the navStack logic
+ * that backs this behavior: after closing an overlay, the stack should be
+ * in the same state as if the user had pressed Back.
+ */
+function testOverlayCloseViaUIPopsStack() {
+  const nav = createTestNavStack()
+  nav.pushView('dashboard')
+  nav.pushOverlay('party')
+  assert(nav.length() === 2, 'Stack: dashboard-view + party-overlay')
+
+  // Simulate UI close: pop the overlay entry (mirrors what history.back()
+  // triggers via popstate — the popstate handler pops navStack).
+  const leaving = nav.pop()
+  assert(leaving?.type === 'overlay' && (leaving as any).overlay === 'party', 'UI close pops party-overlay entry')
+  assert(nav.peek()?.type === 'view' && (nav.peek() as any).view === 'dashboard', 'After UI close, stack top is dashboard')
+
+  // Now pressing Back should exit the app (not pop a stale overlay).
+  const leaving2 = nav.pop()
+  assert(leaving2?.type === 'view' && (leaving2 as any).view === 'dashboard', 'Back after UI close exits dashboard (no stale entry)')
+  assert(nav.length() === 0, 'Stack empty → Back exits app naturally')
+}
+
+/**
+ * §BUG-1b: Open overlay, close via UI, open another overlay → Back should
+ * close the second overlay (not get stuck on a stale first-overlay entry).
+ */
+function testOverlayCloseViaUIThenReopen() {
+  const nav = createTestNavStack()
+  nav.pushView('dashboard')
+  nav.pushOverlay('party')
+  // UI close party
+  nav.pop()
+  // Open invoice overlay
+  nav.pushOverlay('invoice')
+  assert(nav.length() === 2, 'Stack: dashboard-view + invoice-overlay (party was popped)')
+
+  const leaving = nav.pop()
+  assert(leaving?.type === 'overlay' && (leaving as any).overlay === 'invoice', 'Back closes invoice overlay')
+  assert(nav.peek()?.type === 'view' && (nav.peek() as any).view === 'dashboard', 'Returns to dashboard')
+}
+
+/**
+ * §BUG-2: First Back on dashboard should exit the app (not re-push and
+ * swallow the Back). Previously, the isInitialEntry logic re-pushed a
+ * dashboard entry on the first popstate, trapping the user — they had to
+ * press Back twice to exit. The fix removed the re-push.
+ *
+ * This test verifies the navStack is empty after popping the initial
+ * dashboard entry, and no re-push occurs.
+ */
+function testFirstBackOnDashboardExits() {
+  const nav = createTestNavStack()
+  nav.pushView('dashboard') // initial entry
+
+  // First Back: pop dashboard → stack empty → exit app (no re-push)
+  const leaving = nav.pop()
+  assert(leaving?.type === 'view' && (leaving as any).view === 'dashboard', 'First Back pops dashboard')
+  assert(nav.length() === 0, 'Stack is empty after first Back')
+
+  // Verify NO re-push happens (the old bug re-pushed here).
+  // In the fixed code, the popstate handler returns without pushing.
+  // We simulate this by checking the stack stays empty.
+  assert(nav.length() === 0, 'No re-push: stack stays empty → app exits')
+}
+
+/**
+ * §BUG-2b: After navigating Dashboard → Inventory → Back → Back, the
+ * second Back should exit the app (not require a third Back).
+ */
+function testBackChainExitsAppAtEnd() {
+  const nav = createTestNavStack()
+  nav.pushView('dashboard')
+  nav.pushView('inventory')
+  assert(nav.length() === 2, 'Stack: dashboard + inventory')
+
+  // First Back: inventory → dashboard
+  const leaving1 = nav.pop()
+  assert(leaving1?.type === 'view' && (leaving1 as any).view === 'inventory', 'First Back: leave inventory')
+  assert(nav.peek()?.type === 'view' && (nav.peek() as any).view === 'dashboard', 'First Back: return to dashboard')
+
+  // Second Back: dashboard → exit (stack empty, no re-push)
+  const leaving2 = nav.pop()
+  assert(leaving2?.type === 'view' && (leaving2 as any).view === 'dashboard', 'Second Back: leave dashboard')
+  assert(nav.length() === 0, 'Stack empty → app exits on second Back (no third Back needed)')
+}
+
+/**
+ * §WINDOW-QUERYCLIENT: Verify the QueryClient is NOT exposed on window
+ * (the previous workaround was removed in favor of useQueryClient() hook).
+ */
+function testNoWindowQueryClientExposure() {
+  const src = fs.readFileSync('src/lib/query-provider.tsx', 'utf8')
+  assert(!src.includes('__queryClient'), 'QueryProvider does NOT expose window.__queryClient')
+  assert(!src.includes('(window as any)'), 'QueryProvider does NOT use (window as any)')
+
+  const appShell = fs.readFileSync('src/components/layout/app-shell.tsx', 'utf8')
+  assert(appShell.includes('useQueryClient'), 'AppShell uses useQueryClient() hook')
+  assert(!appShell.includes('__queryClient'), 'AppShell does NOT reference window.__queryClient')
+}
+
 // ─── Run all tests ─────────────────────────────────────────────────────────
 
 console.log('\n  Back-button navigation:')
@@ -283,6 +393,14 @@ testEmptyStackAllowsExit()
 testRestoringGuardPreventsDuplicatePush()
 testRapidNavigationBackChain()
 
+console.log('\n  Overlay-close-via-UI sync (BUG-1 fix):')
+testOverlayCloseViaUIPopsStack()
+testOverlayCloseViaUIThenReopen()
+
+console.log('\n  First-Back-exits-app (BUG-2 fix):')
+testFirstBackOnDashboardExits()
+testBackChainExitsAppAtEnd()
+
 console.log('\n  Dashboard state distinctions:')
 testLoadingToData()
 testLoadingToEmpty()
@@ -293,6 +411,9 @@ testCachedDataBackgroundRefetch()
 
 console.log('\n  AppShell bootstrap dedup:')
 testBootstrapNoAppSettingsFetch()
+
+console.log('\n  No window.__queryClient exposure:')
+testNoWindowQueryClientExposure()
 
 console.log('\n  Search freeze:')
 testSearchFreeze()

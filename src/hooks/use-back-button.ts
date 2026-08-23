@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useAppStore } from '@/store/app-store'
 
 /**
@@ -46,7 +46,6 @@ const navStack: NavEntry[] = []
 let isRestoringFromHistory = false
 
 export function useBackButton() {
-  const isInitialEntry = useRef(true)
 
   // Push initial marker on mount.
   useEffect(() => {
@@ -57,7 +56,6 @@ export function useBackButton() {
     window.history.replaceState({ app: 'bizledger', initial: true }, '')
     navStack.length = 0
     navStack.push({ type: 'view', view: 'dashboard' })
-    isInitialEntry.current = true
   }, [])
 
   // Watch for view + overlay state changes and push history entries.
@@ -73,8 +71,7 @@ export function useBackButton() {
         window.history.pushState({ app: 'bizledger' }, '')
       }
 
-      // Push state when an overlay/dialog opens (null → non-null).
-      // Only push for OPENING — closing is handled by popstate.
+      // §OVERLAY-OPEN: Push when an overlay/dialog opens (null → non-null).
       if (!prev.overlayPartyId && state.overlayPartyId) {
         navStack.push({ type: 'overlay', overlay: 'party' })
         window.history.pushState({ app: 'bizledger' }, '')
@@ -115,6 +112,26 @@ export function useBackButton() {
         navStack.push({ type: 'overlay', overlay: 'fingerprint-modal' })
         window.history.pushState({ app: 'bizledger' }, '')
       }
+
+      // §OVERLAY-CLOSE-VIA-UI: When an overlay closes via the UI (X button,
+      // backdrop click, Escape) — i.e. non-null → null WITHOUT a popstate —
+      // we must sync the browser history by calling history.back(). This
+      // consumes the overlay's history entry. The resulting popstate will
+      // pop the navStack entry; since the overlay is already closed, the
+      // popstate handler's `if (state.overlayX)` check is false → no-op.
+      // Without this, the navStack desyncs from browser history and the
+      // next Back press becomes a no-op instead of going to the real
+      // previous state.
+      if (prev.overlayPartyId && !state.overlayPartyId) { window.history.back(); return }
+      if (prev.overlayInvoiceId && !state.overlayInvoiceId) { window.history.back(); return }
+      if (prev.showSearch && !state.showSearch) { window.history.back(); return }
+      if (prev.showPartyForm && !state.showPartyForm) { window.history.back(); return }
+      if (prev.showProductForm && !state.showProductForm) { window.history.back(); return }
+      if (prev.showInvoiceForm && !state.showInvoiceForm) { window.history.back(); return }
+      if (prev.fabOpen && !state.fabOpen) { window.history.back(); return }
+      if (prev.globalFamilyModal && !state.globalFamilyModal) { window.history.back(); return }
+      if (prev.globalPartnerModal && !state.globalPartnerModal) { window.history.back(); return }
+      if (prev.globalFingerprintModal && !state.globalFingerprintModal) { window.history.back(); return }
     })
 
     return () => unsub()
@@ -191,16 +208,10 @@ export function useBackButton() {
       }
 
       // §EXIT: navStack is empty. We're at the initial dashboard with no
-      // overlays. Allow the browser to exit the app naturally.
+      // overlays. Let the browser handle Back naturally — it will exit the
+      // app or go to the previous site. We do NOT re-push (that would trap
+      // the user in the app and make Back never exit).
       if (state.activeView === 'dashboard') {
-        if (isInitialEntry.current) {
-          isInitialEntry.current = false
-          // Push dashboard back so the user returns to the app if they
-          // navigate forward again.
-          navStack.push({ type: 'view', view: 'dashboard' })
-          window.history.pushState({ app: 'bizledger' }, '')
-        }
-        // Let the browser handle the back — exit the app.
         return
       }
 

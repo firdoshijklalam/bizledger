@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { TopAppBar } from './top-app-bar'
@@ -54,6 +55,10 @@ export function AppShell() {
     setOverlayInvoiceId,
   } = useAppStore()
   const { setLanguage } = useI18n()
+  // §QUERY-CLIENT: Use the useQueryClient() hook — AppShell is rendered
+  // inside QueryProvider, so this is the clean way to access the shared
+  // cache. Used by the language-apply effect below.
+  const queryClient = useQueryClient()
   const [paymentToken, setPaymentToken] = useState<string | null>(() => { if (typeof window === 'undefined') return null; return new URLSearchParams(window.location.search).get('payment') })
   // PRD Part 33: public store / more-shops / visited-shops URL routing
   // Use lazy initializers to read URL params on first render (before businessLoaded check)
@@ -189,19 +194,17 @@ export function AppShell() {
   // the bootstrap — the cache is populated by `useFetch('/api/app-settings')`
   // in BottomTabNav/DashboardView (deduped by TanStack Query).
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    const queryClient = (window as any).__queryClient
-    if (!queryClient) return
-    const unsubscribe = queryClient.getQueryCache().subscribe((event: any) => {
-      if (event.query.queryKey?.[0] === '/api/app-settings' && event.type === 'updated') {
-        const settings = event.query.state.data
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      const query = event.query as any
+      if (query.queryKey?.[0] === '/api/app-settings' && event.type === 'updated') {
+        const settings = (query.state as any).data
         if (settings?.language) {
           setLanguage(settings.language)
         }
       }
     })
     return () => unsubscribe()
-  }, [setLanguage])
+  }, [queryClient, setLanguage])
 
   // PRD Part 33: Public pages render immediately — no business loading required
   // Payment Landing Page — public, no app chrome (PRD v2 §10.5)
