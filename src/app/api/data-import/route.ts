@@ -286,21 +286,37 @@ async function performImport(
     // maintain a mapping so relationships (partyId, invoiceId, productId) are
     // preserved. For 'merge' strategy with existing records in the SAME business,
     // the original IDs are preserved (upsert).
+    //
+    // §REPEAT-IMPORT: When the SAME backup is imported twice (e.g., re-running
+    // a merge), the _imp suffixed IDs from the first import already exist.
+    // We must check BOTH the original ID AND the _imp variant against existing
+    // records. If either exists, we skip (merge) or update (updateExisting).
     const idMap = new Map<string, string>() // oldId → newId
+
+    // Helper: check if an ID (or its _imp variant) already exists in current business
+    const hasId = (id: string, existingSet: Set<string>): boolean => {
+      return existingSet.has(id) || existingSet.has(`${id}_imp`)
+    }
+    const resolveId = (id: string, existingSet: Set<string>): string => {
+      if (existingSet.has(id)) return id
+      if (existingSet.has(`${id}_imp`)) return `${id}_imp`
+      return `${id}_imp` // generate new _imp ID
+    }
 
     // §ORDER-1: Categories (no deps)
     for (const c of envelope.categories) {
-      if (existing.categoryIds.has(c.id)) {
+      if (hasId(c.id, existing.categoryIds)) {
+        const existingId = resolveId(c.id, existing.categoryIds)
         if (opts.updateExisting) {
           await tx.category.upsert({
-            where: { id: c.id },
+            where: { id: existingId },
             update: { name: c.name, parentId: c.parentId ? (idMap.get(c.parentId) || c.parentId) : null, level: c.level, sortOrder: c.sortOrder, businessId },
             create: { id: c.id, name: c.name, parentId: c.parentId ? (idMap.get(c.parentId) || c.parentId) : null, level: c.level, sortOrder: c.sortOrder, businessId },
           })
-          idMap.set(c.id, c.id)
+          idMap.set(c.id, existingId)
           result.imported.categories++
         } else {
-          idMap.set(c.id, c.id)
+          idMap.set(c.id, existingId)
           result.skipped.categories++
         }
       } else {
@@ -316,10 +332,11 @@ async function performImport(
 
     // §ORDER-2: Parties (no deps)
     for (const p of envelope.parties) {
-      if (existing.partyIds.has(p.id)) {
+      if (hasId(p.id, existing.partyIds)) {
+        const existingId = resolveId(p.id, existing.partyIds)
         if (opts.updateExisting) {
           await tx.party.upsert({
-            where: { id: p.id },
+            where: { id: existingId },
             update: {
               name: p.name, phone: p.phone, type: p.type, balance: p.balance,
               qualityGrade: p.qualityGrade, creditLimit: p.creditLimit,
@@ -335,10 +352,10 @@ async function performImport(
               creditTrustScore: p.creditTrustScore, buyerGroup: p.buyerGroup, businessId,
             },
           })
-          idMap.set(p.id, p.id)
+          idMap.set(p.id, existingId)
           result.imported.parties++
         } else {
-          idMap.set(p.id, p.id)
+          idMap.set(p.id, existingId)
           result.skipped.parties++
         }
       } else {
@@ -359,10 +376,11 @@ async function performImport(
 
     // §ORDER-3: Products (may reference Party via supplierId)
     for (const p of envelope.products) {
-      if (existing.productIds.has(p.id)) {
+      if (hasId(p.id, existing.productIds)) {
+        const existingId = resolveId(p.id, existing.productIds)
         if (opts.updateExisting) {
           await tx.product.upsert({
-            where: { id: p.id },
+            where: { id: existingId },
             update: {
               name: p.name, sku: p.sku, category: p.category, subCategory: p.subCategory,
               categoryPath: p.categoryPath, unit: p.unit, purchasePrice: p.purchasePrice,
@@ -415,10 +433,11 @@ async function performImport(
       const newQrToken = `${s.id}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
       // §STAFF-ID-FALLBACK: If staffId is empty (stripped or missing), generate one
       const staffIdVal = s.staffId || Math.random().toString().slice(2, 8)
-      if (existing.staffIds.has(s.id)) {
+      if (hasId(s.id, existing.staffIds)) {
+        const existingId = resolveId(s.id, existing.staffIds)
         if (opts.updateExisting) {
           await tx.staff.upsert({
-            where: { id: s.id },
+            where: { id: existingId },
             update: {
               name: s.name, phone: s.phone, role: s.role, staffId: staffIdVal, isActive: s.isActive,
               permBilling: s.permBilling, permInventory: s.permInventory, permKhata: s.permKhata,
@@ -455,10 +474,11 @@ async function performImport(
 
     // §ORDER-5: PartyNotes (depends on Party; no businessId field)
     for (const pn of envelope.partyNotes) {
-      if (existing.partyNoteIds.has(pn.id)) {
+      if (hasId(pn.id, existing.partyNoteIds)) {
+        const existingId = resolveId(pn.id, existing.partyNoteIds)
         if (opts.updateExisting) {
           await tx.partyNote.upsert({
-            where: { id: pn.id },
+            where: { id: existingId },
             update: { partyId: idMap.get(pn.partyId) || pn.partyId, type: pn.type, content: pn.content, author: pn.author },
             create: { id: pn.id, partyId: idMap.get(pn.partyId) || pn.partyId, type: pn.type, content: pn.content, author: pn.author },
           })
@@ -478,10 +498,11 @@ async function performImport(
 
     // §ORDER-6: Invoices (depends on Party — partyId may be null for walk-in)
     for (const inv of envelope.invoices) {
-      if (existing.invoiceIds.has(inv.id)) {
+      if (hasId(inv.id, existing.invoiceIds)) {
+        const existingId = resolveId(inv.id, existing.invoiceIds)
         if (opts.updateExisting) {
           await tx.invoice.upsert({
-            where: { id: inv.id },
+            where: { id: existingId },
             update: {
               partyId: inv.partyId ? (idMap.get(inv.partyId) || inv.partyId) : null, invoiceNumber: inv.invoiceNumber, type: inv.type,
               status: inv.status, isGst: inv.isGst, subtotal: inv.subtotal,
@@ -528,10 +549,11 @@ async function performImport(
 
     // §ORDER-7: InvoiceItems (depends on Invoice + Product — both may be null)
     for (const it of envelope.invoiceItems) {
-      if (existing.invoiceItemIds.has(it.id)) {
+      if (hasId(it.id, existing.invoiceItemIds)) {
+        const existingId = resolveId(it.id, existing.invoiceItemIds)
         if (opts.updateExisting) {
           await tx.invoiceItem.upsert({
-            where: { id: it.id },
+            where: { id: existingId },
             update: {
               invoiceId: idMap.get(it.invoiceId) || it.invoiceId, productId: it.productId ? (idMap.get(it.productId) || it.productId) : null, name: it.name,
               quantity: it.quantity, unitPrice: it.unitPrice, discount: it.discount,
@@ -563,10 +585,11 @@ async function performImport(
 
     // §ORDER-8: Transactions (depends on Party + Invoice — both may be null)
     for (const t of envelope.transactions) {
-      if (existing.transactionIds.has(t.id)) {
+      if (hasId(t.id, existing.transactionIds)) {
+        const existingId = resolveId(t.id, existing.transactionIds)
         if (opts.updateExisting) {
           await tx.transaction.upsert({
-            where: { id: t.id },
+            where: { id: existingId },
             update: {
               partyId: t.partyId ? (idMap.get(t.partyId) || t.partyId) : null, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter,
               description: t.description, category: t.category, invoiceId: t.invoiceId ? (idMap.get(t.invoiceId) || t.invoiceId) : null, businessId,
@@ -595,10 +618,11 @@ async function performImport(
 
     // §ORDER-9: StockMovements (depends on Product; uses description not note)
     for (const sm of envelope.stockMovements) {
-      if (existing.stockMovementIds.has(sm.id)) {
+      if (hasId(sm.id, existing.stockMovementIds)) {
+        const existingId = resolveId(sm.id, existing.stockMovementIds)
         if (opts.updateExisting) {
           await tx.stockMovement.upsert({
-            where: { id: sm.id },
+            where: { id: existingId },
             update: {
               productId: idMap.get(sm.productId) || sm.productId, type: sm.type, quantity: sm.quantity,
               balanceAfter: sm.balanceAfter, referenceId: sm.referenceId,
@@ -630,10 +654,11 @@ async function performImport(
 
     // §ORDER-10: CustomPrices (depends on Product + Party — both may be null)
     for (const cp of envelope.customPrices) {
-      if (existing.customPriceIds.has(cp.id)) {
+      if (hasId(cp.id, existing.customPriceIds)) {
+        const existingId = resolveId(cp.id, existing.customPriceIds)
         if (opts.updateExisting) {
           await tx.customPrice.upsert({
-            where: { id: cp.id },
+            where: { id: existingId },
             update: {
               productId: cp.productId ? (idMap.get(cp.productId) || cp.productId) : null, catalogItemId: cp.catalogItemId, buyerId: cp.buyerId ? (idMap.get(cp.buyerId) || cp.buyerId) : null,
               buyerGroupName: cp.buyerGroupName, customPrice: cp.customPrice,
