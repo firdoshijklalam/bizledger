@@ -129,8 +129,18 @@ export function AppShell() {
     if (params.get('payment')) setPaymentToken(params.get('payment'))
   }, [MARKETPLACE_ENABLED])
 
-  // Bootstrap: ensure seeded + load business + load language setting
+  // Bootstrap: ensure seeded + load business + apply saved language.
   // Includes retry logic for sandbox environment where server may be temporarily unavailable
+  //
+  // §PERFORMANCE: Only /api/business is fetched here. /api/app-settings is
+  // NOT fetched — it's fetched by `useFetch('/api/app-settings')` consumers
+  // (BottomTabNav, DashboardView) which TanStack Query dedupes to a SINGLE
+  // network request. Previously the bootstrap ALSO fetched app-settings
+  // (raw fetch, bypassing the cache), causing 2-3x duplicate requests.
+  //
+  // §NON-BLOCKING: businessLoaded is set as soon as the business identity
+  // is available — we do NOT block on app-settings (language is applied
+  // via a subscribe to the app-settings cache, see effect below).
   useEffect(() => {
     let mounted = true
     let retryCount = 0
@@ -156,9 +166,7 @@ export function AppShell() {
         }
         if (!mounted) return
         setBusiness(biz)
-        const settings = await fetch('/api/app-settings').then((r) => r.json())
-        if (settings?.language) setLanguage(settings.language)
-        if (mounted) setBusinessLoaded(true)
+        setBusinessLoaded(true)
       } catch (e) {
         console.error('Bootstrap error (attempt ' + (retryCount + 1) + ')', e)
         if (retryCount < 5 && mounted) {
@@ -174,7 +182,26 @@ export function AppShell() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [setBusiness, setBusinessLoaded])
+
+  // §LANGUAGE-APPLY: Subscribe to the app-settings cache and apply the
+  // language preference when it arrives. This avoids a separate fetch in
+  // the bootstrap — the cache is populated by `useFetch('/api/app-settings')`
+  // in BottomTabNav/DashboardView (deduped by TanStack Query).
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const queryClient = (window as any).__queryClient
+    if (!queryClient) return
+    const unsubscribe = queryClient.getQueryCache().subscribe((event: any) => {
+      if (event.query.queryKey?.[0] === '/api/app-settings' && event.type === 'updated') {
+        const settings = event.query.state.data
+        if (settings?.language) {
+          setLanguage(settings.language)
+        }
+      }
+    })
+    return () => unsubscribe()
+  }, [setLanguage])
 
   // PRD Part 33: Public pages render immediately — no business loading required
   // Payment Landing Page — public, no app chrome (PRD v2 §10.5)

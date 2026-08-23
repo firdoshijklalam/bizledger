@@ -1,7 +1,7 @@
 'use client'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 /**
  * §PERFORMANCE: TanStack Query provider.
@@ -16,6 +16,11 @@ import { useState } from 'react'
  *   using it unmounts, so returning to a view within 5min is instant.
  * refetchOnWindowFocus: false — avoids refetches when the user switches
  *   browser tabs (not needed for this app).
+ *
+ * §CACHE-SHARING: The QueryClient is exposed on `window.__queryClient` so
+ * the AppShell bootstrap can pre-populate the cache (e.g. app-settings
+ * fetched during bootstrap is shared with all `useFetch('/api/app-settings')`
+ * consumers, eliminating duplicate requests).
  */
 export function QueryProvider({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -31,5 +36,18 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
         },
       }),
   )
+
+  // Expose the client on window so the bootstrap effect can pre-populate cache.
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      ;(window as any).__queryClient = client
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete (window as any).__queryClient
+      }
+    }
+  }, [client])
+
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
 }

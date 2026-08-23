@@ -20,7 +20,7 @@ import { Card } from '@/components/ui/card'
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from '@/components/ui/dropdown-menu'
-import { LoadingState, EmptyState } from '@/components/shared/states'
+import { LoadingState, EmptyState, ErrorState } from '@/components/shared/states'
 import { useScrollRetention } from '@/hooks/use-scroll-retention'
 import { useScrollStore } from '@/store/scroll-store'
 import { useRealtimeOrders } from '@/hooks/use-realtime-orders'
@@ -125,7 +125,7 @@ export function DashboardView() {
     return `/api/dashboard?range=${timeRange}`
   }, [timeRange, customStart, customEnd])
 
-  const { data, loading: apiLoading } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl])
+  const { data, loading: apiLoading, error: apiError, refetch } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl])
   // §HERO-PROFILE: fetch userRole for the role tag (Owner/Admin/Sales)
   const { data: appSettings } = useFetch<any>('/api/app-settings', [])
   // §GRADE-BOTTOM-SHEET: fetch all parties so the grade distribution bottom
@@ -142,6 +142,13 @@ export function DashboardView() {
   // without a loading screen — the old values stay visible until the new ones
   // arrive, then snap in. This eliminates the "page reload" UX.
   const loading = apiLoading && !data
+  // §ERROR-VS-EMPTY: Distinguish a real error from a legitimate empty result.
+  // Previously, ANY failure (DB error, timeout, 401, 500) left `data === null`
+  // and showed "No data yet" — which misled users into thinking their business
+  // had no data, when in fact the request had failed. Now we surface the error
+  // with a Retry button instead.
+  const isTimeout = apiError?.includes('timed out')
+  const isAuthError = apiError?.includes('HTTP 401')
 
   const chartOptions: Array<{ id: ChartType; label: string }> = [
     { id: 'revenue', label: t('dash.chart.revenue') },
@@ -164,6 +171,23 @@ export function DashboardView() {
       </div>
     )
   }
+  // §ERROR-VS-EMPTY: If the API failed (DB error, timeout, 5xx, 401), show
+  // an ErrorState with Retry — NOT "No data yet". A failed request must not
+  // be misclassified as an empty dataset.
+  if (!data && apiError) {
+    return (
+      <ErrorState
+        message={isTimeout
+          ? 'Dashboard request timed out. Please check your connection and try again.'
+          : isAuthError
+            ? 'Your session has expired. Please sign in again.'
+            : `Unable to load dashboard: ${apiError}`}
+        onRetry={isAuthError ? () => { if (typeof window !== 'undefined') window.location.replace('/login') } : refetch}
+      />
+    )
+  }
+  // §EMPTY: Only show "No data yet" when the request succeeded but genuinely
+  // returned no data (e.g., a brand-new business with zero transactions).
   if (!data && !apiLoading) return <EmptyState icon={Heart} title="No data yet" />
   if (!data) return <LoadingState />
 

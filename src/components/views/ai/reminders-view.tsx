@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { LoadingState, EmptyState } from '@/components/shared/states'
+import { LoadingState, EmptyState, ErrorState } from '@/components/shared/states'
 import { ShareSheet } from '@/components/shared/share-sheet'
 import { toast } from 'sonner'
 import { useState, useEffect } from 'react'
@@ -35,7 +35,7 @@ const STORAGE_KEY = 'bizledger-auto-reminders'
 
 export function RemindersView() {
   const { business } = useAppStore()
-  const { data, loading } = useFetch<Reminder[]>('/api/reminders', [])
+  const { data, loading, error, refetch } = useFetch<Reminder[]>('/api/reminders', [])
   const [sentIds, setSentIds] = useState<Set<string>>(new Set())
   const currency = business?.currency || 'INR'
 
@@ -68,6 +68,11 @@ export function RemindersView() {
   const [shareSheet, setShareSheet] = useState<{ text: string; title: string; name: string; phone: string | null } | null>(null)
 
   if (loading) return <LoadingState />
+  // §ERROR-VS-EMPTY: Surface API errors with Retry. An error here should NOT
+  // show "No overdue payments 🎉" — that would falsely reassure the user.
+  if (!data && error) {
+    return <ErrorState message={`Unable to load reminders: ${error}`} onRetry={refetch} />
+  }
   if (!data || data.length === 0) return <EmptyState icon={CheckCircle2} title="No overdue payments 🎉" description="All your customers are up to date!" />
 
   const defaultTemplate = (r: Reminder) =>

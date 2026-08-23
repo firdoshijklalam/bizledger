@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { LoadingState, EmptyState } from '@/components/shared/states'
+import { LoadingState, EmptyState, ErrorState } from '@/components/shared/states'
 import { toast } from 'sonner'
 import { useState } from 'react'
 import {
@@ -32,7 +32,7 @@ interface Insights {
 
 export function InsightsView() {
   const { business, setActiveView } = useAppStore()
-  const { data, loading } = useFetch<Insights>('/api/insights', [])
+  const { data, loading, error, refetch } = useFetch<Insights>('/api/insights', [])
   const currency = business?.currency || 'INR'
   const [topMode, setTopMode] = useState<'revenue' | 'volume'>('revenue')
   // AI Suggestion modal (PRD Part 20 §5)
@@ -40,6 +40,10 @@ export function InsightsView() {
   const [aiLoading, setAiLoading] = useState(false)
 
   if (loading) return <LoadingState />
+  // §ERROR-VS-EMPTY: Surface API errors with Retry instead of "No insights".
+  if (!data && error) {
+    return <ErrorState message={`Unable to load insights: ${error}`} onRetry={refetch} />
+  }
   if (!data) return <EmptyState icon={TrendingUp} title="No insights available" />
 
   const handleRemind = (d: { name: string; phone?: string | null }) => {

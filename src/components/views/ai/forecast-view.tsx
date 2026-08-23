@@ -7,7 +7,7 @@ import { motion } from 'framer-motion'
 import { TrendingUp, AlertTriangle, ArrowUp, ArrowDown, Package, ShoppingCart } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { LoadingState, EmptyState } from '@/components/shared/states'
+import { LoadingState, EmptyState, ErrorState } from '@/components/shared/states'
 import { toast } from 'sonner'
 import { useState } from 'react'
 
@@ -38,10 +38,14 @@ type Timeframe = 1 | 3 | 6
 export function ForecastView() {
   const { business, setActiveView } = useAppStore()
   const [timeframe, setTimeframe] = useState<Timeframe>(3)
-  const { data, loading } = useFetch<Forecast[]>(`/api/forecast?months=${timeframe}`, [timeframe])
+  const { data, loading, error, refetch } = useFetch<Forecast[]>(`/api/forecast?months=${timeframe}`, [timeframe])
   const currency = business?.currency || 'INR'
 
   if (loading) return <LoadingState />
+  // §ERROR-VS-EMPTY: Surface API errors with Retry.
+  if (!data && error) {
+    return <ErrorState message={`Unable to load forecast: ${error}`} onRetry={refetch} />
+  }
   if (!data || data.length === 0) return <EmptyState icon={TrendingUp} title="No forecast data" description="Create some invoices to see demand predictions." />
 
   const restockNeeded = data.filter((f) => f.needsRestock)
