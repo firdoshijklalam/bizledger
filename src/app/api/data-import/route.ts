@@ -281,6 +281,13 @@ async function performImport(
       existing.stockMovementIds.clear()
     }
 
+    // §ID-MAPPING: When importing into a different business, the backup's IDs
+    // may already exist globally (in Business A). We generate new IDs and
+    // maintain a mapping so relationships (partyId, invoiceId, productId) are
+    // preserved. For 'merge' strategy with existing records in the SAME business,
+    // the original IDs are preserved (upsert).
+    const idMap = new Map<string, string>() // oldId → newId
+
     // §ORDER-1: Categories (no deps)
     for (const c of envelope.categories) {
       if (existing.categoryIds.has(c.id)) {
@@ -290,13 +297,18 @@ async function performImport(
             update: { name: c.name, parentId: c.parentId, level: c.level, sortOrder: c.sortOrder, businessId },
             create: { id: c.id, name: c.name, parentId: c.parentId, level: c.level, sortOrder: c.sortOrder, businessId },
           })
+          idMap.set(c.id, c.id)
           result.imported.categories++
         } else {
+          idMap.set(c.id, c.id)
           result.skipped.categories++
         }
       } else {
+        // §NEW-ID: Generate a new ID to avoid global cuid collision
+        const newId = `${c.id}_imp`
+        idMap.set(c.id, newId)
         await tx.category.create({
-          data: { id: c.id, name: c.name, parentId: c.parentId, level: c.level, sortOrder: c.sortOrder, businessId },
+          data: { id: newId, name: c.name, parentId: c.parentId, level: c.level, sortOrder: c.sortOrder, businessId },
         })
         result.imported.categories++
       }
@@ -323,14 +335,18 @@ async function performImport(
               creditTrustScore: p.creditTrustScore, buyerGroup: p.buyerGroup, businessId,
             },
           })
+          idMap.set(p.id, p.id)
           result.imported.parties++
         } else {
+          idMap.set(p.id, p.id)
           result.skipped.parties++
         }
       } else {
+        const newId = `${p.id}_imp`
+        idMap.set(p.id, newId)
         await tx.party.create({
           data: {
-            id: p.id, name: p.name, phone: p.phone, type: p.type, balance: p.balance,
+            id: newId, name: p.name, phone: p.phone, type: p.type, balance: p.balance,
             qualityGrade: p.qualityGrade, creditLimit: p.creditLimit,
             openingBalance: p.openingBalance, address: p.address, gstin: p.gstin,
             notes: p.notes, avgPaymentDays: p.avgPaymentDays, avgDiscountPct: p.avgDiscountPct,
@@ -373,13 +389,16 @@ async function performImport(
           result.skipped.products++
         }
       } else {
+        const newId = `${p.id}_imp`
+        idMap.set(p.id, newId)
         await tx.product.create({
           data: {
-            id: p.id, name: p.name, sku: p.sku, category: p.category, subCategory: p.subCategory,
+            id: newId, name: p.name, sku: p.sku, category: p.category, subCategory: p.subCategory,
             categoryPath: p.categoryPath, unit: p.unit, purchasePrice: p.purchasePrice,
             salePrice: p.salePrice, mrp: p.mrp, wholesalePrice: p.wholesalePrice,
             gstRate: p.gstRate, stock: p.stock, lowStockThreshold: p.lowStockThreshold,
-            supplierId: p.supplierId, retailEnabled: p.retailEnabled, retailUnit: p.retailUnit,
+            supplierId: p.supplierId ? (idMap.get(p.supplierId) || p.supplierId) : null,
+            retailEnabled: p.retailEnabled, retailUnit: p.retailUnit,
             conversionFactor: p.conversionFactor, retailSalePrice: p.retailSalePrice,
             retailMrp: p.retailMrp, looseStock: p.looseStock, isPublished: p.isPublished,
             businessId,
@@ -419,9 +438,11 @@ async function performImport(
           result.skipped.staff++
         }
       } else {
+        const newId = `${s.id}_imp`
+        idMap.set(s.id, newId)
         await tx.staff.create({
           data: {
-            id: s.id, name: s.name, phone: s.phone, role: s.role, staffId: staffIdVal, qrToken: newQrToken,
+            id: newId, name: s.name, phone: s.phone, role: s.role, staffId: staffIdVal, qrToken: newQrToken,
             isActive: s.isActive,
             permBilling: s.permBilling, permInventory: s.permInventory, permKhata: s.permKhata,
             permReports: s.permReports, permSourcing: s.permSourcing, permSettings: s.permSettings,
@@ -446,8 +467,10 @@ async function performImport(
           result.skipped.partyNotes++
         }
       } else {
+        const newId = `${pn.id}_imp`
+        idMap.set(pn.id, newId)
         await tx.partyNote.create({
-          data: { id: pn.id, partyId: pn.partyId, type: pn.type, content: pn.content, author: pn.author },
+          data: { id: newId, partyId: idMap.get(pn.partyId) || pn.partyId, type: pn.type, content: pn.content, author: pn.author },
         })
         result.imported.partyNotes++
       }
@@ -485,9 +508,11 @@ async function performImport(
           result.skipped.invoices++
         }
       } else {
+        const newId = `${inv.id}_imp`
+        idMap.set(inv.id, newId)
         await tx.invoice.create({
           data: {
-            id: inv.id, partyId: inv.partyId, invoiceNumber: inv.invoiceNumber, type: inv.type,
+            id: newId, partyId: inv.partyId ? (idMap.get(inv.partyId) || inv.partyId) : null, invoiceNumber: inv.invoiceNumber, type: inv.type,
             status: inv.status, isGst: inv.isGst, subtotal: inv.subtotal,
             discountValue: inv.discountValue, discountMode: inv.discountMode,
             discountAmount: inv.discountAmount, gstAmount: inv.gstAmount,
@@ -523,9 +548,11 @@ async function performImport(
           result.skipped.invoiceItems++
         }
       } else {
+        const newId = `${it.id}_imp`
+        idMap.set(it.id, newId)
         await tx.invoiceItem.create({
           data: {
-            id: it.id, invoiceId: it.invoiceId, productId: it.productId, name: it.name,
+            id: newId, invoiceId: idMap.get(it.invoiceId) || it.invoiceId, productId: it.productId ? (idMap.get(it.productId) || it.productId) : null, name: it.name,
             quantity: it.quantity, unitPrice: it.unitPrice, discount: it.discount,
             gstRate: it.gstRate, total: it.total, fulfilledQty: it.fulfilledQty,
           },
@@ -554,10 +581,12 @@ async function performImport(
           result.skipped.transactions++
         }
       } else {
+        const newId = `${t.id}_imp`
+        idMap.set(t.id, newId)
         await tx.transaction.create({
           data: {
-            id: t.id, partyId: t.partyId, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter,
-            description: t.description, category: t.category, invoiceId: t.invoiceId, businessId,
+            id: newId, partyId: t.partyId ? (idMap.get(t.partyId) || t.partyId) : null, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter,
+            description: t.description, category: t.category, invoiceId: t.invoiceId ? (idMap.get(t.invoiceId) || t.invoiceId) : null, businessId,
           },
         })
         result.imported.transactions++
@@ -586,9 +615,11 @@ async function performImport(
           result.skipped.stockMovements++
         }
       } else {
+        const newId = `${sm.id}_imp`
+        idMap.set(sm.id, newId)
         await tx.stockMovement.create({
           data: {
-            id: sm.id, productId: sm.productId, type: sm.type, quantity: sm.quantity,
+            id: newId, productId: idMap.get(sm.productId) || sm.productId, type: sm.type, quantity: sm.quantity,
             balanceAfter: sm.balanceAfter, referenceId: sm.referenceId,
             referenceType: sm.referenceType, description: sm.description, businessId,
           },
@@ -625,9 +656,11 @@ async function performImport(
           result.skipped.customPrices++
         }
       } else {
+        const newId = `${cp.id}_imp`
+        idMap.set(cp.id, newId)
         await tx.customPrice.create({
           data: {
-            id: cp.id, productId: cp.productId, catalogItemId: cp.catalogItemId, buyerId: cp.buyerId,
+            id: newId, productId: cp.productId ? (idMap.get(cp.productId) || cp.productId) : null, catalogItemId: cp.catalogItemId, buyerId: cp.buyerId ? (idMap.get(cp.buyerId) || cp.buyerId) : null,
             buyerGroupName: cp.buyerGroupName, customPrice: cp.customPrice,
             customSalePrice: cp.customSalePrice, customMrp: cp.customMrp,
             customWholesalePrice: cp.customWholesalePrice,
