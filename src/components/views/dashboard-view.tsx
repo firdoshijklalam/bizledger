@@ -125,7 +125,12 @@ export function DashboardView() {
     return `/api/dashboard?range=${timeRange}`
   }, [timeRange, customStart, customEnd])
 
-  const { data, loading: apiLoading, error: apiError, refetch } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl])
+  // §DASHBOARD-TIMEOUT: 30s timeout — the backend maxDuration is 30s and the
+  // dashboard runs 8 parallel queries on Neon PostgreSQL (each ~2s due to
+  // network RTT). The default 10s useFetch timeout was too short, causing
+  // intermittent "Dashboard request timed out" errors. This is a targeted
+  // increase for the dashboard ONLY — other API calls keep the default 10s.
+  const { data, loading: apiLoading, error: apiError, refetch } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl], { timeoutMs: 30000 })
   // §HERO-PROFILE: fetch userRole for the role tag (Owner/Admin/Sales)
   const { data: appSettings } = useFetch<any>('/api/app-settings', [])
   // §GRADE-BOTTOM-SHEET: fetch all parties so the grade distribution bottom
@@ -1036,7 +1041,7 @@ function TimeMetricCard({
     return `/api/dashboard?range=${range}`
   }, [range, customStart, customEnd])
 
-  const { data } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl])
+  const { data } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl], { timeoutMs: 30000 })
   const value = valueExtractor(data)
   const rangeLabel = CARD_RANGES.find((r) => r.id === range)?.label || ''
 
