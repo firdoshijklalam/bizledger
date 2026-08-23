@@ -271,54 +271,106 @@ function testSearchFreeze() {
   assert(contentLines.length === 0, 'Search freeze: 7 files have zero content changes vs b9eb828')
 }
 
-// ─── New regression tests (post-07c9567 audit) ─────────────────────────────
+// ─── New regression tests (post-0f270f3 audit) ────────────────────────────
 
 /**
- * §BUG-1: Overlay closed via UI (X button / backdrop / Escape) must sync
- * browser history. Previously, closing an overlay via UI did NOT call
- * history.back(), leaving a stale entry in the browser history. The next
- * Back press would then "pop" the already-closed overlay (a no-op)
- * instead of going to the real previous state.
+ * §OVERLAY-CLOSE-LAZY: When an overlay closes via UI (X/backdrop/Escape),
+ * the navStack entry is NOT popped immediately — it's consumed lazily on
+ * the next Back press. This is the correct design: calling history.back()
+ * from the subscribe handler (as 0f270f3 did) broke the combined
+ * "close overlay + navigate" pattern (e.g. party detail → Quick Sale),
+ * because history.back() + early-return skipped the view-change push.
  *
- * The fix: the subscribe handler now calls history.back() when an overlay
- * closes via UI (non-null → null). This test verifies the navStack logic
- * that backs this behavior: after closing an overlay, the stack should be
- * in the same state as if the user had pressed Back.
+ * This test verifies the lazy-consume behavior: after UI close, the stale
+ * overlay entry remains in the stack, and the next Back pops it (as a
+ * no-op close since the overlay is already dismissed).
  */
-function testOverlayCloseViaUIPopsStack() {
+function testOverlayCloseViaUIStaysLazy() {
   const nav = createTestNavStack()
   nav.pushView('dashboard')
   nav.pushOverlay('party')
   assert(nav.length() === 2, 'Stack: dashboard-view + party-overlay')
 
-  // Simulate UI close: pop the overlay entry (mirrors what history.back()
-  // triggers via popstate — the popstate handler pops navStack).
-  const leaving = nav.pop()
-  assert(leaving?.type === 'overlay' && (leaving as any).overlay === 'party', 'UI close pops party-overlay entry')
-  assert(nav.peek()?.type === 'view' && (nav.peek() as any).view === 'dashboard', 'After UI close, stack top is dashboard')
+  // UI close: the overlay entry is NOT popped (lazy). Stack unchanged.
+  // (In the real implementation, no history.back() is called.)
+  assert(nav.length() === 2, 'After UI close, stack still has stale party-overlay entry (lazy)')
 
-  // Now pressing Back should exit the app (not pop a stale overlay).
-  const leaving2 = nav.pop()
-  assert(leaving2?.type === 'view' && (leaving2 as any).view === 'dashboard', 'Back after UI close exits dashboard (no stale entry)')
-  assert(nav.length() === 0, 'Stack empty → Back exits app naturally')
+  // Next Back: pops the stale party-overlay entry. The overlay is already
+  // closed, so the popstate close-check is a no-op. The user effectively
+  // goes back from where they were.
+  const leaving = nav.pop()
+  assert(leaving?.type === 'overlay' && (leaving as any).overlay === 'party', 'Back pops stale party-overlay (no-op close)')
+  assert(nav.peek()?.type === 'view' && (nav.peek() as any).view === 'dashboard', 'After lazy consume, stack top is dashboard')
 }
 
 /**
- * §BUG-1b: Open overlay, close via UI, open another overlay → Back should
- * close the second overlay (not get stuck on a stale first-overlay entry).
+ * §COMBINED-CLOSE-NAVIGATE: The critical regression — when an overlay
+ * closes AND a view changes in the same batched state update (e.g. party
+ * detail → Quick Sale), the view change MUST be pushed to navStack. The
+ * 0f270f3 history.back() approach broke this by early-returning after
+ * the close, skipping the view push. This test verifies the view push
+ * happens alongside the (lazy) overlay close.
  */
-function testOverlayCloseViaUIThenReopen() {
+function testCombinedCloseOverlayAndNavigate() {
   const nav = createTestNavStack()
   nav.pushView('dashboard')
   nav.pushOverlay('party')
-  // UI close party
-  nav.pop()
-  // Open invoice overlay
-  nav.pushOverlay('invoice')
-  assert(nav.length() === 2, 'Stack: dashboard-view + invoice-overlay (party was popped)')
+  assert(nav.length() === 2, 'Stack: dashboard + party-overlay')
 
-  const leaving = nav.pop()
-  assert(leaving?.type === 'overlay' && (leaving as any).overlay === 'invoice', 'Back closes invoice overlay')
+  // Combined: close party overlay + navigate to sale-pad.
+  // In the fixed implementation:
+  //   - The overlay close does NOT pop navStack (lazy) and does NOT call
+  //     history.back().
+  //   - The view change DOES push {view:'sale-pad'} to navStack.
+  // So navStack = [dashboard, party-overlay(stale), sale-pad-view].
+  nav.pushView('sale-pad')
+  assert(nav.length() === 3, 'Stack: dashboard + stale-party-overlay + sale-pad-view')
+  const top = nav.peek()
+  assert(top?.type === 'view' && (top as any).view === 'sale-pad', 'Top is sale-pad (view change was pushed)')
+
+  // Back from sale-pad: pops sale-pad-view → target = party-overlay (stale).
+  // The popstate handler sees target.type === 'overlay' → "just stay" → returns.
+  // This is correct: the stale entry is consumed as a no-op.
+  const leaving1 = nav.pop()
+  assert(leaving1?.type === 'view' && (leaving1 as any).view === 'sale-pad', 'First Back: leave sale-pad')
+  const target1 = nav.peek()
+  assert(target1?.type === 'overlay' && (target1 as any).overlay === 'party', 'Target is stale party-overlay (consumed as no-op on next Back)')
+
+  // Back again: pops stale party-overlay → no-op close → target = dashboard.
+  const leaving2 = nav.pop()
+  assert(leaving2?.type === 'overlay' && (leaving2 as any).overlay === 'party', 'Second Back: pop stale party-overlay')
+  const target2 = nav.peek()
+  assert(target2?.type === 'view' && (target2 as any).view === 'dashboard', 'Returns to dashboard')
+}
+
+/**
+ * §COMBINED-CLOSE-OPEN: Close one overlay + open another in the same batch
+ * (e.g. party detail → click invoice → opens invoice overlay). Both the
+ * close (lazy) and the open (push) must be handled. The 0f270f3 approach
+ * broke this because history.back() + early-return skipped the open push.
+ */
+function testCombinedCloseOverlayAndOpenAnother() {
+  const nav = createTestNavStack()
+  nav.pushView('dashboard')
+  nav.pushOverlay('party')
+  assert(nav.length() === 2, 'Stack: dashboard + party-overlay')
+
+  // Combined: close party overlay + open invoice overlay.
+  // Fixed: party-overlay stays (lazy), invoice-overlay is pushed.
+  nav.pushOverlay('invoice')
+  assert(nav.length() === 3, 'Stack: dashboard + stale-party-overlay + invoice-overlay')
+  const top = nav.peek()
+  assert(top?.type === 'overlay' && (top as any).overlay === 'invoice', 'Top is invoice-overlay (open was pushed)')
+
+  // Back: pops invoice-overlay → closes it → target = stale party-overlay.
+  const leaving1 = nav.pop()
+  assert(leaving1?.type === 'overlay' && (leaving1 as any).overlay === 'invoice', 'Back closes invoice-overlay')
+  const target1 = nav.peek()
+  assert(target1?.type === 'overlay' && (target1 as any).overlay === 'party', 'Target is stale party-overlay')
+
+  // Back again: pops stale party-overlay (no-op close) → target = dashboard.
+  const leaving2 = nav.pop()
+  assert(leaving2?.type === 'overlay' && (leaving2 as any).overlay === 'party', 'Second Back: stale party-overlay consumed')
   assert(nav.peek()?.type === 'view' && (nav.peek() as any).view === 'dashboard', 'Returns to dashboard')
 }
 
@@ -393,9 +445,12 @@ testEmptyStackAllowsExit()
 testRestoringGuardPreventsDuplicatePush()
 testRapidNavigationBackChain()
 
-console.log('\n  Overlay-close-via-UI sync (BUG-1 fix):')
-testOverlayCloseViaUIPopsStack()
-testOverlayCloseViaUIThenReopen()
+console.log('\n  Overlay-close-via-UI (lazy consume, no history.back):')
+testOverlayCloseViaUIStaysLazy()
+
+console.log('\n  Combined close+navigate (critical regression from 0f270f3):')
+testCombinedCloseOverlayAndNavigate()
+testCombinedCloseOverlayAndOpenAnother()
 
 console.log('\n  First-Back-exits-app (BUG-2 fix):')
 testFirstBackOnDashboardExits()

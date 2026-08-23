@@ -72,6 +72,19 @@ export function useBackButton() {
       }
 
       // §OVERLAY-OPEN: Push when an overlay/dialog opens (null → non-null).
+      // Only push for OPENING — closing is handled lazily by popstate (the
+      // stale entry is consumed on the next Back press, at which point the
+      // overlay is already closed and the popstate close-check is a no-op).
+      //
+      // §DESIGN-NOTE: We intentionally do NOT call history.back() when an
+      // overlay closes via UI. The previous 0f270f3 commit tried that, but
+      // it broke the common "close overlay + navigate" pattern (e.g. party
+      // detail → Quick Sale) where setOverlayPartyId(null) and
+      // setActiveView('sale-pad') are batched in one state update. The
+      // history.back() + early return caused the view change to be skipped
+      // from the navStack, leaving the app in a broken state. Leaving the
+      // stale entry is the safer trade-off: the next Back press consumes
+      // it as a no-op close, which is correct browser behavior.
       if (!prev.overlayPartyId && state.overlayPartyId) {
         navStack.push({ type: 'overlay', overlay: 'party' })
         window.history.pushState({ app: 'bizledger' }, '')
@@ -112,26 +125,6 @@ export function useBackButton() {
         navStack.push({ type: 'overlay', overlay: 'fingerprint-modal' })
         window.history.pushState({ app: 'bizledger' }, '')
       }
-
-      // §OVERLAY-CLOSE-VIA-UI: When an overlay closes via the UI (X button,
-      // backdrop click, Escape) — i.e. non-null → null WITHOUT a popstate —
-      // we must sync the browser history by calling history.back(). This
-      // consumes the overlay's history entry. The resulting popstate will
-      // pop the navStack entry; since the overlay is already closed, the
-      // popstate handler's `if (state.overlayX)` check is false → no-op.
-      // Without this, the navStack desyncs from browser history and the
-      // next Back press becomes a no-op instead of going to the real
-      // previous state.
-      if (prev.overlayPartyId && !state.overlayPartyId) { window.history.back(); return }
-      if (prev.overlayInvoiceId && !state.overlayInvoiceId) { window.history.back(); return }
-      if (prev.showSearch && !state.showSearch) { window.history.back(); return }
-      if (prev.showPartyForm && !state.showPartyForm) { window.history.back(); return }
-      if (prev.showProductForm && !state.showProductForm) { window.history.back(); return }
-      if (prev.showInvoiceForm && !state.showInvoiceForm) { window.history.back(); return }
-      if (prev.fabOpen && !state.fabOpen) { window.history.back(); return }
-      if (prev.globalFamilyModal && !state.globalFamilyModal) { window.history.back(); return }
-      if (prev.globalPartnerModal && !state.globalPartnerModal) { window.history.back(); return }
-      if (prev.globalFingerprintModal && !state.globalFingerprintModal) { window.history.back(); return }
     })
 
     return () => unsub()
