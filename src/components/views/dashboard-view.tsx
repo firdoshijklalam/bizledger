@@ -217,6 +217,7 @@ export function DashboardView() {
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         onClick={() => setActiveView('settings')}
+        aria-label="Manage business profile"
         className="w-full text-left rounded-2xl bg-gradient-to-br from-primary to-emerald-700 dark:from-primary dark:to-emerald-900 p-4 text-primary-foreground shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform"
       >
         <div className="flex items-center gap-3">
@@ -240,6 +241,10 @@ export function DashboardView() {
               </span>
             </div>
             <h2 className="text-base font-bold truncate">{business?.name}</h2>
+            {/* §BUSINESS-TYPE: Derive from storeSlug/serviceableAreas — "Retail Store" if storeSlug present, "Wholesale" if not. No new DB field. */}
+            <p className="text-[10px] opacity-70 -mt-0.5">
+              {business?.storeSlug ? 'Retail Store' : 'Wholesale'}{business?.serviceableAreas ? ' • Local' : ''}
+            </p>
             {/* Business metadata row: location • phone */}
             <div className="flex items-center gap-3 mt-1 text-[10px] opacity-90">
               {business?.address && (
@@ -263,8 +268,18 @@ export function DashboardView() {
               </div>
             )}
           </div>
-          {/* Edit chevron */}
-          <ChevronRight className="w-5 h-5 opacity-60 shrink-0" />
+        </div>
+        {/* §STATUS-AND-MANAGE: Bottom row with active status + manage action */}
+        <div className="flex items-center justify-between mt-3 pt-2 border-t border-white/10">
+          {/* §BUSINESS-STATUS: Derive from subscriptionPlan field (trial|active|expired|cancelled). Default "Active". */}
+          <span className="flex items-center gap-1 text-[10px] opacity-90">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 shrink-0" aria-hidden="true" />
+            {business?.subscriptionPlan === 'trial' ? 'Trial' : business?.subscriptionPlan === 'expired' ? 'Expired' : 'Active'}
+          </span>
+          <span className="text-[11px] font-medium opacity-90 flex items-center gap-0.5">
+            Manage
+            <ChevronRight className="w-3.5 h-3.5" />
+          </span>
         </div>
       </motion.button>
 
