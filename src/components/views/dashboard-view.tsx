@@ -241,10 +241,6 @@ export function DashboardView() {
               </span>
             </div>
             <h2 className="text-base font-bold truncate">{business?.name}</h2>
-            {/* §BUSINESS-TYPE: Derive from storeSlug/serviceableAreas — "Retail Store" if storeSlug present, "Wholesale" if not. No new DB field. */}
-            <p className="text-[10px] opacity-70 -mt-0.5">
-              {business?.storeSlug ? 'Retail Store' : 'Wholesale'}{business?.serviceableAreas ? ' • Local' : ''}
-            </p>
             {/* Business metadata row: location • phone */}
             <div className="flex items-center gap-3 mt-1 text-[10px] opacity-90">
               {business?.address && (
@@ -269,13 +265,10 @@ export function DashboardView() {
             )}
           </div>
         </div>
-        {/* §STATUS-AND-MANAGE: Bottom row with active status + manage action */}
-        <div className="flex items-center justify-between mt-3 pt-2 border-t border-white/10">
-          {/* §BUSINESS-STATUS: Derive from subscriptionPlan field (trial|active|expired|cancelled). Default "Active". */}
-          <span className="flex items-center gap-1 text-[10px] opacity-90">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 shrink-0" aria-hidden="true" />
-            {business?.subscriptionPlan === 'trial' ? 'Trial' : business?.subscriptionPlan === 'expired' ? 'Expired' : 'Active'}
-          </span>
+        {/* §MANAGE-ACTION: Bottom row with Manage action. No business type/status
+            shown — the data model has no explicit businessType or status field,
+            so we do not derive or invent one. */}
+        <div className="flex items-center justify-end mt-3 pt-2 border-t border-white/10">
           <span className="text-[11px] font-medium opacity-90 flex items-center gap-0.5">
             Manage
             <ChevronRight className="w-3.5 h-3.5" />
