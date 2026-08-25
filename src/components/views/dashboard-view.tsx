@@ -98,34 +98,122 @@ export function DashboardView() {
   const [hubExpanded, setHubExpanded] = useState(false)
   // §QUICK-CUSTOMIZE: Bottom sheet for Business Overview card customization
   const [showCustomize, setShowCustomize] = useState(false)
-  // §CARD-VISIBILITY: Business-level preferences persisted via AppSettings.cardPreferences
-  // Falls back to all-true defaults when null, missing keys, or malformed JSON.
-  const [cardPrefs, setCardPrefs] = useState({
+  // §CARD-PREFS: Business-level preferences persisted via AppSettings.cardPreferences
+  // Falls back to defaults when null, missing keys, or malformed JSON.
+  const DEFAULT_PREFS = {
     showOwner: true,
     showAddress: true,
     showPhone: true,
     showGstin: true,
-  })
-  const updateCardPref = async (key: keyof typeof cardPrefs, value: boolean) => {
-    const next = { ...cardPrefs, [key]: value }
-    setCardPrefs(next)
-    // Persist to AppSettings via existing API
+    greetingText: 'Namaste',
+    coverBlur: 8,
+    coverOverlay: 0.35,
+  }
+  const [cardPrefs, setCardPrefs] = useState(DEFAULT_PREFS)
+  // §DRAFT-STATE: Local draft for the customization sheet. Changes are NOT
+  // persisted until the user clicks "Save Changes". Cancel discards the draft.
+  const [draft, setDraft] = useState(DEFAULT_PREFS)
+  const [draftLogo, setDraftLogo] = useState<string | null | undefined>(undefined) // undefined = no change
+  const [draftCover, setDraftCover] = useState<string | null | undefined>(undefined)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
+  const parseCardPrefs = (raw: any) => {
+    const defaults = DEFAULT_PREFS
+    if (!raw) return defaults
     try {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+      return {
+        showOwner: parsed.showOwner ?? defaults.showOwner,
+        showAddress: parsed.showAddress ?? defaults.showAddress,
+        showPhone: parsed.showPhone ?? defaults.showPhone,
+        showGstin: parsed.showGstin ?? defaults.showGstin,
+        greetingText: typeof parsed.greetingText === 'string' ? parsed.greetingText.slice(0, 30) : defaults.greetingText,
+        coverBlur: typeof parsed.coverBlur === 'number' ? Math.max(0, Math.min(20, parsed.coverBlur)) : defaults.coverBlur,
+        coverOverlay: typeof parsed.coverOverlay === 'number' ? Math.max(0, Math.min(0.9, parsed.coverOverlay)) : defaults.coverOverlay,
+      }
+    } catch {
+      return defaults
+    }
+  }
+
+  // §OPEN-CUSTOMIZER: Initialize draft from current saved state
+  const openCustomizer = () => {
+    setDraft(cardPrefs)
+    setDraftLogo(undefined) // undefined = no change from saved
+    setDraftCover(undefined)
+    setSaveError(null)
+    setSaveSuccess(false)
+    setShowCustomize(true)
+  }
+
+  // §CANCEL: Discard draft and close
+  const cancelCustomizer = () => {
+    setDraft(cardPrefs)
+    setDraftLogo(undefined)
+    setDraftCover(undefined)
+    setSaveError(null)
+    setSaveSuccess(false)
+    setShowCustomize(false)
+  }
+
+  // §SAVE: Persist all draft changes together (preferences + logo + cover)
+  const saveChanges = async () => {
+    setSaving(true)
+    setSaveError(null)
+    setSaveSuccess(false)
+    try {
+      // 1. Save card preferences
       await fetch('/api/app-settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cardPreferences: JSON.stringify(next) }),
+        body: JSON.stringify({ cardPreferences: JSON.stringify(draft) }),
       })
+      // 2. Save logo if changed
+      if (draftLogo !== undefined) {
+        await fetch('/api/business', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logoUrl: draftLogo }),
+        })
+      }
+      // 3. Save cover if changed
+      if (draftCover !== undefined) {
+        await fetch('/api/business', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ coverUrl: draftCover }),
+        })
+      }
+      // 4. Update local state (no page reload)
+      setCardPrefs(draft)
+      if (draftLogo !== undefined && business) {
+        // Update the business object in the store
+        useAppStore.getState().setBusiness({ ...business, logoUrl: draftLogo })
+      }
+      if (draftCover !== undefined && business) {
+        useAppStore.getState().setBusiness({ ...business, coverUrl: draftCover })
+      }
+      setSaveSuccess(true)
+      // Close sheet after short delay so user sees success
+      setTimeout(() => {
+        setShowCustomize(false)
+        setSaveSuccess(false)
+      }, 800)
     } catch {
-      // best-effort
+      setSaveError('Could not save changes')
+    } finally {
+      setSaving(false)
     }
   }
-  // §LOGO-UPLOAD: Profile photo upload via existing /api/image-compress + PUT /api/business
+
+  // §IMAGE-UPLOAD-DRAFT: Compress image and set in draft (NOT persisted yet)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadingCover, setUploadingCover] = useState(false)
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: 'logoUrl' | 'coverUrl') => {
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>, field: 'logoUrl' | 'coverUrl') => {
     const file = e.target.files?.[0]
     if (!file) return
     if (field === 'logoUrl') setUploading(true)
@@ -142,14 +230,9 @@ export function DashboardView() {
         })
         const compressed = await compressRes.json()
         const finalImage = compressed.ok ? compressed.image : base64
-        // Save to business via existing API
-        await fetch('/api/business', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ [field]: finalImage }),
-        })
-        // Refresh business data
-        window.location.reload()
+        // Set in draft (NOT persisted — user must click Save)
+        if (field === 'logoUrl') setDraftLogo(finalImage)
+        else setDraftCover(finalImage)
       }
       reader.readAsDataURL(file)
     } catch {
@@ -159,6 +242,26 @@ export function DashboardView() {
       else setUploadingCover(false)
     }
   }
+
+  // §SUGGESTED-COVERS: CSS gradient-based covers (no external assets needed)
+  const SUGGESTED_COVERS = [
+    'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    'linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%)',
+    'linear-gradient(135deg, #064e3b 0%, #10b981 100%)',
+    'linear-gradient(135deg, #7c2d12 0%, #f59e0b 100%)',
+    'linear-gradient(135deg, #1e293b 0%, #475569 100%)',
+    'linear-gradient(135deg, #581c87 0%, #c026d3 100%)',
+    'linear-gradient(135deg, #0c4a6e 0%, #38bdf8 100%)',
+    'linear-gradient(135deg, #166534 0%, #84cc16 100%)',
+  ]
+
+  // §RESET-DEFAULTS: Reset draft to recommended defaults
+  const resetToDefaults = () => {
+    setDraft(DEFAULT_PREFS)
+    setDraftLogo(null) // null = remove logo
+    setDraftCover(null) // null = remove cover
+  }
+
   const { saveScroll } = useScrollRetention()
   const { save: saveScrollPos, restore: restoreScrollPos } = useScrollStore()
 
@@ -196,22 +299,11 @@ export function DashboardView() {
   const { data, loading: apiLoading, error: apiError, refetch } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl], { timeoutMs: 30000 })
   // §HERO-PROFILE: fetch userRole for the role tag (Owner/Admin/Sales)
   const { data: appSettings } = useFetch<any>('/api/app-settings', [])
-  // §CARD-PREFS-LOAD: Parse cardPreferences from appSettings (defensive JSON parse)
+  // §CARD-PREFS-LOAD: Parse cardPreferences from appSettings
   useEffect(() => {
     if (!appSettings) return
-    const raw = (appSettings as any).cardPreferences
-    if (!raw) return
-    try {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-      setCardPrefs({
-        showOwner: parsed.showOwner ?? true,
-        showAddress: parsed.showAddress ?? true,
-        showPhone: parsed.showPhone ?? true,
-        showGstin: parsed.showGstin ?? true,
-      })
-    } catch {
-      // malformed JSON → keep defaults
-    }
+    const parsed = parseCardPrefs((appSettings as any).cardPreferences)
+    setCardPrefs(parsed)
   }, [appSettings])
   // §GRADE-BOTTOM-SHEET: fetch all parties so the grade distribution bottom
   // sheet can show ALL customers in a grade (not just topDebtors which is
@@ -296,15 +388,18 @@ export function DashboardView() {
       <motion.button
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        onClick={() => setShowCustomize(true)}
+        onClick={openCustomizer}
         aria-label="Manage business profile"
         className="relative w-full text-left rounded-2xl overflow-hidden shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform"
       >
-        {/* §COVER-PHOTO: Cover background image with dark gradient overlay for readability */}
+        {/* §COVER-PHOTO: Cover background with user-controlled blur + overlay */}
         {business?.coverUrl ? (
-          <img src={business.coverUrl} alt="" className="absolute inset-0 w-full h-full object-cover" aria-hidden="true" />
+          <img src={business.coverUrl} alt="" className="absolute inset-0 w-full h-full object-cover"
+            style={{ filter: `blur(${cardPrefs.coverBlur}px)` }}
+            aria-hidden="true" />
         ) : null}
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/90 to-emerald-700/90 dark:from-primary/90 dark:to-emerald-900/90" />
+        <div className="absolute inset-0 bg-gradient-to-br from-primary to-emerald-700 dark:from-primary dark:to-emerald-900"
+          style={{ opacity: cardPrefs.coverOverlay + 0.55 }} />
         <div className="relative p-4 text-primary-foreground">
         <div className="flex items-center gap-3">
           {/* Circular avatar — business logo or initials fallback */}
@@ -320,7 +415,7 @@ export function DashboardView() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               {cardPrefs.showOwner && (
-                <p className="text-xs opacity-80">Namaste, {business?.ownerName?.split(' ')[0] || 'Trader'} 👋</p>
+                <p className="text-xs opacity-80">{cardPrefs.greetingText || 'Namaste'}, {business?.ownerName?.split(' ')[0] || 'Trader'} 👋</p>
               )}
               {/* User role tag */}
               <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-white/20 backdrop-blur-sm flex items-center gap-0.5">
@@ -363,7 +458,7 @@ export function DashboardView() {
         </div>
       </motion.button>
 
-      {/* §QUICK-CUSTOMIZE-SHEET: Bottom sheet for Business Overview card customization */}
+      {/* §BUSINESS-CARD-EDITOR: Bottom sheet with live preview + draft/save model */}
       <AnimatePresence>
         {showCustomize && (
           <>
@@ -371,7 +466,7 @@ export function DashboardView() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setShowCustomize(false)}
+              onClick={cancelCustomizer}
               className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-[2px]"
             />
             <motion.div
@@ -379,102 +474,194 @@ export function DashboardView() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-              className="fixed bottom-0 inset-x-0 z-[100] bg-card rounded-t-3xl border-t border-border p-5 pb-[calc(env(safe-area-inset-bottom)+16px)] max-w-2xl mx-auto max-h-[80vh] overflow-y-auto"
+              className="fixed bottom-0 inset-x-0 z-[100] bg-card rounded-t-3xl border-t border-border max-w-2xl mx-auto max-h-[85vh] flex flex-col"
             >
-              <div className="w-10 h-1 rounded-full bg-muted mx-auto mb-4" />
-              <div className="flex items-center justify-between mb-4">
+              {/* §HEADER: sticky top with title + close */}
+              <div className="flex items-center justify-between p-4 pb-2 border-b border-border">
                 <h3 className="text-sm font-semibold flex items-center gap-1.5">
                   <Settings className="w-4 h-4" /> Customize Card
                 </h3>
-                <button onClick={() => setShowCustomize(false)} className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center">
+                <button onClick={cancelCustomizer} className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center">
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* §PROFILE-PHOTO: Upload logo via existing /api/image-compress + PUT /api/business */}
-              <div className="mb-4">
-                <p className="text-[10px] text-muted-foreground uppercase mb-2">Profile Photo</p>
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-muted overflow-hidden flex items-center justify-center shrink-0">
-                    {business?.logoUrl ? (
-                      <img src={business.logoUrl} alt="Logo" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-lg font-bold text-muted-foreground">
-                        {(business?.name || 'B').charAt(0).toUpperCase()}
-                      </span>
-                    )}
+              {/* §SCROLLABLE-CONTENT: preview + controls */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {/* §LIVE-PREVIEW: Card preview using draft state */}
+                <div className="relative w-full rounded-2xl overflow-hidden shadow-md">
+                  {(draftCover !== undefined ? draftCover : business?.coverUrl) ? (
+                    <img
+                      src={(draftCover !== undefined ? draftCover : business?.coverUrl) as string}
+                      alt="" className="absolute inset-0 w-full h-full object-cover"
+                      style={{ filter: `blur(${draft.coverBlur}px)` }}
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                  <div className="absolute inset-0 bg-gradient-to-br from-primary to-emerald-700 dark:from-primary dark:to-emerald-900"
+                    style={{ opacity: draft.coverOverlay + 0.55 }} />
+                  <div className="relative p-4 text-primary-foreground">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0 overflow-hidden border-2 border-white/30">
+                        {(draftLogo !== undefined ? draftLogo : business?.logoUrl) ? (
+                          <img src={(draftLogo !== undefined ? draftLogo : business?.logoUrl) as string} alt="Logo" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-base font-bold">{(business?.name || 'B').charAt(0).toUpperCase()}</span>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        {draft.showOwner && (
+                          <p className="text-xs opacity-80">{draft.greetingText || 'Namaste'}, {business?.ownerName?.split(' ')[0] || 'Trader'} 👋</p>
+                        )}
+                        <h2 className="text-sm font-bold truncate">{business?.name}</h2>
+                        <div className="flex items-center gap-2 mt-0.5 text-[9px] opacity-90">
+                          {draft.showAddress && business?.address && (
+                            <span className="flex items-center gap-0.5 min-w-0"><MapPin className="w-2.5 h-2.5 shrink-0" /><span className="truncate">{business.address.split(',').slice(-2).join(',').trim()}</span></span>
+                          )}
+                          {draft.showPhone && business?.phone && (
+                            <span className="flex items-center gap-0.5 shrink-0"><Phone className="w-2.5 h-2.5" /><span>{business.phone}</span></span>
+                          )}
+                        </div>
+                        {draft.showGstin && business?.gstin && (
+                          <div className="flex items-center gap-0.5 mt-0.5 text-[9px] opacity-75"><Building2 className="w-2.5 h-2.5 shrink-0" /><span className="truncate">GSTIN: {business.gstin}</span></div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'logoUrl')} className="hidden" />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors min-h-[40px] disabled:opacity-50"
-                  >
-                    {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
-                    {uploading ? 'Uploading...' : 'Change Photo'}
-                  </button>
                 </div>
-              </div>
 
-              {/* §COVER-PHOTO: Upload cover via existing /api/image-compress + PUT /api/business */}
-              <div className="mb-4">
-                <p className="text-[10px] text-muted-foreground uppercase mb-2">Cover Photo</p>
-                <div className="flex items-center gap-3">
-                  <div className="w-16 h-10 rounded-lg bg-muted overflow-hidden flex items-center justify-center shrink-0">
-                    {business?.coverUrl ? (
-                      <img src={business.coverUrl} alt="Cover" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-[9px] text-muted-foreground">No cover</span>
-                    )}
-                  </div>
-                  <input ref={coverInputRef} type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'coverUrl')} className="hidden" />
-                  <button
-                    onClick={() => coverInputRef.current?.click()}
-                    disabled={uploadingCover}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors min-h-[40px] disabled:opacity-50"
-                  >
-                    {uploadingCover ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
-                    {uploadingCover ? 'Uploading...' : 'Change Cover'}
-                  </button>
-                </div>
-              </div>
-
-              {/* §INFORMATION-VISIBILITY: Show/hide existing business fields on the card */}
-              <div className="mb-4">
-                <p className="text-[10px] text-muted-foreground uppercase mb-2">Show on Card</p>
-                <div className="space-y-1">
-                  {([
-                    { key: 'showOwner' as const, label: 'Owner Name' },
-                    { key: 'showAddress' as const, label: 'Address' },
-                    { key: 'showPhone' as const, label: 'Phone' },
-                    { key: 'showGstin' as const, label: 'GSTIN' },
-                  ]).map(({ key, label }) => (
-                    <button
-                      key={key}
-                      onClick={() => updateCardPref(key, !cardPrefs[key])}
-                      className="w-full flex items-center justify-between py-2 min-h-[40px] group"
-                    >
-                      <span className="text-xs font-medium">{label}</span>
-                      <span className={`w-9 h-5 rounded-full flex items-center transition-colors ${cardPrefs[key] ? 'bg-primary justify-end' : 'bg-muted justify-start'}`}>
-                        <span className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5 flex items-center justify-center">
-                          {cardPrefs[key] ? <Eye className="w-2.5 h-2.5 text-primary" /> : <EyeOff className="w-2.5 h-2.5 text-muted-foreground" />}
-                        </span>
-                      </span>
+                {/* §PROFILE-PHOTO: Change + Remove */}
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase mb-2">Profile Photo</p>
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-muted overflow-hidden flex items-center justify-center shrink-0">
+                      {(draftLogo !== undefined ? draftLogo : business?.logoUrl) ? (
+                        <img src={(draftLogo !== undefined ? draftLogo : business?.logoUrl) as string} alt="Logo" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-lg font-bold text-muted-foreground">{(business?.name || 'B').charAt(0).toUpperCase()}</span>
+                      )}
+                    </div>
+                    <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => handleImageSelect(e, 'logoUrl')} className="hidden" />
+                    <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors min-h-[40px] disabled:opacity-50">
+                      {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                      {uploading ? 'Processing...' : 'Change'}
                     </button>
-                  ))}
+                    {draftLogo !== undefined && (
+                      <button onClick={() => setDraftLogo(null)} className="px-3 py-2 rounded-xl bg-destructive/10 text-destructive text-xs font-medium hover:bg-destructive/20 transition-colors min-h-[40px]">
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {/* §COVER-PHOTO: Suggested + Custom + Remove */}
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase mb-2">Cover Photo</p>
+                  {/* Suggested covers */}
+                  <div className="grid grid-cols-4 gap-2 mb-2">
+                    {SUGGESTED_COVERS.map((grad, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setDraftCover(grad)}
+                        className={`h-10 rounded-lg shrink-0 border-2 transition-colors ${draftCover === grad ? 'border-primary' : 'border-transparent'}`}
+                        style={{ background: grad }}
+                        aria-label={`Cover option ${i + 1}`}
+                      />
+                    ))}
+                  </div>
+                  {/* Custom upload */}
+                  <div className="flex items-center gap-2">
+                    <input ref={coverInputRef} type="file" accept="image/*" onChange={(e) => handleImageSelect(e, 'coverUrl')} className="hidden" />
+                    <button onClick={() => coverInputRef.current?.click()} disabled={uploadingCover} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors min-h-[40px] disabled:opacity-50">
+                      {uploadingCover ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                      {uploadingCover ? 'Processing...' : 'Upload Custom'}
+                    </button>
+                    {draftCover !== undefined && (
+                      <button onClick={() => setDraftCover(null)} className="px-3 py-2 rounded-xl bg-destructive/10 text-destructive text-xs font-medium hover:bg-destructive/20 transition-colors min-h-[40px]">
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* §COVER-BLUR: Slider 0–20 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[10px] text-muted-foreground uppercase">Cover Blur</p>
+                    <span className="text-[10px] text-muted-foreground">{draft.coverBlur < 4 ? 'Low' : draft.coverBlur < 12 ? 'Medium' : 'High'} ({draft.coverBlur}px)</span>
+                  </div>
+                  <input type="range" min={0} max={20} value={draft.coverBlur} onChange={(e) => setDraft({ ...draft, coverBlur: Number(e.target.value) })} className="w-full h-8 accent-primary" />
+                </div>
+
+                {/* §COVER-OVERLAY: Slider 0–0.9 */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[10px] text-muted-foreground uppercase">Overlay / Readability</p>
+                    <span className="text-[10px] text-muted-foreground">{Math.round(draft.coverOverlay * 100)}%</span>
+                  </div>
+                  <input type="range" min={0} max={0.9} step={0.05} value={draft.coverOverlay} onChange={(e) => setDraft({ ...draft, coverOverlay: Number(e.target.value) })} className="w-full h-8 accent-primary" />
+                </div>
+
+                {/* §GREETING-TEXT: Custom greeting */}
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase mb-1.5">Greeting Text</p>
+                  <input
+                    type="text"
+                    value={draft.greetingText}
+                    onChange={(e) => setDraft({ ...draft, greetingText: e.target.value.slice(0, 30) })}
+                    placeholder="Namaste"
+                    maxLength={30}
+                    className="w-full h-10 rounded-xl bg-muted px-3 text-sm border-0 outline-none"
+                  />
+                </div>
+
+                {/* §VISIBILITY-TOGGLES */}
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase mb-2">Show on Card</p>
+                  <div className="space-y-1">
+                    {([
+                      { key: 'showOwner' as const, label: 'Owner Name' },
+                      { key: 'showAddress' as const, label: 'Address' },
+                      { key: 'showPhone' as const, label: 'Phone' },
+                      { key: 'showGstin' as const, label: 'GSTIN' },
+                    ]).map(({ key, label }) => (
+                      <button key={key} onClick={() => setDraft({ ...draft, [key]: !draft[key] })} className="w-full flex items-center justify-between py-2 min-h-[40px]">
+                        <span className="text-xs font-medium">{label}</span>
+                        <span className={`w-9 h-5 rounded-full flex items-center transition-colors ${draft[key] ? 'bg-primary justify-end' : 'bg-muted justify-start'}`}>
+                          <span className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5 flex items-center justify-center">
+                            {draft[key] ? <Eye className="w-2.5 h-2.5 text-primary" /> : <EyeOff className="w-2.5 h-2.5 text-muted-foreground" />}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* §RESET-DEFAULTS */}
+                <button onClick={resetToDefaults} className="w-full text-xs text-muted-foreground hover:text-foreground py-2">
+                  Reset to recommended defaults
+                </button>
+
+                {/* §MANAGE-SETTINGS: Navigate to full Settings page */}
+                <button onClick={() => { cancelCustomizer(); setActiveView('settings') }} className="w-full flex items-center justify-between p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors min-h-[48px]">
+                  <span className="text-xs font-medium flex items-center gap-1.5">⚙️ Manage Business Settings</span>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                </button>
               </div>
 
-              {/* §MAIN-SETTINGS: Navigate to full Settings page */}
-              <button
-                onClick={() => { setShowCustomize(false); setActiveView('settings') }}
-                className="w-full flex items-center justify-between p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors min-h-[48px]"
-              >
-                <span className="text-xs font-medium flex items-center gap-1.5">
-                  ⚙️ Manage Business Settings
-                </span>
-                <ChevronRight className="w-4 h-4 text-muted-foreground" />
-              </button>
+              {/* §STICKY-FOOTER: Save / Cancel */}
+              <div className="border-t border-border p-3 flex items-center gap-2 bg-card">
+                {saveError && <span className="text-[10px] text-destructive flex-1">{saveError}</span>}
+                {saveSuccess && <span className="text-[10px] text-emerald-600 flex-1">✓ Changes saved</span>}
+                {!saveError && !saveSuccess && <span className="flex-1" />}
+                <button onClick={cancelCustomizer} disabled={saving} className="px-4 py-2.5 rounded-xl text-xs font-medium text-muted-foreground hover:bg-muted transition-colors min-h-[44px] disabled:opacity-50">
+                  Cancel
+                </button>
+                <button onClick={saveChanges} disabled={saving} className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors min-h-[44px] disabled:opacity-50 flex items-center gap-1.5">
+                  {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
             </motion.div>
           </>
         )}

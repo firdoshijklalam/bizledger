@@ -91,8 +91,8 @@ export async function PUT(req: NextRequest) {
 }
 
 // §CARD-PREFERENCES-VALIDATION: Defensive parse + allow-list.
-// Accepts a JSON string or object. Only known boolean keys are persisted.
-// Malformed JSON, non-boolean values, or unknown keys are silently dropped.
+// Accepts a JSON string or object. Only known keys with correct types are persisted.
+// Malformed JSON, invalid types, or unknown keys are silently dropped.
 // Returns a JSON string safe for Prisma storage, or null if empty.
 function validateCardPreferences(input: unknown): string | null {
   let prefs: Record<string, unknown> = {}
@@ -108,12 +108,31 @@ function validateCardPreferences(input: unknown): string | null {
     return null
   }
 
-  const ALLOWED_KEYS = ['showOwner', 'showAddress', 'showPhone', 'showGstin'] as const
-  const clean: Record<string, boolean> = {}
-  for (const key of ALLOWED_KEYS) {
+  const clean: Record<string, unknown> = {}
+
+  // §VISIBILITY-TOGGLES: boolean only
+  const BOOL_KEYS = ['showOwner', 'showAddress', 'showPhone', 'showGstin'] as const
+  for (const key of BOOL_KEYS) {
     if (key in prefs && typeof prefs[key] === 'boolean') {
       clean[key] = prefs[key]
     }
   }
+
+  // §GREETING-TEXT: string, trimmed, max 30 chars
+  if ('greetingText' in prefs && typeof prefs.greetingText === 'string') {
+    const trimmed = prefs.greetingText.trim().slice(0, 30)
+    clean.greetingText = trimmed
+  }
+
+  // §COVER-BLUR: number 0–20, default 8
+  if ('coverBlur' in prefs && typeof prefs.coverBlur === 'number' && !isNaN(prefs.coverBlur)) {
+    clean.coverBlur = Math.max(0, Math.min(20, Math.round(prefs.coverBlur)))
+  }
+
+  // §COVER-OVERLAY: number 0–0.9, default 0.35
+  if ('coverOverlay' in prefs && typeof prefs.coverOverlay === 'number' && !isNaN(prefs.coverOverlay)) {
+    clean.coverOverlay = Math.max(0, Math.min(0.9, Math.round(prefs.coverOverlay * 100) / 100))
+  }
+
   return Object.keys(clean).length > 0 ? JSON.stringify(clean) : null
 }
