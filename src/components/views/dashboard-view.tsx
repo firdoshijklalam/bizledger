@@ -118,6 +118,16 @@ export function DashboardView() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
+
+  // §TRY-CLOSE: If dirty, show discard confirmation; otherwise close immediately
+  const tryClose = () => {
+    if (isDirty) {
+      setShowDiscardConfirm(true)
+    } else {
+      setShowCustomize(false)
+    }
+  }
 
   const parseCardPrefs = (raw: any) => {
     const defaults = DEFAULT_PREFS
@@ -148,13 +158,14 @@ export function DashboardView() {
     setShowCustomize(true)
   }
 
-  // §CANCEL: Discard draft and close
+  // §CANCEL: Discard draft and close (forced — no confirmation)
   const cancelCustomizer = () => {
     setDraft(cardPrefs)
     setDraftLogo(undefined)
     setDraftCover(undefined)
     setSaveError(null)
     setSaveSuccess(false)
+    setShowDiscardConfirm(false)
     setShowCustomize(false)
   }
 
@@ -468,7 +479,7 @@ export function DashboardView() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={cancelCustomizer}
+              onClick={tryClose}
               className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-[2px]"
             />
             <motion.div
@@ -483,7 +494,7 @@ export function DashboardView() {
                 <h3 className="text-sm font-semibold flex items-center gap-1.5">
                   <Settings className="w-4 h-4" /> Customize Card
                 </h3>
-                <button onClick={cancelCustomizer} className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center">
+                <button onClick={tryClose} className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -656,7 +667,7 @@ export function DashboardView() {
                 {saveError && <span className="text-[10px] text-destructive flex-1">{saveError}</span>}
                 {saveSuccess && <span className="text-[10px] text-emerald-600 flex-1">✓ Changes saved</span>}
                 {!saveError && !saveSuccess && <span className="flex-1" />}
-                <button onClick={cancelCustomizer} disabled={saving} className="px-4 py-2.5 rounded-xl text-xs font-medium text-muted-foreground hover:bg-muted transition-colors min-h-[44px] disabled:opacity-50">
+                <button onClick={tryClose} disabled={saving} className="px-4 py-2.5 rounded-xl text-xs font-medium text-muted-foreground hover:bg-muted transition-colors min-h-[44px] disabled:opacity-50">
                   Cancel
                 </button>
                 <button onClick={saveChanges} disabled={saving || !isDirty} className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors min-h-[44px] disabled:opacity-50 flex items-center gap-1.5">
@@ -665,6 +676,44 @@ export function DashboardView() {
                 </button>
               </div>
             </motion.div>
+
+            {/* §DISCARD-CONFIRMATION: Shows when user tries to close with unsaved changes */}
+            <AnimatePresence>
+              {showDiscardConfirm && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[110] bg-black/60 flex items-center justify-center p-4"
+                  onClick={() => setShowDiscardConfirm(false)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.9 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0.9 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-card rounded-2xl p-5 max-w-xs w-full space-y-3"
+                  >
+                    <p className="text-sm font-semibold text-center">Discard unsaved changes?</p>
+                    <p className="text-[11px] text-muted-foreground text-center">Your draft changes will be lost.</p>
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        onClick={() => setShowDiscardConfirm(false)}
+                        className="flex-1 px-3 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium min-h-[44px]"
+                      >
+                        Continue Editing
+                      </button>
+                      <button
+                        onClick={cancelCustomizer}
+                        className="flex-1 px-3 py-2.5 rounded-xl bg-destructive/10 text-destructive text-xs font-medium min-h-[44px]"
+                      >
+                        Discard
+                      </button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </>
         )}
       </AnimatePresence>
