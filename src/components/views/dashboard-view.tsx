@@ -158,38 +158,33 @@ export function DashboardView() {
     setShowCustomize(false)
   }
 
-  // §SAVE: Persist all draft changes together (preferences + logo + cover)
+  // §SAVE: Persist ALL draft changes in ONE atomic API call.
+  // Uses POST /api/card-customization which wraps Business + AppSettings
+  // updates inside a single Prisma $transaction. If any part fails,
+  // everything rolls back — no partial-save state.
   const saveChanges = async () => {
     setSaving(true)
     setSaveError(null)
     setSaveSuccess(false)
     try {
-      // 1. Save card preferences
-      await fetch('/api/app-settings', {
-        method: 'PUT',
+      // Build request body — only include fields that changed
+      const payload: Record<string, unknown> = {}
+      if (draftLogo !== undefined) payload.logoUrl = draftLogo
+      if (draftCover !== undefined) payload.coverUrl = draftCover
+      // Always send cardPreferences (it's the full draft state)
+      payload.cardPreferences = JSON.stringify(draft)
+
+      const res = await fetch('/api/card-customization', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cardPreferences: JSON.stringify(draft) }),
+        body: JSON.stringify(payload),
       })
-      // 2. Save logo if changed
-      if (draftLogo !== undefined) {
-        await fetch('/api/business', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logoUrl: draftLogo }),
-        })
-      }
-      // 3. Save cover if changed
-      if (draftCover !== undefined) {
-        await fetch('/api/business', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ coverUrl: draftCover }),
-        })
-      }
-      // 4. Update local state (no page reload)
+      const data = await res.json()
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Save failed')
+
+      // §UPDATE-LOCAL-STATE: No page reload — update Zustand store + local prefs
       setCardPrefs(draft)
       if (draftLogo !== undefined && business) {
-        // Update the business object in the store
         useAppStore.getState().setBusiness({ ...business, logoUrl: draftLogo })
       }
       if (draftCover !== undefined && business) {
@@ -207,6 +202,13 @@ export function DashboardView() {
       setSaving(false)
     }
   }
+
+  // §DIRTY-STATE: Check if draft differs from saved state
+  const isDirty = (() => {
+    if (draftLogo !== undefined) return true
+    if (draftCover !== undefined) return true
+    return JSON.stringify(draft) !== JSON.stringify(cardPrefs)
+  })()
 
   // §IMAGE-UPLOAD-DRAFT: Compress image and set in draft (NOT persisted yet)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -657,9 +659,9 @@ export function DashboardView() {
                 <button onClick={cancelCustomizer} disabled={saving} className="px-4 py-2.5 rounded-xl text-xs font-medium text-muted-foreground hover:bg-muted transition-colors min-h-[44px] disabled:opacity-50">
                   Cancel
                 </button>
-                <button onClick={saveChanges} disabled={saving} className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors min-h-[44px] disabled:opacity-50 flex items-center gap-1.5">
+                <button onClick={saveChanges} disabled={saving || !isDirty} className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors min-h-[44px] disabled:opacity-50 flex items-center gap-1.5">
                   {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {saving ? 'Saving...' : 'Save Changes'}
+                  {saving ? 'Saving...' : isDirty ? 'Save Changes' : 'No changes'}
                 </button>
               </div>
             </motion.div>

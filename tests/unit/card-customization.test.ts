@@ -284,8 +284,8 @@ function testNoPageReload() {
 // Z. Save persists via API calls
 function testSaveUsesApi() {
   const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
-  assert(src.includes("fetch('/api/app-settings'"), 'Save calls app-settings API')
-  assert(src.includes("fetch('/api/business'"), 'Save calls business API for images')
+  assert(src.includes("fetch('/api/card-customization'"), 'Save uses atomic /api/card-customization endpoint')
+  assert(!src.includes("window.location.reload()"), 'No page reload after save')
 }
 
 // AA. Cancel discards draft
@@ -293,6 +293,48 @@ function testCancelDiscards() {
   const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
   assert(src.includes('cancelCustomizer'), 'Cancel function exists')
   assert(src.includes('setDraft(cardPrefs)'), 'Cancel restores saved state')
+}
+
+// BB. Atomic endpoint exists
+function testAtomicEndpoint() {
+  const exists = fs.existsSync('src/app/api/card-customization/route.ts')
+  assert(exists, 'POST /api/card-customization endpoint exists')
+}
+
+// CC. Atomic endpoint uses $transaction
+function testAtomicTransaction() {
+  const src = fs.readFileSync('src/app/api/card-customization/route.ts', 'utf8')
+  assert(src.includes('db.$transaction'), 'Card customization uses Prisma $transaction')
+}
+
+// DD. Atomic endpoint has RBAC
+function testAtomicRBAC() {
+  const src = fs.readFileSync('src/app/api/card-customization/route.ts', 'utf8')
+  assert(src.includes("requireRole(['OWNER', 'ADMIN'])"), 'Card customization requires OWNER/ADMIN')
+}
+
+// EE. Atomic endpoint uses getCurrentBusiness (tenant isolation)
+function testAtomicTenantIsolation() {
+  const src = fs.readFileSync('src/app/api/card-customization/route.ts', 'utf8')
+  assert(src.includes('getCurrentBusiness'), 'Card customization uses getCurrentBusiness (tenant isolation)')
+}
+
+// FF. isDirty state tracking
+function testDirtyStateTracking() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes('isDirty'), 'isDirty state exists')
+  assert(src.includes('disabled={saving || !isDirty}'), 'Save button disabled when not dirty')
+}
+
+// GG. No separate app-settings or business API calls in save flow
+function testNoSeparateApiCalls() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  // The save function should NOT contain separate PUT /api/app-settings or PUT /api/business calls
+  const saveStart = src.indexOf('const saveChanges')
+  const saveEnd = src.indexOf('}', saveStart + 200)
+  const saveFunc = src.substring(saveStart, saveEnd + 1)
+  assert(!saveFunc.includes("fetch('/api/app-settings'"), 'Save does not call /api/app-settings separately')
+  assert(!saveFunc.includes("fetch('/api/business'"), 'Save does not call /api/business separately')
 }
 
 // ─── Run all tests ─────────────────────────────────────────────────────────
@@ -337,6 +379,14 @@ console.log('\n  Draft / save / cancel:')
 testNoPageReload()
 testSaveUsesApi()
 testCancelDiscards()
+
+console.log('\n  Atomic endpoint:')
+testAtomicEndpoint()
+testAtomicTransaction()
+testAtomicRBAC()
+testAtomicTenantIsolation()
+testDirtyStateTracking()
+testNoSeparateApiCalls()
 
 console.log(`\n✅ Passed: ${passed}`)
 console.log(`❌ Failed: ${failed}`)
