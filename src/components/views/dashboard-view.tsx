@@ -9,7 +9,7 @@ import {
   TrendingUp, TrendingDown, Wallet, Heart, AlertTriangle, Package,
   ArrowUpRight, ArrowDownRight, ArrowLeftRight, Users, Receipt, ChevronRight,
   BarChart3, LineChart, X, Loader2, Calendar,
-  MapPin, Phone, Building2, ShieldCheck, Store,
+  MapPin, Phone, Building2, ShieldCheck, Store, Settings, Camera, Eye, EyeOff,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -96,6 +96,62 @@ export function DashboardView() {
   const [topExpanded, setTopExpanded] = useState(false)
   const [hubTab, setHubTab] = useState<'transactions' | 'lowstock' | 'orders'>('transactions')
   const [hubExpanded, setHubExpanded] = useState(false)
+  // §QUICK-CUSTOMIZE: Bottom sheet for Business Overview card customization
+  const [showCustomize, setShowCustomize] = useState(false)
+  // §CARD-VISIBILITY: Client-side show/hide preferences persisted in localStorage
+  const [cardPrefs, setCardPrefs] = useState({
+    showAddress: true,
+    showPhone: true,
+    showGstin: true,
+    showOwner: true,
+  })
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const saved = localStorage.getItem('bizledger-card-prefs')
+    if (saved) {
+      try { setCardPrefs(JSON.parse(saved)) } catch {}
+    }
+  }, [])
+  const updateCardPref = (key: keyof typeof cardPrefs, value: boolean) => {
+    const next = { ...cardPrefs, [key]: value }
+    setCardPrefs(next)
+    localStorage.setItem('bizledger-card-prefs', JSON.stringify(next))
+  }
+  // §LOGO-UPLOAD: Profile photo upload via existing /api/image-compress + PUT /api/business
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      const reader = new FileReader()
+      reader.onload = async () => {
+        const base64 = reader.result as string
+        // Compress via existing API
+        const compressRes = await fetch('/api/image-compress', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64, targetSizeKB: 200 }),
+        })
+        const compressed = await compressRes.json()
+        const finalImage = compressed.ok ? compressed.image : base64
+        // Save to business.logoUrl via existing API
+        await fetch('/api/business', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logoUrl: finalImage }),
+        })
+        // Refresh business data
+        window.location.reload()
+      }
+      reader.readAsDataURL(file)
+    } catch {
+      // best-effort
+    } finally {
+      setUploading(false)
+    }
+  }
   const { saveScroll } = useScrollRetention()
   const { save: saveScrollPos, restore: restoreScrollPos } = useScrollStore()
 
@@ -216,7 +272,7 @@ export function DashboardView() {
       <motion.button
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        onClick={() => setActiveView('settings')}
+        onClick={() => setShowCustomize(true)}
         aria-label="Manage business profile"
         className="w-full text-left rounded-2xl bg-gradient-to-br from-primary to-emerald-700 dark:from-primary dark:to-emerald-900 p-4 text-primary-foreground shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform"
       >
@@ -233,7 +289,9 @@ export function DashboardView() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <p className="text-xs opacity-80">Namaste, {business?.ownerName?.split(' ')[0] || 'Trader'} 👋</p>
+              {cardPrefs.showOwner && (
+                <p className="text-xs opacity-80">Namaste, {business?.ownerName?.split(' ')[0] || 'Trader'} 👋</p>
+              )}
               {/* User role tag */}
               <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-white/20 backdrop-blur-sm flex items-center gap-0.5">
                 <ShieldCheck className="w-2.5 h-2.5" />
@@ -243,21 +301,21 @@ export function DashboardView() {
             <h2 className="text-base font-bold truncate">{business?.name}</h2>
             {/* Business metadata row: location • phone */}
             <div className="flex items-center gap-3 mt-1 text-[10px] opacity-90">
-              {business?.address && (
+              {cardPrefs.showAddress && business?.address && (
                 <span className="flex items-center gap-0.5 min-w-0">
                   <MapPin className="w-3 h-3 shrink-0" />
                   <span className="truncate">{business.address.split(',').slice(-2).join(',').trim()}</span>
                 </span>
               )}
-              {business?.phone && (
+              {cardPrefs.showPhone && business?.phone && (
                 <span className="flex items-center gap-0.5 shrink-0">
                   <Phone className="w-3 h-3" />
                   <span>{business.phone}</span>
                 </span>
               )}
             </div>
-            {/* GSTIN line (if registered) */}
-            {business?.gstin && (
+            {/* GSTIN line (if registered and visible) */}
+            {cardPrefs.showGstin && business?.gstin && (
               <div className="flex items-center gap-0.5 mt-0.5 text-[10px] opacity-75">
                 <Building2 className="w-3 h-3 shrink-0" />
                 <span className="truncate">GSTIN: {business.gstin}</span>
@@ -275,6 +333,100 @@ export function DashboardView() {
           </span>
         </div>
       </motion.button>
+
+      {/* §QUICK-CUSTOMIZE-SHEET: Bottom sheet for Business Overview card customization */}
+      <AnimatePresence>
+        {showCustomize && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCustomize(false)}
+              className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-[2px]"
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+              className="fixed bottom-0 inset-x-0 z-[100] bg-card rounded-t-3xl border-t border-border p-5 pb-[calc(env(safe-area-inset-bottom)+16px)] max-w-2xl mx-auto"
+            >
+              <div className="w-10 h-1 rounded-full bg-muted mx-auto mb-4" />
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                  <Settings className="w-4 h-4" /> Customize Card
+                </h3>
+                <button onClick={() => setShowCustomize(false)} className="w-8 h-8 rounded-full hover:bg-muted flex items-center justify-center">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* §PROFILE-PHOTO: Upload logo via existing /api/image-compress + PUT /api/business */}
+              <div className="mb-4">
+                <p className="text-[10px] text-muted-foreground uppercase mb-2">Profile Photo</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-muted overflow-hidden flex items-center justify-center shrink-0">
+                    {business?.logoUrl ? (
+                      <img src={business.logoUrl} alt="Logo" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-lg font-bold text-muted-foreground">
+                        {(business?.name || 'B').charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <input ref={fileInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors min-h-[40px] disabled:opacity-50"
+                  >
+                    {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                    {uploading ? 'Uploading...' : 'Change Photo'}
+                  </button>
+                </div>
+              </div>
+
+              {/* §INFORMATION-VISIBILITY: Show/hide existing business fields on the card */}
+              <div className="mb-4">
+                <p className="text-[10px] text-muted-foreground uppercase mb-2">Show on Card</p>
+                <div className="space-y-1">
+                  {([
+                    { key: 'showOwner' as const, label: 'Owner Name' },
+                    { key: 'showAddress' as const, label: 'Address' },
+                    { key: 'showPhone' as const, label: 'Phone' },
+                    { key: 'showGstin' as const, label: 'GSTIN' },
+                  ]).map(({ key, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => updateCardPref(key, !cardPrefs[key])}
+                      className="w-full flex items-center justify-between py-2 min-h-[40px] group"
+                    >
+                      <span className="text-xs font-medium">{label}</span>
+                      <span className={`w-9 h-5 rounded-full flex items-center transition-colors ${cardPrefs[key] ? 'bg-primary justify-end' : 'bg-muted justify-start'}`}>
+                        <span className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5 flex items-center justify-center">
+                          {cardPrefs[key] ? <Eye className="w-2.5 h-2.5 text-primary" /> : <EyeOff className="w-2.5 h-2.5 text-muted-foreground" />}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* §MAIN-SETTINGS: Navigate to full Settings page */}
+              <button
+                onClick={() => { setShowCustomize(false); setActiveView('settings') }}
+                className="w-full flex items-center justify-between p-3 rounded-xl bg-muted/50 hover:bg-muted transition-colors min-h-[48px]"
+              >
+                <span className="text-xs font-medium flex items-center gap-1.5">
+                  ⚙️ Manage Business Settings
+                </span>
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* §LOCALIZED-CARD-FILTERS: Global time filter row REMOVED.
           Time-dependent cards now have their own dropdown range selector.
