@@ -38,6 +38,7 @@ export interface Business {
   pan?: string | null
   upiId?: string | null
   logoUrl?: string | null
+  coverUrl?: string | null
   currency: string
   // PRD Part 33: Marketplace fields
   storeSlug?: string | null

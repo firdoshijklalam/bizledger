@@ -33,6 +33,7 @@ model Business {
   pan       String?
   upiId     String?
   logoUrl   String?
+  coverUrl  String?
   currency  String   @default("INR")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -494,6 +495,7 @@ model AppSettings {
   telegramFileIdMode       Boolean   @default(false) // Store media as Telegram File IDs (zero cloud cost)
   // PRD Part 37 §3: Dual-profile switching
   appMode                  String    @default("merchant") // merchant | customer — current active mode
+  cardPreferences          String?   // JSON: {showOwner,showAddress,showPhone,showGstin}
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 

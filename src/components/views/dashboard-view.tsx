@@ -98,32 +98,38 @@ export function DashboardView() {
   const [hubExpanded, setHubExpanded] = useState(false)
   // §QUICK-CUSTOMIZE: Bottom sheet for Business Overview card customization
   const [showCustomize, setShowCustomize] = useState(false)
-  // §CARD-VISIBILITY: Client-side show/hide preferences persisted in localStorage
+  // §CARD-VISIBILITY: Business-level preferences persisted via AppSettings.cardPreferences
+  // Falls back to all-true defaults when null, missing keys, or malformed JSON.
   const [cardPrefs, setCardPrefs] = useState({
+    showOwner: true,
     showAddress: true,
     showPhone: true,
     showGstin: true,
-    showOwner: true,
   })
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const saved = localStorage.getItem('bizledger-card-prefs')
-    if (saved) {
-      try { setCardPrefs(JSON.parse(saved)) } catch {}
-    }
-  }, [])
-  const updateCardPref = (key: keyof typeof cardPrefs, value: boolean) => {
+  const updateCardPref = async (key: keyof typeof cardPrefs, value: boolean) => {
     const next = { ...cardPrefs, [key]: value }
     setCardPrefs(next)
-    localStorage.setItem('bizledger-card-prefs', JSON.stringify(next))
+    // Persist to AppSettings via existing API
+    try {
+      await fetch('/api/app-settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cardPreferences: JSON.stringify(next) }),
+      })
+    } catch {
+      // best-effort
+    }
   }
   // §LOGO-UPLOAD: Profile photo upload via existing /api/image-compress + PUT /api/business
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const coverInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploadingCover, setUploadingCover] = useState(false)
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: 'logoUrl' | 'coverUrl') => {
     const file = e.target.files?.[0]
     if (!file) return
-    setUploading(true)
+    if (field === 'logoUrl') setUploading(true)
+    else setUploadingCover(true)
     try {
       const reader = new FileReader()
       reader.onload = async () => {
@@ -136,11 +142,11 @@ export function DashboardView() {
         })
         const compressed = await compressRes.json()
         const finalImage = compressed.ok ? compressed.image : base64
-        // Save to business.logoUrl via existing API
+        // Save to business via existing API
         await fetch('/api/business', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ logoUrl: finalImage }),
+          body: JSON.stringify({ [field]: finalImage }),
         })
         // Refresh business data
         window.location.reload()
@@ -149,7 +155,8 @@ export function DashboardView() {
     } catch {
       // best-effort
     } finally {
-      setUploading(false)
+      if (field === 'logoUrl') setUploading(false)
+      else setUploadingCover(false)
     }
   }
   const { saveScroll } = useScrollRetention()
@@ -189,6 +196,23 @@ export function DashboardView() {
   const { data, loading: apiLoading, error: apiError, refetch } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl], { timeoutMs: 30000 })
   // §HERO-PROFILE: fetch userRole for the role tag (Owner/Admin/Sales)
   const { data: appSettings } = useFetch<any>('/api/app-settings', [])
+  // §CARD-PREFS-LOAD: Parse cardPreferences from appSettings (defensive JSON parse)
+  useEffect(() => {
+    if (!appSettings) return
+    const raw = (appSettings as any).cardPreferences
+    if (!raw) return
+    try {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+      setCardPrefs({
+        showOwner: parsed.showOwner ?? true,
+        showAddress: parsed.showAddress ?? true,
+        showPhone: parsed.showPhone ?? true,
+        showGstin: parsed.showGstin ?? true,
+      })
+    } catch {
+      // malformed JSON → keep defaults
+    }
+  }, [appSettings])
   // §GRADE-BOTTOM-SHEET: fetch all parties so the grade distribution bottom
   // sheet can show ALL customers in a grade (not just topDebtors which is
   // sliced to 5). Cached by TanStack Query so this is instant on re-open.
@@ -274,8 +298,14 @@ export function DashboardView() {
         animate={{ opacity: 1, y: 0 }}
         onClick={() => setShowCustomize(true)}
         aria-label="Manage business profile"
-        className="w-full text-left rounded-2xl bg-gradient-to-br from-primary to-emerald-700 dark:from-primary dark:to-emerald-900 p-4 text-primary-foreground shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform"
+        className="relative w-full text-left rounded-2xl overflow-hidden shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform"
       >
+        {/* §COVER-PHOTO: Cover background image with dark gradient overlay for readability */}
+        {business?.coverUrl ? (
+          <img src={business.coverUrl} alt="" className="absolute inset-0 w-full h-full object-cover" aria-hidden="true" />
+        ) : null}
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/90 to-emerald-700/90 dark:from-primary/90 dark:to-emerald-900/90" />
+        <div className="relative p-4 text-primary-foreground">
         <div className="flex items-center gap-3">
           {/* Circular avatar — business logo or initials fallback */}
           <div className="w-14 h-14 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0 overflow-hidden border-2 border-white/30">
@@ -323,14 +353,13 @@ export function DashboardView() {
             )}
           </div>
         </div>
-        {/* §MANAGE-ACTION: Bottom row with Manage action. No business type/status
-            shown — the data model has no explicit businessType or status field,
-            so we do not derive or invent one. */}
+        {/* §MANAGE-ACTION: Bottom row with Manage action */}
         <div className="flex items-center justify-end mt-3 pt-2 border-t border-white/10">
           <span className="text-[11px] font-medium opacity-90 flex items-center gap-0.5">
             Manage
             <ChevronRight className="w-3.5 h-3.5" />
           </span>
+        </div>
         </div>
       </motion.button>
 
@@ -350,7 +379,7 @@ export function DashboardView() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-              className="fixed bottom-0 inset-x-0 z-[100] bg-card rounded-t-3xl border-t border-border p-5 pb-[calc(env(safe-area-inset-bottom)+16px)] max-w-2xl mx-auto"
+              className="fixed bottom-0 inset-x-0 z-[100] bg-card rounded-t-3xl border-t border-border p-5 pb-[calc(env(safe-area-inset-bottom)+16px)] max-w-2xl mx-auto max-h-[80vh] overflow-y-auto"
             >
               <div className="w-10 h-1 rounded-full bg-muted mx-auto mb-4" />
               <div className="flex items-center justify-between mb-4">
@@ -375,7 +404,7 @@ export function DashboardView() {
                       </span>
                     )}
                   </div>
-                  <input ref={fileInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                  <input ref={fileInputRef} type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'logoUrl')} className="hidden" />
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading}
@@ -383,6 +412,29 @@ export function DashboardView() {
                   >
                     {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
                     {uploading ? 'Uploading...' : 'Change Photo'}
+                  </button>
+                </div>
+              </div>
+
+              {/* §COVER-PHOTO: Upload cover via existing /api/image-compress + PUT /api/business */}
+              <div className="mb-4">
+                <p className="text-[10px] text-muted-foreground uppercase mb-2">Cover Photo</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-16 h-10 rounded-lg bg-muted overflow-hidden flex items-center justify-center shrink-0">
+                    {business?.coverUrl ? (
+                      <img src={business.coverUrl} alt="Cover" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-[9px] text-muted-foreground">No cover</span>
+                    )}
+                  </div>
+                  <input ref={coverInputRef} type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'coverUrl')} className="hidden" />
+                  <button
+                    onClick={() => coverInputRef.current?.click()}
+                    disabled={uploadingCover}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors min-h-[40px] disabled:opacity-50"
+                  >
+                    {uploadingCover ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+                    {uploadingCover ? 'Uploading...' : 'Change Cover'}
                   </button>
                 </div>
               </div>

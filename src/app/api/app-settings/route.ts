@@ -54,6 +54,11 @@ export async function PUT(req: NextRequest) {
         externalScannerEnabled: body.externalScannerEnabled,
         // PRD Part 32 §3: Defaulter registry
         defaulterRegistryEnabled: body.defaulterRegistryEnabled,
+        // §CARD-PREFERENCES: JSON string with show/hide toggles. Defensive parse:
+        // only accept if it's a valid JSON string containing known boolean keys.
+        cardPreferences: body.cardPreferences !== undefined
+          ? validateCardPreferences(body.cardPreferences)
+          : undefined,
       },
       create: {
         businessId: business.id,
@@ -73,6 +78,9 @@ export async function PUT(req: NextRequest) {
         gateDangerZone: body.gateDangerZone ?? true,
         externalScannerEnabled: body.externalScannerEnabled ?? false,
         defaulterRegistryEnabled: body.defaulterRegistryEnabled ?? true,
+        cardPreferences: body.cardPreferences !== undefined
+          ? validateCardPreferences(body.cardPreferences)
+          : null,
       },
     })
     // §DECIMAL-FIX-D: gateDiscountLimit is Decimal
@@ -80,4 +88,32 @@ export async function PUT(req: NextRequest) {
   } catch (e) {
     return apiError(e, "Request failed")
   }
+}
+
+// §CARD-PREFERENCES-VALIDATION: Defensive parse + allow-list.
+// Accepts a JSON string or object. Only known boolean keys are persisted.
+// Malformed JSON, non-boolean values, or unknown keys are silently dropped.
+// Returns a JSON string safe for Prisma storage, or null if empty.
+function validateCardPreferences(input: unknown): string | null {
+  let prefs: Record<string, unknown> = {}
+  if (typeof input === 'string') {
+    try {
+      prefs = JSON.parse(input)
+    } catch {
+      return null // malformed JSON → fall back to null (defaults)
+    }
+  } else if (typeof input === 'object' && input !== null) {
+    prefs = input as Record<string, unknown>
+  } else {
+    return null
+  }
+
+  const ALLOWED_KEYS = ['showOwner', 'showAddress', 'showPhone', 'showGstin'] as const
+  const clean: Record<string, boolean> = {}
+  for (const key of ALLOWED_KEYS) {
+    if (key in prefs && typeof prefs[key] === 'boolean') {
+      clean[key] = prefs[key]
+    }
+  }
+  return Object.keys(clean).length > 0 ? JSON.stringify(clean) : null
 }

@@ -34,7 +34,7 @@ export async function PUT(req: NextRequest) {
     const body = await req.json()
     // Only update non-null fields (partial update)
     const data: Record<string, any> = {}
-    const fields = ['name', 'ownerName', 'phone', 'email', 'address', 'state', 'gstin', 'pan', 'upiId', 'currency', 'logoUrl', 'storeSlug', 'deliveryRadiusKm', 'latitude', 'longitude']
+    const fields = ['name', 'ownerName', 'phone', 'email', 'address', 'state', 'gstin', 'pan', 'upiId', 'currency', 'logoUrl', 'coverUrl', 'storeSlug', 'deliveryRadiusKm', 'latitude', 'longitude']
     for (const f of fields) {
       if (body[f] !== undefined) data[f] = body[f]
     }

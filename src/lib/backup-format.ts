@@ -58,6 +58,8 @@ export interface SanitizedBusiness {
   pan: string | null
   upiId: string | null
   currency: string
+  logoUrl: string | null
+  coverUrl: string | null
   storeSlug: string | null
   createdAt: Date | string
 }
@@ -68,6 +70,7 @@ export interface SanitizedAppSettings {
   invoicePrefix: string
   notificationsEnabled: boolean
   autoBackupEnabled: boolean
+  cardPreferences: string | null
   // §NO-SECRETS: pinHash, pinEnabled, gateLockdownUntil are NEVER exported
 }
 
@@ -260,6 +263,8 @@ export function sanitizeBusiness(b: any): SanitizedBusiness {
     pan: b.pan ?? null,
     upiId: b.upiId ?? null,
     currency: b.currency ?? 'INR',
+    logoUrl: b.logoUrl ?? null,
+    coverUrl: b.coverUrl ?? null,
     storeSlug: b.storeSlug ?? null,
     createdAt: b.createdAt,
   }
@@ -273,6 +278,7 @@ export function sanitizeAppSettings(s: any): SanitizedAppSettings | null {
     invoicePrefix: s.invoicePrefix ?? 'INV',
     notificationsEnabled: s.notificationsEnabled ?? true,
     autoBackupEnabled: s.autoBackupEnabled ?? false,
+    cardPreferences: s.cardPreferences ?? null,
   }
 }
 
