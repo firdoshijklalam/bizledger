@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 import { serializeDecimals } from '@/lib/decimal-serializer'
-import { computeRangeBounds, calendarMonthStartIST, calendarTodayStartIST, type DashboardRange } from '@/lib/date-ranges'
+import { computeRangeBounds, calendarMonthStartIST, calendarTodayStartIST, computeBuckets, type DashboardRange } from '@/lib/date-ranges'
 
 // GET /api/dashboard?range=1d|2d|3d|5d|7d|1m|3m|6m|1y|custom&startDate=...&endDate=...
 //
@@ -244,54 +244,14 @@ export async function GET(req: NextRequest) {
       ],
     }
 
+    // §FIX-2B: Use shared computeBuckets() from date-ranges.ts — eliminates the
+    // 30-minute IST truncation bug that occurred when setUTCHours(18,0,0,0)
+    // truncated rangeStart from 18:30 UTC (00:00 IST) to 18:00 UTC (23:30 IST).
+    // Now uses time arithmetic (getTime() + i * unitMs) — exact IST boundaries.
     const salesTrend: Array<{ date: string; fullDate?: string; revenue: number; expense: number; profit: number; collected: number; creditGiven: number }> = []
-    for (let i = 0; i < bucketCount; i++) {
-      let bucketStart: Date
-      let bucketEnd: Date
-      let label: string
-
-      // §FIX-2: All bucket computation uses UTC methods on the IST-aligned
-      // rangeStart/rangeEnd Date objects. The rangeStart from computeRangeBounds()
-      // is a UTC Date representing an IST boundary (e.g. 18:30 UTC = 00:00 IST).
-      // Using server-local getHours/setHours would shift buckets by the server's
-      // timezone offset (e.g. UTC server → buckets starting at 18:00 UTC instead
-      // of 00:00 IST). Using UTC methods keeps buckets deterministic regardless
-      // of server timezone. Labels use toLocaleString with timeZone: 'Asia/Kolkata'
-      // so users see IST times on the chart axis.
-      if (bucketType === 'hour') {
-        bucketStart = new Date(rangeStart)
-        bucketStart.setUTCHours(rangeStart.getUTCHours() + i, 0, 0, 0)
-        bucketEnd = new Date(bucketStart)
-        bucketEnd.setUTCHours(bucketStart.getUTCHours() + 1)
-        label = bucketStart.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
-      } else if (bucketType === 'day') {
-        bucketStart = new Date(rangeStart)
-        bucketStart.setUTCDate(rangeStart.getUTCDate() + i)
-        bucketStart.setUTCHours(0, 0, 0, 0)
-        bucketEnd = new Date(bucketStart)
-        bucketEnd.setUTCDate(bucketStart.getUTCDate() + 1)
-        if (bucketCount <= 7) {
-          label = bucketStart.toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' })
-        } else {
-          label = bucketStart.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' })
-        }
-      } else if (bucketType === 'week') {
-        bucketStart = new Date(rangeStart)
-        bucketStart.setUTCDate(rangeStart.getUTCDate() + i * 7)
-        bucketEnd = new Date(bucketStart)
-        bucketEnd.setUTCDate(bucketStart.getUTCDate() + 7)
-        label = `W${i + 1}`
-      } else {
-        bucketStart = new Date(rangeStart)
-        bucketStart.setUTCMonth(rangeStart.getUTCMonth() + i, 1)
-        bucketStart.setUTCHours(0, 0, 0, 0)
-        bucketEnd = new Date(bucketStart)
-        bucketEnd.setUTCMonth(bucketStart.getUTCMonth() + 1)
-        label = bucketStart.toLocaleDateString('en-IN', { month: 'short', timeZone: 'Asia/Kolkata' })
-      }
-
-      if (bucketStart > rangeEnd) break
-
+    const EXPENSE_TYPES = ['debit', 'expense', 'purchase'] as const
+    const buckets = computeBuckets(rangeStart, rangeEnd, bucketType, bucketCount)
+    for (const { start: bucketStart, end: bucketEnd, label } of buckets) {
       const dayInvoices = rangeInvoicesForTrend.filter(
         (inv) => new Date(inv.createdAt) >= bucketStart && new Date(inv.createdAt) < bucketEnd
       )
@@ -302,8 +262,6 @@ export async function GET(req: NextRequest) {
       // §FIX-1: Chart expense now matches card expense scope exactly.
       // Card SQL: type IN ('debit', 'expense', 'purchase')
       // Chart JS: was type === 'debit' only — missed 'expense' and 'purchase'.
-      // This shared constant ensures the two paths never drift again.
-      const EXPENSE_TYPES = ['debit', 'expense', 'purchase'] as const
       const expense = dayTxns.filter((t) => EXPENSE_TYPES.includes(t.type as any)).reduce((s, t) => s + num(t.amount), 0)
       const collected = dayTxns.filter((t) => t.type === 'credit').reduce((s, t) => s + num(t.amount), 0)
       const creditGiven = dayInvoices

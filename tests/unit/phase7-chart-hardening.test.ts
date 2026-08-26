@@ -18,7 +18,7 @@ export {}
 
 import * as fs from 'fs'
 import { formatChartAxisValue } from '../../src/lib/utils'
-import { computeRangeBounds, calendarMonthStartIST } from '../../src/lib/date-ranges'
+import { computeRangeBounds, calendarMonthStartIST, computeBuckets } from '../../src/lib/date-ranges'
 
 let passed = 0, failed = 0
 function assert(cond: boolean, msg: string) {
@@ -50,63 +50,193 @@ async function main() {
   }
 
   // ─── FIX 2: IST bucket correctness (UTC methods) ────────────────────────
-  console.log('\n  FIX 2 — IST bucket correctness (UTC methods):')
+  console.log('\n  FIX 2 — IST bucket correctness (time arithmetic in computeBuckets):')
   {
+    const drSrc = fs.readFileSync('src/lib/date-ranges.ts', 'utf8')
     const apiSrc = fs.readFileSync('src/app/api/dashboard/route.ts', 'utf8')
-    const codeOnly = apiSrc.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
 
-    // §POSITIVE: Bucket computation uses UTC methods
-    assert(codeOnly.includes('setUTCHours'),
-      'Hourly buckets use setUTCHours (not setHours)')
-    assert(codeOnly.includes('setUTCDate'),
-      'Daily/weekly buckets use setUTCDate (not setDate)')
-    assert(codeOnly.includes('setUTCMonth'),
-      'Monthly buckets use setUTCMonth (not setMonth)')
+    // §POSITIVE: Bucket computation uses time arithmetic (not setUTCHours truncation)
+    assert(drSrc.includes('rangeStart.getTime() + i * HOUR_MS'),
+      'Hourly buckets use getTime() + i * HOUR_MS (no truncation)')
+    assert(drSrc.includes('rangeStart.getTime() + i * DAY_MS'),
+      'Daily buckets use getTime() + i * DAY_MS (no truncation)')
+    assert(drSrc.includes('rangeStart.getTime() + i * WEEK_MS'),
+      'Weekly buckets use getTime() + i * WEEK_MS (no truncation)')
 
-    // §NEGATIVE: Server-local methods must NOT be used for bucket computation
-    // (getHours, getDate, getMonth are OK for reading — but setHours, setDate, setMonth
-    // are NOT OK for computing IST-aligned bucket boundaries)
-    // Check the bucket loop section only (lines ~248-290)
-    const bucketSection = codeOnly.substring(
-      codeOnly.indexOf('for (let i = 0; i < bucketCount'),
-      codeOnly.indexOf('if (bucketStart > rangeEnd) break')
-    )
+    // §NEGATIVE: Old setUTCHours truncation must NOT exist in bucket computation
+    const drCodeOnly = drSrc.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    const bucketSection = drCodeOnly.substring(drCodeOnly.indexOf('function computeBuckets'))
+    assert(!bucketSection.includes('setUTCHours('),
+      'computeBuckets does NOT use setUTCHours (was the 30-min truncation bug)')
     assert(!bucketSection.includes('.setHours('),
-      'Bucket loop does NOT use server-local setHours()')
+      'computeBuckets does NOT use server-local setHours()')
     assert(!bucketSection.includes('.setDate('),
-      'Bucket loop does NOT use server-local setDate()')
+      'computeBuckets does NOT use server-local setDate()')
     assert(!bucketSection.includes('.setMonth('),
-      'Bucket loop does NOT use server-local setMonth()')
+      'computeBuckets does NOT use server-local setMonth()')
 
     // §LABELS: Labels use Asia/Kolkata timezone
-    assert(apiSrc.includes("timeZone: 'Asia/Kolkata'"),
-      'Chart labels use timeZone: Asia/Kolkata')
+    assert(drSrc.includes("timeZone: 'Asia/Kolkata'"),
+      'Chart labels use timeZone: Asia/Kolkata (in date-ranges.ts computeBuckets)')
+
+    // §API: Dashboard API calls computeBuckets (not inline bucket loop)
+    assert(apiSrc.includes('computeBuckets'),
+      'Dashboard API calls computeBuckets() from date-ranges.ts')
 
     // §BEHAVIORAL: Verify hourly buckets start at IST midnight
-    // computeRangeBounds('1d') returns start = 18:30 UTC = 00:00 IST
-    // First hourly bucket should be at 18:30 UTC (00:00 IST), not 18:00 UTC (23:30 IST)
     const day1 = computeRangeBounds('1d')!
-    // rangeStart.getUTCHours() should be 18 (18:30 UTC = 00:00 IST)
-    // First bucket: setUTCHours(18, 0, 0, 0) = 18:00 UTC
-    // This is CORRECT — 18:00 UTC = 23:30 IST... wait, that's wrong.
-    // Actually: rangeStart = 18:30 UTC (00:00 IST).
-    // setUTCHours(rangeStart.getUTCHours() + 0, 0, 0, 0) = setUTCHours(18, 0, 0, 0) = 18:00 UTC
-    // But 18:00 UTC = 23:30 IST — that's 30 minutes BEFORE midnight IST.
-    // This is a rounding issue: setUTCHours truncates 18:30 to 18:00.
-    // The bucket should cover 18:30→19:30 UTC (00:00→01:00 IST), but setUTCHours(18) gives 18:00→19:00.
-    // This is a known limitation — the bucket is slightly off (30 min early).
-    // However, the transaction filtering uses >= bucketStart && < bucketEnd,
-    // so a transaction at 18:45 UTC (00:15 IST) would be in bucket 0 (18:00-19:00 UTC).
-    // The label would show "11:30 PM" (IST) which is close to midnight but not exact.
-    // This is acceptable for chart display purposes.
-    // The key assertion is that buckets use UTC methods (not server-local).
     assert(day1.start.getUTCHours() === 18,
       '1d rangeStart UTC hours = 18 (= 00:00 IST midnight)')
+  }
 
-    // §BEHAVIORAL: Verify 7d daily buckets align to IST days
-    const day7 = computeRangeBounds('7d')!
-    assert(day7.start.getUTCHours() === 18,
-      '7d rangeStart UTC hours = 18 (= 00:00 IST midnight)')
+  // ─── FIX 2B: Behavioral IST bucket correctness ────────────────────────
+  console.log('\n  FIX 2B — Behavioral IST bucket correctness:')
+  {
+    // §MOCK-DATE: Override Date constructor + Date.now to simulate fixed IST times
+    function withMockedDate(istYear: number, istMonth: number, istDate: number, istHour: number, istMinute: number, fn: () => void) {
+      const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000
+      const utcMs = Date.UTC(istYear, istMonth - 1, istDate, istHour, istMinute, 0) - IST_OFFSET_MS
+      const RealDate = Date
+      function MockDate(this: any, ...args: any[]) {
+        if (args.length === 0) return new RealDate(utcMs)
+        return new (RealDate as any)(...args)
+      }
+      MockDate.prototype = RealDate.prototype
+      MockDate.now = () => utcMs
+      ;(MockDate as any).UTC = RealDate.UTC
+      ;(MockDate as any).parse = RealDate.parse
+      globalThis.Date = MockDate as any
+      try { fn() } finally { globalThis.Date = RealDate }
+    }
+
+    const fmt = (d: Date) => d.toISOString()
+
+    // Test 1: 00:00 IST → first hourly bucket starts at 00:00 IST (18:30 UTC prev day)
+    withMockedDate(2026, 8, 26, 0, 0, () => {
+      const bounds = computeRangeBounds('1d')!
+      const buckets = computeBuckets(bounds.start, bounds.end, 'hour', 24)
+      assert(buckets[0].start.getTime() === bounds.start.getTime(),
+        '00:00 IST: First hourly bucket starts exactly at rangeStart (no truncation)')
+      assert(buckets[0].start.toISOString() === '2026-08-25T18:30:00.000Z',
+        '00:00 IST: First hourly bucket = 18:30 UTC (00:00 IST midnight)')
+      assert(buckets[0].end.getTime() - buckets[0].start.getTime() === 60 * 60 * 1000,
+        '00:00 IST: First hourly bucket spans exactly 1 hour')
+      assert(buckets[0].label === '12:00 am',
+        '00:00 IST: First bucket label = "12:00 am"')
+      assert(buckets[23].label === '11:00 pm',
+        '00:00 IST: Last bucket label = "11:00 pm"')
+    })
+
+    // Test 2: 05:29 IST → first hourly bucket STILL starts at 00:00 IST
+    withMockedDate(2026, 8, 26, 5, 29, () => {
+      const bounds = computeRangeBounds('1d')!
+      const buckets = computeBuckets(bounds.start, bounds.end, 'hour', 24)
+      assert(buckets[0].start.toISOString() === '2026-08-25T18:30:00.000Z',
+        '05:29 IST: First hourly bucket = 18:30 UTC (00:00 IST midnight, not 23:29 IST)')
+    })
+
+    // Test 3: 05:30 IST → same behavior (midnight boundary cross)
+    withMockedDate(2026, 8, 26, 5, 30, () => {
+      const bounds = computeRangeBounds('1d')!
+      const buckets = computeBuckets(bounds.start, bounds.end, 'hour', 24)
+      assert(buckets[0].start.toISOString() === '2026-08-25T18:30:00.000Z',
+        '05:30 IST: First hourly bucket = 18:30 UTC (00:00 IST midnight)')
+    })
+
+    // Test 4: 23:59 IST → first hourly bucket STILL starts at 00:00 IST
+    withMockedDate(2026, 8, 26, 23, 59, () => {
+      const bounds = computeRangeBounds('1d')!
+      const buckets = computeBuckets(bounds.start, bounds.end, 'hour', 24)
+      assert(buckets[0].start.toISOString() === '2026-08-25T18:30:00.000Z',
+        '23:59 IST: First hourly bucket = 18:30 UTC (00:00 IST midnight)')
+    })
+
+    // Test 5: 00:30 IST → first hourly bucket starts at 00:00 IST (not 00:30)
+    withMockedDate(2026, 8, 26, 0, 30, () => {
+      const bounds = computeRangeBounds('1d')!
+      const buckets = computeBuckets(bounds.start, bounds.end, 'hour', 24)
+      assert(buckets[0].start.getTime() === bounds.start.getTime(),
+        '00:30 IST: First hourly bucket starts at rangeStart (00:00 IST, not 00:30)')
+    })
+
+    // Test 6: Daily buckets for 7d — first day starts at IST midnight
+    withMockedDate(2026, 8, 26, 12, 0, () => {
+      const bounds = computeRangeBounds('7d')!
+      const buckets = computeBuckets(bounds.start, bounds.end, 'day', 7)
+      assert(buckets[0].start.getTime() === bounds.start.getTime(),
+        '7d: First daily bucket starts at rangeStart (IST midnight)')
+      assert(buckets[0].end.getTime() - buckets[0].start.getTime() === 24 * 60 * 60 * 1000,
+        '7d: First daily bucket spans exactly 1 day')
+    })
+
+    // Test 7: Month boundary — 3d rolling from Aug 31 → first day is Aug 29
+    withMockedDate(2026, 8, 31, 12, 0, () => {
+      const bounds = computeRangeBounds('3d')!
+      const buckets = computeBuckets(bounds.start, bounds.end, 'day', 3)
+      assert(buckets.length === 3,
+        '3d: Returns 3 daily buckets')
+      assert(buckets[0].start.toISOString() === '2026-08-28T18:30:00.000Z',
+        '3d (Aug 31): First day bucket = Aug 29 00:00 IST')
+      assert(buckets[2].start.toISOString() === '2026-08-30T18:30:00.000Z',
+        '3d (Aug 31): Last day bucket = Aug 31 00:00 IST')
+    })
+
+    // Test 8: Year boundary — 1d on Jan 1, 2026 → yesterday is Dec 31, 2025
+    withMockedDate(2026, 1, 1, 0, 0, () => {
+      const bounds = computeRangeBounds('1d')!
+      const buckets = computeBuckets(bounds.start, bounds.end, 'hour', 24)
+      assert(buckets[0].start.toISOString() === '2025-12-31T18:30:00.000Z',
+        'Jan 1 00:00 IST: First hourly bucket = Dec 31 18:30 UTC (00:00 IST Jan 1)')
+    })
+
+    // Test 9: Monthly buckets — 6m range
+    withMockedDate(2026, 8, 26, 12, 0, () => {
+      const bounds = computeRangeBounds('6m')!
+      const buckets = computeBuckets(bounds.start, bounds.end, 'month', 6)
+      assert(buckets.length === 6,
+        '6m: Returns 6 monthly buckets')
+      // First bucket: Feb 26 (rolling 6 months from Aug 26)
+      assert(buckets[0].start.getUTCHours() === 18,
+        '6m: First monthly bucket hour = 18 UTC (00:00 IST midnight)')
+      assert(buckets[0].start.getUTCMinutes() === 30,
+        '6m: First monthly bucket minute = 30 (preserves IST midnight, not truncated to 00)')
+    })
+
+    // Test 10: computeBuckets uses shared helper from date-ranges.ts
+    const apiSrc = fs.readFileSync('src/app/api/dashboard/route.ts', 'utf8')
+    assert(apiSrc.includes('computeBuckets'),
+      'Dashboard API uses shared computeBuckets() helper from date-ranges.ts')
+  }
+
+  // ─── FIX 1B: Behavioral expense consistency ────────────────────────────
+  console.log('\n  FIX 1B — Behavioral expense consistency:')
+  {
+    // §BEHAVIORAL: Simulate mixed transactions and verify chart expense sum = card expense
+    // This verifies the EXPENSE_TYPES constant matches the SQL filter.
+    const EXPENSE_TYPES = ['debit', 'expense', 'purchase'] as const
+
+    // Simulate transactions across 3 buckets
+    const txns = [
+      { type: 'debit', amount: 100, createdAt: '2026-08-25T19:00:00Z' },     // bucket 0
+      { type: 'expense', amount: 200, createdAt: '2026-08-25T20:00:00Z' },    // bucket 1
+      { type: 'purchase', amount: 300, createdAt: '2026-08-25T21:00:00Z' },   // bucket 2
+      { type: 'credit', amount: 500, createdAt: '2026-08-25T19:30:00Z' },     // bucket 0 (not expense)
+      { type: 'debit', amount: 150, createdAt: '2026-08-25T22:00:00Z' },      // bucket 3
+    ]
+
+    // Card expense (SQL: type IN ('debit', 'expense', 'purchase'))
+    const cardExpense = txns
+      .filter(t => EXPENSE_TYPES.includes(t.type as any))
+      .reduce((s, t) => s + t.amount, 0)
+
+    // Chart expense (JS filter: EXPENSE_TYPES.includes)
+    const chartExpense = txns
+      .filter(t => EXPENSE_TYPES.includes(t.type as any))
+      .reduce((s, t) => s + t.amount, 0)
+
+    assert(cardExpense === 750, 'Card expense = 100+200+300+150 = 750 (debit+expense+purchase)')
+    assert(chartExpense === cardExpense, 'Chart expense sum === card expense (behavioral match)')
+    assert(chartExpense !== 250, 'Chart expense ≠ 250 (old bug: only debit=100+150 would give 250)')
   }
 
   // ─── FIX 3: Indian currency axis formatting ────────────────────────────

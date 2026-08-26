@@ -427,3 +427,76 @@ export function calendarMonthStartIST(now: Date = new Date()): Date {
 export function calendarTodayStartIST(now: Date = new Date()): Date {
   return computeRangeBounds('1d')!.start
 }
+
+/**
+ * §FIX-2B: Compute chart bucket boundaries using IST-aligned time arithmetic.
+ *
+ * Previously, the bucket loop used `setUTCHours(rangeStart.getUTCHours() + i, 0, 0, 0)`
+ * which TRUNCATED 18:30 UTC (00:00 IST) → 18:00 UTC (23:30 IST). This caused
+ * the first hourly bucket to start 30 minutes before IST midnight.
+ *
+ * Fix: Use direct time arithmetic (`getTime() + i * unitMs`) for hour/day/week
+ * buckets — this preserves the exact IST midnight boundary without truncation.
+ * For month buckets, use `setUTCMonth(month + i, 1)` WITHOUT `setUTCHours(0,0,0,0)`
+ * — the rangeStart's time component (18:30 UTC = 00:00 IST) is preserved.
+ *
+ * Returns an array of `{ start, end, label }` objects for chart rendering.
+ */
+export interface Bucket {
+  start: Date
+  end: Date
+  label: string
+}
+
+export function computeBuckets(
+  rangeStart: Date,
+  rangeEnd: Date,
+  bucketType: 'hour' | 'day' | 'week' | 'month',
+  bucketCount: number,
+): Bucket[] {
+  const buckets: Bucket[] = []
+  const HOUR_MS = 60 * 60 * 1000
+  const DAY_MS = 24 * HOUR_MS
+  const WEEK_MS = 7 * DAY_MS
+
+  for (let i = 0; i < bucketCount; i++) {
+    let start: Date
+    let end: Date
+    let label: string
+
+    if (bucketType === 'hour') {
+      // §FIX-2B: Use time arithmetic — no truncation of the IST midnight boundary
+      start = new Date(rangeStart.getTime() + i * HOUR_MS)
+      end = new Date(start.getTime() + HOUR_MS)
+      label = start.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
+    } else if (bucketType === 'day') {
+      // §FIX-2B: Use time arithmetic — preserves IST midnight (18:30 UTC)
+      start = new Date(rangeStart.getTime() + i * DAY_MS)
+      end = new Date(start.getTime() + DAY_MS)
+      if (bucketCount <= 7) {
+        label = start.toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' })
+      } else {
+        label = start.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' })
+      }
+    } else if (bucketType === 'week') {
+      // §FIX-2B: Use time arithmetic — preserves IST midnight
+      start = new Date(rangeStart.getTime() + i * WEEK_MS)
+      end = new Date(start.getTime() + WEEK_MS)
+      label = `W${i + 1}`
+    } else {
+      // §FIX-2B: Month buckets use setUTCMonth WITHOUT setUTCHours(0,0,0,0)
+      // — preserves the rangeStart's time component (18:30 UTC = 00:00 IST)
+      start = new Date(rangeStart)
+      start.setUTCMonth(rangeStart.getUTCMonth() + i, 1)
+      // Do NOT call setUTCHours(0, 0, 0, 0) — preserves IST midnight time
+      end = new Date(start)
+      end.setUTCMonth(start.getUTCMonth() + 1, 1)
+      label = start.toLocaleDateString('en-IN', { month: 'short', timeZone: 'Asia/Kolkata' })
+    }
+
+    if (start > rangeEnd) break
+    buckets.push({ start, end, label })
+  }
+
+  return buckets
+}
