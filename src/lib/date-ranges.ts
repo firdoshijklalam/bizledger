@@ -31,22 +31,30 @@
  *   - '3d'        Today + previous 2 days (rolling 3 calendar days)
  *   - '5d'        Today + previous 4 days (rolling 5 calendar days)
  *   - '7d'        Rolling last 7 calendar days (NOT Mon–Sun week)
- *   - '1m'        Rolling last 30 days (NOT calendar month — preserves
- *                 existing Dashboard API semantics at a0dfe64)
- *   - '3m'        Rolling last 90 days
- *   - '6m'        Rolling last 180 days
- *   - '1y'        Rolling last 365 days
+ *   - '1m'        Calendar-aware rolling 1 month via setMonth(-1)
+ *                 (NOT a fixed 30-day count — actual day count varies 28-31)
+ *   - '3m'        Calendar-aware rolling 3 months via setMonth(-3)
+ *   - '6m'        Calendar-aware rolling 6 months via setMonth(-6)
+ *   - '1y'        Calendar-aware rolling 1 year via setFullYear(-1)
+ *                 (365 or 366 days depending on leap year)
  *   - 'custom'    User-supplied start/end (YYYY-MM-DD); end is inclusive
- *                 (23:59:59.999 IST)
+ *                 (23:59:59.999 IST). Reversed inputs are auto-normalized
+ *                 by swapping DATE STRINGS (not timestamps) before applying
+ *                 start-of-day/end-of-day semantics.
  *
- * §ROLLING-VS-CALENDAR: The Dashboard API at a0dfe64 used ROLLING
- * semantics for 1m (`setMonth(getMonth()-1)`) and ROLLING for 1y
- * (`setFullYear(getFullYear()-1)`). 1m via setMonth(-1) actually produces
- * a calendar-anchored "same day last month" — but if today is March 31,
- * setMonth(-1) gives March 3 (March has 31 days, Feb has 28, so Feb 31
- * overflows). To preserve existing numbers EXACTLY, we mirror that
- * behavior with setMonth/setFullYear rather than introducing a 30-day
- * approximation. See `computeRangeBounds` below.
+ * §ROLLING-VS-CALENDAR: '1m'/'3m'/'6m' use `setMonth(-N)` which is calendar-
+ * aware (same day N months ago). '1y' uses `setFullYear(-1)` (same day 1 year
+ * ago). These are NOT fixed day-counts. For example, on Aug 26, `1m` = Jul 26
+ * (31 days), but on Mar 31 `1m` = Feb 28 (28 days, 2026 non-leap) — JavaScript
+ * overflows Feb 31 to Mar 3 internally, then we normalize. This mirrors the
+ * Dashboard API's pre-Phase-5 semantics at `a0dfe64` (which used
+ * `setMonth(getMonth()-1)`).
+ *
+ * §CALENDAR-MONTH-TO-DATE: SEPARATE from the rolling '1m' range above. The
+ * Dashboard API's `monthlyRevenue` field uses CALENDAR month-to-date (1st of
+ * current IST month → now), NOT rolling 1 month. This is preserved by the
+ * separate `calendarMonthStartIST()` helper exported below. Do NOT confuse
+ * the two — they compute different windows.
  *
  * §NON-NEGOTIABLE: Callers MUST use this utility. They MUST NOT roll
  * their own `switch(range)` statements. If a new range is needed, add
@@ -215,6 +223,21 @@ function rollingYearsBounds(yearsAgo: number): { start: Date; end: Date } {
  *   - start = YYYY-MM-DDT00:00:00+05:30
  *   - end   = YYYY-MM-DDT23:59:59.999+05:30
  *
+ * §REVERSED-INPUT-NORMALIZATION (Phase 5 pre-commit FIX 2):
+ * If the user accidentally selects end-date BEFORE start-date (e.g.
+ * customStart='2026-08-24', customEnd='2026-08-20'), we normalize by
+ * swapping the DATE STRINGS first, THEN applying start-of-day/end-of-day
+ * semantics. Swapping the strings (not the timestamps) is critical —
+ * swapping timestamps would produce a near-empty window because start
+ * already has 00:00:00 applied and end already has 23:59:59.999 applied.
+ *
+ * Example (reversed input):
+ *   customStart='2026-08-24', customEnd='2026-08-20'
+ *   → swap strings → start='2026-08-20', end='2026-08-24'
+ *   → apply IST semantics →
+ *     start = 2026-08-20T00:00:00+05:30 = 2026-08-19T18:30:00.000Z
+ *     end   = 2026-08-24T23:59:59.999+05:30 = 2026-08-24T18:29:59.999Z
+ *
  * Returns null if either date is missing/invalid.
  */
 function customBounds(
@@ -222,16 +245,27 @@ function customBounds(
   customEnd: string | undefined | null,
 ): { start: Date; end: Date } | null {
   if (!customStart || !customEnd) return null
-  // Parse "YYYY-MM-DD" as IST midnight by appending T00:00:00+05:30
-  const startStr = `${customStart}T00:00:00+05:30`
-  const endStr = `${customEnd}T23:59:59.999+05:30`
-  const start = new Date(startStr)
-  const end = new Date(endStr)
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) return null
-  // Swap if user reversed the order
-  if (start.getTime() > end.getTime()) {
-    return { start: end, end: start }
+
+  // §FIX-2: Normalize by swapping DATE STRINGS (not timestamps).
+  // Date strings in YYYY-MM-DD format compare lexicographically the same
+  // way they compare chronologically, so a simple string comparison tells
+  // us if the user reversed the input.
+  let startStr = customStart
+  let endStr = customEnd
+  if (startStr > endStr) {
+    // Reversed input — swap the date strings BEFORE applying IST semantics
+    const tmp = startStr
+    startStr = endStr
+    endStr = tmp
   }
+
+  // Parse "YYYY-MM-DD" as IST midnight (start) / IST end-of-day (end)
+  const start = new Date(`${startStr}T00:00:00+05:30`)
+  const end = new Date(`${endStr}T23:59:59.999+05:30`)
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return null
+
+  // §POST-SWAP-INVARIANT: After swapping date strings, start <= end is
+  // guaranteed. No timestamp swap needed.
   return { start, end }
 }
 
@@ -336,4 +370,60 @@ export function equalRangeContext(a: RangeContext, b: RangeContext): boolean {
     (a.customStart || null) === (b.customStart || null) &&
     (a.customEnd || null) === (b.customEnd || null)
   )
+}
+
+/**
+ * §CALENDAR-MONTH-START-IST: Returns the IST midnight of the 1st day of the
+ * CURRENT IST calendar month. Used by the Dashboard API's `monthlyRevenue`
+ * field (which is calendar month-to-date, NOT rolling 1 month).
+ *
+ * §WHY-SEPARATE-FROM-1M: The '1m' range in `computeRangeBounds` is ROLLING
+ * (setMonth(-1) = same day last month). But `monthlyRevenue` semantics at
+ * a0dfe64 used `new Date(); setDate(1); setHours(0,0,0,0)` — which is
+ * CALENDAR month-to-date (1st of current month → now). These are DIFFERENT
+ * windows. Pre-Phase-5 commit `94647ee` accidentally replaced `monthStart`
+ * with `computeRangeBounds('1m')!.start`, changing `monthlyRevenue` from
+ * calendar-month-to-date to rolling-1-month — a regression. This helper
+ * restores the calendar-month-to-date semantics with IST-safe boundaries.
+ *
+ * §IST-SAFE: Computes the 1st of the current IST month at 00:00:00 IST,
+ * regardless of server timezone. The old `setHours(0,0,0,0)` on a UTC
+ * server gave UTC midnight (= 05:30 IST) — wrong for IST users.
+ *
+ * Example: today is 2026-08-26 12:00 IST
+ *   → returns 2026-08-01T00:00:00+05:30 = 2026-07-31T18:30:00.000Z
+ *
+ * Example: today is 2026-01-15 03:00 IST (year boundary)
+ *   → returns 2026-01-01T00:00:00+05:30 = 2025-12-31T18:30:00.000Z
+ */
+export function calendarMonthStartIST(now: Date = new Date()): Date {
+  // Shift "now" to IST by adding the IST offset, then take the UTC year/month
+  // (which now represent IST year/month), then construct UTC midnight on the
+  // 1st of that month, then shift back to UTC.
+  const istNow = new Date(now.getTime() + IST_OFFSET_MS)
+  const istMonthStartUtc = new Date(
+    Date.UTC(
+      istNow.getUTCFullYear(),
+      istNow.getUTCMonth(),
+      1, // 1st day of the month
+      0,
+      0,
+      0,
+      0,
+    ),
+  )
+  // Shift back to UTC for return (Date objects are UTC internally)
+  return new Date(istMonthStartUtc.getTime() - IST_OFFSET_MS)
+}
+
+/**
+ * §CALENDAR-TODAY-START-IST: Returns the IST midnight of today. Used by the
+ * Dashboard API's `todaySales` field. Alias for `computeRangeBounds('1d')!.start`
+ * but named explicitly for clarity at the call-site where the semantic is
+ * "today" (not "the 1d range").
+ *
+ * §IST-SAFE: Computes today's 00:00:00 IST regardless of server timezone.
+ */
+export function calendarTodayStartIST(now: Date = new Date()): Date {
+  return computeRangeBounds('1d')!.start
 }

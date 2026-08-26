@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 import { serializeDecimals } from '@/lib/decimal-serializer'
-import { computeRangeBounds, type DashboardRange } from '@/lib/date-ranges'
+import { computeRangeBounds, calendarMonthStartIST, calendarTodayStartIST, type DashboardRange } from '@/lib/date-ranges'
 
 // GET /api/dashboard?range=1d|2d|3d|5d|7d|1m|3m|6m|1y|custom&startDate=...&endDate=...
 //
@@ -85,10 +85,25 @@ export async function GET(req: NextRequest) {
     // into single raw SQL queries with CASE WHEN, we cut the round-trips to ~9,
     // reducing response time to ~2-3s for small datasets.
     const voidExclude = { ...bizWhere, status: { not: 'void' } }
-    // §IST-TODAY-MONTH: Use IST-aligned boundaries for today/monthStart too,
-    // so "todaySales" and "monthlyRevenue" line up with the displayed range.
-    const todayBounds = computeRangeBounds('1d')!
-    const monthStart = computeRangeBounds('1m')!.start
+    // §IST-TODAY-MONTH: Use IST-aligned boundaries for today/monthStart.
+    //
+    // §CALENDAR-MONTH-FIX (pre-commit FIX 1): `monthStart` uses CALENDAR
+    // month-to-date (1st of current IST month → now), NOT rolling 1 month.
+    // The previous commit `94647ee` accidentally used `computeRangeBounds('1m')`
+    // here — that gave ROLLING 1 month (same day last month → now), which
+    // changed `monthlyRevenue` semantics from calendar-month-to-date to
+    // rolling-month. This restores the original `a0dfe64` semantics
+    // (which used `new Date(); setDate(1); setHours(0,0,0,0)`) but with
+    // IST-safe boundaries (the old `setHours(0,0,0,0)` gave UTC midnight =
+    // 05:30 IST — wrong for Indian users).
+    //
+    // §SEPARATE-FROM-1M: `computeRangeBounds('1m')` is ROLLING and is used
+    // by the dashboard card click (Total Sales/Collection with "1 Month"
+    // selected means "rolling 1 month"). But `monthlyRevenue` field is a
+    // SEPARATE concept — "revenue this calendar month" — which is what the
+    // "Monthly Revenue" card label says. Do NOT conflate the two.
+    const todayBounds = calendarTodayStartIST()
+    const monthStart = calendarMonthStartIST()
     const rangeTxnWhere = { ...bizWhere, createdAt: { gte: rangeStart, lte: rangeEnd } }
 
     // §PARALLEL-ALL: ALL queries run in a SINGLE Promise.all — including the
@@ -134,7 +149,7 @@ export async function GET(req: NextRequest) {
         total_count: bigint; paid_count: bigint
       }>>`
         SELECT
-          COALESCE(SUM(CASE WHEN "createdAt" >= ${todayBounds.start} THEN "grandTotal" ELSE 0 END), 0) AS today_sales,
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${todayBounds} THEN "grandTotal" ELSE 0 END), 0) AS today_sales,
           COALESCE(SUM(CASE WHEN "createdAt" >= ${monthStart} THEN "grandTotal" ELSE 0 END), 0) AS monthly_sales,
           COALESCE(SUM(CASE WHEN "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd} THEN "grandTotal" ELSE 0 END), 0) AS range_sales,
           COALESCE(SUM(CASE WHEN "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd} THEN "subtotal" - "discountAmount" ELSE 0 END), 0) AS range_net_revenue,
