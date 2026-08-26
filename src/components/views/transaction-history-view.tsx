@@ -15,6 +15,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
 import { useMemo, useState, useEffect } from 'react'
+import {
+  computeRangeBounds,
+  dashboardRangeLabel,
+  DASHBOARD_RANGES,
+  type DashboardRange,
+  type RangeContext,
+} from '@/lib/date-ranges'
 
 // ============================================================================
 // §HISTORY: Transaction History & Reports Module
@@ -31,9 +38,18 @@ import { useMemo, useState, useEffect } from 'react'
 //   5. LOGICAL SEPARATION — Due Collection transactions (type=credit,
 //      category='Payment In') render with a distinct icon + label so they're
 //      never confused with new product-sale invoices.
+// §PHASE-5-D1: History now supports the FULL DashboardRange set (1d/yesterday/
+//   2d/3d/5d/7d/1m/3m/6m/1y/custom) — same shared range IDs as the Dashboard.
+//   When the dashboard Sales/Collection card is clicked, History receives the
+//   EXACT same RangeContext {range, customStart, customEnd} and computes the
+//   EXACT same date boundaries via the shared `computeRangeBounds` utility.
+//   No more lossy mapping (e.g. dashboard "3 Days" → History "This Week").
 // ============================================================================
 
-type DateRange = 'today' | 'yesterday' | 'week' | 'custom'
+// §PHASE-5-D1: HistoryRange = DashboardRange. Single shared type across all
+// 3 views (Dashboard, History, Reports). Any new range added to DashboardRange
+// is automatically supported by History with no extra code.
+type DateRange = DashboardRange
 type StatusFilter = 'all' | 'dues' | 'pickup' | 'paid'
 
 interface DailySummary {
@@ -74,29 +90,53 @@ const STATUS_BADGE: Record<string, { label: string; cls: string; dot: string }> 
 }
 
 export function TransactionHistoryView() {
-  const { business, triggerRefresh, overlayInvoiceId, setOverlayInvoiceId, historyDateRange, setHistoryDateRange } = useAppStore()
+  const { business, triggerRefresh, overlayInvoiceId, setOverlayInvoiceId, historyDateRange, setHistoryDateRange, historyRangeContext, setHistoryRangeContext } = useAppStore()
   const currency = business?.currency || 'INR'
 
   // ---- Filters ----
-  const [range, setRange] = useState<DateRange>('today')
+  // §PHASE-5-D1: Default range is now '1d' (Today) using the shared DashboardRange
+  // type — was 'today' (legacy). Same semantic, just renamed to match the
+  // shared type so the dashboard card click's range ID is accepted directly.
+  const [range, setRange] = useState<DateRange>('1d')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
 
-  // §HISTORY-ROUTING: Auto-filter from the dashboard Sales card. When the
-  // dashboard passes a historyDateRange (e.g. 'today' / 'week'), apply it on
-  // mount and clear the param so it doesn't re-apply on later visits.
+  // §HISTORY-ROUTING (Phase 5 D1): Consume the FULL RangeContext from the
+  // dashboard card click — {range, customStart, customEnd}. This preserves
+  // custom range dates which were previously lost (Phase 4 bug D1).
+  // Applies on mount, then clears the param so it doesn't re-apply on later visits.
+  useEffect(() => {
+    if (!historyRangeContext) return
+    const ctx = historyRangeContext
+    const t = setTimeout(() => {
+      setRange(ctx.range)
+      setCustomStart(ctx.customStart || '')
+      setCustomEnd(ctx.customEnd || '')
+      setHistoryRangeContext(null)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [historyRangeContext, setHistoryRangeContext])
+
+  // §LEGACY-HISTORY-DATE-RANGE: For any callers still using the old
+  // `historyDateRange` field (e.g. deep links, older code paths), preserve
+  // backward compat by mapping to the new range string. 'today' → '1d',
+  // 'week' → '7d'. This keeps the old API working without breaking the new path.
   useEffect(() => {
     if (!historyDateRange) return
     const t = setTimeout(() => {
-      setRange(historyDateRange)
+      const mapped: DateRange = historyDateRange === 'today' ? '1d' : historyDateRange === 'week' ? '7d' : historyDateRange === 'yesterday' ? 'yesterday' : 'custom'
+      setRange(mapped)
       setHistoryDateRange(null)
     }, 0)
     return () => clearTimeout(t)
   }, [historyDateRange, setHistoryDateRange])
 
   // ---- Data ----
+  // §PHASE-5-D1: API call sends `range` (DashboardRange string) directly —
+  // no lossy mapping. The backend `/api/transactions/summary` accepts the
+  // full DashboardRange set and computes the same boundaries as the Dashboard.
   const summaryQuery = useMemo(() => {
     const p = new URLSearchParams({ range })
     if (range === 'custom' && customStart) p.set('startDate', customStart)
@@ -136,26 +176,27 @@ export function TransactionHistoryView() {
   }, [invoices])
 
   // ---- Apply filters ----
+  // §PHASE-5-D1: Use shared computeRangeBounds — same utility the Dashboard
+  // and Reports APIs use. This GUARANTEES the client-side feed filter uses
+  // the EXACT same date window as the server-side summary API call.
   const filtered = useMemo(() => {
     let out = feed
     // Date range filter (client-side on createdAt)
     if (range !== 'custom' || (customStart && customEnd)) {
-      const now = new Date()
-      const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0,0,0,0); return x }
-      const endOfDay = (d: Date) => { const x = new Date(d); x.setHours(23,59,59,999); return x }
-      let start: Date, end: Date
-      if (range === 'today') { start = startOfDay(now); end = endOfDay(now) }
-      else if (range === 'yesterday') { const y = new Date(now); y.setDate(y.getDate()-1); start = startOfDay(y); end = endOfDay(y) }
-      else if (range === 'week') { const s = startOfDay(now); const day = s.getDay(); const diff = day===0?6:day-1; s.setDate(s.getDate()-diff); start = s; end = endOfDay(now) }
-      else { start = new Date(customStart+'T00:00:00'); end = new Date(customEnd+'T23:59:59.999') }
-      out = out.filter((i) => {
-        // §DATA-FIX: Compare using local date components to avoid timezone
-        // mismatch (server UTC vs client local). An invoice created "today"
-        // in server time should still show under "today" in client time.
-        const d = new Date(i.date)
-        const dLocal = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds())
-        return dLocal >= start && dLocal <= end
-      })
+      const bounds = computeRangeBounds(range, customStart, customEnd)
+      if (bounds) {
+        const startMs = bounds.start.getTime()
+        const endMs = bounds.end.getTime()
+        out = out.filter((i) => {
+          // §DATA-FIX: Compare using Date.getTime() which is timezone-agnostic.
+          // computeRangeBounds returns IST-aligned boundaries; this comparison
+          // correctly handles IST "today" against invoice timestamps stored as
+          // UTC (the previous code's local-date-component conversion is no
+          // longer needed — the boundaries are already IST-correct).
+          const t = new Date(i.date).getTime()
+          return t >= startMs && t <= endMs
+        })
+      }
     }
     // Status filter
     if (statusFilter === 'dues') out = out.filter((i) => i.status && i.status !== 'paid' && i.status !== 'void' && (i.amountDue || 0) > 0)
@@ -225,19 +266,24 @@ export function TransactionHistoryView() {
 
       {/* ---- §1: DAILY SUMMARY DASHBOARD (sticky) ---- */}
       <div className="sticky top-14 z-20 -mx-3 px-3 py-2 bg-background/95 backdrop-blur-xl border-b border-border">
-        {/* Date range quick-filters */}
+        {/* Date range quick-filters
+            §PHASE-5-D1: Now uses the FULL DASHBOARD_RANGES list — same range
+            IDs as the Dashboard. When the user clicks a Sales/Collection card
+            with "3 Days" selected, History opens showing "3 Days" (not "This
+            Week" as before). Each chip uses dashboardRangeLabel() so the
+            label matches what the Dashboard card displayed. */}
         <div className="flex items-center gap-1.5 mb-2 overflow-x-auto no-scrollbar">
-          {(['today','yesterday','week','custom'] as DateRange[]).map((r) => (
+          {DASHBOARD_RANGES.map((r) => (
             <button
-              key={r}
-              onClick={() => setRange(r)}
+              key={r.id}
+              onClick={() => setRange(r.id)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
-                range === r
+                range === r.id
                   ? 'bg-primary text-primary-foreground shadow-sm'
                   : 'bg-muted text-muted-foreground hover:bg-muted/80'
               }`}
             >
-              {r === 'today' ? 'Today' : r === 'yesterday' ? 'Yesterday' : r === 'week' ? 'This Week' : 'Custom'}
+              {r.label}
             </button>
           ))}
           {range === 'custom' && (

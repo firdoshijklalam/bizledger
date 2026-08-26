@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 import { serializeDecimals } from '@/lib/decimal-serializer'
+import { computeRangeBounds, type DashboardRange } from '@/lib/date-ranges'
 
 // GET /api/dashboard?range=1d|2d|3d|5d|7d|1m|3m|6m|1y|custom&startDate=...&endDate=...
 //
@@ -11,13 +12,28 @@ import { serializeDecimals } from '@/lib/decimal-serializer'
 //
 // §VOID-EXCLUSION: Voided invoices (status='void') are excluded from all financial
 // calculations (sales, revenue, trends, top products, etc.).
+//
+// §SHARED-DATE-RANGES: Date boundary computation is delegated to
+// `src/lib/date-ranges.ts` — the single source of truth shared with History and
+// Reports APIs. This guarantees Dashboard, History, and Reports compute IDENTICAL
+// date windows for any given range, eliminating the Phase 4 D1 date-context bug
+// where Dashboard "3 Days" → History "This Week" (different window).
+//
+// §IST-TIMEZONE-FIX: Prior to this commit, the Dashboard API computed date
+// boundaries using `new Date().setHours(0,0,0,0)` which uses the SERVER's local
+// timezone (UTC on Vercel). This caused "Today" to mean UTC-midnight-to-UTC-now,
+// which is wrong for IST users (UTC midnight = 05:30 IST, so a sale at 4 AM IST
+// on Aug 26 was counted under Aug 25 "Today"). The shared utility now computes
+// IST-aligned boundaries (Asia/Kolkata, UTC+5:30) so "Today" means IST today
+// 00:00:00 → 23:59:59.999 IST. This is a behavior change but fixes a demonstrable
+// timezone bug the user explicitly flagged.
 
 // §VERCEL-LIMIT: Allow up to 30s for large datasets (Hobby plan default is 10s).
 export const maxDuration = 30
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
-    const range = searchParams.get('range') || '7d'
+    const rangeParam = (searchParams.get('range') || '7d') as DashboardRange
     const startDate = searchParams.get('startDate')
     const endDate = searchParams.get('endDate')
 
@@ -26,36 +42,38 @@ export async function GET(req: NextRequest) {
 
     const bizWhere = { businessId: business.id }
 
-    // Calculate date range
-    const now = new Date()
-    let rangeStart: Date
-    let rangeEnd: Date = new Date(now)
+    // §SHARED-BOUNDARIES: Delegate to computeRangeBounds — single source of truth.
+    // Returns null only for 'custom' with missing/invalid customStart/customEnd;
+    // in that case we fall back to '7d' rolling (matching pre-fix default behavior).
+    const bounds = computeRangeBounds(rangeParam, startDate, endDate)
+    const rangeStart: Date = bounds?.start ?? computeRangeBounds('7d')!.start
+    const rangeEnd: Date = bounds?.end ?? computeRangeBounds('7d')!.end
+
+    // §BUCKET-CONFIG: Chart bucket sizing based on range duration.
+    // Kept here (not in date-ranges.ts) because bucketing is a Dashboard chart
+    // concern, not a date-boundary concern.
+    const rangeDays = Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / 86400000)
     let bucketType: 'hour' | 'day' | 'week' | 'month' = 'day'
     let bucketCount = 7
-
-    if (range === 'custom' && startDate && endDate) {
-      rangeStart = new Date(startDate)
-      rangeEnd = new Date(endDate)
-      rangeEnd.setHours(23, 59, 59, 999)
-      const days = Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / 86400000)
-      if (days <= 1) { bucketType = 'hour'; bucketCount = 24 }
-      else if (days <= 14) { bucketType = 'day'; bucketCount = days }
-      else if (days <= 90) { bucketType = 'day'; bucketCount = days }
-      else { bucketType = 'month'; bucketCount = Math.ceil(days / 30) }
-    } else {
-      switch (range) {
-        case 'yesterday': rangeStart = new Date(now); rangeStart.setDate(rangeStart.getDate()-1); rangeStart.setHours(0,0,0,0); rangeEnd = new Date(now); rangeEnd.setDate(rangeEnd.getDate()-1); rangeEnd.setHours(23,59,59,999); bucketType = 'hour'; bucketCount = 24; break
-        case '1d': rangeStart = new Date(now); rangeStart.setHours(0,0,0,0); bucketType = 'hour'; bucketCount = 24; break
-        case '2d': rangeStart = new Date(now); rangeStart.setDate(rangeStart.getDate()-1); rangeStart.setHours(0,0,0,0); bucketType = 'day'; bucketCount = 2; break
-        case '3d': rangeStart = new Date(now); rangeStart.setDate(rangeStart.getDate()-2); rangeStart.setHours(0,0,0,0); bucketType = 'day'; bucketCount = 3; break
-        case '5d': rangeStart = new Date(now); rangeStart.setDate(rangeStart.getDate()-4); rangeStart.setHours(0,0,0,0); bucketType = 'day'; bucketCount = 5; break
-        case '7d': rangeStart = new Date(now); rangeStart.setDate(rangeStart.getDate()-6); rangeStart.setHours(0,0,0,0); bucketType = 'day'; bucketCount = 7; break
-        case '1m': rangeStart = new Date(now); rangeStart.setMonth(rangeStart.getMonth()-1); bucketType = 'day'; bucketCount = 30; break
-        case '3m': rangeStart = new Date(now); rangeStart.setMonth(rangeStart.getMonth()-3); bucketType = 'week'; bucketCount = 13; break
-        case '6m': rangeStart = new Date(now); rangeStart.setMonth(rangeStart.getMonth()-6); bucketType = 'month'; bucketCount = 6; break
-        case '1y': rangeStart = new Date(now); rangeStart.setFullYear(rangeStart.getFullYear()-1); bucketType = 'month'; bucketCount = 12; break
-        default: rangeStart = new Date(now); rangeStart.setDate(rangeStart.getDate()-6); rangeStart.setHours(0,0,0,0); bucketType = 'day'; bucketCount = 7
-      }
+    if (rangeParam === '1d' || rangeParam === 'yesterday') {
+      bucketType = 'hour'; bucketCount = 24
+    } else if (rangeParam === '2d' || rangeParam === '3d' || rangeParam === '5d') {
+      bucketType = 'day'; bucketCount = Math.max(2, rangeDays)
+    } else if (rangeParam === '7d') {
+      bucketType = 'day'; bucketCount = 7
+    } else if (rangeParam === '1m') {
+      bucketType = 'day'; bucketCount = 30
+    } else if (rangeParam === '3m') {
+      bucketType = 'week'; bucketCount = 13
+    } else if (rangeParam === '6m') {
+      bucketType = 'month'; bucketCount = 6
+    } else if (rangeParam === '1y') {
+      bucketType = 'month'; bucketCount = 12
+    } else if (rangeParam === 'custom') {
+      // Custom: choose bucket type based on span
+      if (rangeDays <= 1) { bucketType = 'hour'; bucketCount = 24 }
+      else if (rangeDays <= 90) { bucketType = 'day'; bucketCount = rangeDays }
+      else { bucketType = 'month'; bucketCount = Math.ceil(rangeDays / 30) }
     }
 
     // §DECIMAL-FIX: Prisma Decimal fields return as string. Convert to Number.
@@ -67,8 +85,10 @@ export async function GET(req: NextRequest) {
     // into single raw SQL queries with CASE WHEN, we cut the round-trips to ~9,
     // reducing response time to ~2-3s for small datasets.
     const voidExclude = { ...bizWhere, status: { not: 'void' } }
-    const today = new Date(); today.setHours(0, 0, 0, 0)
-    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
+    // §IST-TODAY-MONTH: Use IST-aligned boundaries for today/monthStart too,
+    // so "todaySales" and "monthlyRevenue" line up with the displayed range.
+    const todayBounds = computeRangeBounds('1d')!
+    const monthStart = computeRangeBounds('1m')!.start
     const rangeTxnWhere = { ...bizWhere, createdAt: { gte: rangeStart, lte: rangeEnd } }
 
     // §PARALLEL-ALL: ALL queries run in a SINGLE Promise.all — including the
@@ -103,14 +123,22 @@ export async function GET(req: NextRequest) {
         select: { id: true, name: true, category: true, stock: true, purchasePrice: true, lowStockThreshold: true },
       }),
       // §COMBINED-INVOICE: 1 raw SQL query replaces 5 separate Prisma queries
+      // §NET-REVENUE: Added range_net_revenue + range_discount columns to support
+      // the Total Revenue card showing a value DIFFERENT from Total Sales.
+      //   range_sales        = SUM(grandTotal) — what customer paid (incl. GST, after discount)
+      //   range_net_revenue  = SUM(subtotal - discountAmount) — pre-tax, post-discount
+      // Total Sales card shows range_sales; Total Revenue card shows range_net_revenue.
       db.$queryRaw<Array<{
         today_sales: bigint; monthly_sales: bigint; range_sales: bigint;
+        range_net_revenue: bigint; range_discount: bigint;
         total_count: bigint; paid_count: bigint
       }>>`
         SELECT
-          COALESCE(SUM(CASE WHEN "createdAt" >= ${today} THEN "grandTotal" ELSE 0 END), 0) AS today_sales,
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${todayBounds.start} THEN "grandTotal" ELSE 0 END), 0) AS today_sales,
           COALESCE(SUM(CASE WHEN "createdAt" >= ${monthStart} THEN "grandTotal" ELSE 0 END), 0) AS monthly_sales,
           COALESCE(SUM(CASE WHEN "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd} THEN "grandTotal" ELSE 0 END), 0) AS range_sales,
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd} THEN "subtotal" - "discountAmount" ELSE 0 END), 0) AS range_net_revenue,
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd} THEN "discountAmount" ELSE 0 END), 0) AS range_discount,
           COUNT(*) AS total_count,
           COUNT(CASE WHEN status = 'paid' THEN 1 END) AS paid_count
         FROM "Invoice"
@@ -152,14 +180,54 @@ export async function GET(req: NextRequest) {
     const todaySales = num(inv?.today_sales)
     const monthlyRevenue = num(inv?.monthly_sales)
     const rangeSales = num(inv?.range_sales)
+    // §NET-REVENUE: Pre-tax, post-discount — different from rangeSales (which
+    // includes GST and is net of discounts). Used by Total Revenue card.
+    const rangeNetRevenue = num(inv?.range_net_revenue)
+    const rangeDiscount = num(inv?.range_discount)
     const invoiceCount = num(inv?.total_count)
     const rangeCollection = num(txn?.collection_sum)
     const rangeExpense = num(txn?.expense_sum)
     const paidCount = num(inv?.paid_count)
     const paidRatio = invoiceCount > 0 ? paidCount / invoiceCount : 1
+    const nonOverdueRatio = 1 - overdueCount / Math.max(partyCount, 1)
+    const stockBonus = lowStockCount === 0 ? 20 : 10
     const healthScore = Math.round(
-      Math.max(0, Math.min(100, paidRatio * 50 + (1 - overdueCount / Math.max(partyCount, 1)) * 30 + (lowStockCount === 0 ? 20 : 10)))
+      Math.max(0, Math.min(100, paidRatio * 50 + nonOverdueRatio * 30 + stockBonus))
     )
+    // §HEALTH-DRILL-DOWN: Decompose health score into its 3 components so the
+    // Business Health card click can show users WHAT contributes to the score
+    // and WHAT to improve. Used by Reports P&L view's new "Health Breakdown"
+    // section (Phase 4 D4 fix — minimal addition, no new view/route).
+    const healthBreakdown = {
+      score: healthScore,
+      paidRatio: Math.round(paidRatio * 100) / 100,           // 0..1 → 50 points max
+      nonOverdueRatio: Math.round(nonOverdueRatio * 100) / 100, // 0..1 → 30 points max
+      lowStockCount,
+      stockBonus,                                                // 10 or 20
+      components: [
+        {
+          id: 'paid',
+          label: 'Invoice Payment Rate',
+          value: Math.round(paidRatio * 50 * 10) / 10,
+          max: 50,
+          hint: `${Math.round(paidRatio * 100)}% of invoices (${paidCount}/${invoiceCount}) are paid`,
+        },
+        {
+          id: 'overdue',
+          label: 'Customer Non-Overdue Rate',
+          value: Math.round(nonOverdueRatio * 30 * 10) / 10,
+          max: 30,
+          hint: `${overdueCount} of ${partyCount} customers are overdue (Grade E)`,
+        },
+        {
+          id: 'stock',
+          label: 'Stock Health',
+          value: stockBonus,
+          max: 20,
+          hint: lowStockCount === 0 ? 'No low-stock items' : `${lowStockCount} products below threshold`,
+        },
+      ],
+    }
 
     const salesTrend: Array<{ date: string; fullDate?: string; revenue: number; expense: number; profit: number; collected: number; creditGiven: number }> = []
     for (let i = 0; i < bucketCount; i++) {
@@ -293,10 +361,20 @@ export async function GET(req: NextRequest) {
       todaySales,
       monthlyRevenue,
       rangeSales,
+      // §NET-REVENUE: Distinct from rangeSales. Used by Total Revenue card so
+      // it shows a DIFFERENT number from Total Sales (which uses rangeSales).
+      // rangeSales = SUM(grandTotal) — what customer paid (incl GST, after discount)
+      // rangeNetRevenue = SUM(subtotal - discountAmount) — pre-tax, post-discount
+      rangeNetRevenue,
+      rangeDiscount,
       rangeCollection,
       rangeExpense,
       lowStockCount,
       healthScore,
+      // §HEALTH-BREAKDOWN: Decomposed score components — used by Reports P&L
+      // view's Health Breakdown section (Phase 4 D4 fix). Frontend reads
+      // `healthBreakdown.components[]` to show what contributes to the score.
+      healthBreakdown,
       topDebtors,
       // §DECIMAL-FIX-B: recentTransactions contains raw Prisma records with Decimal
       // `amount`/`balanceAfter` and nested `party.balance`/`party.openingBalance`.

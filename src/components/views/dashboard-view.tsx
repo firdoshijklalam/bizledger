@@ -34,10 +34,22 @@ import {
   type CardConfig,
   type DashboardCardDef,
 } from '@/components/shared/dashboard-card-management'
+import {
+  computeRangeBounds,
+  dashboardRangeLabel,
+  DASHBOARD_RANGES,
+  type DashboardRange,
+  type RangeContext,
+} from '@/lib/date-ranges'
 
 type ChartType = 'revenue' | 'profit' | 'cashflow' | 'collections' | 'categories' | 'inventory'
 type ChartView = 'line' | 'bar'
-type TimeRange = 'yesterday' | '1d' | '2d' | '3d' | '5d' | '7d' | '1m' | '3m' | '6m' | '1y' | 'custom'
+// §TIME-RANGE: Replaced local TimeRange union with the shared DashboardRange
+// from src/lib/date-ranges.ts. This guarantees the dashboard, History, and
+// Reports all use the EXACT SAME set of range IDs — no lossy mapping.
+type TimeRange = DashboardRange
+// §CHART-RANGES: Replaced local TIME_RANGES with the shared DASHBOARD_RANGES
+// from src/lib/date-ranges.ts — single source of truth for the range list + labels.
 
 interface ExtendedDashboardStats extends DashboardStats {
   topCategories?: Array<{ name: string; value: number }>
@@ -51,47 +63,52 @@ interface ExtendedDashboardStats extends DashboardStats {
   rangeSales?: number
   rangeCollection?: number
   rangeExpense?: number
+  // §NET-REVENUE (Phase 5 D3 fix): Pre-tax, post-discount revenue for the
+  // selected range. DIFFERENT from rangeSales (which is SUM(grandTotal) —
+  // post-discount but INCLUDES GST). Used by the Total Revenue card so it
+  // shows a distinct value from Total Sales.
+  rangeNetRevenue?: number
+  rangeDiscount?: number
+  // §HEALTH-BREAKDOWN (Phase 5 D4 fix): Decomposed health score components
+  // from the dashboard API. Used by Reports P&L view's Health Breakdown
+  // section so the user can see WHAT contributes to the score.
+  healthBreakdown?: {
+    score: number
+    paidRatio: number
+    nonOverdueRatio: number
+    lowStockCount: number
+    stockBonus: number
+    components: Array<{
+      id: string
+      label: string
+      value: number
+      max: number
+      hint: string
+    }>
+  }
 }
 
-const TIME_RANGES: Array<{ id: TimeRange; label: string }> = [
-  { id: '1d', label: 'Today' },
-  { id: 'yesterday', label: 'Yesterday' },
-  { id: '2d', label: '2 Days' },
-  { id: '3d', label: '3 Days' },
-  { id: '5d', label: '5 Days' },
-  { id: '7d', label: '7 Days' },
-  { id: '1m', label: '1 Month' },
-  { id: '3m', label: '3 Months' },
-  { id: '6m', label: '6 Months' },
-  { id: '1y', label: '1 Year' },
-  { id: 'custom', label: 'Custom' },
-]
+// §TIME-RANGES: REMOVED — was a duplicate of DASHBOARD_RANGES from
+// src/lib/date-ranges.ts. Use DASHBOARD_RANGES instead. Single source of truth.
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6']
 
-// §ROUTING: Map a dashboard TimeRange → History DateRange.
-// History only has today/yesterday/week/custom, so multi-day ranges collapse to 'week'.
-function mapToHistoryRange(r: TimeRange): 'today' | 'yesterday' | 'week' | 'custom' {
-  if (r === '1d') return 'today'
-  if (r === 'yesterday') return 'yesterday'
-  if (r === 'custom') return 'custom'
-  return 'week' // 2d/3d/5d/7d/1m/3m/6m/1y → week
-}
-
-// §ROUTING: Map a dashboard TimeRange → Reports PLRange.
-// P&L has today/week/month/3months/custom.
-function mapToReportsRange(r: TimeRange): 'today' | 'week' | 'month' | '3months' | 'custom' {
-  if (r === '1d') return 'today'
-  if (r === 'yesterday') return 'today' // P&L has no yesterday → today is closest
-  if (r === 'custom') return 'custom'
-  if (r === '2d' || r === '3d' || r === '5d' || r === '7d') return 'week'
-  if (r === '1m') return 'month'
-  if (r === '3m' || r === '6m' || r === '1y') return '3months'
-  return 'month'
-}
+// §ROUTING (Phase 5 D1 fix): The lossy mapToHistoryRange() and
+// mapToReportsRange() functions have been REMOVED. They collapsed
+// 2d/3d/5d/7d/1m/3m/6m/1y → 'week'/'month'/'3months', which produced
+// DIFFERENT date windows than the dashboard card displayed.
+//
+// Now the raw DashboardRange string is passed through unchanged.
+// History and Reports both use the shared `computeRangeBounds()` from
+// src/lib/date-ranges.ts — so they compute the EXACT same start/end as
+// the dashboard card.
+//
+// Custom range's customStart/customEnd travel via the new
+// `historyRangeContext` / `reportsRangeContext` store fields
+// (RangeContext = { range, customStart, customEnd }).
 
 export function DashboardView() {
-  const { business, setActiveView, setKhataFilter, setKhataGradeFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setReportsDateRange, setReportsTab } = useAppStore()
+  const { business, setActiveView, setKhataFilter, setKhataGradeFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setHistoryRangeContext, setReportsDateRange, setReportsRangeContext, setReportsTab } = useAppStore()
   const { t } = useI18n()
   const [chartType, setChartType] = useState<ChartType>('revenue')
   const [chartView, setChartView] = useState<ChartView>('line')
@@ -441,6 +458,14 @@ export function DashboardView() {
 
   // §UNIFIED-CARD-DEFS: All available dashboard cards with stable IDs.
   // Includes both lifetime metrics and time-dependent metrics.
+  // §PHASE-5-D1: onClick handlers now receive a RangeContext {range, customStart,
+  // customEnd} so History/Reports can be opened with the EXACT same date window
+  // the card was displaying. Non-time-metric cards ignore the ctx parameter.
+  // §PHASE-5-D3: totalRevenue card now uses rangeNetRevenue (pre-tax, post-
+  // discount) — DIFFERENT from totalSales card (which uses rangeSales = SUM of
+  // grandTotal, incl. GST). The two cards now display distinct values.
+  // §PHASE-5-D4: businessHealth card now opens Reports P&L with a special
+  // 'health' tab signal so the Health Breakdown section is shown front-and-center.
   const allCardDefs: Array<DashboardCardDef & { recommended?: boolean; isTimeMetric?: boolean }> = [
     { id: 'totalReceivable', label: t('dash.receivable'), icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Money owed to you by customers', recommended: true,
       valueExtractor: (d) => d?.totalReceivable ?? 0, formatValue: (v, c) => formatCurrency(v, c),
@@ -450,22 +475,22 @@ export function DashboardView() {
       onClick: () => { saveScrollPos('dashboard'); setKhataFilter('payable'); setActiveView('khata') } },
     { id: 'businessHealth', label: t('dash.health'), icon: Heart, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', description: 'Overall business health score', recommended: true,
       valueExtractor: (d) => d?.healthScore ?? 0, formatValue: (v) => `${v}/100`,
-      onClick: () => { saveScrollPos('dashboard'); setActiveView('reports') } },
+      onClick: () => { saveScrollPos('dashboard'); setReportsTab('health'); setActiveView('reports') } },
     { id: 'lowStock', label: t('dash.lowStock'), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', description: 'Products below stock threshold', recommended: true,
       valueExtractor: (d) => d?.lowStockCount ?? 0, formatValue: (v) => String(v),
       onClick: () => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') } },
-    { id: 'totalSales', label: 'Total Sales', icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', description: 'Sales for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
+    { id: 'totalSales', label: 'Total Sales', icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', description: 'Sales for selected period (incl. GST)', recommended: true, isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeSales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
-      onClick: (r) => { saveScrollPos('dashboard'); setHistoryDateRange(mapToHistoryRange(r as any)); setActiveView('history') } },
+      onClick: (ctx) => { saveScrollPos('dashboard'); setHistoryRangeContext(ctx); setActiveView('history') } },
     { id: 'totalCollection', label: 'Total Collection', icon: ArrowDownRight, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', description: 'Collections for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeCollection ?? 0, formatValue: (v, c) => formatCurrency(v, c),
-      onClick: (r) => { saveScrollPos('dashboard'); setHistoryDateRange(mapToHistoryRange(r as any)); setActiveView('history') } },
+      onClick: (ctx) => { saveScrollPos('dashboard'); setHistoryRangeContext(ctx); setActiveView('history') } },
     { id: 'totalExpense', label: 'Total Expense', icon: ArrowUpRight, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', description: 'Expenses for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeExpense ?? 0, formatValue: (v, c) => formatCurrency(v, c),
-      onClick: (r) => { saveScrollPos('dashboard'); setReportsDateRange(mapToReportsRange(r as any)); setActiveView('reports') } },
-    { id: 'totalRevenue', label: 'Total Revenue', icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', description: 'Revenue for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
-      valueExtractor: (d) => d?.rangeSales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
-      onClick: (r) => { saveScrollPos('dashboard'); setReportsDateRange(mapToReportsRange(r as any)); setActiveView('reports') } },
+      onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
+    { id: 'totalRevenue', label: 'Total Revenue', icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', description: 'Net revenue (pre-tax, post-discount)', recommended: true, isTimeMetric: true, defaultRange: '1d',
+      valueExtractor: (d) => d?.rangeNetRevenue ?? d?.rangeSales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
     // §ADDITIONAL-CARDS: Available but hidden by default
     { id: 'totalCustomers', label: 'Total Customers', icon: Users, tint: 'bg-blue-500', bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-700 dark:text-blue-300', description: 'Total number of customers',
       valueExtractor: (d) => d?.partyCount ?? 0, formatValue: (v) => String(v),
@@ -481,10 +506,10 @@ export function DashboardView() {
       onClick: () => { saveScrollPos('dashboard'); setActiveView('inventory') } },
     { id: 'todaySales', label: "Today's Sales", icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', description: 'Sales for today only',
       valueExtractor: (d) => d?.todaySales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
-      onClick: () => { saveScrollPos('dashboard'); setHistoryDateRange('today'); setActiveView('history') } },
-    { id: 'monthlyRevenue', label: 'Monthly Revenue', icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Revenue this month',
+      onClick: () => { saveScrollPos('dashboard'); setHistoryRangeContext({ range: '1d' }); setActiveView('history') } },
+    { id: 'monthlyRevenue', label: 'Monthly Revenue', icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Revenue this month (incl. GST)',
       valueExtractor: (d) => d?.monthlyRevenue ?? 0, formatValue: (v, c) => formatCurrency(v, c),
-      onClick: () => { saveScrollPos('dashboard'); setReportsDateRange('month'); setActiveView('reports') } },
+      onClick: () => { saveScrollPos('dashboard'); setReportsRangeContext({ range: '1m' }); setActiveView('reports') } },
   ]
 
   // §VISIBLE-CARDS: Filter to visible + sort by configured order
@@ -920,7 +945,7 @@ export function DashboardView() {
           const value = def.valueExtractor(data)
           const formatted = def.formatValue(value, currency)
           return (
-            <motion.button key={config.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={() => def.onClick('')} aria-label={def.label} className="text-left focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-2xl">
+            <motion.button key={config.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={() => def.onClick({ range: '1d' })} aria-label={def.label} className="text-left focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-2xl">
               <Card className={`p-4 ${def.bg} border-none hover:shadow-md transition-shadow h-full active:scale-[0.98]`}>
                 <div className="flex items-start justify-between mb-2"><span className={`w-8 h-8 rounded-lg ${def.tint} text-white flex items-center justify-center`}><Icon className="w-4 h-4" /></span></div>
                 <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{def.label}</p>
@@ -967,7 +992,7 @@ export function DashboardView() {
             {chartOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
           <select value={timeRange} onChange={(e) => { const val = e.target.value as TimeRange; setTimeRange(val); if (val === 'custom') setShowCustomPicker(true) }} className="text-xs bg-muted rounded-lg px-2 py-1.5 border-0 outline-none h-8 font-medium shrink-0">
-            {TIME_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+            {DASHBOARD_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select>
         </div>
 
@@ -1199,7 +1224,8 @@ export function DashboardView() {
               setReportsTab('party')
             } else if (topTab === 'payments') {
               // Top Payments → History/Transactions (payments received)
-              setHistoryDateRange('week')
+              // §PHASE-5-D1: Use RangeContext for full custom-range support.
+              setHistoryRangeContext({ range: '7d' })
               setActiveView('history')
             } else if (topTab === 'products') {
               // Top Products → Inventory
@@ -1327,7 +1353,10 @@ export function DashboardView() {
               // §DYNAMIC-ROUTING: View All routes based on active hub tab.
               if (hubTab === 'transactions') {
                 // Transactions → History (with active time filter)
-                setHistoryDateRange(mapToHistoryRange(timeRange))
+                // §PHASE-5-D1: Pass the FULL RangeContext (not just range string)
+                // so History sees the exact same date window — including custom
+                // range's start/end dates.
+                setHistoryRangeContext({ range: timeRange, customStart, customEnd })
                 setActiveView('history')
               } else if (hubTab === 'lowstock') {
                 // Low Stock → Inventory (with low-stock filter, no time param)
@@ -1357,7 +1386,7 @@ export function DashboardView() {
               onChange={(e) => { const val = e.target.value as TimeRange; setTimeRange(val); if (val === 'custom') setShowCustomPicker(true) }}
               className="text-[10px] bg-muted rounded-md px-1.5 py-0.5 border-0 outline-none font-medium text-muted-foreground cursor-pointer"
             >
-              {TIME_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+              {DASHBOARD_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
             </select>
           </div>
         )}
@@ -1564,19 +1593,16 @@ function OnlineOrdersList({ currency, onNavigate }: { currency: string; onNaviga
 // the value via valueExtractor. Used for time-dependent metrics (Sales,
 // Collection, Expense). Lifetime metrics (Receivable, Payable, Health, LowStock)
 // do NOT use this — they have no time dimension.
+// §PHASE-5-D1: onClick now passes the FULL RangeContext (range + customStart +
+// customEnd) so History/Reports see the EXACT same date window — including
+// custom range dates which were previously lost.
+// §PHASE-5-D2: Each TimeMetricCard still maintains its OWN local range state.
+// Rationale for keeping independent ranges (after Phase 4 audit): the user may
+// want to compare "Today's Sales" vs "This Week's Collection" on the same
+// dashboard. Unifying would force both to the same range, removing that
+// capability. The card's range is now ALWAYS preserved on click — so even
+// with independent ranges, navigation never loses context.
 // ============================================================================
-
-const CARD_RANGES: Array<{ id: TimeRange; label: string }> = [
-  { id: '1d', label: '1 Day (Today)' },
-  { id: '2d', label: '2 Days' },
-  { id: '3d', label: '3 Days' },
-  { id: '5d', label: '5 Days' },
-  { id: '7d', label: '1 Week' },
-  { id: '1m', label: '1 Month' },
-  { id: '6m', label: '6 Months' },
-  { id: '1y', label: '1 Year' },
-  { id: 'custom', label: 'Custom Range' },
-]
 
 function TimeMetricCard({
   label, icon: Icon, tint, bg, text, defaultRange, currency, valueExtractor, onClick,
@@ -1589,7 +1615,9 @@ function TimeMetricCard({
   defaultRange: TimeRange
   currency: string
   valueExtractor: (d: ExtendedDashboardStats | null | undefined) => number
-  onClick: (range: TimeRange) => void
+  // §PHASE-5-D1: onClick now receives a full RangeContext — preserves custom
+  // range start/end dates through the navigation chain.
+  onClick: (ctx: RangeContext) => void
 }) {
   const [range, setRange] = useState<TimeRange>(defaultRange)
   const [customStart, setCustomStart] = useState('')
@@ -1604,7 +1632,9 @@ function TimeMetricCard({
 
   const { data } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl], { timeoutMs: 30000 })
   const value = valueExtractor(data)
-  const rangeLabel = CARD_RANGES.find((r) => r.id === range)?.label || ''
+  // §PHASE-5-D1: Use shared dashboardRangeLabel so the card displays the SAME
+  // label History/Reports will display after the click.
+  const rangeLabel = dashboardRangeLabel(range, customStart, customEnd)
 
   return (
     <Card className={`p-4 ${bg} border-none hover:shadow-md transition-shadow h-full relative`}>
@@ -1622,7 +1652,7 @@ function TimeMetricCard({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
-            {CARD_RANGES.map((r) => (
+            {DASHBOARD_RANGES.map((r) => (
               <DropdownMenuItem
                 key={r.id}
                 onSelect={() => setRange(r.id)}
@@ -1635,7 +1665,7 @@ function TimeMetricCard({
         </DropdownMenu>
       </div>
 
-      <button onClick={() => onClick(range)} className="w-full text-left relative z-0 pr-8">
+      <button onClick={() => onClick({ range, customStart: customStart || null, customEnd: customEnd || null })} className="w-full text-left relative z-0 pr-8">
         <div className="flex items-start mb-2">
           <span className={`w-8 h-8 rounded-lg ${tint} text-white flex items-center justify-center`}>
             <Icon className="w-4 h-4" />

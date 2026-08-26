@@ -22,6 +22,13 @@ import {
 } from 'recharts'
 import { useMemo, useState, useEffect } from 'react'
 import { buildReportCsv, computeRangeDates, computeGstRangeDates, type ReportType } from '@/lib/reports-csv'
+import {
+  computeRangeBounds,
+  dashboardRangeLabel,
+  DASHBOARD_RANGES,
+  type DashboardRange,
+  type RangeContext,
+} from '@/lib/date-ranges'
 
 const PIE_COLORS = ['#10b981', '#14b8a6', '#f59e0b', '#f97316', '#ef4444']
 
@@ -45,24 +52,37 @@ interface ReportData {
   invoiceCount: number
 }
 
-type PLRange = 'today' | 'week' | 'month' | '3months' | 'custom'
+// §PHASE-5-D1: PLRange is now an alias for DashboardRange — same shared type
+// across Dashboard, History, and Reports. Reports P&L accepts ALL 9 dashboard
+// ranges (1d/yesterday/2d/3d/5d/7d/1m/3m/6m/1y/custom) so a dashboard card
+// click carrying any of these ranges is faithfully displayed.
+type PLRange = DashboardRange
 type GSTRange = 'month' | 'last_month' | 'quarter' | 'custom'
 type PartySegment = 'all' | 'customers' | 'suppliers'
 type OutstandingTab = 'receivables' | 'payables'
 type StockMovement = 'all' | 'fast' | 'slow' | 'non-moving'
 
 export function ReportsView() {
-  const { business, setActiveView, reportsDateRange, setReportsDateRange, reportsTab, setReportsTab } = useAppStore()
+  const { business, setActiveView, reportsDateRange, setReportsDateRange, reportsRangeContext, setReportsRangeContext, reportsTab, setReportsTab } = useAppStore()
   const { t } = useI18n()
 
   // Active report tab — declared FIRST because the reportsUrl useMemo below
   // depends on it. (React Hooks rule: hooks must be called in the same order
   // every render, but the dependencies inside useMemo can reference any
   // variable declared above the useMemo call.)
+  // §PHASE-5-D4: 'health' is a NEW pseudo-tab that scrolls the user to the
+  // Health Breakdown section (rendered inside the P&L tab). It's NOT a real
+  // report tab — set as 'pl' but a separate `showHealthBreakdown` flag controls
+  // the section's prominent display.
   const [activeReport, setActiveReport] = useState<'pl' | 'gst' | 'party' | 'outstanding' | 'stock' | 'grade'>('pl')
+  // §PHASE-5-D4: When the dashboard Business Health card is clicked, this flag
+  // is set true on mount to expand the Health Breakdown section prominently.
+  const [showHealthBreakdown, setShowHealthBreakdown] = useState(false)
 
   // P&L date filter (PRD Part 19 §1)
-  const [plRange, setPlRange] = useState<PLRange>('month')
+  // §PHASE-5-D1: Default plRange is now '1m' (1 Month) using the shared
+  // DashboardRange type — was 'month' (legacy). Same semantic.
+  const [plRange, setPlRange] = useState<PLRange>('1m')
   const [plCustomStart, setPlCustomStart] = useState('')
   const [plCustomEnd, setPlCustomEnd] = useState('')
 
@@ -76,15 +96,26 @@ export function ReportsView() {
   // by the start/end dates. When the active report is not P&L or GST (which
   // are the only date-filterable reports), no date params are sent.
   //
-  // §BUGFIX: Previously the P&L and GST date filter buttons (Today/Week/Month/
-  // 3 Months/Custom) were cosmetic — they updated local state but the API was
-  // always called without params. Now the URL reflects the selected range.
+  // §PHASE-5-D1: P&L now uses the NEW `?range=X&startDate=...&endDate=...`
+  // path — the Reports API uses `computeRangeBounds` (shared utility) to
+  // compute the SAME date boundaries as the Dashboard card. This eliminates
+  // the timezone drift bug where Reports used `Date.UTC(...)` but Dashboard
+  // used `new Date().setHours()` (local-time). Now both use IST-aligned
+  // boundaries from the same utility.
+  //
+  // GST continues to use the legacy `?start=YYYY-MM-DD&end=YYYY-MM-DD` path
+  // because GST's range presets (month/last_month/quarter) are calendar-based
+  // and not part of DashboardRange. This is unchanged behavior.
   const reportsUrl = useMemo(() => {
     const params = new URLSearchParams()
     if (activeReport === 'pl') {
-      const { start, end } = computeRangeDates(plRange, plCustomStart, plCustomEnd)
-      if (start) params.set('start', start)
-      if (end) params.set('end', end)
+      // §PHASE-5-D1: Pass range + customStart/customEnd directly. Reports API
+      // recognizes `range` and computes the same boundaries as Dashboard.
+      params.set('range', plRange)
+      if (plRange === 'custom') {
+        if (plCustomStart) params.set('startDate', plCustomStart)
+        if (plCustomEnd) params.set('endDate', plCustomEnd)
+      }
     } else if (activeReport === 'gst') {
       const { start, end } = computeGstRangeDates(gstRange, gstCustomStart, gstCustomEnd)
       if (start) params.set('start', start)
@@ -99,32 +130,65 @@ export function ReportsView() {
   // matching the API route's maxDuration=30.
   const { data, loading, error, refetch } = useFetch<ReportData>(reportsUrl, [reportsUrl], { timeoutMs: 30000 })
   // §HEALTH-BANNER: fetch dashboard stats for the Business Health score context
-  const { data: dashData } = useFetch<{ healthScore?: number; totalReceivable?: number } & Record<string, unknown>>('/api/dashboard?range=7d', [])
+  // §PHASE-5-D4: Now also fetches `healthBreakdown` for the new Health Breakdown
+  // section. The fetch is unchanged — just typing widened.
+  const { data: dashData } = useFetch<{ healthScore?: number; totalReceivable?: number; healthBreakdown?: any } & Record<string, unknown>>('/api/dashboard?range=7d', [])
   const [healthBannerDismissed, setHealthBannerDismissed] = useState(false)
   const { data: allProducts } = useFetch<any[]>('/api/products', [])
 
   // §REPORTS-ROUTING: Auto-select a report tab passed from the dashboard
   // (e.g. 'outstanding' from Top Debtors, 'party' from Top Buyers).
+  // §PHASE-5-D4: If reportsTab === 'health' (Business Health card click),
+  // we set activeReport='pl' AND setShowHealthBreakdown(true) so the Health
+  // Breakdown section is prominently expanded at the top of P&L.
   useEffect(() => {
     if (!reportsTab) return
     const t = setTimeout(() => {
-      setActiveReport(reportsTab as any)
+      if (reportsTab === 'health') {
+        setActiveReport('pl')
+        setShowHealthBreakdown(true)
+      } else {
+        setActiveReport(reportsTab as any)
+      }
       setReportsTab(null)
     }, 0)
     return () => clearTimeout(t)
   }, [reportsTab, setReportsTab, setActiveReport])
 
-  // §REPORTS-ROUTING: Auto-apply date range passed from dashboard cards.
-  // When the dashboard Expense/Revenue card passes a reportsDateRange, apply
-  // it to the P&L filter on mount, then clear the param.
+  // §REPORTS-ROUTING (Phase 5 D1): Consume the FULL RangeContext from the
+  // dashboard Expense/Revenue card click — {range, customStart, customEnd}.
+  // This preserves custom range dates which were previously lost (Phase 4 D1).
+  // Applies on mount, then clears the param.
+  useEffect(() => {
+    if (!reportsRangeContext) return
+    const ctx = reportsRangeContext
+    const t = setTimeout(() => {
+      setPlRange(ctx.range)
+      setPlCustomStart(ctx.customStart || '')
+      setPlCustomEnd(ctx.customEnd || '')
+      // §PHASE-5-D4: Health card click sets 'pl' tab AND shows breakdown.
+      // For other cards (Expense/Revenue), just navigate to P&L.
+      setActiveReport('pl')
+      setReportsRangeContext(null)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [reportsRangeContext, setReportsRangeContext, setPlRange, setPlCustomStart, setPlCustomEnd, setActiveReport])
+
+  // §LEGACY-REPORTS-DATE-RANGE: For any callers still using the old
+  // `reportsDateRange` field (older code paths, deep links), preserve backward
+  // compat by mapping legacy strings to DashboardRange IDs.
+  // 'today' → '1d', 'week' → '7d', 'month' → '1m', '3months' → '3m'.
   useEffect(() => {
     if (!reportsDateRange) return
     const t = setTimeout(() => {
-      setPlRange(reportsDateRange)
+      const legacyMap: Record<string, PLRange> = {
+        today: '1d', week: '7d', month: '1m', '3months': '3m', custom: 'custom',
+      }
+      setPlRange(legacyMap[reportsDateRange] || '1m')
       setReportsDateRange(null)
     }, 0)
     return () => clearTimeout(t)
-  }, [reportsDateRange, setReportsDateRange])
+  }, [reportsDateRange, setReportsDateRange, setPlRange])
 
   // Party Ledger (PRD Part 19 §3)
   const [partySeg, setPartySeg] = useState<PartySegment>('all')
@@ -349,15 +413,61 @@ export function ReportsView() {
                 </div>
               </div>
             )}
-            {/* Date filter chips (PRD Part 19 §1) */}
+
+            {/* §PHASE-5-D4: Health Breakdown section.
+                Shown when the Business Health card was clicked (showHealthBreakdown=true).
+                Displays the score's 3 components so the user understands WHAT
+                contributes to the score and WHAT to improve:
+                  1. Invoice Payment Rate (50 pts max)
+                  2. Customer Non-Overdue Rate (30 pts max)
+                  3. Stock Health (20 pts max)
+                Each component shows: label, value/max, hint with concrete numbers.
+                User can dismiss to hide this section. */}
+            {showHealthBreakdown && dashData?.healthBreakdown && (
+              <div className="relative rounded-xl border border-teal-200 dark:border-teal-900/50 bg-card p-4 pr-9 space-y-3">
+                <button
+                  onClick={() => setShowHealthBreakdown(false)}
+                  className="absolute top-2 right-2 w-6 h-6 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground"
+                  aria-label="Dismiss"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+                <div className="flex items-center gap-2">
+                  <Heart className="w-4 h-4 text-teal-600" />
+                  <h3 className="text-sm font-semibold">Business Health Breakdown</h3>
+                  <span className="text-xs font-bold text-teal-700 dark:text-teal-300 ml-auto pr-6">
+                    {dashData.healthBreakdown.score}/100
+                  </span>
+                </div>
+                <div className="space-y-2.5">
+                  {dashData.healthBreakdown.components?.map((c: any) => (
+                    <div key={c.id} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium">{c.label}</span>
+                        <span className="tabular text-muted-foreground">{c.value}/{c.max} pts</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full bg-teal-500 rounded-full transition-all"
+                          style={{ width: `${Math.min(100, (c.value / c.max) * 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground leading-tight">{c.hint}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-muted-foreground pt-2 border-t border-border">
+                  Score = Payment Rate (50) + Non-Overdue Rate (30) + Stock Health (20). Improve each component to raise your overall score.
+                </p>
+              </div>
+            )}
+            {/* Date filter chips (PRD Part 19 §1)
+                §PHASE-5-D1: Now uses the FULL DASHBOARD_RANGES list — same range
+                IDs as the Dashboard. When the user clicks an Expense/Revenue card
+                with "3 Days" selected, Reports P&L opens showing "3 Days" (not
+                "Week" as before, which meant a different window). */}
             <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
-              {([
-                { id: 'today', label: 'Today' },
-                { id: 'week', label: 'Week' },
-                { id: 'month', label: 'Month' },
-                { id: '3months', label: '3 Months' },
-                { id: 'custom', label: 'Custom' },
-              ] as const).map((r) => (
+              {DASHBOARD_RANGES.map((r) => (
                 <button
                   key={r.id}
                   onClick={() => setPlRange(r.id)}

@@ -1,73 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
+import { computeRangeBounds, type DashboardRange } from '@/lib/date-ranges'
 
 // GET /api/transactions/summary
 // Returns a daily summary for the History/Reports module.
+//
+// §SHARED-DATE-RANGES: This route now accepts the FULL dashboard range set
+// (1d/yesterday/2d/3d/5d/7d/1m/3m/6m/1y/custom) and uses the SAME date-boundary
+// utility as the Dashboard API (`src/lib/date-ranges.ts`). This eliminates the
+// Phase 4 D1 bug where Dashboard "3 Days" → History "This Week" (different window).
+// History now receives the same range string the Dashboard card was showing and
+// computes the SAME start/end boundaries — so the displayed numbers match.
+//
+// §BACKWARD-COMPAT: Legacy range strings 'today' and 'week' are still accepted
+// for any external callers — they map to '1d' and '7d' respectively. This
+// preserves backward compatibility with any cached URLs / bookmarks.
+//
 // Query params:
-//   range: 'today' | 'yesterday' | 'week' | 'custom'  (default 'today')
+//   range: '1d' | 'yesterday' | '2d' | '3d' | '5d' | '7d' | '1m' | '3m' | '6m' | '1y' | 'custom'
+//          (legacy: 'today' → '1d', 'week' → '7d')
 //   startDate, endDate: ISO date strings (YYYY-MM-DD) for custom range
 //
 // Returns:
 // {
 //   range, startDate, endDate,
-//   grossSales: number,        // sum of invoice.grandTotal (sales/retail type)
-//   netSales: number,          // grossSales - discountAmount
-//   cashReceived: number,      // sum of transaction.amount where type=credit AND category LIKE 'Payment%' or 'Sale' with cash
-//   upiReceived: number,
-//   creditGiven: number,       // sum of invoices where paymentMode='credit' grandTotal
-//   dueCollected: number,      // sum of transactions type=credit category='Payment In'
-//   invoiceCount: number,
-//   transactionCount: number,
-//   byPaymentMode: { cash, upi, credit, cheque },
-//   byCategory: { [category: string]: number },
+//   grossSales, netSales, cashReceived, upiReceived, creditGiven,
+//   dueCollected, invoiceCount, transactionCount, byPaymentMode, byCategory
 // }
 
-function getRangeBounds(range: string, startDate?: string | null, endDate?: string | null) {
-  const now = new Date()
-  // Use local midnight boundaries so "today" matches the shopkeeper's day.
-  const startOfDay = (d: Date) => {
-    const x = new Date(d)
-    x.setHours(0, 0, 0, 0)
-    return x
-  }
-  const endOfDay = (d: Date) => {
-    const x = new Date(d)
-    x.setHours(23, 59, 59, 999)
-    return x
-  }
-
-  switch (range) {
-    case 'yesterday': {
-      const y = new Date(now)
-      y.setDate(y.getDate() - 1)
-      return { start: startOfDay(y), end: endOfDay(y) }
-    }
-    case 'week': {
-      // Current week (Mon-Sun)
-      const start = startOfDay(now)
-      const day = start.getDay() // 0=Sun..6=Sat
-      const diff = day === 0 ? 6 : day - 1 // back to Monday
-      start.setDate(start.getDate() - diff)
-      return { start, end: endOfDay(now) }
-    }
-    case 'custom': {
-      if (startDate && endDate) {
-        const s = new Date(startDate + 'T00:00:00')
-        const e = new Date(endDate + 'T23:59:59.999')
-        if (!isNaN(s.getTime()) && !isNaN(e.getTime())) return { start: s, end: e }
-      }
-      return { start: startOfDay(now), end: endOfDay(now) }
-    }
-    case 'today':
-    default:
-      return { start: startOfDay(now), end: endOfDay(now) }
-  }
+// §LEGACY-MAP: Map old History range strings to DashboardRange values so
+// existing callers (and any bookmarked URLs) keep working.
+function normalizeRange(raw: string): DashboardRange {
+  if (raw === 'today') return '1d'
+  if (raw === 'week') return '7d'
+  return raw as DashboardRange
 }
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
-  const range = searchParams.get('range') || 'today'
+  const rawRange = searchParams.get('range') || '1d'
+  const range = normalizeRange(rawRange)
   const startDate = searchParams.get('startDate')
   const endDate = searchParams.get('endDate')
 
@@ -76,7 +49,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }
 
-  const { start, end } = getRangeBounds(range, startDate, endDate)
+  // §SHARED-BOUNDARIES: Single source of truth — same as Dashboard API.
+  // For 'custom' without valid dates, fall back to '1d' (today) — matches
+  // pre-fix behavior where invalid custom range defaulted to today.
+  const bounds = computeRangeBounds(range, startDate, endDate)
+    ?? computeRangeBounds('1d')!
+  const start = bounds.start
+  const end = bounds.end
 
   try {
     // Fetch invoices in range (sales/retail = product sales; exclude purchase/challan)
@@ -158,7 +137,7 @@ export async function GET(req: NextRequest) {
 
 function NextNextEmpty() {
   return NextResponse.json({
-    range: 'today',
+    range: '1d',
     grossSales: 0,
     netSales: 0,
     cashReceived: 0,

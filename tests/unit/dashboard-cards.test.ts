@@ -70,21 +70,24 @@ assert(visibleDefaults.every(c => c.order < 8), 'All visible defaults have order
 
 console.log('\n  Card destination mapping (source inspection):')
 // 3. Card destination mapping
+// §PHASE-5-D1: Updated to reflect new RangeContext-based navigation. Cards now
+// call `setHistoryRangeContext(ctx)` / `setReportsRangeContext(ctx)` instead of
+// the legacy `setHistoryDateRange(range)` / `setReportsDateRange(range)`.
 const dashSrc = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
 assert(dashSrc.includes("setKhataFilter('receivable')"), 'totalReceivable → Khata receivable')
 assert(dashSrc.includes("setKhataFilter('payable')"), 'totalPayable → Khata payable')
-assert(dashSrc.includes("setActiveView('reports')") && dashSrc.includes("businessHealth"), 'businessHealth → Reports')
+assert(dashSrc.includes("setReportsTab('health')") && dashSrc.includes("businessHealth"), 'businessHealth → Reports (health tab)')
 assert(dashSrc.includes("setInventoryFilter('low-stock')"), 'lowStock → Inventory low-stock')
-assert(dashSrc.includes("setHistoryDateRange") && dashSrc.includes("totalSales"), 'totalSales → History')
-assert(dashSrc.includes("setHistoryDateRange") && dashSrc.includes("totalCollection"), 'totalCollection → History')
-assert(dashSrc.includes("setReportsDateRange") && dashSrc.includes("totalExpense"), 'totalExpense → Reports PL')
-assert(dashSrc.includes("setReportsDateRange") && dashSrc.includes("totalRevenue"), 'totalRevenue → Reports PL')
+assert(dashSrc.includes("setHistoryRangeContext") && dashSrc.includes("totalSales"), 'totalSales → History (via RangeContext)')
+assert(dashSrc.includes("setHistoryRangeContext") && dashSrc.includes("totalCollection"), 'totalCollection → History (via RangeContext)')
+assert(dashSrc.includes("setReportsRangeContext") && dashSrc.includes("totalExpense"), 'totalExpense → Reports PL (via RangeContext)')
+assert(dashSrc.includes("setReportsRangeContext") && dashSrc.includes("totalRevenue"), 'totalRevenue → Reports PL (via RangeContext)')
 assert(dashSrc.includes("setKhataFilter('all')") && dashSrc.includes("totalCustomers"), 'totalCustomers → Khata all')
 assert(dashSrc.includes("setActiveView('inventory')") && dashSrc.includes("totalProducts"), 'totalProducts → Inventory')
 assert(dashSrc.includes("setActiveView('billing')") && dashSrc.includes("totalInvoices"), 'totalInvoices → Billing')
 assert(dashSrc.includes("setActiveView('inventory')") && dashSrc.includes("stockValue"), 'stockValue → Inventory')
-assert(dashSrc.includes("setHistoryDateRange('today')") && dashSrc.includes("todaySales"), 'todaySales → History today')
-assert(dashSrc.includes("setReportsDateRange('month')") && dashSrc.includes("monthlyRevenue"), 'monthlyRevenue → Reports month')
+assert(dashSrc.includes("setHistoryRangeContext({ range: '1d' }") && dashSrc.includes("todaySales"), 'todaySales → History (range: 1d/today)')
+assert(dashSrc.includes("setReportsRangeContext({ range: '1m' }") && dashSrc.includes("monthlyRevenue"), 'monthlyRevenue → Reports (range: 1m/month)')
 
 console.log('\n  Hidden cards and ordering:')
 // 4. Hidden cards not rendered

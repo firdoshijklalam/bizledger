@@ -10,6 +10,7 @@ import {
 import { useAppStore } from '@/store/app-store'
 import { useFetch } from '@/hooks/use-fetch'
 import { formatCurrency } from '@/lib/utils'
+import type { RangeContext } from '@/lib/date-ranges'
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
   useSensor, useSensors, DragEndEvent,
@@ -34,7 +35,10 @@ export interface DashboardCardDef {
   isTimeMetric?: boolean
   valueExtractor: (data: any) => number
   formatValue: (val: number, currency: string) => string
-  onClick: (range: string) => void
+  // §PHASE-5-D1: onClick now receives a FULL RangeContext (range + customStart
+  // + customEnd) instead of just the range string. This carries custom range
+  // dates through navigation so History/Reports see the EXACT same window.
+  onClick: (ctx: RangeContext) => void
   defaultRange?: string
 }
 

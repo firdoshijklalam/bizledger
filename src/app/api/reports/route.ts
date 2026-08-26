@@ -3,6 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 import { serializeDecimals } from '@/lib/decimal-serializer'
 import { parseReportDateRange } from '@/lib/reports-csv'
+import { computeRangeBounds, type DashboardRange } from '@/lib/date-ranges'
 
 // §VERCEL-LIMIT: Allow up to 30s for report aggregation across many invoices/items
 export const maxDuration = 30
@@ -42,10 +43,35 @@ export async function GET(req: NextRequest) {
   const business = await getCurrentBusiness()
   if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
-  // §DATE-RANGE: Parse optional start/end query params. Returns null when no
-  // valid range is provided → the API defaults to all-time (backward compatible).
+  // §DATE-RANGE: Two paths for date filtering:
+  //   (1) ?range=3d&startDate=...&endDate=...  ← NEW: dashboard-card click path.
+  //       Uses `computeRangeBounds` from `src/lib/date-ranges.ts` — SAME utility
+  //       the Dashboard API uses. Guarantees identical date boundaries.
+  //   (2) ?start=YYYY-MM-DD&end=YYYY-MM-DD      ← LEGACY: Reports view's own
+  //       P&L/GST filter path. Preserved for backward compatibility (existing
+  //       callers, existing tests).
+  // If both are provided, `range` takes precedence (dashboard click is the
+  // user's most recent intent).
   const url = new URL(req.url)
-  const dateRange = parseReportDateRange(url.searchParams)
+  const rangeParam = url.searchParams.get('range') as DashboardRange | null
+  let dateRange: { start: Date; end: Date } | null = null
+  if (rangeParam) {
+    // §SHARED-BOUNDARIES: Dashboard card click path. Computes the same start/end
+    // as the Dashboard API — so a card showing "3 Days: ₹X" navigates to Reports
+    // showing the EXACT same 3-day window.
+    const startDate = url.searchParams.get('startDate')
+    const endDate = url.searchParams.get('endDate')
+    dateRange = computeRangeBounds(rangeParam, startDate, endDate)
+    // §FALLBACK: If 'custom' range had invalid dates, fall back to legacy
+    // ?start=&end= parsing (or null = all-time).
+    if (!dateRange) {
+      dateRange = parseReportDateRange(url.searchParams)
+    }
+  } else {
+    // §LEGACY-PATH: Reports view's own P&L/GST filter sends ?start=&end=
+    // YYYY-MM-DD strings. Preserved as-is for backward compatibility.
+    dateRange = parseReportDateRange(url.searchParams)
+  }
 
   // Build the createdAt filter object (undefined = no date filter = all-time)
   const createdAtFilter = dateRange
