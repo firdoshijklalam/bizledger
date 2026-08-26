@@ -481,10 +481,18 @@ export function computeBuckets(
       end = new Date(start.getTime() + WEEK_MS)
       label = `W${i + 1}`
     } else {
+      // §FIX-7E: Monthly buckets — first bucket starts at rangeStart (not 1st of month),
+      // last bucket ends at rangeEnd (not 1st of next month). This prevents out-of-range
+      // transactions from being included in the chart (which would break sum(bucket) === rangeExpense).
+      // Middle buckets span full calendar months (1st to 1st).
       start = new Date(rangeStart)
       start.setUTCMonth(rangeStart.getUTCMonth() + i, 1)
       end = new Date(start)
       end.setUTCMonth(start.getUTCMonth() + 1, 1)
+      // §FIRST-BUCKET: First bucket starts at rangeStart (not 1st of month)
+      if (i === 0) {
+        start = new Date(rangeStart)
+      }
       label = start.toLocaleDateString('en-IN', { month: 'short', timeZone: 'Asia/Kolkata' })
     }
 
