@@ -40,6 +40,38 @@ export function formatNumber(n: number): string {
   return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n)
 }
 
+/**
+ * §FIX-3: Compact Indian number formatting for chart axis labels.
+ *
+ * Uses the Indian number system (Lakh = 1,00,000; Crore = 1,00,00,000)
+ * instead of the Western system (K/M/B) which was previously hardcoded
+ * in 10 YAxis tickFormatter lambdas across dashboard-view.tsx.
+ *
+ * Examples:
+ *   0          → "0"
+ *   500        → "500"
+ *   1000       → "1k"
+ *   10000      → "10k"
+ *   50000      → "50k"
+ *   100000     → "1L"     (1 Lakh)
+ *   500000     → "5L"
+ *   1000000    → "10L"
+ *   5000000    → "50L"
+ *   10000000   → "1Cr"    (1 Crore = 100 Lakh)
+ *   25000000   → "2.5Cr"
+ *
+ * This is a DISPLAY-ONLY formatter — it does NOT change the underlying
+ * numeric values. It is separate from formatCurrency() which returns
+ * a full currency string (₹1,00,000) suitable for tooltips and cards.
+ */
+export function formatChartAxisValue(v: number): string {
+  const abs = Math.abs(v)
+  if (abs >= 10000000) return `${(v / 10000000).toFixed(abs % 10000000 === 0 ? 0 : 1)}Cr`
+  if (abs >= 100000) return `${(v / 100000).toFixed(abs % 100000 === 0 ? 0 : 1)}L`
+  if (abs >= 1000) return `${(v / 1000).toFixed(0)}k`
+  return String(v)
+}
+
 export function formatDate(date: string | Date | null | undefined, format = 'DD/MM/YYYY'): string {
   if (!date) return 'N/A'
   try {

@@ -77,11 +77,17 @@ export async function getCurrentBusiness() {
     // §SINGLE-QUERY-AUTH: JOIN Session → User → Business in one raw SQL.
     // Replaces 2 sequential queries (session.findUnique + business.findUnique)
     // with 1 query. Saves ~1.5-2s on Neon (each query ~1.5s due to network RTT).
+    // §CROSS-DB-FIX: Pass `now` as a Date PARAMETER instead of using a SQL
+    // function (NOW()/CURRENT_TIMESTAMP). Prisma stores DateTime as INTEGER
+    // (ms since epoch) in SQLite but as TIMESTAMP in PostgreSQL — comparing
+    // a stored column against a SQL function breaks cross-DB compat. A Date
+    // parameter is correctly adapted by Prisma's driver for both providers.
+    const now = new Date()
     const rows = await db.$queryRaw<Array<any>>`
       SELECT b.* FROM "Session" s
       JOIN "User" u ON s."userId" = u.id
       JOIN "Business" b ON u."businessId" = b.id
-      WHERE s."tokenHash" = ${tokenHash} AND s."expiresAt" > NOW()
+      WHERE s."tokenHash" = ${tokenHash} AND s."expiresAt" > ${now}
       LIMIT 1
     `
     return rows[0] || null

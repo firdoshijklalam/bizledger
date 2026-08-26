@@ -337,6 +337,78 @@ function testNoSeparateApiCalls() {
   assert(!saveFunc.includes("fetch('/api/business'"), 'Save does not call /api/business separately')
 }
 
+// HH. Image upload uses awaited FileReader (not async callback)
+function testAwaitedFileReader() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes('await new Promise<string>'), 'FileReader wrapped in awaited Promise')
+  assert(!src.includes('reader.onload = async'), 'No async onload callback (old bug)')
+}
+
+// II. Upload error state exists
+function testUploadErrorState() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes('uploadError'), 'uploadError state exists')
+  assert(src.includes('Could not process image'), 'Visible error message on upload failure')
+}
+
+// JJ. Input value reset after file select
+function testInputValueReset() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes("e.target.value = ''"), 'File input value reset after select')
+}
+
+// KK. Save uses server response as source of truth (not stale business)
+function testServerResponseSource() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes('data.business'), 'Save uses server response data.business')
+  assert(src.includes('useAppStore.getState().setBusiness(data.business)'), 'Uses server response for setBusiness')
+  // Old buggy pattern should NOT be present
+  const saveStart = src.indexOf('const saveChanges')
+  const saveEnd = src.indexOf('}', saveStart + 400)
+  const saveFunc = src.substring(saveStart, saveEnd + 1)
+  assert(!saveFunc.includes('setBusiness({ ...business, logoUrl'), 'Does NOT use stale business for logo update')
+  assert(!saveFunc.includes('setBusiness({ ...business, coverUrl'), 'Does NOT use stale business for cover update')
+}
+
+// LL. API input validation: rejects non-image strings
+function testApiInputValidation() {
+  const src = fs.readFileSync('src/app/api/card-customization/route.ts', 'utf8')
+  assert(src.includes('validateImageUrl'), 'API has validateImageUrl function')
+  assert(src.includes('data:image/'), 'API accepts data:image/ URLs')
+  assert(src.includes('linear-gradient('), 'API accepts linear-gradient (CSS presets)')
+  assert(src.includes('MAX_IMAGE_SIZE'), 'API has max image size limit')
+}
+
+// MM. MIME type validation on client
+function testClientMimeValidation() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes('file.type.startsWith'), 'Client validates MIME type')
+}
+
+// NN. Upload error cleared on new upload
+function testErrorClearedOnNewUpload() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes('setUploadError(null)'), 'Upload error cleared on new upload start')
+}
+
+// OO. Upload error cleared on save success
+function testErrorClearedOnSaveSuccess() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  const saveStart = src.indexOf('const saveChanges')
+  const saveEnd = src.indexOf('}', saveStart + 300)
+  const saveFunc = src.substring(saveStart, saveEnd + 1)
+  assert(saveFunc.includes('setUploadError(null)'), 'Upload error cleared on save start')
+}
+
+// PP. Upload error cleared on openCustomizer
+function testErrorClearedOnOpen() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  const openStart = src.indexOf('const openCustomizer')
+  const openEnd = src.indexOf('}', openStart + 100)
+  const openFunc = src.substring(openStart, openEnd + 1)
+  assert(openFunc.includes('setUploadError(null)'), 'Upload error cleared on editor open')
+}
+
 // ─── Run all tests ─────────────────────────────────────────────────────────
 
 console.log('\n  Card preferences validation:')
@@ -387,6 +459,70 @@ testAtomicRBAC()
 testAtomicTenantIsolation()
 testDirtyStateTracking()
 testNoSeparateApiCalls()
+
+console.log('\n  Image upload fix:')
+testAwaitedFileReader()
+testUploadErrorState()
+testInputValueReset()
+testServerResponseSource()
+testApiInputValidation()
+testClientMimeValidation()
+testErrorClearedOnNewUpload()
+testErrorClearedOnSaveSuccess()
+testErrorClearedOnOpen()
+
+// ─── UX Improvements (Phase 6) ────────────────────────────────────────────
+console.log('\n  UX Improvements (Phase 6):')
+
+// §PHASE-6: Read the dashboard-view source at top level for UX assertions
+const uxSrc = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+
+// §UX-P0: Save button always shows "Save Changes" (never "No changes")
+assert(uxSrc.includes("'Saving...' : 'Save Changes'"), 'Save button always shows "Save Changes" label')
+assert(!uxSrc.includes("'No changes'"), 'Save button does NOT show "No changes" label')
+assert(uxSrc.includes('disabled={saving || !isDirty}'), 'Save button disabled when !isDirty')
+assert(uxSrc.includes('disabled:cursor-not-allowed'), 'Save button has disabled cursor style')
+
+// §UX-P0: Discard confirmation text updated
+assert(uxSrc.includes('Discard changes?'), 'Discard dialog title = "Discard changes?"')
+assert(uxSrc.includes('You have unsaved changes. Are you sure you want to discard them?'), 'Discard dialog body updated')
+assert(uxSrc.includes('Keep Editing'), 'Discard dialog has "Keep Editing" button')
+assert(uxSrc.includes('Discard Changes'), 'Discard dialog has "Discard Changes" button')
+
+// §UX-P0: Mobile bottom-sheet obstruction fix
+assert(uxSrc.includes('max-h-[90dvh]'), 'Sheet max-height uses 90dvh (dynamic viewport)')
+assert(!uxSrc.includes('max-h-[85vh]'), 'Sheet does NOT use old 85vh (caused mobile obstruction)')
+assert(uxSrc.includes('pb-24'), 'Scrollable content has pb-24 (96px bottom padding)')
+assert(uxSrc.includes('env(safe-area-inset-bottom)'), 'Footer uses env(safe-area-inset-bottom) for iOS/Android safe area')
+assert(uxSrc.includes('max(0.75rem, env(safe-area-inset-bottom))'), 'Footer paddingBottom uses max() for safe area')
+
+// §UX-P1: Reset to Default with confirmation
+assert(uxSrc.includes('showResetConfirm'), 'Reset confirmation state exists')
+assert(uxSrc.includes('handleResetClick'), 'handleResetClick function exists')
+assert(uxSrc.includes('Reset to Default'), 'Reset button label = "Reset to Default"')
+assert(!uxSrc.includes('Reset to recommended defaults'), 'Old "Reset to recommended defaults" label removed')
+assert(uxSrc.includes('Reset to default?'), 'Reset confirmation dialog title exists')
+assert(uxSrc.includes('This will restore the default card appearance and settings.'), 'Reset confirmation body exists')
+assert(uxSrc.includes('Keep Current'), 'Reset dialog has "Keep Current" button')
+assert(uxSrc.includes('setShowResetConfirm(false)'), 'Reset confirmation can be dismissed')
+assert(uxSrc.includes('resetToDefaults'), 'resetToDefaults function exists (called after confirmation)')
+
+// §UX-P1: Selected cover photo — checkmark overlay
+assert(uxSrc.includes('Check'), 'Check icon imported from lucide-react')
+assert(uxSrc.includes('isSelected'), 'Cover preset has isSelected variable')
+assert(uxSrc.includes('aria-pressed={isSelected}'), 'Cover preset has aria-pressed for accessibility')
+assert(uxSrc.includes('ring-2 ring-primary/30'), 'Selected cover has ring outline')
+assert(uxSrc.includes('bg-white/90'), 'Checkmark background uses semi-transparent white')
+
+// §UX-P1: Greeting text character counter
+assert(uxSrc.includes('greetingText.length'), 'Greeting counter uses greetingText.length')
+assert(uxSrc.includes('/ 30'), 'Greeting counter shows "X / 30" format')
+assert(uxSrc.includes('text-amber-600'), 'Counter turns amber when near limit (>= 25 chars)')
+assert(uxSrc.includes('focus:ring-2 focus:ring-primary/20'), 'Greeting input has focus ring')
+
+// §UX-P2: Profile photo Remove button already exists (pre-existing)
+assert(uxSrc.includes('setDraftLogo(null)'), 'Profile photo Remove sets draftLogo to null')
+assert(uxSrc.includes("draftLogo !== undefined &&"), 'Remove button only shows when draftLogo is set')
 
 console.log(`\n✅ Passed: ${passed}`)
 console.log(`❌ Failed: ${failed}`)

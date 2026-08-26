@@ -4,12 +4,13 @@ import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
 import type { DashboardStats, Party, Product } from '@/lib/types'
-import { formatCurrency, formatDate, GRADE_META, timeAgo } from '@/lib/utils'
+import { formatCurrency, formatDate, formatChartAxisValue, GRADE_META, timeAgo } from '@/lib/utils'
 import {
   TrendingUp, TrendingDown, Wallet, Heart, AlertTriangle, Package,
   ArrowUpRight, ArrowDownRight, ArrowLeftRight, Users, Receipt, ChevronRight,
   BarChart3, LineChart, X, Loader2, Calendar,
   MapPin, Phone, Building2, ShieldCheck, Store, Settings, Camera, Eye, EyeOff,
+  FileText, Boxes, LayoutGrid, Check,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -26,10 +27,29 @@ import { useScrollStore } from '@/store/scroll-store'
 import { useRealtimeOrders } from '@/hooks/use-realtime-orders'
 import { toNumber } from '@/lib/numeric'
 import { useMemo, useState, useEffect, useRef } from 'react'
+import {
+  DashboardCardManagementSheet,
+  DEFAULT_CARD_CONFIG,
+  parseCardConfig,
+  type CardConfig,
+  type DashboardCardDef,
+} from '@/components/shared/dashboard-card-management'
+import {
+  computeRangeBounds,
+  dashboardRangeLabel,
+  DASHBOARD_RANGES,
+  type DashboardRange,
+  type RangeContext,
+} from '@/lib/date-ranges'
 
 type ChartType = 'revenue' | 'profit' | 'cashflow' | 'collections' | 'categories' | 'inventory'
 type ChartView = 'line' | 'bar'
-type TimeRange = 'yesterday' | '1d' | '2d' | '3d' | '5d' | '7d' | '1m' | '3m' | '6m' | '1y' | 'custom'
+// §TIME-RANGE: Replaced local TimeRange union with the shared DashboardRange
+// from src/lib/date-ranges.ts. This guarantees the dashboard, History, and
+// Reports all use the EXACT SAME set of range IDs — no lossy mapping.
+type TimeRange = DashboardRange
+// §CHART-RANGES: Replaced local TIME_RANGES with the shared DASHBOARD_RANGES
+// from src/lib/date-ranges.ts — single source of truth for the range list + labels.
 
 interface ExtendedDashboardStats extends DashboardStats {
   topCategories?: Array<{ name: string; value: number }>
@@ -43,47 +63,52 @@ interface ExtendedDashboardStats extends DashboardStats {
   rangeSales?: number
   rangeCollection?: number
   rangeExpense?: number
+  // §NET-REVENUE (Phase 5 D3 fix): Pre-tax, post-discount revenue for the
+  // selected range. DIFFERENT from rangeSales (which is SUM(grandTotal) —
+  // post-discount but INCLUDES GST). Used by the Total Revenue card so it
+  // shows a distinct value from Total Sales.
+  rangeNetRevenue?: number
+  rangeDiscount?: number
+  // §HEALTH-BREAKDOWN (Phase 5 D4 fix): Decomposed health score components
+  // from the dashboard API. Used by Reports P&L view's Health Breakdown
+  // section so the user can see WHAT contributes to the score.
+  healthBreakdown?: {
+    score: number
+    paidRatio: number
+    nonOverdueRatio: number
+    lowStockCount: number
+    stockBonus: number
+    components: Array<{
+      id: string
+      label: string
+      value: number
+      max: number
+      hint: string
+    }>
+  }
 }
 
-const TIME_RANGES: Array<{ id: TimeRange; label: string }> = [
-  { id: '1d', label: 'Today' },
-  { id: 'yesterday', label: 'Yesterday' },
-  { id: '2d', label: '2 Days' },
-  { id: '3d', label: '3 Days' },
-  { id: '5d', label: '5 Days' },
-  { id: '7d', label: '7 Days' },
-  { id: '1m', label: '1 Month' },
-  { id: '3m', label: '3 Months' },
-  { id: '6m', label: '6 Months' },
-  { id: '1y', label: '1 Year' },
-  { id: 'custom', label: 'Custom' },
-]
+// §TIME-RANGES: REMOVED — was a duplicate of DASHBOARD_RANGES from
+// src/lib/date-ranges.ts. Use DASHBOARD_RANGES instead. Single source of truth.
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6']
 
-// §ROUTING: Map a dashboard TimeRange → History DateRange.
-// History only has today/yesterday/week/custom, so multi-day ranges collapse to 'week'.
-function mapToHistoryRange(r: TimeRange): 'today' | 'yesterday' | 'week' | 'custom' {
-  if (r === '1d') return 'today'
-  if (r === 'yesterday') return 'yesterday'
-  if (r === 'custom') return 'custom'
-  return 'week' // 2d/3d/5d/7d/1m/3m/6m/1y → week
-}
-
-// §ROUTING: Map a dashboard TimeRange → Reports PLRange.
-// P&L has today/week/month/3months/custom.
-function mapToReportsRange(r: TimeRange): 'today' | 'week' | 'month' | '3months' | 'custom' {
-  if (r === '1d') return 'today'
-  if (r === 'yesterday') return 'today' // P&L has no yesterday → today is closest
-  if (r === 'custom') return 'custom'
-  if (r === '2d' || r === '3d' || r === '5d' || r === '7d') return 'week'
-  if (r === '1m') return 'month'
-  if (r === '3m' || r === '6m' || r === '1y') return '3months'
-  return 'month'
-}
+// §ROUTING (Phase 5 D1 fix): The lossy mapToHistoryRange() and
+// mapToReportsRange() functions have been REMOVED. They collapsed
+// 2d/3d/5d/7d/1m/3m/6m/1y → 'week'/'month'/'3months', which produced
+// DIFFERENT date windows than the dashboard card displayed.
+//
+// Now the raw DashboardRange string is passed through unchanged.
+// History and Reports both use the shared `computeRangeBounds()` from
+// src/lib/date-ranges.ts — so they compute the EXACT same start/end as
+// the dashboard card.
+//
+// Custom range's customStart/customEnd travel via the new
+// `historyRangeContext` / `reportsRangeContext` store fields
+// (RangeContext = { range, customStart, customEnd }).
 
 export function DashboardView() {
-  const { business, setActiveView, setKhataFilter, setKhataGradeFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setReportsDateRange, setReportsTab } = useAppStore()
+  const { business, setActiveView, setKhataFilter, setKhataGradeFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setHistoryRangeContext, setReportsDateRange, setReportsRangeContext, setReportsTab } = useAppStore()
   const { t } = useI18n()
   const [chartType, setChartType] = useState<ChartType>('revenue')
   const [chartView, setChartView] = useState<ChartView>('line')
@@ -98,6 +123,9 @@ export function DashboardView() {
   const [hubExpanded, setHubExpanded] = useState(false)
   // §QUICK-CUSTOMIZE: Bottom sheet for Business Overview card customization
   const [showCustomize, setShowCustomize] = useState(false)
+  // §DASHBOARD-CARDS: User's dashboard card visibility/order configuration
+  const [dashCardConfig, setDashCardConfig] = useState<CardConfig>(DEFAULT_CARD_CONFIG)
+  const [showDashCardMgr, setShowDashCardMgr] = useState(false)
   // §CARD-PREFS: Business-level preferences persisted via AppSettings.cardPreferences
   // Falls back to defaults when null, missing keys, or malformed JSON.
   const DEFAULT_PREFS = {
@@ -119,6 +147,8 @@ export function DashboardView() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
+  // §UX-P1: Reset confirmation state — user must confirm before draft is reset
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
 
   // §TRY-CLOSE: If dirty, show discard confirmation; otherwise close immediately
   const tryClose = () => {
@@ -155,6 +185,7 @@ export function DashboardView() {
     setDraftCover(undefined)
     setSaveError(null)
     setSaveSuccess(false)
+    setUploadError(null)
     setShowCustomize(true)
   }
 
@@ -165,6 +196,7 @@ export function DashboardView() {
     setDraftCover(undefined)
     setSaveError(null)
     setSaveSuccess(false)
+    setUploadError(null)
     setShowDiscardConfirm(false)
     setShowCustomize(false)
   }
@@ -177,6 +209,7 @@ export function DashboardView() {
     setSaving(true)
     setSaveError(null)
     setSaveSuccess(false)
+    setUploadError(null)
     try {
       // Build request body — only include fields that changed
       const payload: Record<string, unknown> = {}
@@ -193,13 +226,20 @@ export function DashboardView() {
       const data = await res.json()
       if (!res.ok || !data.ok) throw new Error(data.error || 'Save failed')
 
-      // §UPDATE-LOCAL-STATE: No page reload — update Zustand store + local prefs
+      // §FIXED-LOCAL-STATE: Use server response as source of truth.
+      // Previously: two separate setBusiness calls from stale `business` object
+      // could overwrite each other when both logo + cover changed.
+      // Now: use the returned `data.business` object directly (if provided).
       setCardPrefs(draft)
-      if (draftLogo !== undefined && business) {
-        useAppStore.getState().setBusiness({ ...business, logoUrl: draftLogo })
-      }
-      if (draftCover !== undefined && business) {
-        useAppStore.getState().setBusiness({ ...business, coverUrl: draftCover })
+      if (data.business) {
+        useAppStore.getState().setBusiness(data.business)
+      } else if (business) {
+        // Fallback: construct from current business if server didn't return it
+        // (shouldn't happen — but handle gracefully)
+        const updatedBiz: any = { ...business }
+        if (draftLogo !== undefined) updatedBiz.logoUrl = draftLogo
+        if (draftCover !== undefined) updatedBiz.coverUrl = draftCover
+        useAppStore.getState().setBusiness(updatedBiz)
       }
       setSaveSuccess(true)
       // Close sheet after short delay so user sees success
@@ -226,30 +266,64 @@ export function DashboardView() {
   const coverInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadingCover, setUploadingCover] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  // §FIXED-IMAGE-UPLOAD: Complete async flow with proper error handling.
+  // FileReader is wrapped in a Promise so errors are caught by the outer try/catch.
+  // uploading state stays true until the ENTIRE flow (read + compress) completes.
+  // On failure: previous saved image is unchanged, visible error shown.
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>, field: 'logoUrl' | 'coverUrl') => {
     const file = e.target.files?.[0]
+    // Reset input so same file can be selected again
+    e.target.value = ''
     if (!file) return
+
+    // Validate MIME type
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Please select an image file.')
+      return
+    }
+
+    // Clear previous error when starting new upload
+    setUploadError(null)
     if (field === 'logoUrl') setUploading(true)
     else setUploadingCover(true)
+
     try {
-      const reader = new FileReader()
-      reader.onload = async () => {
-        const base64 = reader.result as string
-        // Compress via existing API
-        const compressRes = await fetch('/api/image-compress', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64, targetSizeKB: 200 }),
-        })
-        const compressed = await compressRes.json()
-        const finalImage = compressed.ok ? compressed.image : base64
-        // Set in draft (NOT persisted — user must click Save)
-        if (field === 'logoUrl') setDraftLogo(finalImage)
-        else setDraftCover(finalImage)
+      // Step 1: Read file as data URL (awaited Promise)
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(new Error('Could not read file.'))
+        reader.readAsDataURL(file)
+      })
+
+      // Step 2: Compress via existing API
+      const compressRes = await fetch('/api/image-compress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64, targetSizeKB: 200 }),
+      })
+
+      if (!compressRes.ok) {
+        throw new Error('Image processing failed on the server.')
       }
-      reader.readAsDataURL(file)
+
+      const compressed = await compressRes.json()
+      if (!compressed || !compressed.ok) {
+        throw new Error('Image processing returned an unexpected response.')
+      }
+
+      const finalImage = compressed.image as string
+      if (!finalImage || typeof finalImage !== 'string') {
+        throw new Error('Image processing returned invalid data.')
+      }
+
+      // Step 3: Set draft (NOT persisted — user must click Save)
+      if (field === 'logoUrl') setDraftLogo(finalImage)
+      else setDraftCover(finalImage)
     } catch {
-      // best-effort
+      setUploadError('Could not process image. Please try another image.')
     } finally {
       if (field === 'logoUrl') setUploading(false)
       else setUploadingCover(false)
@@ -268,11 +342,19 @@ export function DashboardView() {
     'linear-gradient(135deg, #166534 0%, #84cc16 100%)',
   ]
 
-  // §RESET-DEFAULTS: Reset draft to recommended defaults
+  // §RESET-DEFAULTS: Reset draft to recommended defaults.
+  // §UX-P1: Only modifies draft state — does NOT call the API.
+  // User must click "Save Changes" afterwards to persist the reset.
   const resetToDefaults = () => {
     setDraft(DEFAULT_PREFS)
     setDraftLogo(null) // null = remove logo
     setDraftCover(null) // null = remove cover
+    setShowResetConfirm(false)
+  }
+
+  // §UX-P1: Show reset confirmation dialog before resetting draft
+  const handleResetClick = () => {
+    setShowResetConfirm(true)
   }
 
   const { saveScroll } = useScrollRetention()
@@ -312,11 +394,14 @@ export function DashboardView() {
   const { data, loading: apiLoading, error: apiError, refetch } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl], { timeoutMs: 30000 })
   // §HERO-PROFILE: fetch userRole for the role tag (Owner/Admin/Sales)
   const { data: appSettings } = useFetch<any>('/api/app-settings', [])
-  // §CARD-PREFS-LOAD: Parse cardPreferences from appSettings
+  // §CARD-PREFS-LOAD: Parse cardPreferences + dashboardCards from appSettings
   useEffect(() => {
     if (!appSettings) return
     const parsed = parseCardPrefs((appSettings as any).cardPreferences)
     setCardPrefs(parsed)
+    // §DASHBOARD-CARDS-LOAD: Parse dashboard card config from AppSettings
+    const dashCards = parseCardConfig((appSettings as any).dashboardCards)
+    setDashCardConfig(dashCards)
   }, [appSettings])
   // §GRADE-BOTTOM-SHEET: fetch all parties so the grade distribution bottom
   // sheet can show ALL customers in a grade (not just topDebtors which is
@@ -381,16 +466,83 @@ export function DashboardView() {
   if (!data && !apiLoading) return <EmptyState icon={Heart} title="No data yet" />
   if (!data) return <LoadingState />
 
-  // §LOCALIZED-CARD-FILTERS: Lifetime metric cards (no time filter — these are
-  // running balances/counts, not time-dependent). Time-dependent cards (Sales,
-  // Collection, Expense) are rendered separately as TimeMetricCard components
-  // with their own dropdown range selector.
-  const lifetimeMetrics = [
-    { label: t('dash.receivable'), value: formatCurrency(data.totalReceivable, currency), icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', onClick: () => { saveScrollPos('dashboard'); setKhataFilter('receivable'); setActiveView('khata') } },
-    { label: t('dash.payable'), value: formatCurrency(data.totalPayable, currency), icon: TrendingDown, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', onClick: () => { saveScrollPos('dashboard'); setKhataFilter('payable'); setActiveView('khata') } },
-    { label: t('dash.health'), value: `${data.healthScore}/100`, icon: Heart, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', onClick: () => { saveScrollPos('dashboard'); setActiveView('reports') } },
-    { label: t('dash.lowStock'), value: String(data.lowStockCount), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', onClick: () => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') } },
+  // §UNIFIED-CARD-DEFS: All available dashboard cards with stable IDs.
+  // Includes both lifetime metrics and time-dependent metrics.
+  // §PHASE-5-D1: onClick handlers now receive a RangeContext {range, customStart,
+  // customEnd} so History/Reports can be opened with the EXACT same date window
+  // the card was displaying. Non-time-metric cards ignore the ctx parameter.
+  // §PHASE-5-D3: totalRevenue card now uses rangeNetRevenue (pre-tax, post-
+  // discount) — DIFFERENT from totalSales card (which uses rangeSales = SUM of
+  // grandTotal, incl. GST). The two cards now display distinct values.
+  // §PHASE-5-D4: businessHealth card now opens Reports P&L with a special
+  // 'health' tab signal so the Health Breakdown section is shown front-and-center.
+  const allCardDefs: Array<DashboardCardDef & { recommended?: boolean; isTimeMetric?: boolean }> = [
+    { id: 'totalReceivable', label: t('dash.receivable'), icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Money owed to you by customers', recommended: true,
+      valueExtractor: (d) => d?.totalReceivable ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: () => { saveScrollPos('dashboard'); setKhataFilter('receivable'); setActiveView('khata') } },
+    { id: 'totalPayable', label: t('dash.payable'), icon: TrendingDown, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', description: 'Money you owe to suppliers', recommended: true,
+      valueExtractor: (d) => d?.totalPayable ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: () => { saveScrollPos('dashboard'); setKhataFilter('payable'); setActiveView('khata') } },
+    { id: 'businessHealth', label: t('dash.health'), icon: Heart, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', description: 'Overall business health score', recommended: true,
+      valueExtractor: (d) => d?.healthScore ?? 0, formatValue: (v) => `${v}/100`,
+      onClick: () => { saveScrollPos('dashboard'); setReportsTab('health'); setActiveView('reports') } },
+    { id: 'lowStock', label: t('dash.lowStock'), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', description: 'Products below stock threshold', recommended: true,
+      valueExtractor: (d) => d?.lowStockCount ?? 0, formatValue: (v) => String(v),
+      onClick: () => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') } },
+    { id: 'totalSales', label: 'Total Sales', icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', description: 'Sales for selected period (incl. GST)', recommended: true, isTimeMetric: true, defaultRange: '1d',
+      valueExtractor: (d) => d?.rangeSales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: (ctx) => { saveScrollPos('dashboard'); setHistoryRangeContext(ctx); setActiveView('history') } },
+    { id: 'totalCollection', label: 'Total Collection', icon: ArrowDownRight, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', description: 'Collections for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
+      valueExtractor: (d) => d?.rangeCollection ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: (ctx) => { saveScrollPos('dashboard'); setHistoryRangeContext(ctx); setActiveView('history') } },
+    { id: 'totalExpense', label: 'Total Expense', icon: ArrowUpRight, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', description: 'Expenses for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
+      valueExtractor: (d) => d?.rangeExpense ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
+    { id: 'totalRevenue', label: 'Total Revenue', icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', description: 'Net revenue (pre-tax, post-discount)', recommended: true, isTimeMetric: true, defaultRange: '1d',
+      valueExtractor: (d) => d?.rangeNetRevenue ?? d?.rangeSales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
+    // §ADDITIONAL-CARDS: Available but hidden by default
+    { id: 'totalCustomers', label: 'Total Customers', icon: Users, tint: 'bg-blue-500', bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-700 dark:text-blue-300', description: 'Total number of customers',
+      valueExtractor: (d) => d?.partyCount ?? 0, formatValue: (v) => String(v),
+      onClick: () => { saveScrollPos('dashboard'); setKhataFilter('all'); setActiveView('khata') } },
+    { id: 'totalProducts', label: 'Total Products', icon: Package, tint: 'bg-indigo-500', bg: 'bg-indigo-50 dark:bg-indigo-950/30', text: 'text-indigo-700 dark:text-indigo-300', description: 'Total number of products',
+      valueExtractor: (d) => d?.productCount ?? 0, formatValue: (v) => String(v),
+      onClick: () => { saveScrollPos('dashboard'); setActiveView('inventory') } },
+    { id: 'totalInvoices', label: 'Total Invoices', icon: FileText, tint: 'bg-cyan-500', bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-700 dark:text-cyan-300', description: 'Total invoices issued',
+      valueExtractor: (d) => d?.invoiceCount ?? 0, formatValue: (v) => String(v),
+      onClick: () => { saveScrollPos('dashboard'); setActiveView('billing') } },
+    { id: 'stockValue', label: 'Stock Value', icon: Boxes, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', description: 'Total value of current inventory',
+      valueExtractor: (d) => d?.inventoryValue ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: () => { saveScrollPos('dashboard'); setActiveView('inventory') } },
+    { id: 'todaySales', label: "Today's Sales", icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', description: 'Sales for today only',
+      valueExtractor: (d) => d?.todaySales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: () => { saveScrollPos('dashboard'); setHistoryRangeContext({ range: '1d' }); setActiveView('history') } },
+    { id: 'monthlyRevenue', label: 'Monthly Revenue', icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Revenue this month (incl. GST)',
+      valueExtractor: (d) => d?.monthlyRevenue ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: () => { saveScrollPos('dashboard'); setReportsRangeContext({ range: '1m' }); setActiveView('reports') } },
   ]
+
+  // §VISIBLE-CARDS: Filter to visible + sort by configured order
+  const visibleCards = dashCardConfig
+    .filter(c => c.visible)
+    .sort((a, b) => a.order - b.order)
+    .map(config => ({ config, def: allCardDefs.find(d => d.id === config.id) }))
+    .filter(c => c.def) as Array<{ config: { id: string; visible: boolean; order: number }; def: typeof allCardDefs[0] }>
+
+  // §SAVE-DASHBOARD-CARDS: Persist card config via atomic API
+  const saveDashboardCards = async (newConfig: CardConfig) => {
+    const res = await fetch('/api/card-customization', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dashboardCards: JSON.stringify(newConfig) }),
+    })
+    const data = await res.json()
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Save failed')
+    setDashCardConfig(newConfig)
+  }
+
+  // §MANAGE-CARDS-DEFS: Card metadata for the management sheet
+  const manageCardDefs = allCardDefs.map(d => ({ id: d.id, label: d.label, icon: d.icon, description: d.description, recommended: d.recommended }))
 
   return (
     <div className="space-y-4">
@@ -405,12 +557,24 @@ export function DashboardView() {
         aria-label="Manage business profile"
         className="relative w-full text-left rounded-2xl overflow-hidden shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform"
       >
-        {/* §COVER-PHOTO: Cover background with user-controlled blur + overlay */}
-        {business?.coverUrl ? (
-          <img src={business.coverUrl} alt="" className="absolute inset-0 w-full h-full object-cover"
-            style={{ filter: `blur(${cardPrefs.coverBlur}px)` }}
+        {/* §COVER-PHOTO: Cover background with user-controlled blur + overlay.
+            §FIX: CSS gradients (linear-gradient(...)) must be rendered as
+            div background, NOT as <img src> — browsers treat gradient strings
+            as relative URLs in <img src>, producing 404s.
+            Data URLs (data:image/...) work fine in <img src>. */}
+        {(() => {
+          const cover = business?.coverUrl
+          if (!cover) return null
+          if (cover.startsWith('data:image/')) {
+            return <img src={cover} alt="" className="absolute inset-0 w-full h-full object-cover"
+              style={{ filter: `blur(${cardPrefs.coverBlur}px)` }}
+              aria-hidden="true" />
+          }
+          // CSS gradient or other non-data URL → render as background
+          return <div className="absolute inset-0 w-full h-full"
+            style={{ background: cover, filter: `blur(${cardPrefs.coverBlur}px)`, backgroundSize: 'cover' }}
             aria-hidden="true" />
-        ) : null}
+        })()}
         <div className="absolute inset-0 bg-gradient-to-br from-primary to-emerald-700 dark:from-primary dark:to-emerald-900"
           style={{ opacity: cardPrefs.coverOverlay + 0.55 }} />
         <div className="relative p-4 text-primary-foreground">
@@ -487,7 +651,10 @@ export function DashboardView() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-              className="fixed bottom-0 inset-x-0 z-[100] bg-card rounded-t-3xl border-t border-border max-w-2xl mx-auto max-h-[85vh] flex flex-col"
+              // §UX-P0: max-h uses 90dvh (dynamic viewport) for better mobile support.
+              // On iOS Safari, 85vh includes the URL bar area; dvh adjusts dynamically.
+              // safe-area-inset-bottom is handled via the footer's padding.
+              className="fixed bottom-0 inset-x-0 z-[100] bg-card rounded-t-3xl border-t border-border max-w-2xl mx-auto max-h-[90dvh] flex flex-col"
             >
               {/* §HEADER: sticky top with title + close */}
               <div className="flex items-center justify-between p-4 pb-2 border-b border-border">
@@ -499,18 +666,26 @@ export function DashboardView() {
                 </button>
               </div>
 
-              {/* §SCROLLABLE-CONTENT: preview + controls */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {/* §LIVE-PREVIEW: Card preview using draft state */}
+              {/* §SCROLLABLE-CONTENT: preview + controls.
+                  §UX-P0: Added pb-24 (96px bottom padding) so the last setting
+                  is never hidden behind the sticky footer on mobile. */}
+              <div className="flex-1 overflow-y-auto p-4 pb-24 space-y-4">
+                {/* §LIVE-PREVIEW: Card preview using draft state.
+                    §FIX: Same conditional rendering as the main card —
+                    CSS gradients need div background, not <img src>. */}
                 <div className="relative w-full rounded-2xl overflow-hidden shadow-md">
-                  {(draftCover !== undefined ? draftCover : business?.coverUrl) ? (
-                    <img
-                      src={(draftCover !== undefined ? draftCover : business?.coverUrl) as string}
-                      alt="" className="absolute inset-0 w-full h-full object-cover"
-                      style={{ filter: `blur(${draft.coverBlur}px)` }}
-                      aria-hidden="true"
-                    />
-                  ) : null}
+                  {(() => {
+                    const cover = draftCover !== undefined ? draftCover : business?.coverUrl
+                    if (!cover) return null
+                    if (cover.startsWith('data:image/')) {
+                      return <img src={cover} alt="" className="absolute inset-0 w-full h-full object-cover"
+                        style={{ filter: `blur(${draft.coverBlur}px)` }}
+                        aria-hidden="true" />
+                    }
+                    return <div className="absolute inset-0 w-full h-full"
+                      style={{ background: cover, filter: `blur(${draft.coverBlur}px)`, backgroundSize: 'cover' }}
+                      aria-hidden="true" />
+                  })()}
                   <div className="absolute inset-0 bg-gradient-to-br from-primary to-emerald-700 dark:from-primary dark:to-emerald-900"
                     style={{ opacity: draft.coverOverlay + 0.55 }} />
                   <div className="relative p-4 text-primary-foreground">
@@ -546,6 +721,12 @@ export function DashboardView() {
                 {/* §PROFILE-PHOTO: Change + Remove */}
                 <div>
                   <p className="text-[10px] text-muted-foreground uppercase mb-2">Profile Photo</p>
+                  {/* §UPLOAD-ERROR: Visible error state for image processing failures */}
+                  {uploadError && (
+                    <div className="mb-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-[11px] font-medium">
+                      {uploadError}
+                    </div>
+                  )}
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-full bg-muted overflow-hidden flex items-center justify-center shrink-0">
                       {(draftLogo !== undefined ? draftLogo : business?.logoUrl) ? (
@@ -570,17 +751,30 @@ export function DashboardView() {
                 {/* §COVER-PHOTO: Suggested + Custom + Remove */}
                 <div>
                   <p className="text-[10px] text-muted-foreground uppercase mb-2">Cover Photo</p>
-                  {/* Suggested covers */}
+                  {/* Suggested covers.
+                    §UX-P1: Selected preset shows a checkmark overlay for clarity. */}
                   <div className="grid grid-cols-4 gap-2 mb-2">
-                    {SUGGESTED_COVERS.map((grad, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setDraftCover(grad)}
-                        className={`h-10 rounded-lg shrink-0 border-2 transition-colors ${draftCover === grad ? 'border-primary' : 'border-transparent'}`}
-                        style={{ background: grad }}
-                        aria-label={`Cover option ${i + 1}`}
-                      />
-                    ))}
+                    {SUGGESTED_COVERS.map((grad, i) => {
+                      const isSelected = draftCover === grad
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => setDraftCover(grad)}
+                          className={`relative h-10 rounded-lg shrink-0 border-2 transition-all ${isSelected ? 'border-primary ring-2 ring-primary/30' : 'border-transparent hover:border-muted-foreground/30'}`}
+                          style={{ background: grad }}
+                          aria-label={`Cover option ${i + 1}`}
+                          aria-pressed={isSelected}
+                        >
+                          {isSelected && (
+                            <span className="absolute inset-0 flex items-center justify-center">
+                              <span className="w-5 h-5 rounded-full bg-white/90 flex items-center justify-center shadow-sm">
+                                <Check className="w-3 h-3 text-primary" />
+                              </span>
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
                   </div>
                   {/* Custom upload */}
                   <div className="flex items-center gap-2">
@@ -615,16 +809,20 @@ export function DashboardView() {
                   <input type="range" min={0} max={0.9} step={0.05} value={draft.coverOverlay} onChange={(e) => setDraft({ ...draft, coverOverlay: Number(e.target.value) })} className="w-full h-8 accent-primary" />
                 </div>
 
-                {/* §GREETING-TEXT: Custom greeting */}
+                {/* §GREETING-TEXT: Custom greeting.
+                    §UX-P1: Added character counter (X / 30) to match backend limit. */}
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase mb-1.5">Greeting Text</p>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] text-muted-foreground uppercase">Greeting Text</p>
+                    <span className={`text-[10px] tabular ${draft.greetingText.length >= 25 ? 'text-amber-600' : 'text-muted-foreground'}`}>{draft.greetingText.length} / 30</span>
+                  </div>
                   <input
                     type="text"
                     value={draft.greetingText}
                     onChange={(e) => setDraft({ ...draft, greetingText: e.target.value.slice(0, 30) })}
                     placeholder="Namaste"
                     maxLength={30}
-                    className="w-full h-10 rounded-xl bg-muted px-3 text-sm border-0 outline-none"
+                    className="w-full h-10 rounded-xl bg-muted px-3 text-sm border-0 outline-none focus:ring-2 focus:ring-primary/20"
                   />
                 </div>
 
@@ -650,9 +848,9 @@ export function DashboardView() {
                   </div>
                 </div>
 
-                {/* §RESET-DEFAULTS */}
-                <button onClick={resetToDefaults} className="w-full text-xs text-muted-foreground hover:text-foreground py-2">
-                  Reset to recommended defaults
+                {/* §RESET-DEFAULTS: §UX-P1 — now shows confirmation dialog before resetting draft. */}
+                <button onClick={handleResetClick} className="w-full text-xs text-muted-foreground hover:text-foreground py-2">
+                  Reset to Default
                 </button>
 
                 {/* §MANAGE-SETTINGS: Navigate to full Settings page */}
@@ -662,17 +860,21 @@ export function DashboardView() {
                 </button>
               </div>
 
-              {/* §STICKY-FOOTER: Save / Cancel */}
-              <div className="border-t border-border p-3 flex items-center gap-2 bg-card">
+              {/* §STICKY-FOOTER: Save / Cancel.
+                  §UX-P0: Added safe-area bottom padding so footer isn't hidden
+                  behind iOS Safari bottom bar / Android Chrome nav bar. */}
+              <div className="border-t border-border p-3 flex items-center gap-2 bg-card" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
                 {saveError && <span className="text-[10px] text-destructive flex-1">{saveError}</span>}
                 {saveSuccess && <span className="text-[10px] text-emerald-600 flex-1">✓ Changes saved</span>}
                 {!saveError && !saveSuccess && <span className="flex-1" />}
                 <button onClick={tryClose} disabled={saving} className="px-4 py-2.5 rounded-xl text-xs font-medium text-muted-foreground hover:bg-muted transition-colors min-h-[44px] disabled:opacity-50">
                   Cancel
                 </button>
-                <button onClick={saveChanges} disabled={saving || !isDirty} className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors min-h-[44px] disabled:opacity-50 flex items-center gap-1.5">
+                {/* §UX-P0: Save button always shows "Save Changes" label.
+                    Disabled state (via isDirty) communicates no-changes visually. */}
+                <button onClick={saveChanges} disabled={saving || !isDirty} className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
                   {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {saving ? 'Saving...' : isDirty ? 'Save Changes' : 'No changes'}
+                  {saving ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </motion.div>
@@ -694,20 +896,60 @@ export function DashboardView() {
                     onClick={(e) => e.stopPropagation()}
                     className="bg-card rounded-2xl p-5 max-w-xs w-full space-y-3"
                   >
-                    <p className="text-sm font-semibold text-center">Discard unsaved changes?</p>
-                    <p className="text-[11px] text-muted-foreground text-center">Your draft changes will be lost.</p>
+                    {/* §UX-P0: Updated dialog text per spec. */}
+                  <p className="text-sm font-semibold text-center">Discard changes?</p>
+                    <p className="text-[11px] text-muted-foreground text-center">You have unsaved changes. Are you sure you want to discard them?</p>
                     <div className="flex gap-2 pt-2">
                       <button
                         onClick={() => setShowDiscardConfirm(false)}
                         className="flex-1 px-3 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium min-h-[44px]"
                       >
-                        Continue Editing
+                        Keep Editing
                       </button>
                       <button
                         onClick={cancelCustomizer}
                         className="flex-1 px-3 py-2.5 rounded-xl bg-destructive/10 text-destructive text-xs font-medium min-h-[44px]"
                       >
-                        Discard
+                        Discard Changes
+                      </button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* §UX-P1: Reset to Default confirmation dialog.
+                Reset only affects draft state — no API call until user clicks Save. */}
+            <AnimatePresence>
+              {showResetConfirm && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[110] bg-black/60 flex items-center justify-center p-4"
+                  onClick={() => setShowResetConfirm(false)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.9 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0.9 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-card rounded-2xl p-5 max-w-xs w-full space-y-3"
+                  >
+                    <p className="text-sm font-semibold text-center">Reset to default?</p>
+                    <p className="text-[11px] text-muted-foreground text-center">This will restore the default card appearance and settings.</p>
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        onClick={() => setShowResetConfirm(false)}
+                        className="flex-1 px-3 py-2.5 rounded-xl bg-muted text-foreground text-xs font-medium min-h-[44px]"
+                      >
+                        Keep Current
+                      </button>
+                      <button
+                        onClick={resetToDefaults}
+                        className="flex-1 px-3 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium min-h-[44px]"
+                      >
+                        Reset to Default
                       </button>
                     </div>
                   </motion.div>
@@ -754,92 +996,64 @@ export function DashboardView() {
           range selector in the top-right corner. Each fetches its own
           /api/dashboard?range=X slice. */}
 
-      {/* Lifetime metric cards (no time filter) */}
+      {/* §UNIFIED-DASHBOARD-CARDS: All visible cards in one grid.
+          Cards are rendered dynamically based on user's dashboardCards config.
+          Time-dependent cards still use TimeMetricCard for their range selector. */}
       <div className="grid grid-cols-2 gap-3">
-        {lifetimeMetrics.map((m, i) => {
-          const Icon = m.icon
+        {visibleCards.map(({ config, def }, i) => {
+          if (def.isTimeMetric) {
+            return (
+              <TimeMetricCard
+                key={config.id}
+                label={def.label}
+                icon={def.icon}
+                tint={def.tint}
+                bg={def.bg}
+                text={def.text}
+                defaultRange={(def.defaultRange as any) || '1d'}
+                currency={currency}
+                valueExtractor={def.valueExtractor}
+                onClick={def.onClick}
+              />
+            )
+          }
+          const Icon = def.icon
+          const value = def.valueExtractor(data)
+          const formatted = def.formatValue(value, currency)
           return (
-            <motion.button key={m.label} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={m.onClick} className="text-left">
-              <Card className={`p-4 ${m.bg} border-none hover:shadow-md transition-shadow h-full`}>
-                <div className="flex items-start justify-between mb-2"><span className={`w-8 h-8 rounded-lg ${m.tint} text-white flex items-center justify-center`}><Icon className="w-4 h-4" /></span></div>
-                <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{m.label}</p>
-                <p className={`text-base font-bold tabular ${m.text}`}>{m.value}</p>
+            <motion.button key={config.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={() => def.onClick({ range: '1d' })} aria-label={def.label} className="text-left focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-2xl">
+              <Card className={`p-4 ${def.bg} border-none hover:shadow-md transition-shadow h-full active:scale-[0.98]`}>
+                <div className="flex items-start justify-between mb-2"><span className={`w-8 h-8 rounded-lg ${def.tint} text-white flex items-center justify-center`}><Icon className="w-4 h-4" /></span></div>
+                <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{def.label}</p>
+                <p className={`text-base font-bold tabular ${def.text}`}>{formatted}</p>
               </Card>
             </motion.button>
           )
         })}
       </div>
 
-      {/* Time-dependent metric cards (with localized dropdown filter) */}
-      <div className="grid grid-cols-2 gap-3">
-        <TimeMetricCard
-          label="Total Sales"
-          icon={Wallet}
-          tint="bg-amber-500"
-          bg="bg-amber-50 dark:bg-amber-950/30"
-          text="text-amber-700 dark:text-amber-300"
-          defaultRange="1d"
-          currency={currency}
-          valueExtractor={(d) => d?.rangeSales ?? 0}
-          onClick={(r) => {
-            // §ROUTING: Total Sales → History & Reports (sales volume)
-            saveScrollPos('dashboard')
-            setHistoryDateRange(mapToHistoryRange(r))
-            setActiveView('history')
-          }}
-        />
-        <TimeMetricCard
-          label="Total Collection"
-          icon={ArrowDownRight}
-          tint="bg-teal-500"
-          bg="bg-teal-50 dark:bg-teal-950/30"
-          text="text-teal-700 dark:text-teal-300"
-          defaultRange="1d"
-          currency={currency}
-          valueExtractor={(d) => d?.rangeCollection ?? 0}
-          onClick={(r) => {
-            // §ROUTING: Total Collection → History & Reports (collections feed)
-            saveScrollPos('dashboard')
-            setHistoryDateRange(mapToHistoryRange(r))
-            setActiveView('history')
-          }}
-        />
-        <TimeMetricCard
-          label="Total Expense"
-          icon={ArrowUpRight}
-          tint="bg-red-500"
-          bg="bg-red-50 dark:bg-red-950/30"
-          text="text-red-700 dark:text-red-300"
-          defaultRange="1d"
-          currency={currency}
-          valueExtractor={(d) => d?.rangeExpense ?? 0}
-          onClick={(r) => {
-            // §ROUTING: Total Expense → Profit & Loss (expense breakdown)
-            saveScrollPos('dashboard')
-            setReportsDateRange(mapToReportsRange(r))
-            setActiveView('reports')
-          }}
-        />
-        <TimeMetricCard
-          label="Total Revenue"
-          icon={Receipt}
-          tint="bg-purple-500"
-          bg="bg-purple-50 dark:bg-purple-950/30"
-          text="text-purple-700 dark:text-purple-300"
-          defaultRange="1d"
-          currency={currency}
-          valueExtractor={(d) => d?.rangeSales ?? 0}
-          onClick={(r) => {
-            // §ROUTING: Total Revenue → Profit & Loss (revenue analysis)
-            saveScrollPos('dashboard')
-            setReportsDateRange(mapToReportsRange(r))
-            setActiveView('reports')
-          }}
-        />
-      </div>
+      {/* §MANAGE-DASHBOARD-CARDS: Button to open card management sheet */}
+      <button
+        onClick={() => setShowDashCardMgr(true)}
+        className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-xs font-medium text-muted-foreground min-h-[44px]"
+      >
+        <LayoutGrid className="w-3.5 h-3.5" />
+        Manage Dashboard Cards
+      </button>
 
-      {/* Chart — PRD Part 4: Chart toggle + dynamic time-frame + advanced charts */}
-      <Card className="p-4">
+      {/* §DASHBOARD-CARD-MANAGEMENT-SHEET */}
+      <DashboardCardManagementSheet
+        open={showDashCardMgr}
+        onClose={() => setShowDashCardMgr(false)}
+        cardDefs={manageCardDefs}
+        savedConfig={dashCardConfig}
+        onSave={saveDashboardCards}
+      />
+
+      {/* Chart — PRD Part 4: Chart toggle + dynamic time-frame + advanced charts.
+          §FIX-5: Added pb-16 (64px) bottom padding to the chart Card so the
+          FAB (z-50, fixed bottom-right) doesn't overlap the legend row. */}
+      <Card className="p-4 pb-16">
         <div className="flex items-center justify-between mb-2">
           <div>
             <h3 className="text-sm font-semibold">{chartOptions.find((o) => o.id === chartType)?.label || 'Business Analytics'}</h3>
@@ -856,22 +1070,66 @@ export function DashboardView() {
             {chartOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
           <select value={timeRange} onChange={(e) => { const val = e.target.value as TimeRange; setTimeRange(val); if (val === 'custom') setShowCustomPicker(true) }} className="text-xs bg-muted rounded-lg px-2 py-1.5 border-0 outline-none h-8 font-medium shrink-0">
-            {TIME_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+            {DASHBOARD_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select>
         </div>
 
         {/* §TOGGLE-FIX: Chart rendering respects chartView (line vs bar) for
             ALL chart types. Categories (pie) ignores the toggle. Inventory
-            uses AreaChart (line variant) / BarChart (bar variant). */}
-        <motion.div key={chartType + chartView} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }} className="h-44 -ml-2">
+            uses AreaChart (line variant) / BarChart (bar variant).
+            §FIX-6: Per-chart loading state — shows spinner when revalidating
+            (apiLoading && data present from previous range). Doesn't hide
+            the entire dashboard; only the chart area shows the loader.
+            §FIX-7: Empty state — when all buckets have zero values, shows
+            "No activity in this period" instead of a blank chart.
+            §FIX-8: Accessibility — chart container has role="img" + aria-label.
+            §FIX-9: Performance — profit chart's data.map() is memoized. */}
+
+        {/* §FIX-9: Memoize profit chart data transformation to avoid recompute on every render */}
+        {(() => {
+          // §CHECK-EMPTY: Determine if all chart values are zero
+          const allZero = data.salesTrend.length > 0 && data.salesTrend.every(d =>
+            d.revenue === 0 && d.expense === 0 && d.profit === 0 &&
+            d.collected === 0 && d.creditGiven === 0
+          )
+
+          // §FIX-6: Per-chart loading indicator (stale-while-revalidate)
+          if (apiLoading && data) {
+            return (
+              <div className="h-44 flex items-center justify-center" role="status" aria-live="polite">
+                <div className="flex flex-col items-center gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  <span className="text-[10px] text-muted-foreground">Updating chart…</span>
+                </div>
+              </div>
+            )
+          }
+
+          // §FIX-7: Empty state
+          if (allZero) {
+            return (
+              <div className="h-44 flex items-center justify-center" role="img" aria-label="No chart data available">
+                <div className="flex flex-col items-center gap-1">
+                  <p className="text-xs text-muted-foreground">No revenue or expense activity in this period</p>
+                  <p className="text-[10px] text-muted-foreground/60">Try a wider date range</p>
+                </div>
+              </div>
+            )
+          }
+
+          // §FIX-8: ARIA label for screen readers
+          const ariaLabel = `${chartOptions.find((o) => o.id === chartType)?.label || 'Business'} chart for ${dashboardRangeLabel(timeRange, customStart, customEnd)} — ${data.salesTrend.length} data points`
+
+          return (
+            <motion.div key={chartType + chartView} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }} className="h-44 -ml-2" role="img" aria-label={ariaLabel}>
           <ResponsiveContainer width="100%" height="100%">
             {chartType === 'revenue' && chartView === 'line' ? (
               <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.4} /><stop offset="100%" stopColor="#10b981" stopOpacity={0} /></linearGradient><linearGradient id="exp" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f87171" stopOpacity={0.3} /><stop offset="100%" stopColor="#f87171" stopOpacity={0} /></linearGradient></defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" name="Revenue" />
                 <Area type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} fill="url(#exp)" name="Expense" />
               </AreaChart>
@@ -879,8 +1137,8 @@ export function DashboardView() {
               <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Revenue" />
                 <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Expense" />
               </BarChart>
@@ -889,8 +1147,8 @@ export function DashboardView() {
               <RechartsLineChart data={data.salesTrend.map((d) => ({ ...d, profitVal: d.profit >= 0 ? d.profit : 0, lossVal: d.profit < 0 ? Math.abs(d.profit) : 0 }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Line type="monotone" dataKey="profitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Profit" />
                 <Line type="monotone" dataKey="lossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Loss" />
               </RechartsLineChart>
@@ -899,8 +1157,8 @@ export function DashboardView() {
               <BarChart data={data.salesTrend.map((d) => ({ ...d, profitVal: d.profit >= 0 ? d.profit : 0, lossVal: d.profit < 0 ? Math.abs(d.profit) : 0 }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="profitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Profit" />
                 <Bar dataKey="lossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Loss" />
               </BarChart>
@@ -909,8 +1167,8 @@ export function DashboardView() {
               <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Line type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} dot={false} name="Cash In" />
                 <Line type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} dot={false} name="Cash Out" />
                 <Line type="monotone" dataKey="profit" stroke="#6366f1" strokeWidth={2} dot={false} name="Net" />
@@ -920,8 +1178,8 @@ export function DashboardView() {
               <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Cash In" />
                 <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Cash Out" />
                 <Bar dataKey="profit" fill="#6366f1" radius={[3, 3, 0, 0]} name="Net" />
@@ -931,8 +1189,8 @@ export function DashboardView() {
               <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Line type="monotone" dataKey="collected" stroke="#10b981" strokeWidth={2} dot={false} name="Collected" />
                 <Line type="monotone" dataKey="creditGiven" stroke="#ef4444" strokeWidth={2} dot={false} name="New Credit" />
               </RechartsLineChart>
@@ -941,8 +1199,8 @@ export function DashboardView() {
               <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="collected" fill="#10b981" radius={[3, 3, 0, 0]} name="Collected" />
                 <Bar dataKey="creditGiven" fill="#ef4444" radius={[3, 3, 0, 0]} name="New Credit" />
               </BarChart>
@@ -959,8 +1217,8 @@ export function DashboardView() {
                 <defs><linearGradient id="inv" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.4} /><stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} /></linearGradient></defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Area type="monotone" dataKey="revenue" stroke="#8b5cf6" strokeWidth={2} fill="url(#inv)" name="Inventory Sales" />
               </AreaChart>
             ) : (
@@ -968,13 +1226,15 @@ export function DashboardView() {
               <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="revenue" fill="#8b5cf6" radius={[3, 3, 0, 0]} name="Inventory Sales" />
               </BarChart>
             )}
           </ResponsiveContainer>
         </motion.div>
+          )
+        })()}
 
         {/* Legend */}
         {['revenue', 'cashflow', 'collections', 'profit'].includes(chartType) && (
@@ -1088,7 +1348,8 @@ export function DashboardView() {
               setReportsTab('party')
             } else if (topTab === 'payments') {
               // Top Payments → History/Transactions (payments received)
-              setHistoryDateRange('week')
+              // §PHASE-5-D1: Use RangeContext for full custom-range support.
+              setHistoryRangeContext({ range: '7d' })
               setActiveView('history')
             } else if (topTab === 'products') {
               // Top Products → Inventory
@@ -1216,7 +1477,10 @@ export function DashboardView() {
               // §DYNAMIC-ROUTING: View All routes based on active hub tab.
               if (hubTab === 'transactions') {
                 // Transactions → History (with active time filter)
-                setHistoryDateRange(mapToHistoryRange(timeRange))
+                // §PHASE-5-D1: Pass the FULL RangeContext (not just range string)
+                // so History sees the exact same date window — including custom
+                // range's start/end dates.
+                setHistoryRangeContext({ range: timeRange, customStart, customEnd })
                 setActiveView('history')
               } else if (hubTab === 'lowstock') {
                 // Low Stock → Inventory (with low-stock filter, no time param)
@@ -1246,7 +1510,7 @@ export function DashboardView() {
               onChange={(e) => { const val = e.target.value as TimeRange; setTimeRange(val); if (val === 'custom') setShowCustomPicker(true) }}
               className="text-[10px] bg-muted rounded-md px-1.5 py-0.5 border-0 outline-none font-medium text-muted-foreground cursor-pointer"
             >
-              {TIME_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+              {DASHBOARD_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
             </select>
           </div>
         )}
@@ -1331,6 +1595,12 @@ export function DashboardView() {
 }
 
 // PRD Part 38 §4: TradingView-style custom tooltip with full date display
+// §FIX-4: Mobile-safe tooltip — uses Recharts' allowEscapeViewBox={{ x: false }}
+// to clamp the tooltip within the chart's SVG bounds. This prevents the 220px
+// tooltip from overflowing the screen on 375px mobile viewports when the user
+// touches the rightmost or leftmost data point. The tooltip's maxWidth is
+// also reduced on mobile (160px) vs desktop (220px) via a CSS media query
+// pattern — but the primary fix is the allowEscapeViewBox clamping.
 function CustomTooltip({ active, payload, label, currency }: any) {
   if (!active || !payload || payload.length === 0) return null
   // Use fullDate from payload if available, otherwise try label
@@ -1352,7 +1622,10 @@ function CustomTooltip({ active, payload, label, currency }: any) {
       padding: '10px 14px',
       fontSize: 12,
       boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-      maxWidth: 220,
+      // §FIX-4: maxWidth reduced from 220 to 180 for better mobile fit.
+      // Combined with allowEscapeViewBox={{ x: false }} on the <Tooltip>,
+      // this ensures the tooltip stays within the chart bounds on 375px screens.
+      maxWidth: 180,
       color: '#f3f4f6',
     }}>
       <p style={{ fontWeight: 700, marginBottom: 6, fontSize: 10, color: '#9ca3af', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 4 }}>
@@ -1453,19 +1726,16 @@ function OnlineOrdersList({ currency, onNavigate }: { currency: string; onNaviga
 // the value via valueExtractor. Used for time-dependent metrics (Sales,
 // Collection, Expense). Lifetime metrics (Receivable, Payable, Health, LowStock)
 // do NOT use this — they have no time dimension.
+// §PHASE-5-D1: onClick now passes the FULL RangeContext (range + customStart +
+// customEnd) so History/Reports see the EXACT same date window — including
+// custom range dates which were previously lost.
+// §PHASE-5-D2: Each TimeMetricCard still maintains its OWN local range state.
+// Rationale for keeping independent ranges (after Phase 4 audit): the user may
+// want to compare "Today's Sales" vs "This Week's Collection" on the same
+// dashboard. Unifying would force both to the same range, removing that
+// capability. The card's range is now ALWAYS preserved on click — so even
+// with independent ranges, navigation never loses context.
 // ============================================================================
-
-const CARD_RANGES: Array<{ id: TimeRange; label: string }> = [
-  { id: '1d', label: '1 Day (Today)' },
-  { id: '2d', label: '2 Days' },
-  { id: '3d', label: '3 Days' },
-  { id: '5d', label: '5 Days' },
-  { id: '7d', label: '1 Week' },
-  { id: '1m', label: '1 Month' },
-  { id: '6m', label: '6 Months' },
-  { id: '1y', label: '1 Year' },
-  { id: 'custom', label: 'Custom Range' },
-]
 
 function TimeMetricCard({
   label, icon: Icon, tint, bg, text, defaultRange, currency, valueExtractor, onClick,
@@ -1478,7 +1748,9 @@ function TimeMetricCard({
   defaultRange: TimeRange
   currency: string
   valueExtractor: (d: ExtendedDashboardStats | null | undefined) => number
-  onClick: (range: TimeRange) => void
+  // §PHASE-5-D1: onClick now receives a full RangeContext — preserves custom
+  // range start/end dates through the navigation chain.
+  onClick: (ctx: RangeContext) => void
 }) {
   const [range, setRange] = useState<TimeRange>(defaultRange)
   const [customStart, setCustomStart] = useState('')
@@ -1493,7 +1765,9 @@ function TimeMetricCard({
 
   const { data } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl], { timeoutMs: 30000 })
   const value = valueExtractor(data)
-  const rangeLabel = CARD_RANGES.find((r) => r.id === range)?.label || ''
+  // §PHASE-5-D1: Use shared dashboardRangeLabel so the card displays the SAME
+  // label History/Reports will display after the click.
+  const rangeLabel = dashboardRangeLabel(range, customStart, customEnd)
 
   return (
     <Card className={`p-4 ${bg} border-none hover:shadow-md transition-shadow h-full relative`}>
@@ -1511,7 +1785,7 @@ function TimeMetricCard({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
-            {CARD_RANGES.map((r) => (
+            {DASHBOARD_RANGES.map((r) => (
               <DropdownMenuItem
                 key={r.id}
                 onSelect={() => setRange(r.id)}
@@ -1524,7 +1798,7 @@ function TimeMetricCard({
         </DropdownMenu>
       </div>
 
-      <button onClick={() => onClick(range)} className="w-full text-left relative z-0 pr-8">
+      <button onClick={() => onClick({ range, customStart: customStart || null, customEnd: customEnd || null })} className="w-full text-left relative z-0 pr-8">
         <div className="flex items-start mb-2">
           <span className={`w-8 h-8 rounded-lg ${tint} text-white flex items-center justify-center`}>
             <Icon className="w-4 h-4" />

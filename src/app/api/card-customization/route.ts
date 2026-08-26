@@ -73,6 +73,32 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json()
 
+    // §INPUT-VALIDATION: Validate logoUrl and coverUrl before transaction.
+    // Accept: null (remove), data:image/* (uploaded image),
+    // linear-gradient(...) (suggested CSS cover), or undefined (no change).
+    // Reject: arbitrary strings, oversized payloads.
+    const MAX_IMAGE_SIZE = 500 * 1024 // 500KB base64 string limit
+    function validateImageUrl(val: unknown, fieldName: string): void {
+      if (val === null) return
+      if (typeof val !== 'string') {
+        throw new Error(`Invalid ${fieldName}: must be string or null`)
+      }
+      if (val.length > MAX_IMAGE_SIZE) {
+        throw new Error(`${fieldName} too large (max 500KB)`)
+      }
+      // Accept data: URLs (uploaded images) and linear-gradient (CSS presets)
+      if (!val.startsWith('data:image/') && !val.startsWith('linear-gradient(')) {
+        throw new Error(`Invalid ${fieldName} format`)
+      }
+    }
+
+    if (body.logoUrl !== undefined) {
+      validateImageUrl(body.logoUrl, 'logoUrl')
+    }
+    if (body.coverUrl !== undefined) {
+      validateImageUrl(body.coverUrl, 'coverUrl')
+    }
+
     // §ATOMIC-TRANSACTION: Update Business + AppSettings inside ONE Prisma
     // $transaction. If any part fails, everything rolls back.
     const result = await db.$transaction(async (tx) => {
@@ -96,16 +122,20 @@ export async function POST(req: NextRequest) {
 
       // 2. Update AppSettings.cardPreferences if provided
       let updatedSettings: any = null
-      if (body.cardPreferences !== undefined) {
-        const validated = validateCardPreferences(body.cardPreferences)
+      if (body.cardPreferences !== undefined || body.dashboardCards !== undefined) {
+        const updateData: Record<string, unknown> = {}
+        if (body.cardPreferences !== undefined) {
+          updateData.cardPreferences = validateCardPreferences(body.cardPreferences)
+        }
+        if (body.dashboardCards !== undefined) {
+          updateData.dashboardCards = validateDashboardCards(body.dashboardCards)
+        }
         updatedSettings = await tx.appSettings.upsert({
           where: { businessId: business.id },
-          update: {
-            cardPreferences: validated,
-          },
+          update: updateData,
           create: {
             businessId: business.id,
-            cardPreferences: validated,
+            ...updateData,
           },
         })
       }
@@ -122,4 +152,42 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     return apiError(e, 'Card customization save failed')
   }
+}
+
+// §VALIDATE-DASHBOARD-CARDS: Defensive parse + allow-list for dashboard card config.
+// Accepts JSON string or array. Only known card IDs with boolean visible + number order.
+// Returns a JSON string safe for Prisma storage, or null if empty/invalid.
+function validateDashboardCards(input: unknown): string | null {
+  let cards: unknown[]
+  if (typeof input === 'string') {
+    try {
+      cards = JSON.parse(input)
+    } catch {
+      return null
+    }
+  } else if (Array.isArray(input)) {
+    cards = input
+  } else {
+    return null
+  }
+
+  // §KNOWN-CARD-IDs: Allow-list of valid dashboard card IDs
+  const KNOWN_IDS = new Set([
+    'totalReceivable', 'totalPayable', 'businessHealth', 'lowStock',
+    'totalSales', 'totalCollection', 'totalExpense', 'totalRevenue',
+    'totalCustomers', 'totalProducts', 'totalInvoices', 'stockValue',
+    'todaySales', 'monthlyRevenue',
+  ])
+
+  const clean: Array<{ id: string; visible: boolean; order: number }> = []
+  for (const item of cards) {
+    if (typeof item !== 'object' || item === null) continue
+    const obj = item as Record<string, unknown>
+    if (typeof obj.id !== 'string' || !KNOWN_IDS.has(obj.id)) continue
+    if (typeof obj.visible !== 'boolean') continue
+    if (typeof obj.order !== 'number' || !Number.isFinite(obj.order)) continue
+    clean.push({ id: obj.id, visible: obj.visible, order: Math.max(0, Math.min(100, Math.round(obj.order))) })
+  }
+
+  return clean.length > 0 ? JSON.stringify(clean) : null
 }

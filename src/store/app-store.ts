@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { ViewId, Business } from '@/lib/types'
+import type { RangeContext } from '@/lib/date-ranges'
 
 export type KhataFilter = 'all' | 'receivable' | 'payable'
 export type InventoryFilter = 'all' | 'low-stock'
@@ -93,15 +94,32 @@ interface AppState {
   // §HISTORY-ROUTING: when the dashboard Sales card is tapped, this carries the
   // active dateRange so the History view can auto-filter to the same timeframe.
   // 'today' | 'yesterday' | 'week' | 'custom'. Cleared after consumption.
+  // §LEGACY: Pre-Phase-5 field — preserved for backward compat. New callers
+  // should use `historyRangeContext` which carries the full {range, customStart,
+  // customEnd} object so Custom Range dates aren't lost.
   historyDateRange: 'today' | 'yesterday' | 'week' | 'custom' | null
   setHistoryDateRange: (r: 'today' | 'yesterday' | 'week' | 'custom' | null) => void
+
+  // §HISTORY-CONTEXT (Phase 5 D1 fix): Full range context — range string +
+  // customStart/customEnd for 'custom' range. The dashboard card click sets
+  // this, History view reads it on mount and clears it after applying.
+  // Carries ALL THREE fields together so 'custom' range's exact dates travel
+  // with the navigation (the original Phase 4 bug D1 was losing these).
+  historyRangeContext: RangeContext | null
+  setHistoryRangeContext: (ctx: RangeContext | null) => void
 
   // §REPORTS-ROUTING: when the dashboard Expense/Revenue card is tapped, this
   // carries the active dateRange so the P&L report auto-filters to the same
   // timeframe. Maps to PLRange ('today'|'week'|'month'|'3months'|'custom').
   // Cleared after consumption.
+  // §LEGACY: Pre-Phase-5 field — preserved for backward compat.
   reportsDateRange: 'today' | 'week' | 'month' | '3months' | 'custom' | null
   setReportsDateRange: (r: 'today' | 'week' | 'month' | '3months' | 'custom' | null) => void
+  // §REPORTS-CONTEXT (Phase 5 D1 fix): Full range context for Reports P&L —
+  // same shape as historyRangeContext. Used by Total Expense/Total Revenue
+  // card clicks so 'custom' range dates are preserved end-to-end.
+  reportsRangeContext: RangeContext | null
+  setReportsRangeContext: (ctx: RangeContext | null) => void
   // §REPORTS-ROUTING: pre-select a specific report tab (e.g. 'outstanding'
   // from Top Debtors, 'party' from Top Buyers). Cleared after consumption.
   reportsTab: string | null
@@ -221,10 +239,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
   // §HISTORY-ROUTING: date range passed from dashboard Sales card → History view
   historyDateRange: null,
   setHistoryDateRange: (r) => set({ historyDateRange: r }),
+  // §HISTORY-CONTEXT (Phase 5 D1): Full {range, customStart, customEnd}
+  historyRangeContext: null,
+  setHistoryRangeContext: (ctx) => set({ historyRangeContext: ctx }),
 
   // §REPORTS-ROUTING: date range passed from dashboard Expense/Revenue card → P&L
   reportsDateRange: null,
   setReportsDateRange: (r) => set({ reportsDateRange: r }),
+  // §REPORTS-CONTEXT (Phase 5 D1): Full {range, customStart, customEnd}
+  reportsRangeContext: null,
+  setReportsRangeContext: (ctx) => set({ reportsRangeContext: ctx }),
   reportsTab: null,
   setReportsTab: (t) => set({ reportsTab: t }),
 
