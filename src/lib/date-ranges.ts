@@ -465,12 +465,10 @@ export function computeBuckets(
     let label: string
 
     if (bucketType === 'hour') {
-      // §FIX-2B: Use time arithmetic — no truncation of the IST midnight boundary
       start = new Date(rangeStart.getTime() + i * HOUR_MS)
       end = new Date(start.getTime() + HOUR_MS)
       label = start.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
     } else if (bucketType === 'day') {
-      // §FIX-2B: Use time arithmetic — preserves IST midnight (18:30 UTC)
       start = new Date(rangeStart.getTime() + i * DAY_MS)
       end = new Date(start.getTime() + DAY_MS)
       if (bucketCount <= 7) {
@@ -479,22 +477,37 @@ export function computeBuckets(
         label = start.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' })
       }
     } else if (bucketType === 'week') {
-      // §FIX-2B: Use time arithmetic — preserves IST midnight
       start = new Date(rangeStart.getTime() + i * WEEK_MS)
       end = new Date(start.getTime() + WEEK_MS)
       label = `W${i + 1}`
     } else {
-      // §FIX-2B: Month buckets use setUTCMonth WITHOUT setUTCHours(0,0,0,0)
-      // — preserves the rangeStart's time component (18:30 UTC = 00:00 IST)
       start = new Date(rangeStart)
       start.setUTCMonth(rangeStart.getUTCMonth() + i, 1)
-      // Do NOT call setUTCHours(0, 0, 0, 0) — preserves IST midnight time
       end = new Date(start)
       end.setUTCMonth(start.getUTCMonth() + 1, 1)
       label = start.toLocaleDateString('en-IN', { month: 'short', timeZone: 'Asia/Kolkata' })
     }
 
     if (start > rangeEnd) break
+    // §FIX-7D: Extend last bucket's end to cover rangeEnd exactly.
+    // Without this, the last bucket's end (e.g. 30th day for 1m) doesn't
+    // reach rangeEnd (which includes the 31st day for months with 31 days).
+    // This ensures sum(bucket.expense) === rangeExpense — no data lost.
+    // We only extend if the gap is positive (bucket end < range end) and
+    // this is the last iteration (i === bucketCount - 1 OR next start > rangeEnd).
+    const nextStart = (i + 1 < bucketCount)
+      ? new Date(rangeStart.getTime() + (i + 1) * (bucketType === 'hour' ? HOUR_MS : bucketType === 'day' ? DAY_MS : bucketType === 'week' ? WEEK_MS : 0))
+      : null
+    // For monthly buckets, nextStart uses setUTCMonth (not time arithmetic)
+    const nextMonthStart = (i + 1 < bucketCount && bucketType === 'month')
+      ? (() => { const d = new Date(rangeStart); d.setUTCMonth(rangeStart.getUTCMonth() + i + 1, 1); return d })()
+      : null
+    const isLast = (i === bucketCount - 1) || (nextStart && nextStart > rangeEnd) || (nextMonthStart && nextMonthStart > rangeEnd)
+
+    if (isLast && end < rangeEnd) {
+      end = new Date(rangeEnd.getTime() + 1) // +1ms to make end inclusive (>= rangeEnd)
+    }
+
     buckets.push({ start, end, label })
   }
 
