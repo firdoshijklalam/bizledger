@@ -155,6 +155,7 @@ export function DashboardView() {
     setDraftCover(undefined)
     setSaveError(null)
     setSaveSuccess(false)
+    setUploadError(null)
     setShowCustomize(true)
   }
 
@@ -165,6 +166,7 @@ export function DashboardView() {
     setDraftCover(undefined)
     setSaveError(null)
     setSaveSuccess(false)
+    setUploadError(null)
     setShowDiscardConfirm(false)
     setShowCustomize(false)
   }
@@ -177,6 +179,7 @@ export function DashboardView() {
     setSaving(true)
     setSaveError(null)
     setSaveSuccess(false)
+    setUploadError(null)
     try {
       // Build request body — only include fields that changed
       const payload: Record<string, unknown> = {}
@@ -193,13 +196,20 @@ export function DashboardView() {
       const data = await res.json()
       if (!res.ok || !data.ok) throw new Error(data.error || 'Save failed')
 
-      // §UPDATE-LOCAL-STATE: No page reload — update Zustand store + local prefs
+      // §FIXED-LOCAL-STATE: Use server response as source of truth.
+      // Previously: two separate setBusiness calls from stale `business` object
+      // could overwrite each other when both logo + cover changed.
+      // Now: use the returned `data.business` object directly (if provided).
       setCardPrefs(draft)
-      if (draftLogo !== undefined && business) {
-        useAppStore.getState().setBusiness({ ...business, logoUrl: draftLogo })
-      }
-      if (draftCover !== undefined && business) {
-        useAppStore.getState().setBusiness({ ...business, coverUrl: draftCover })
+      if (data.business) {
+        useAppStore.getState().setBusiness(data.business)
+      } else if (business) {
+        // Fallback: construct from current business if server didn't return it
+        // (shouldn't happen — but handle gracefully)
+        const updatedBiz: any = { ...business }
+        if (draftLogo !== undefined) updatedBiz.logoUrl = draftLogo
+        if (draftCover !== undefined) updatedBiz.coverUrl = draftCover
+        useAppStore.getState().setBusiness(updatedBiz)
       }
       setSaveSuccess(true)
       // Close sheet after short delay so user sees success
@@ -226,30 +236,64 @@ export function DashboardView() {
   const coverInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadingCover, setUploadingCover] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  // §FIXED-IMAGE-UPLOAD: Complete async flow with proper error handling.
+  // FileReader is wrapped in a Promise so errors are caught by the outer try/catch.
+  // uploading state stays true until the ENTIRE flow (read + compress) completes.
+  // On failure: previous saved image is unchanged, visible error shown.
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>, field: 'logoUrl' | 'coverUrl') => {
     const file = e.target.files?.[0]
+    // Reset input so same file can be selected again
+    e.target.value = ''
     if (!file) return
+
+    // Validate MIME type
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Please select an image file.')
+      return
+    }
+
+    // Clear previous error when starting new upload
+    setUploadError(null)
     if (field === 'logoUrl') setUploading(true)
     else setUploadingCover(true)
+
     try {
-      const reader = new FileReader()
-      reader.onload = async () => {
-        const base64 = reader.result as string
-        // Compress via existing API
-        const compressRes = await fetch('/api/image-compress', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64, targetSizeKB: 200 }),
-        })
-        const compressed = await compressRes.json()
-        const finalImage = compressed.ok ? compressed.image : base64
-        // Set in draft (NOT persisted — user must click Save)
-        if (field === 'logoUrl') setDraftLogo(finalImage)
-        else setDraftCover(finalImage)
+      // Step 1: Read file as data URL (awaited Promise)
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(new Error('Could not read file.'))
+        reader.readAsDataURL(file)
+      })
+
+      // Step 2: Compress via existing API
+      const compressRes = await fetch('/api/image-compress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64, targetSizeKB: 200 }),
+      })
+
+      if (!compressRes.ok) {
+        throw new Error('Image processing failed on the server.')
       }
-      reader.readAsDataURL(file)
+
+      const compressed = await compressRes.json()
+      if (!compressed || !compressed.ok) {
+        throw new Error('Image processing returned an unexpected response.')
+      }
+
+      const finalImage = compressed.image as string
+      if (!finalImage || typeof finalImage !== 'string') {
+        throw new Error('Image processing returned invalid data.')
+      }
+
+      // Step 3: Set draft (NOT persisted — user must click Save)
+      if (field === 'logoUrl') setDraftLogo(finalImage)
+      else setDraftCover(finalImage)
     } catch {
-      // best-effort
+      setUploadError('Could not process image. Please try another image.')
     } finally {
       if (field === 'logoUrl') setUploading(false)
       else setUploadingCover(false)
@@ -546,6 +590,12 @@ export function DashboardView() {
                 {/* §PROFILE-PHOTO: Change + Remove */}
                 <div>
                   <p className="text-[10px] text-muted-foreground uppercase mb-2">Profile Photo</p>
+                  {/* §UPLOAD-ERROR: Visible error state for image processing failures */}
+                  {uploadError && (
+                    <div className="mb-2 px-3 py-2 rounded-lg bg-destructive/10 text-destructive text-[11px] font-medium">
+                      {uploadError}
+                    </div>
+                  )}
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-full bg-muted overflow-hidden flex items-center justify-center shrink-0">
                       {(draftLogo !== undefined ? draftLogo : business?.logoUrl) ? (

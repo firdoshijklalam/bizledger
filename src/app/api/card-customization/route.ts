@@ -73,6 +73,32 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json()
 
+    // §INPUT-VALIDATION: Validate logoUrl and coverUrl before transaction.
+    // Accept: null (remove), data:image/* (uploaded image),
+    // linear-gradient(...) (suggested CSS cover), or undefined (no change).
+    // Reject: arbitrary strings, oversized payloads.
+    const MAX_IMAGE_SIZE = 500 * 1024 // 500KB base64 string limit
+    function validateImageUrl(val: unknown, fieldName: string): void {
+      if (val === null) return
+      if (typeof val !== 'string') {
+        throw new Error(`Invalid ${fieldName}: must be string or null`)
+      }
+      if (val.length > MAX_IMAGE_SIZE) {
+        throw new Error(`${fieldName} too large (max 500KB)`)
+      }
+      // Accept data: URLs (uploaded images) and linear-gradient (CSS presets)
+      if (!val.startsWith('data:image/') && !val.startsWith('linear-gradient(')) {
+        throw new Error(`Invalid ${fieldName} format`)
+      }
+    }
+
+    if (body.logoUrl !== undefined) {
+      validateImageUrl(body.logoUrl, 'logoUrl')
+    }
+    if (body.coverUrl !== undefined) {
+      validateImageUrl(body.coverUrl, 'coverUrl')
+    }
+
     // §ATOMIC-TRANSACTION: Update Business + AppSettings inside ONE Prisma
     // $transaction. If any part fails, everything rolls back.
     const result = await db.$transaction(async (tx) => {

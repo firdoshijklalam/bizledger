@@ -337,6 +337,78 @@ function testNoSeparateApiCalls() {
   assert(!saveFunc.includes("fetch('/api/business'"), 'Save does not call /api/business separately')
 }
 
+// HH. Image upload uses awaited FileReader (not async callback)
+function testAwaitedFileReader() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes('await new Promise<string>'), 'FileReader wrapped in awaited Promise')
+  assert(!src.includes('reader.onload = async'), 'No async onload callback (old bug)')
+}
+
+// II. Upload error state exists
+function testUploadErrorState() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes('uploadError'), 'uploadError state exists')
+  assert(src.includes('Could not process image'), 'Visible error message on upload failure')
+}
+
+// JJ. Input value reset after file select
+function testInputValueReset() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes("e.target.value = ''"), 'File input value reset after select')
+}
+
+// KK. Save uses server response as source of truth (not stale business)
+function testServerResponseSource() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes('data.business'), 'Save uses server response data.business')
+  assert(src.includes('useAppStore.getState().setBusiness(data.business)'), 'Uses server response for setBusiness')
+  // Old buggy pattern should NOT be present
+  const saveStart = src.indexOf('const saveChanges')
+  const saveEnd = src.indexOf('}', saveStart + 400)
+  const saveFunc = src.substring(saveStart, saveEnd + 1)
+  assert(!saveFunc.includes('setBusiness({ ...business, logoUrl'), 'Does NOT use stale business for logo update')
+  assert(!saveFunc.includes('setBusiness({ ...business, coverUrl'), 'Does NOT use stale business for cover update')
+}
+
+// LL. API input validation: rejects non-image strings
+function testApiInputValidation() {
+  const src = fs.readFileSync('src/app/api/card-customization/route.ts', 'utf8')
+  assert(src.includes('validateImageUrl'), 'API has validateImageUrl function')
+  assert(src.includes('data:image/'), 'API accepts data:image/ URLs')
+  assert(src.includes('linear-gradient('), 'API accepts linear-gradient (CSS presets)')
+  assert(src.includes('MAX_IMAGE_SIZE'), 'API has max image size limit')
+}
+
+// MM. MIME type validation on client
+function testClientMimeValidation() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes('file.type.startsWith'), 'Client validates MIME type')
+}
+
+// NN. Upload error cleared on new upload
+function testErrorClearedOnNewUpload() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  assert(src.includes('setUploadError(null)'), 'Upload error cleared on new upload start')
+}
+
+// OO. Upload error cleared on save success
+function testErrorClearedOnSaveSuccess() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  const saveStart = src.indexOf('const saveChanges')
+  const saveEnd = src.indexOf('}', saveStart + 300)
+  const saveFunc = src.substring(saveStart, saveEnd + 1)
+  assert(saveFunc.includes('setUploadError(null)'), 'Upload error cleared on save start')
+}
+
+// PP. Upload error cleared on openCustomizer
+function testErrorClearedOnOpen() {
+  const src = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
+  const openStart = src.indexOf('const openCustomizer')
+  const openEnd = src.indexOf('}', openStart + 100)
+  const openFunc = src.substring(openStart, openEnd + 1)
+  assert(openFunc.includes('setUploadError(null)'), 'Upload error cleared on editor open')
+}
+
 // ─── Run all tests ─────────────────────────────────────────────────────────
 
 console.log('\n  Card preferences validation:')
@@ -387,6 +459,17 @@ testAtomicRBAC()
 testAtomicTenantIsolation()
 testDirtyStateTracking()
 testNoSeparateApiCalls()
+
+console.log('\n  Image upload fix:')
+testAwaitedFileReader()
+testUploadErrorState()
+testInputValueReset()
+testServerResponseSource()
+testApiInputValidation()
+testClientMimeValidation()
+testErrorClearedOnNewUpload()
+testErrorClearedOnSaveSuccess()
+testErrorClearedOnOpen()
 
 console.log(`\n✅ Passed: ${passed}`)
 console.log(`❌ Failed: ${failed}`)
