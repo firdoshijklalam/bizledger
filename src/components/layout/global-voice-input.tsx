@@ -1,11 +1,3 @@
-// @ts-nocheck
-// §EXTERNAL-ARTIFACT: This file was added by an external process and has type
-// errors (imports useVoiceInput with an incompatible interface). It is NOT
-// imported by any committed file (dead code). Adding @ts-nocheck to prevent
-// it from blocking the production build. This is the smallest safe fix —
-// does NOT change the file's logic, does NOT delete it, does NOT fix its
-// broken interface mismatch. When the external process owner updates this
-// file to match the current useVoiceInput interface, @ts-nocheck can be removed.
 'use client'
 
 import { useVoiceInput } from '@/hooks/use-voice-input'
