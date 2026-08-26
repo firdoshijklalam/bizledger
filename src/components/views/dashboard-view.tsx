@@ -10,7 +10,7 @@ import {
   ArrowUpRight, ArrowDownRight, ArrowLeftRight, Users, Receipt, ChevronRight,
   BarChart3, LineChart, X, Loader2, Calendar,
   MapPin, Phone, Building2, ShieldCheck, Store, Settings, Camera, Eye, EyeOff,
-  FileText, Boxes, LayoutGrid,
+  FileText, Boxes, LayoutGrid, Check,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -147,6 +147,8 @@ export function DashboardView() {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false)
+  // §UX-P1: Reset confirmation state — user must confirm before draft is reset
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
 
   // §TRY-CLOSE: If dirty, show discard confirmation; otherwise close immediately
   const tryClose = () => {
@@ -340,11 +342,19 @@ export function DashboardView() {
     'linear-gradient(135deg, #166534 0%, #84cc16 100%)',
   ]
 
-  // §RESET-DEFAULTS: Reset draft to recommended defaults
+  // §RESET-DEFAULTS: Reset draft to recommended defaults.
+  // §UX-P1: Only modifies draft state — does NOT call the API.
+  // User must click "Save Changes" afterwards to persist the reset.
   const resetToDefaults = () => {
     setDraft(DEFAULT_PREFS)
     setDraftLogo(null) // null = remove logo
     setDraftCover(null) // null = remove cover
+    setShowResetConfirm(false)
+  }
+
+  // §UX-P1: Show reset confirmation dialog before resetting draft
+  const handleResetClick = () => {
+    setShowResetConfirm(true)
   }
 
   const { saveScroll } = useScrollRetention()
@@ -641,7 +651,10 @@ export function DashboardView() {
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', stiffness: 400, damping: 32 }}
-              className="fixed bottom-0 inset-x-0 z-[100] bg-card rounded-t-3xl border-t border-border max-w-2xl mx-auto max-h-[85vh] flex flex-col"
+              // §UX-P0: max-h uses 90dvh (dynamic viewport) for better mobile support.
+              // On iOS Safari, 85vh includes the URL bar area; dvh adjusts dynamically.
+              // safe-area-inset-bottom is handled via the footer's padding.
+              className="fixed bottom-0 inset-x-0 z-[100] bg-card rounded-t-3xl border-t border-border max-w-2xl mx-auto max-h-[90dvh] flex flex-col"
             >
               {/* §HEADER: sticky top with title + close */}
               <div className="flex items-center justify-between p-4 pb-2 border-b border-border">
@@ -653,8 +666,10 @@ export function DashboardView() {
                 </button>
               </div>
 
-              {/* §SCROLLABLE-CONTENT: preview + controls */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* §SCROLLABLE-CONTENT: preview + controls.
+                  §UX-P0: Added pb-24 (96px bottom padding) so the last setting
+                  is never hidden behind the sticky footer on mobile. */}
+              <div className="flex-1 overflow-y-auto p-4 pb-24 space-y-4">
                 {/* §LIVE-PREVIEW: Card preview using draft state.
                     §FIX: Same conditional rendering as the main card —
                     CSS gradients need div background, not <img src>. */}
@@ -736,17 +751,30 @@ export function DashboardView() {
                 {/* §COVER-PHOTO: Suggested + Custom + Remove */}
                 <div>
                   <p className="text-[10px] text-muted-foreground uppercase mb-2">Cover Photo</p>
-                  {/* Suggested covers */}
+                  {/* Suggested covers.
+                    §UX-P1: Selected preset shows a checkmark overlay for clarity. */}
                   <div className="grid grid-cols-4 gap-2 mb-2">
-                    {SUGGESTED_COVERS.map((grad, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setDraftCover(grad)}
-                        className={`h-10 rounded-lg shrink-0 border-2 transition-colors ${draftCover === grad ? 'border-primary' : 'border-transparent'}`}
-                        style={{ background: grad }}
-                        aria-label={`Cover option ${i + 1}`}
-                      />
-                    ))}
+                    {SUGGESTED_COVERS.map((grad, i) => {
+                      const isSelected = draftCover === grad
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => setDraftCover(grad)}
+                          className={`relative h-10 rounded-lg shrink-0 border-2 transition-all ${isSelected ? 'border-primary ring-2 ring-primary/30' : 'border-transparent hover:border-muted-foreground/30'}`}
+                          style={{ background: grad }}
+                          aria-label={`Cover option ${i + 1}`}
+                          aria-pressed={isSelected}
+                        >
+                          {isSelected && (
+                            <span className="absolute inset-0 flex items-center justify-center">
+                              <span className="w-5 h-5 rounded-full bg-white/90 flex items-center justify-center shadow-sm">
+                                <Check className="w-3 h-3 text-primary" />
+                              </span>
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
                   </div>
                   {/* Custom upload */}
                   <div className="flex items-center gap-2">
@@ -781,16 +809,20 @@ export function DashboardView() {
                   <input type="range" min={0} max={0.9} step={0.05} value={draft.coverOverlay} onChange={(e) => setDraft({ ...draft, coverOverlay: Number(e.target.value) })} className="w-full h-8 accent-primary" />
                 </div>
 
-                {/* §GREETING-TEXT: Custom greeting */}
+                {/* §GREETING-TEXT: Custom greeting.
+                    §UX-P1: Added character counter (X / 30) to match backend limit. */}
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase mb-1.5">Greeting Text</p>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] text-muted-foreground uppercase">Greeting Text</p>
+                    <span className={`text-[10px] tabular ${draft.greetingText.length >= 25 ? 'text-amber-600' : 'text-muted-foreground'}`}>{draft.greetingText.length} / 30</span>
+                  </div>
                   <input
                     type="text"
                     value={draft.greetingText}
                     onChange={(e) => setDraft({ ...draft, greetingText: e.target.value.slice(0, 30) })}
                     placeholder="Namaste"
                     maxLength={30}
-                    className="w-full h-10 rounded-xl bg-muted px-3 text-sm border-0 outline-none"
+                    className="w-full h-10 rounded-xl bg-muted px-3 text-sm border-0 outline-none focus:ring-2 focus:ring-primary/20"
                   />
                 </div>
 
@@ -816,9 +848,9 @@ export function DashboardView() {
                   </div>
                 </div>
 
-                {/* §RESET-DEFAULTS */}
-                <button onClick={resetToDefaults} className="w-full text-xs text-muted-foreground hover:text-foreground py-2">
-                  Reset to recommended defaults
+                {/* §RESET-DEFAULTS: §UX-P1 — now shows confirmation dialog before resetting draft. */}
+                <button onClick={handleResetClick} className="w-full text-xs text-muted-foreground hover:text-foreground py-2">
+                  Reset to Default
                 </button>
 
                 {/* §MANAGE-SETTINGS: Navigate to full Settings page */}
@@ -828,17 +860,21 @@ export function DashboardView() {
                 </button>
               </div>
 
-              {/* §STICKY-FOOTER: Save / Cancel */}
-              <div className="border-t border-border p-3 flex items-center gap-2 bg-card">
+              {/* §STICKY-FOOTER: Save / Cancel.
+                  §UX-P0: Added safe-area bottom padding so footer isn't hidden
+                  behind iOS Safari bottom bar / Android Chrome nav bar. */}
+              <div className="border-t border-border p-3 flex items-center gap-2 bg-card" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
                 {saveError && <span className="text-[10px] text-destructive flex-1">{saveError}</span>}
                 {saveSuccess && <span className="text-[10px] text-emerald-600 flex-1">✓ Changes saved</span>}
                 {!saveError && !saveSuccess && <span className="flex-1" />}
                 <button onClick={tryClose} disabled={saving} className="px-4 py-2.5 rounded-xl text-xs font-medium text-muted-foreground hover:bg-muted transition-colors min-h-[44px] disabled:opacity-50">
                   Cancel
                 </button>
-                <button onClick={saveChanges} disabled={saving || !isDirty} className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors min-h-[44px] disabled:opacity-50 flex items-center gap-1.5">
+                {/* §UX-P0: Save button always shows "Save Changes" label.
+                    Disabled state (via isDirty) communicates no-changes visually. */}
+                <button onClick={saveChanges} disabled={saving || !isDirty} className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
                   {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {saving ? 'Saving...' : isDirty ? 'Save Changes' : 'No changes'}
+                  {saving ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </motion.div>
@@ -860,20 +896,60 @@ export function DashboardView() {
                     onClick={(e) => e.stopPropagation()}
                     className="bg-card rounded-2xl p-5 max-w-xs w-full space-y-3"
                   >
-                    <p className="text-sm font-semibold text-center">Discard unsaved changes?</p>
-                    <p className="text-[11px] text-muted-foreground text-center">Your draft changes will be lost.</p>
+                    {/* §UX-P0: Updated dialog text per spec. */}
+                  <p className="text-sm font-semibold text-center">Discard changes?</p>
+                    <p className="text-[11px] text-muted-foreground text-center">You have unsaved changes. Are you sure you want to discard them?</p>
                     <div className="flex gap-2 pt-2">
                       <button
                         onClick={() => setShowDiscardConfirm(false)}
                         className="flex-1 px-3 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium min-h-[44px]"
                       >
-                        Continue Editing
+                        Keep Editing
                       </button>
                       <button
                         onClick={cancelCustomizer}
                         className="flex-1 px-3 py-2.5 rounded-xl bg-destructive/10 text-destructive text-xs font-medium min-h-[44px]"
                       >
-                        Discard
+                        Discard Changes
+                      </button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* §UX-P1: Reset to Default confirmation dialog.
+                Reset only affects draft state — no API call until user clicks Save. */}
+            <AnimatePresence>
+              {showResetConfirm && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[110] bg-black/60 flex items-center justify-center p-4"
+                  onClick={() => setShowResetConfirm(false)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.9 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0.9 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-card rounded-2xl p-5 max-w-xs w-full space-y-3"
+                  >
+                    <p className="text-sm font-semibold text-center">Reset to default?</p>
+                    <p className="text-[11px] text-muted-foreground text-center">This will restore the default card appearance and settings.</p>
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        onClick={() => setShowResetConfirm(false)}
+                        className="flex-1 px-3 py-2.5 rounded-xl bg-muted text-foreground text-xs font-medium min-h-[44px]"
+                      >
+                        Keep Current
+                      </button>
+                      <button
+                        onClick={resetToDefaults}
+                        className="flex-1 px-3 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium min-h-[44px]"
+                      >
+                        Reset to Default
                       </button>
                     </div>
                   </motion.div>
