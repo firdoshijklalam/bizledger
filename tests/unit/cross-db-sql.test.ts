@@ -159,67 +159,84 @@ async function main() {
     const dbModule = await import(`../../src/lib/db.ts?t=${Date.now() + 1}`)
     const { db } = dbModule
 
-    // Find a real business ID to query against
-    const businesses = await db.business.findMany({ select: { id: true } })
-    assert(businesses.length > 0, 'Dev DB has at least one Business row')
-    const businessId = businesses[0].id
+    // §SELF-CONTAINED FIX: Previously this test asserted that the dev DB
+    // had at least one Business row (via `db.business.findMany`). That made
+    // the test fragile — it depended on external seed state and failed
+    // whenever the dev DB was empty (e.g. after integration test cleanup).
+    // Now the test creates its OWN temporary Business, uses it for the raw
+    // SQL assertions, and deletes it in a `finally` block (runs even on
+    // assertion failure). Existing dev/production data is NEVER touched.
+    const TEST_BIZ_NAME = '__cross_db_sql_test_business__'
+    // Cleanup any leftover from a previous crashed run, then create fresh.
+    await db.business.deleteMany({ where: { name: TEST_BIZ_NAME } }).catch(() => {})
+    const testBusiness = await db.business.create({
+      data: { name: TEST_BIZ_NAME, currency: 'INR' },
+    })
+    const businessId = testBusiness.id
 
-    // §COMBINED-PARTY query — previously had `::bigint` casts that broke SQLite
-    const partyRow = await db.$queryRaw`
-      SELECT
-        COUNT(*) AS total_count,
-        COALESCE(SUM(CASE WHEN balance > 0 THEN balance ELSE 0 END), 0) AS receivable_sum,
-        COALESCE(SUM(CASE WHEN balance < 0 THEN balance ELSE 0 END), 0) AS payable_sum,
-        COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END) AS overdue_count,
-        COUNT(CASE WHEN "qualityGrade" = 'A' THEN 1 END) AS grade_a,
-        COUNT(CASE WHEN "qualityGrade" = 'B' THEN 1 END) AS grade_b,
-        COUNT(CASE WHEN "qualityGrade" = 'C' THEN 1 END) AS grade_c,
-        COUNT(CASE WHEN "qualityGrade" = 'D' THEN 1 END) AS grade_d,
-        COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END) AS grade_e
-      FROM "Party" WHERE "businessId" = ${businessId}
-    `
-    assert(Array.isArray(partyRow) && partyRow.length === 1,
-      'COMBINED-PARTY raw SQL runs without ::bigint error on SQLite')
+    try {
+      // §COMBINED-PARTY query — previously had `::bigint` casts that broke SQLite
+      const partyRow = await db.$queryRaw`
+        SELECT
+          COUNT(*) AS total_count,
+          COALESCE(SUM(CASE WHEN balance > 0 THEN balance ELSE 0 END), 0) AS receivable_sum,
+          COALESCE(SUM(CASE WHEN balance < 0 THEN balance ELSE 0 END), 0) AS payable_sum,
+          COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END) AS overdue_count,
+          COUNT(CASE WHEN "qualityGrade" = 'A' THEN 1 END) AS grade_a,
+          COUNT(CASE WHEN "qualityGrade" = 'B' THEN 1 END) AS grade_b,
+          COUNT(CASE WHEN "qualityGrade" = 'C' THEN 1 END) AS grade_c,
+          COUNT(CASE WHEN "qualityGrade" = 'D' THEN 1 END) AS grade_d,
+          COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END) AS grade_e
+        FROM "Party" WHERE "businessId" = ${businessId}
+      `
+      assert(Array.isArray(partyRow) && partyRow.length === 1,
+        'COMBINED-PARTY raw SQL runs without ::bigint error on SQLite')
 
-    // §COMBINED-INVOICE query — previously had `::bigint` casts
-    const today = new Date(); today.setHours(0, 0, 0, 0)
-    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
-    const rangeStart = new Date(); rangeStart.setDate(rangeStart.getDate() - 6)
-    const rangeEnd = new Date()
-    const invoiceRow = await db.$queryRaw`
-      SELECT
-        COALESCE(SUM(CASE WHEN "createdAt" >= ${today} THEN "grandTotal" ELSE 0 END), 0) AS today_sales,
-        COALESCE(SUM(CASE WHEN "createdAt" >= ${monthStart} THEN "grandTotal" ELSE 0 END), 0) AS monthly_sales,
-        COALESCE(SUM(CASE WHEN "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd} THEN "grandTotal" ELSE 0 END), 0) AS range_sales,
-        COUNT(*) AS total_count,
-        COUNT(CASE WHEN status = 'paid' THEN 1 END) AS paid_count
-      FROM "Invoice"
-      WHERE "businessId" = ${businessId} AND status != 'void'
-    `
-    assert(Array.isArray(invoiceRow) && invoiceRow.length === 1,
-      'COMBINED-INVOICE raw SQL runs without ::bigint error on SQLite')
+      // §COMBINED-INVOICE query — previously had `::bigint` casts
+      const today = new Date(); today.setHours(0, 0, 0, 0)
+      const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
+      const rangeStart = new Date(); rangeStart.setDate(rangeStart.getDate() - 6)
+      const rangeEnd = new Date()
+      const invoiceRow = await db.$queryRaw`
+        SELECT
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${today} THEN "grandTotal" ELSE 0 END), 0) AS today_sales,
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${monthStart} THEN "grandTotal" ELSE 0 END), 0) AS monthly_sales,
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd} THEN "grandTotal" ELSE 0 END), 0) AS range_sales,
+          COUNT(*) AS total_count,
+          COUNT(CASE WHEN status = 'paid' THEN 1 END) AS paid_count
+        FROM "Invoice"
+        WHERE "businessId" = ${businessId} AND status != 'void'
+      `
+      assert(Array.isArray(invoiceRow) && invoiceRow.length === 1,
+        'COMBINED-INVOICE raw SQL runs without ::bigint error on SQLite')
 
-    // §COMBINED-TRANSACTION query — previously had `::bigint` casts
-    const txnRow = await db.$queryRaw`
-      SELECT
-        COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0) AS collection_sum,
-        COALESCE(SUM(CASE WHEN type IN ('debit', 'expense', 'purchase') THEN amount ELSE 0 END), 0) AS expense_sum
-      FROM "Transaction"
-      WHERE "businessId" = ${businessId} AND "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd}
-    `
-    assert(Array.isArray(txnRow) && txnRow.length === 1,
-      'COMBINED-TRANSACTION raw SQL runs without ::bigint error on SQLite')
+      // §COMBINED-TRANSACTION query — previously had `::bigint` casts
+      const txnRow = await db.$queryRaw`
+        SELECT
+          COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0) AS collection_sum,
+          COALESCE(SUM(CASE WHEN type IN ('debit', 'expense', 'purchase') THEN amount ELSE 0 END), 0) AS expense_sum
+        FROM "Transaction"
+        WHERE "businessId" = ${businessId} AND "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd}
+      `
+      assert(Array.isArray(txnRow) && txnRow.length === 1,
+        'COMBINED-TRANSACTION raw SQL runs without ::bigint error on SQLite')
 
-    // §NUM-FIX: Without ::bigint cast, the raw value may be a JS number, BigInt,
-    // or Decimal depending on Prisma driver. The route converts via Number(v),
-    // which handles BigInt → number safely.
-    const num = (v: any): number => Number(v) || 0
-    assert(typeof num(partyRow[0].total_count) === 'number',
-      'Number() conversion handles raw SQL COUNT() result')
-    assert(typeof num(invoiceRow[0].today_sales) === 'number',
-      'Number() conversion handles raw SQL SUM() result')
-
-    await db.$disconnect()
+      // §NUM-FIX: Without ::bigint cast, the raw value may be a JS number, BigInt,
+      // or Decimal depending on Prisma driver. The route converts via Number(v),
+      // which handles BigInt → number safely.
+      const num = (v: any): number => Number(v) || 0
+      assert(typeof num(partyRow[0].total_count) === 'number',
+        'Number() conversion handles raw SQL COUNT() result')
+      assert(typeof num(invoiceRow[0].today_sales) === 'number',
+        'Number() conversion handles raw SQL SUM() result')
+    } finally {
+      // §CLEANUP: Always delete the temporary Business, even if an assertion
+      // failed and threw. deleteMany is idempotent — safe to call even if the
+      // row was already removed. Cascading deletes (if any) handle related
+      // rows; we don't create any Party/Invoice/Transaction in this test.
+      await db.business.deleteMany({ where: { id: businessId } }).catch(() => {})
+      await db.$disconnect()
+    }
   }
 
   // ─── Summary ───────────────────────────────────────────────────────────────
