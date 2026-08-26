@@ -495,7 +495,8 @@ model AppSettings {
   telegramFileIdMode       Boolean   @default(false) // Store media as Telegram File IDs (zero cloud cost)
   // PRD Part 37 §3: Dual-profile switching
   appMode                  String    @default("merchant") // merchant | customer — current active mode
-  cardPreferences          String?   // JSON: {showOwner,showAddress,showPhone,showGstin}
+  cardPreferences          String?   // JSON: {showOwner,showAddress,showPhone,showGstin,greetingText,coverBlur,coverOverlay}
+  dashboardCards            String?   // JSON: [{id,visible,order}] — user's dashboard card configuration
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 

@@ -10,6 +10,7 @@ import {
   ArrowUpRight, ArrowDownRight, ArrowLeftRight, Users, Receipt, ChevronRight,
   BarChart3, LineChart, X, Loader2, Calendar,
   MapPin, Phone, Building2, ShieldCheck, Store, Settings, Camera, Eye, EyeOff,
+  FileText, Boxes, LayoutGrid,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -26,6 +27,13 @@ import { useScrollStore } from '@/store/scroll-store'
 import { useRealtimeOrders } from '@/hooks/use-realtime-orders'
 import { toNumber } from '@/lib/numeric'
 import { useMemo, useState, useEffect, useRef } from 'react'
+import {
+  DashboardCardManagementSheet,
+  DEFAULT_CARD_CONFIG,
+  parseCardConfig,
+  type CardConfig,
+  type DashboardCardDef,
+} from '@/components/shared/dashboard-card-management'
 
 type ChartType = 'revenue' | 'profit' | 'cashflow' | 'collections' | 'categories' | 'inventory'
 type ChartView = 'line' | 'bar'
@@ -98,6 +106,9 @@ export function DashboardView() {
   const [hubExpanded, setHubExpanded] = useState(false)
   // §QUICK-CUSTOMIZE: Bottom sheet for Business Overview card customization
   const [showCustomize, setShowCustomize] = useState(false)
+  // §DASHBOARD-CARDS: User's dashboard card visibility/order configuration
+  const [dashCardConfig, setDashCardConfig] = useState<CardConfig>(DEFAULT_CARD_CONFIG)
+  const [showDashCardMgr, setShowDashCardMgr] = useState(false)
   // §CARD-PREFS: Business-level preferences persisted via AppSettings.cardPreferences
   // Falls back to defaults when null, missing keys, or malformed JSON.
   const DEFAULT_PREFS = {
@@ -356,11 +367,14 @@ export function DashboardView() {
   const { data, loading: apiLoading, error: apiError, refetch } = useFetch<ExtendedDashboardStats>(apiUrl, [apiUrl], { timeoutMs: 30000 })
   // §HERO-PROFILE: fetch userRole for the role tag (Owner/Admin/Sales)
   const { data: appSettings } = useFetch<any>('/api/app-settings', [])
-  // §CARD-PREFS-LOAD: Parse cardPreferences from appSettings
+  // §CARD-PREFS-LOAD: Parse cardPreferences + dashboardCards from appSettings
   useEffect(() => {
     if (!appSettings) return
     const parsed = parseCardPrefs((appSettings as any).cardPreferences)
     setCardPrefs(parsed)
+    // §DASHBOARD-CARDS-LOAD: Parse dashboard card config from AppSettings
+    const dashCards = parseCardConfig((appSettings as any).dashboardCards)
+    setDashCardConfig(dashCards)
   }, [appSettings])
   // §GRADE-BOTTOM-SHEET: fetch all parties so the grade distribution bottom
   // sheet can show ALL customers in a grade (not just topDebtors which is
@@ -425,16 +439,75 @@ export function DashboardView() {
   if (!data && !apiLoading) return <EmptyState icon={Heart} title="No data yet" />
   if (!data) return <LoadingState />
 
-  // §LOCALIZED-CARD-FILTERS: Lifetime metric cards (no time filter — these are
-  // running balances/counts, not time-dependent). Time-dependent cards (Sales,
-  // Collection, Expense) are rendered separately as TimeMetricCard components
-  // with their own dropdown range selector.
-  const lifetimeMetrics = [
-    { label: t('dash.receivable'), value: formatCurrency(data.totalReceivable, currency), icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', onClick: () => { saveScrollPos('dashboard'); setKhataFilter('receivable'); setActiveView('khata') } },
-    { label: t('dash.payable'), value: formatCurrency(data.totalPayable, currency), icon: TrendingDown, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', onClick: () => { saveScrollPos('dashboard'); setKhataFilter('payable'); setActiveView('khata') } },
-    { label: t('dash.health'), value: `${data.healthScore}/100`, icon: Heart, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', onClick: () => { saveScrollPos('dashboard'); setActiveView('reports') } },
-    { label: t('dash.lowStock'), value: String(data.lowStockCount), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', onClick: () => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') } },
+  // §UNIFIED-CARD-DEFS: All available dashboard cards with stable IDs.
+  // Includes both lifetime metrics and time-dependent metrics.
+  const allCardDefs: Array<DashboardCardDef & { recommended?: boolean; isTimeMetric?: boolean }> = [
+    { id: 'totalReceivable', label: t('dash.receivable'), icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Money owed to you by customers', recommended: true,
+      valueExtractor: (d) => d?.totalReceivable ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: () => { saveScrollPos('dashboard'); setKhataFilter('receivable'); setActiveView('khata') } },
+    { id: 'totalPayable', label: t('dash.payable'), icon: TrendingDown, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', description: 'Money you owe to suppliers', recommended: true,
+      valueExtractor: (d) => d?.totalPayable ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: () => { saveScrollPos('dashboard'); setKhataFilter('payable'); setActiveView('khata') } },
+    { id: 'businessHealth', label: t('dash.health'), icon: Heart, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', description: 'Overall business health score', recommended: true,
+      valueExtractor: (d) => d?.healthScore ?? 0, formatValue: (v) => `${v}/100`,
+      onClick: () => { saveScrollPos('dashboard'); setActiveView('reports') } },
+    { id: 'lowStock', label: t('dash.lowStock'), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', description: 'Products below stock threshold', recommended: true,
+      valueExtractor: (d) => d?.lowStockCount ?? 0, formatValue: (v) => String(v),
+      onClick: () => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') } },
+    { id: 'totalSales', label: 'Total Sales', icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', description: 'Sales for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
+      valueExtractor: (d) => d?.rangeSales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: (r) => { saveScrollPos('dashboard'); setHistoryDateRange(mapToHistoryRange(r as any)); setActiveView('history') } },
+    { id: 'totalCollection', label: 'Total Collection', icon: ArrowDownRight, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', description: 'Collections for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
+      valueExtractor: (d) => d?.rangeCollection ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: (r) => { saveScrollPos('dashboard'); setHistoryDateRange(mapToHistoryRange(r as any)); setActiveView('history') } },
+    { id: 'totalExpense', label: 'Total Expense', icon: ArrowUpRight, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', description: 'Expenses for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
+      valueExtractor: (d) => d?.rangeExpense ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: (r) => { saveScrollPos('dashboard'); setReportsDateRange(mapToReportsRange(r as any)); setActiveView('reports') } },
+    { id: 'totalRevenue', label: 'Total Revenue', icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', description: 'Revenue for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
+      valueExtractor: (d) => d?.rangeSales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: (r) => { saveScrollPos('dashboard'); setReportsDateRange(mapToReportsRange(r as any)); setActiveView('reports') } },
+    // §ADDITIONAL-CARDS: Available but hidden by default
+    { id: 'totalCustomers', label: 'Total Customers', icon: Users, tint: 'bg-blue-500', bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-700 dark:text-blue-300', description: 'Total number of customers',
+      valueExtractor: (d) => d?.partyCount ?? 0, formatValue: (v) => String(v),
+      onClick: () => { saveScrollPos('dashboard'); setKhataFilter('all'); setActiveView('khata') } },
+    { id: 'totalProducts', label: 'Total Products', icon: Package, tint: 'bg-indigo-500', bg: 'bg-indigo-50 dark:bg-indigo-950/30', text: 'text-indigo-700 dark:text-indigo-300', description: 'Total number of products',
+      valueExtractor: (d) => d?.productCount ?? 0, formatValue: (v) => String(v),
+      onClick: () => { saveScrollPos('dashboard'); setActiveView('inventory') } },
+    { id: 'totalInvoices', label: 'Total Invoices', icon: FileText, tint: 'bg-cyan-500', bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-700 dark:text-cyan-300', description: 'Total invoices issued',
+      valueExtractor: (d) => d?.invoiceCount ?? 0, formatValue: (v) => String(v),
+      onClick: () => { saveScrollPos('dashboard'); setActiveView('billing') } },
+    { id: 'stockValue', label: 'Stock Value', icon: Boxes, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', description: 'Total value of current inventory',
+      valueExtractor: (d) => d?.inventoryValue ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: () => { saveScrollPos('dashboard'); setActiveView('inventory') } },
+    { id: 'todaySales', label: "Today's Sales", icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', description: 'Sales for today only',
+      valueExtractor: (d) => d?.todaySales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: () => { saveScrollPos('dashboard'); setHistoryDateRange('today'); setActiveView('history') } },
+    { id: 'monthlyRevenue', label: 'Monthly Revenue', icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Revenue this month',
+      valueExtractor: (d) => d?.monthlyRevenue ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: () => { saveScrollPos('dashboard'); setReportsDateRange('month'); setActiveView('reports') } },
   ]
+
+  // §VISIBLE-CARDS: Filter to visible + sort by configured order
+  const visibleCards = dashCardConfig
+    .filter(c => c.visible)
+    .sort((a, b) => a.order - b.order)
+    .map(config => ({ config, def: allCardDefs.find(d => d.id === config.id) }))
+    .filter(c => c.def) as Array<{ config: { id: string; visible: boolean; order: number }; def: typeof allCardDefs[0] }>
+
+  // §SAVE-DASHBOARD-CARDS: Persist card config via atomic API
+  const saveDashboardCards = async (newConfig: CardConfig) => {
+    const res = await fetch('/api/card-customization', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dashboardCards: JSON.stringify(newConfig) }),
+    })
+    const data = await res.json()
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Save failed')
+    setDashCardConfig(newConfig)
+  }
+
+  // §MANAGE-CARDS-DEFS: Card metadata for the management sheet
+  const manageCardDefs = allCardDefs.map(d => ({ id: d.id, label: d.label, icon: d.icon, description: d.description, recommended: d.recommended }))
 
   return (
     <div className="space-y-4">
@@ -822,89 +895,59 @@ export function DashboardView() {
           range selector in the top-right corner. Each fetches its own
           /api/dashboard?range=X slice. */}
 
-      {/* Lifetime metric cards (no time filter) */}
+      {/* §UNIFIED-DASHBOARD-CARDS: All visible cards in one grid.
+          Cards are rendered dynamically based on user's dashboardCards config.
+          Time-dependent cards still use TimeMetricCard for their range selector. */}
       <div className="grid grid-cols-2 gap-3">
-        {lifetimeMetrics.map((m, i) => {
-          const Icon = m.icon
+        {visibleCards.map(({ config, def }, i) => {
+          if (def.isTimeMetric) {
+            return (
+              <TimeMetricCard
+                key={config.id}
+                label={def.label}
+                icon={def.icon}
+                tint={def.tint}
+                bg={def.bg}
+                text={def.text}
+                defaultRange={(def.defaultRange as any) || '1d'}
+                currency={currency}
+                valueExtractor={def.valueExtractor}
+                onClick={def.onClick}
+              />
+            )
+          }
+          const Icon = def.icon
+          const value = def.valueExtractor(data)
+          const formatted = def.formatValue(value, currency)
           return (
-            <motion.button key={m.label} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={m.onClick} className="text-left">
-              <Card className={`p-4 ${m.bg} border-none hover:shadow-md transition-shadow h-full`}>
-                <div className="flex items-start justify-between mb-2"><span className={`w-8 h-8 rounded-lg ${m.tint} text-white flex items-center justify-center`}><Icon className="w-4 h-4" /></span></div>
-                <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{m.label}</p>
-                <p className={`text-base font-bold tabular ${m.text}`}>{m.value}</p>
+            <motion.button key={config.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={() => def.onClick('')} aria-label={def.label} className="text-left focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-2xl">
+              <Card className={`p-4 ${def.bg} border-none hover:shadow-md transition-shadow h-full active:scale-[0.98]`}>
+                <div className="flex items-start justify-between mb-2"><span className={`w-8 h-8 rounded-lg ${def.tint} text-white flex items-center justify-center`}><Icon className="w-4 h-4" /></span></div>
+                <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{def.label}</p>
+                <p className={`text-base font-bold tabular ${def.text}`}>{formatted}</p>
               </Card>
             </motion.button>
           )
         })}
       </div>
 
-      {/* Time-dependent metric cards (with localized dropdown filter) */}
-      <div className="grid grid-cols-2 gap-3">
-        <TimeMetricCard
-          label="Total Sales"
-          icon={Wallet}
-          tint="bg-amber-500"
-          bg="bg-amber-50 dark:bg-amber-950/30"
-          text="text-amber-700 dark:text-amber-300"
-          defaultRange="1d"
-          currency={currency}
-          valueExtractor={(d) => d?.rangeSales ?? 0}
-          onClick={(r) => {
-            // §ROUTING: Total Sales → History & Reports (sales volume)
-            saveScrollPos('dashboard')
-            setHistoryDateRange(mapToHistoryRange(r))
-            setActiveView('history')
-          }}
-        />
-        <TimeMetricCard
-          label="Total Collection"
-          icon={ArrowDownRight}
-          tint="bg-teal-500"
-          bg="bg-teal-50 dark:bg-teal-950/30"
-          text="text-teal-700 dark:text-teal-300"
-          defaultRange="1d"
-          currency={currency}
-          valueExtractor={(d) => d?.rangeCollection ?? 0}
-          onClick={(r) => {
-            // §ROUTING: Total Collection → History & Reports (collections feed)
-            saveScrollPos('dashboard')
-            setHistoryDateRange(mapToHistoryRange(r))
-            setActiveView('history')
-          }}
-        />
-        <TimeMetricCard
-          label="Total Expense"
-          icon={ArrowUpRight}
-          tint="bg-red-500"
-          bg="bg-red-50 dark:bg-red-950/30"
-          text="text-red-700 dark:text-red-300"
-          defaultRange="1d"
-          currency={currency}
-          valueExtractor={(d) => d?.rangeExpense ?? 0}
-          onClick={(r) => {
-            // §ROUTING: Total Expense → Profit & Loss (expense breakdown)
-            saveScrollPos('dashboard')
-            setReportsDateRange(mapToReportsRange(r))
-            setActiveView('reports')
-          }}
-        />
-        <TimeMetricCard
-          label="Total Revenue"
-          icon={Receipt}
-          tint="bg-purple-500"
-          bg="bg-purple-50 dark:bg-purple-950/30"
-          text="text-purple-700 dark:text-purple-300"
-          defaultRange="1d"
-          currency={currency}
-          valueExtractor={(d) => d?.rangeSales ?? 0}
-          onClick={(r) => {
-            // §ROUTING: Total Revenue → Profit & Loss (revenue analysis)
-            saveScrollPos('dashboard')
-            setReportsDateRange(mapToReportsRange(r))
-            setActiveView('reports')
-          }}
-        />
-      </div>
+      {/* §MANAGE-DASHBOARD-CARDS: Button to open card management sheet */}
+      <button
+        onClick={() => setShowDashCardMgr(true)}
+        className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-xs font-medium text-muted-foreground min-h-[44px]"
+      >
+        <LayoutGrid className="w-3.5 h-3.5" />
+        Manage Dashboard Cards
+      </button>
+
+      {/* §DASHBOARD-CARD-MANAGEMENT-SHEET */}
+      <DashboardCardManagementSheet
+        open={showDashCardMgr}
+        onClose={() => setShowDashCardMgr(false)}
+        cardDefs={manageCardDefs}
+        savedConfig={dashCardConfig}
+        onSave={saveDashboardCards}
+      />
 
       {/* Chart — PRD Part 4: Chart toggle + dynamic time-frame + advanced charts */}
       <Card className="p-4">

@@ -122,16 +122,20 @@ export async function POST(req: NextRequest) {
 
       // 2. Update AppSettings.cardPreferences if provided
       let updatedSettings: any = null
-      if (body.cardPreferences !== undefined) {
-        const validated = validateCardPreferences(body.cardPreferences)
+      if (body.cardPreferences !== undefined || body.dashboardCards !== undefined) {
+        const updateData: Record<string, unknown> = {}
+        if (body.cardPreferences !== undefined) {
+          updateData.cardPreferences = validateCardPreferences(body.cardPreferences)
+        }
+        if (body.dashboardCards !== undefined) {
+          updateData.dashboardCards = validateDashboardCards(body.dashboardCards)
+        }
         updatedSettings = await tx.appSettings.upsert({
           where: { businessId: business.id },
-          update: {
-            cardPreferences: validated,
-          },
+          update: updateData,
           create: {
             businessId: business.id,
-            cardPreferences: validated,
+            ...updateData,
           },
         })
       }
@@ -148,4 +152,42 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     return apiError(e, 'Card customization save failed')
   }
+}
+
+// §VALIDATE-DASHBOARD-CARDS: Defensive parse + allow-list for dashboard card config.
+// Accepts JSON string or array. Only known card IDs with boolean visible + number order.
+// Returns a JSON string safe for Prisma storage, or null if empty/invalid.
+function validateDashboardCards(input: unknown): string | null {
+  let cards: unknown[]
+  if (typeof input === 'string') {
+    try {
+      cards = JSON.parse(input)
+    } catch {
+      return null
+    }
+  } else if (Array.isArray(input)) {
+    cards = input
+  } else {
+    return null
+  }
+
+  // §KNOWN-CARD-IDs: Allow-list of valid dashboard card IDs
+  const KNOWN_IDS = new Set([
+    'totalReceivable', 'totalPayable', 'businessHealth', 'lowStock',
+    'totalSales', 'totalCollection', 'totalExpense', 'totalRevenue',
+    'totalCustomers', 'totalProducts', 'totalInvoices', 'stockValue',
+    'todaySales', 'monthlyRevenue',
+  ])
+
+  const clean: Array<{ id: string; visible: boolean; order: number }> = []
+  for (const item of cards) {
+    if (typeof item !== 'object' || item === null) continue
+    const obj = item as Record<string, unknown>
+    if (typeof obj.id !== 'string' || !KNOWN_IDS.has(obj.id)) continue
+    if (typeof obj.visible !== 'boolean') continue
+    if (typeof obj.order !== 'number' || !Number.isFinite(obj.order)) continue
+    clean.push({ id: obj.id, visible: obj.visible, order: Math.max(0, Math.min(100, Math.round(obj.order))) })
+  }
+
+  return clean.length > 0 ? JSON.stringify(clean) : null
 }
