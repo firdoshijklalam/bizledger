@@ -449,12 +449,24 @@ export function DashboardView() {
         aria-label="Manage business profile"
         className="relative w-full text-left rounded-2xl overflow-hidden shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform"
       >
-        {/* §COVER-PHOTO: Cover background with user-controlled blur + overlay */}
-        {business?.coverUrl ? (
-          <img src={business.coverUrl} alt="" className="absolute inset-0 w-full h-full object-cover"
-            style={{ filter: `blur(${cardPrefs.coverBlur}px)` }}
+        {/* §COVER-PHOTO: Cover background with user-controlled blur + overlay.
+            §FIX: CSS gradients (linear-gradient(...)) must be rendered as
+            div background, NOT as <img src> — browsers treat gradient strings
+            as relative URLs in <img src>, producing 404s.
+            Data URLs (data:image/...) work fine in <img src>. */}
+        {(() => {
+          const cover = business?.coverUrl
+          if (!cover) return null
+          if (cover.startsWith('data:image/')) {
+            return <img src={cover} alt="" className="absolute inset-0 w-full h-full object-cover"
+              style={{ filter: `blur(${cardPrefs.coverBlur}px)` }}
+              aria-hidden="true" />
+          }
+          // CSS gradient or other non-data URL → render as background
+          return <div className="absolute inset-0 w-full h-full"
+            style={{ background: cover, filter: `blur(${cardPrefs.coverBlur}px)`, backgroundSize: 'cover' }}
             aria-hidden="true" />
-        ) : null}
+        })()}
         <div className="absolute inset-0 bg-gradient-to-br from-primary to-emerald-700 dark:from-primary dark:to-emerald-900"
           style={{ opacity: cardPrefs.coverOverlay + 0.55 }} />
         <div className="relative p-4 text-primary-foreground">
@@ -545,16 +557,22 @@ export function DashboardView() {
 
               {/* §SCROLLABLE-CONTENT: preview + controls */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {/* §LIVE-PREVIEW: Card preview using draft state */}
+                {/* §LIVE-PREVIEW: Card preview using draft state.
+                    §FIX: Same conditional rendering as the main card —
+                    CSS gradients need div background, not <img src>. */}
                 <div className="relative w-full rounded-2xl overflow-hidden shadow-md">
-                  {(draftCover !== undefined ? draftCover : business?.coverUrl) ? (
-                    <img
-                      src={(draftCover !== undefined ? draftCover : business?.coverUrl) as string}
-                      alt="" className="absolute inset-0 w-full h-full object-cover"
-                      style={{ filter: `blur(${draft.coverBlur}px)` }}
-                      aria-hidden="true"
-                    />
-                  ) : null}
+                  {(() => {
+                    const cover = draftCover !== undefined ? draftCover : business?.coverUrl
+                    if (!cover) return null
+                    if (cover.startsWith('data:image/')) {
+                      return <img src={cover} alt="" className="absolute inset-0 w-full h-full object-cover"
+                        style={{ filter: `blur(${draft.coverBlur}px)` }}
+                        aria-hidden="true" />
+                    }
+                    return <div className="absolute inset-0 w-full h-full"
+                      style={{ background: cover, filter: `blur(${draft.coverBlur}px)`, backgroundSize: 'cover' }}
+                      aria-hidden="true" />
+                  })()}
                   <div className="absolute inset-0 bg-gradient-to-br from-primary to-emerald-700 dark:from-primary dark:to-emerald-900"
                     style={{ opacity: draft.coverOverlay + 0.55 }} />
                   <div className="relative p-4 text-primary-foreground">
