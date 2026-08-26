@@ -86,15 +86,15 @@ export async function GET(req: NextRequest) {
         grade_a: bigint; grade_b: bigint; grade_c: bigint; grade_d: bigint; grade_e: bigint
       }>>`
         SELECT
-          COUNT(*)::bigint AS total_count,
-          COALESCE(SUM(CASE WHEN balance > 0 THEN balance ELSE 0 END), 0)::bigint AS receivable_sum,
-          COALESCE(SUM(CASE WHEN balance < 0 THEN balance ELSE 0 END), 0)::bigint AS payable_sum,
-          COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END)::bigint AS overdue_count,
-          COUNT(CASE WHEN "qualityGrade" = 'A' THEN 1 END)::bigint AS grade_a,
-          COUNT(CASE WHEN "qualityGrade" = 'B' THEN 1 END)::bigint AS grade_b,
-          COUNT(CASE WHEN "qualityGrade" = 'C' THEN 1 END)::bigint AS grade_c,
-          COUNT(CASE WHEN "qualityGrade" = 'D' THEN 1 END)::bigint AS grade_d,
-          COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END)::bigint AS grade_e
+          COUNT(*) AS total_count,
+          COALESCE(SUM(CASE WHEN balance > 0 THEN balance ELSE 0 END), 0) AS receivable_sum,
+          COALESCE(SUM(CASE WHEN balance < 0 THEN balance ELSE 0 END), 0) AS payable_sum,
+          COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END) AS overdue_count,
+          COUNT(CASE WHEN "qualityGrade" = 'A' THEN 1 END) AS grade_a,
+          COUNT(CASE WHEN "qualityGrade" = 'B' THEN 1 END) AS grade_b,
+          COUNT(CASE WHEN "qualityGrade" = 'C' THEN 1 END) AS grade_c,
+          COUNT(CASE WHEN "qualityGrade" = 'D' THEN 1 END) AS grade_d,
+          COUNT(CASE WHEN "qualityGrade" = 'E' THEN 1 END) AS grade_e
         FROM "Party" WHERE "businessId" = ${business.id}
       `,
       // §COMBINED-PRODUCT: 1 findMany replaces 3 queries (count, lowStock, inventory)
@@ -108,11 +108,11 @@ export async function GET(req: NextRequest) {
         total_count: bigint; paid_count: bigint
       }>>`
         SELECT
-          COALESCE(SUM(CASE WHEN "createdAt" >= ${today} THEN "grandTotal" ELSE 0 END), 0)::bigint AS today_sales,
-          COALESCE(SUM(CASE WHEN "createdAt" >= ${monthStart} THEN "grandTotal" ELSE 0 END), 0)::bigint AS monthly_sales,
-          COALESCE(SUM(CASE WHEN "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd} THEN "grandTotal" ELSE 0 END), 0)::bigint AS range_sales,
-          COUNT(*)::bigint AS total_count,
-          COUNT(CASE WHEN status = 'paid' THEN 1 END)::bigint AS paid_count
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${today} THEN "grandTotal" ELSE 0 END), 0) AS today_sales,
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${monthStart} THEN "grandTotal" ELSE 0 END), 0) AS monthly_sales,
+          COALESCE(SUM(CASE WHEN "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd} THEN "grandTotal" ELSE 0 END), 0) AS range_sales,
+          COUNT(*) AS total_count,
+          COUNT(CASE WHEN status = 'paid' THEN 1 END) AS paid_count
         FROM "Invoice"
         WHERE "businessId" = ${business.id} AND status != 'void'
       `,
@@ -121,8 +121,8 @@ export async function GET(req: NextRequest) {
         collection_sum: bigint; expense_sum: bigint
       }>>`
         SELECT
-          COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0)::bigint AS collection_sum,
-          COALESCE(SUM(CASE WHEN type IN ('debit', 'expense', 'purchase') THEN amount ELSE 0 END), 0)::bigint AS expense_sum
+          COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0) AS collection_sum,
+          COALESCE(SUM(CASE WHEN type IN ('debit', 'expense', 'purchase') THEN amount ELSE 0 END), 0) AS expense_sum
         FROM "Transaction"
         WHERE "businessId" = ${business.id} AND "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd}
       `,
