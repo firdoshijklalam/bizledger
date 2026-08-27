@@ -248,19 +248,17 @@ async function main() {
     assert(isAllZero2 === false, 'allZero=false when revenue > 0')
   }
 
-  // ─── FIX-7D-6: global-voice-input.tsx dependency audit ──────────────────
-  console.log('\n  FIX-7D-6 — global-voice-input.tsx dependency audit:')
+  // ─── FIX-7D-6: global-voice-input.tsx deleted (Phase 7G) ─────────────
+  console.log('\n  FIX-7D-6 — global-voice-input.tsx deleted (Phase 7G):')
   {
-    const dashSrc = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
     const topBarSrc = fs.readFileSync('src/components/layout/top-app-bar.tsx', 'utf8')
-    const voiceInputSrc = fs.readFileSync('src/components/layout/global-voice-input.tsx', 'utf8')
-    const useVoiceInputSrc = fs.readFileSync('src/hooks/use-voice-input.ts', 'utf8')
 
-    // §WHO-IMPORTS: No file imports global-voice-input
-    assert(topBarSrc.includes('// §1: GlobalVoiceInput removed'),
-      'top-app-bar.tsx has a COMMENT saying GlobalVoiceInput was removed (not imported)')
+    // §DELETED: File no longer exists
+    const fileExists = fs.existsSync('src/components/layout/global-voice-input.tsx')
+    assert(!fileExists,
+      'global-voice-input.tsx has been DELETED (Phase 7G — confirmed dead code removed)')
 
-    // §NOT-IN-APP-ROUTES: Check if any app route imports it
+    // §NO-IMPORTS: No file references it
     const appDirFiles = fs.readdirSync('src/app', { recursive: true }).filter((f: any) => (typeof f === 'string') && (f.endsWith('.tsx') || f.endsWith('.ts')))
     let importedInRoute = false
     for (const f of appDirFiles) {
@@ -271,24 +269,11 @@ async function main() {
       }
     }
     assert(!importedInRoute,
-      'global-voice-input.tsx is NOT imported by any file in src/app/ (dead code)')
+      'No file in src/app/ imports or references global-voice-input (deleted)')
 
-    // §INTERFACE-MISMATCH: useVoiceInput returns { onFocus, onBlur }, not { listening, ... }
-    assert(useVoiceInputSrc.includes('return {') && useVoiceInputSrc.includes('onFocus:') && useVoiceInputSrc.includes('onBlur:'),
-      'useVoiceInput returns { onFocus, onBlur } — not the properties global-voice-input expects')
-    assert(voiceInputSrc.includes('listening, transcript, parsed, start, stop, reset, isSupported'),
-      'global-voice-input.tsx destructures 7 properties that do NOT exist on useVoiceInput return type')
-    assert(voiceInputSrc.includes('useVoiceInput()'),
-      'global-voice-input.tsx calls useVoiceInput() WITHOUT required onVoiceText argument')
-
-    // §NO-TS-NOCHECK: Verify @ts-nocheck is NOT present
-    assert(!voiceInputSrc.includes('@ts-nocheck'),
-      'global-voice-input.tsx does NOT have @ts-nocheck (no workaround applied)')
-
-    // §NO-TSCONFIG-EXCLUDE: Verify tsconfig does NOT exclude it
-    const tsconfigSrc = fs.readFileSync('tsconfig.json', 'utf8')
-    assert(!tsconfigSrc.includes('global-voice-input'),
-      'tsconfig.json does NOT exclude global-voice-input.tsx (no workaround applied)')
+    // §COMMENT-PRESERVED: top-app-bar still has the removal comment
+    assert(topBarSrc.includes('// §1: GlobalVoiceInput removed'),
+      'top-app-bar.tsx still has the comment documenting GlobalVoiceInput removal')
   }
 
   // ─── Search freeze ──────────────────────────────────────────────────────
