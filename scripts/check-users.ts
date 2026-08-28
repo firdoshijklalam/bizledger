@@ -1,4 +1,4 @@
-import { db } from '/home/z/my-project/src/lib/db'
+import { db } from '../src/lib/db'
 async function main() {
   const users = await db.user.findMany({ select: { email: true, role: true, businessId: true } })
   console.log('Users:', JSON.stringify(users, null, 2))
