@@ -427,11 +427,17 @@ export function DashboardView() {
 
   const chartOptions: Array<{ id: ChartType; label: string }> = [
     { id: 'revenue', label: t('dash.chart.revenue') },
-    { id: 'profit', label: t('dash.chart.profit') },
+    // §FIX-3: Renamed from 'Profit vs Loss' to 'Net Cash Flow' because
+    // dashboard profit = revenue - expense (cash-flow proxy), not true
+    // accounting profit. Reports P&L has the true netProfit calculation.
+    { id: 'profit', label: 'Net Cash Flow' },
     { id: 'cashflow', label: t('dash.chart.cashflow') },
     { id: 'collections', label: 'Collections vs Credit' },
     { id: 'categories', label: 'Top Categories' },
-    { id: 'inventory', label: 'Inventory Value' },
+    // §FIX-4: Renamed from 'Inventory Value' to 'Sales' because the chart
+    // uses dataKey='revenue' (= SUM of all invoice grandTotal), not
+    // inventory-specific data.
+    { id: 'inventory', label: 'Sales' },
   ]
 
   const currency = business?.currency || 'INR'
@@ -1149,8 +1155,9 @@ export function DashboardView() {
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Line type="monotone" dataKey="profitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Profit" />
-                <Line type="monotone" dataKey="lossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Loss" />
+                {/* §FIX-3: Series names updated to match 'Net Cash Flow' semantics */}
+                <Line type="monotone" dataKey="profitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Net" />
+                <Line type="monotone" dataKey="lossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Outflow" />
               </RechartsLineChart>
             ) : chartType === 'profit' && chartView === 'bar' ? (
               // §TOGGLE-FIX: Profit vs Loss — BAR variant (BarChart)
@@ -1159,8 +1166,9 @@ export function DashboardView() {
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Bar dataKey="profitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Profit" />
-                <Bar dataKey="lossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Loss" />
+                {/* §FIX-3: Series names updated to match 'Net Cash Flow' semantics */}
+                <Bar dataKey="profitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Net" />
+                <Bar dataKey="lossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Outflow" />
               </BarChart>
             ) : chartType === 'cashflow' && chartView === 'line' ? (
               // §TOGGLE-FIX: Cashflow — LINE variant (pure lines, no bars)
@@ -1219,7 +1227,8 @@ export function DashboardView() {
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Area type="monotone" dataKey="revenue" stroke="#8b5cf6" strokeWidth={2} fill="url(#inv)" name="Inventory Sales" />
+                {/* §FIX-4: Label changed from 'Inventory Sales' to 'Sales' — data is SUM(grandTotal) for all invoices, not inventory-specific */}
+                <Area type="monotone" dataKey="revenue" stroke="#8b5cf6" strokeWidth={2} fill="url(#inv)" name="Sales" />
               </AreaChart>
             ) : (
               // §TOGGLE-FIX: Inventory — BAR variant
@@ -1228,7 +1237,8 @@ export function DashboardView() {
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Bar dataKey="revenue" fill="#8b5cf6" radius={[3, 3, 0, 0]} name="Inventory Sales" />
+                {/* §FIX-4: Label changed from 'Inventory Sales' to 'Sales' */}
+                <Bar dataKey="revenue" fill="#8b5cf6" radius={[3, 3, 0, 0]} name="Sales" />
               </BarChart>
             )}
           </ResponsiveContainer>
@@ -1240,7 +1250,8 @@ export function DashboardView() {
         {['revenue', 'cashflow', 'collections', 'profit'].includes(chartType) && (
           <div className="flex items-center gap-3 mt-2 text-[10px]">
             {chartType === 'revenue' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Revenue</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Expense</span></>)}
-            {chartType === 'profit' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Profit</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Loss</span></>)}
+            {/* §FIX-3: Legend labels updated to match 'Net Cash Flow' chart name */}
+            {chartType === 'profit' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Net</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Outflow</span></>)}
             {chartType === 'cashflow' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />In</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Out</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500" />Net</span></>)}
             {chartType === 'collections' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Collected</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" />New Credit</span></>)}
           </div>
@@ -1596,24 +1607,62 @@ export function DashboardView() {
 
 // PRD Part 38 §4: TradingView-style custom tooltip with full date display
 // §FIX-4: Mobile-safe tooltip — uses Recharts' allowEscapeViewBox={{ x: false }}
-// to clamp the tooltip within the chart's SVG bounds. This prevents the 220px
-// tooltip from overflowing the screen on 375px mobile viewports when the user
-// touches the rightmost or leftmost data point. The tooltip's maxWidth is
-// also reduced on mobile (160px) vs desktop (220px) via a CSS media query
-// pattern — but the primary fix is the allowEscapeViewBox clamping.
+// to clamp the tooltip within the chart's SVG bounds.
+// §FIX-1 (Phase 13): Added timeZone: 'Asia/Kolkata' to date formatting.
+// §FIX-2 (Phase 13): Added bucket-aware time display for hourly buckets.
+// §FIX-5 (Phase 13): Added weekly bucket date range display.
 function CustomTooltip({ active, payload, label, currency }: any) {
   if (!active || !payload || payload.length === 0) return null
   // Use fullDate from payload if available, otherwise try label
   const fullDate = payload[0]?.payload?.fullDate
-  const formatFullDate = (d: string) => {
+
+  // §FIX-1: All date formatting explicitly uses timeZone: 'Asia/Kolkata'
+  // to ensure correct IST date display regardless of the viewer's browser
+  // timezone. Without this, a non-IST user would see dates shifted by
+  // their local timezone offset.
+  const IST_TZ = 'Asia/Kolkata'
+
+  // §FIX-2: Detect if this is an hourly bucket by checking if the X-axis
+  // label looks like a time (e.g., "12:00 am", "1:30 pm").
+  // For hourly buckets, show the date + the bucket's time range.
+  const isHourly = /^\d{1,2}:\d{2}\s*[ap]m$/i.test(label || '')
+
+  // §FIX-5: Detect if this is a weekly bucket by checking if label is "W1", "W2", etc.
+  const isWeekly = /^W\d+$/i.test(label || '')
+
+  const formatTooltipHeader = (d: string): string => {
     try {
       const date = new Date(d)
       if (isNaN(date.getTime())) return label || ''
-      return date.toLocaleDateString('en-US', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+
+      if (isHourly) {
+        // §FIX-2: Hourly bucket — show date + time range
+        // The bucket start is `date`, end is `date + 1 hour`
+        const endDate = new Date(date.getTime() + 60 * 60 * 1000)
+        const dateStr = date.toLocaleDateString('en-US', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: IST_TZ })
+        const startTime = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: IST_TZ })
+        const endTime = endDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: IST_TZ })
+        return `${dateStr}\n${startTime} – ${endTime}`
+      }
+
+      if (isWeekly) {
+        // §FIX-5: Weekly bucket — show start – end date range
+        // The bucket start is `date`, end is `date + 7 days`
+        const endDate = new Date(date.getTime() + 7 * 24 * 60 * 60 * 1000)
+        const startStr = date.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric', timeZone: IST_TZ })
+        const endStr = endDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric', timeZone: IST_TZ })
+        return `${startStr} – ${endStr}`
+      }
+
+      // Default: daily/monthly bucket — date only
+      return date.toLocaleDateString('en-US', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: IST_TZ })
     } catch {
       return label || ''
     }
   }
+
+  const headerText = fullDate ? formatTooltipHeader(fullDate) : label
+
   return (
     <div style={{
       background: 'rgba(20,20,20,0.95)',
@@ -1622,14 +1671,11 @@ function CustomTooltip({ active, payload, label, currency }: any) {
       padding: '10px 14px',
       fontSize: 12,
       boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-      // §FIX-4: maxWidth reduced from 220 to 180 for better mobile fit.
-      // Combined with allowEscapeViewBox={{ x: false }} on the <Tooltip>,
-      // this ensures the tooltip stays within the chart bounds on 375px screens.
       maxWidth: 180,
       color: '#f3f4f6',
     }}>
-      <p style={{ fontWeight: 700, marginBottom: 6, fontSize: 10, color: '#9ca3af', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 4 }}>
-        {fullDate ? formatFullDate(fullDate) : label}
+      <p style={{ fontWeight: 700, marginBottom: 6, fontSize: 10, color: '#9ca3af', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 4, whiteSpace: 'pre-line' }}>
+        {headerText}
       </p>
       {payload.map((entry: any, i: number) => (
         <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 3 }}>
