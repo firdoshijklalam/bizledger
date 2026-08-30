@@ -27,6 +27,7 @@ export function TransactionForm({ open, onOpenChange, party }: Props) {
   const [type, setType] = useState<TransactionType>('credit')
   const [amount, setAmount] = useState('')
   const [description, setDescription] = useState('')
+  const [isOperatingExpense, setIsOperatingExpense] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const handleSave = async () => {
@@ -44,9 +45,12 @@ export function TransactionForm({ open, onOpenChange, party }: Props) {
         amount: amt,
         description: description.trim() || (type === 'credit' ? 'Payment received' : 'Payment given'),
         category: type === 'credit' ? 'Payment In' : 'Payment Out',
+        // §P16-STEP3.1-FIX-A: Only send isOperatingExpense for debit transactions.
+        // Credits/sales can never be operating expenses.
+        ...(type === 'debit' ? { isOperatingExpense } : {}),
       })
       toast.success(type === 'credit' ? 'Payment recorded' : 'Payment recorded')
-      setAmount(''); setDescription('')
+      setAmount(''); setDescription(''); setIsOperatingExpense(false)
       triggerRefresh()
       onOpenChange(false)
     } catch (e) {
@@ -112,6 +116,24 @@ export function TransactionForm({ open, onOpenChange, party }: Props) {
               placeholder={type === 'credit' ? 'Payment received for…' : 'Paid for…'}
             />
           </div>
+
+          {/* §P16-STEP3.1-FIX-A: Operating expense checkbox — only visible for debit.
+              When checked, the server classifies this as transactionSubtype='operating_expense'
+              (rent, salary, electricity, marketing, etc.) — NOT as supplier payment or owner drawing.
+              This is an explicit user intent, NOT free-text category inference. */}
+          {type === 'debit' && (
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={isOperatingExpense}
+                onChange={(e) => setIsOperatingExpense(e.target.checked)}
+                className="w-4 h-4 rounded border-border"
+              />
+              <span className="text-xs text-muted-foreground">
+                Operating expense (rent, salary, utilities)
+              </span>
+            </label>
+          )}
         </div>
 
         <DialogFooter className="gap-2">

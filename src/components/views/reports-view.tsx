@@ -38,6 +38,10 @@ interface ReportData {
     revenue: number; netRevenue: number; discount: number;
     cogs: number; grossProfit: number; indirectExpenses: number;
     expense: number; netProfit: number; gst: number;
+    // §P16-STEP3.1-FIX-D/E: Authoritative vs legacy breakdown + COGS accuracy
+    authoritativeIndirectExpenses?: number
+    legacyIndirectExpenses?: number
+    cogsAccuracy?: { snapshotItems: number; legacyFallbackItems: number; isApproximate: boolean }
   }
   gst: { totalGst: number; breakdown: Array<{ rate: number; taxable: number; gst: number }> }
   partyLedger: Array<{ id: string; name: string; type: string; grade: string; balance: number; phone?: string | null }>
@@ -504,10 +508,31 @@ export function ReportsView() {
                   <Row icon={TrendingUp} label="Net Revenue" value={formatCurrency(data.profitLoss.netRevenue, currency)} color="text-emerald-600" bold />
                 </div>
                 <Row icon={Package} label="Less: Purchase Cost (COGS)" value={`− ${formatCurrency(data.profitLoss.cogs, currency)}`} color="text-orange-600" />
+                {/* §P16-STEP3.1-FIX-E: COGS accuracy disclosure — show warning when
+                    legacy InvoiceItems (NULL purchasePriceSnapshot) use approximate
+                    fallback pricing. Only shown when legacyFallbackItems > 0. */}
+                {data.profitLoss.cogsAccuracy?.isApproximate && (
+                  <p className="text-[10px] text-amber-600 dark:text-amber-400 pl-6">
+                    ⚠ {data.profitLoss.cogsAccuracy.legacyFallbackItems} item(s) use approximate cost (no historical snapshot)
+                  </p>
+                )}
                 <div className="pt-2 border-t border-dashed border-border">
                   <Row icon={BarChart3} label="Gross Profit" value={formatCurrency(data.profitLoss.grossProfit, currency)} color={data.profitLoss.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} bold />
                 </div>
                 <Row icon={TrendingDown} label="Less: Indirect Expenses" value={`− ${formatCurrency(data.profitLoss.indirectExpenses, currency)}`} color="text-red-600" />
+                {/* §P16-STEP3.1-FIX-D: Disclose authoritative vs legacy OpEx breakdown.
+                    When legacyIndirectExpenses > 0, show the split so users know
+                    how much is authoritative vs unclassified legacy. */}
+                {(data.profitLoss.legacyIndirectExpenses || 0) > 0 && (
+                  <div className="pl-6 space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground">
+                      Authoritative: {formatCurrency(data.profitLoss.authoritativeIndirectExpenses || 0, currency)}
+                    </p>
+                    <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                      ⚠ Unclassified (legacy): {formatCurrency(data.profitLoss.legacyIndirectExpenses || 0, currency)}
+                    </p>
+                  </div>
+                )}
                 <div className="pt-3 border-t-2 border-border">
                   <Row icon={BarChart3} label="Net Profit" value={formatCurrency(data.profitLoss.netProfit, currency)} color={data.profitLoss.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} bold />
                 </div>

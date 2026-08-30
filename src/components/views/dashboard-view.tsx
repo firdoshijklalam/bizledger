@@ -1784,6 +1784,14 @@ function ProfitLossTooltip({ active, payload, label, currency }: any) {
       {renderRow("COGS", p.cogs || 0, "#f59e0b")}
       {renderRow("Gross Profit", p.grossProfit || 0, "#6366f1")}
       {renderRow("Operating Expense", p.operatingExpense || 0, "#f87171")}
+      {/* §P16-STEP3.1-FIX-D: Disclose legacy unclassified expenses separately.
+          When legacyOpEx > 0, show it as a separate line so users know the
+          authoritative Net Profit does NOT include these unclassified amounts. */}
+      {(p.legacyOpEx || 0) > 0 && (
+        <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px dashed rgba(255,255,255,0.1)' }}>
+          {renderRow("Unclassified (legacy)", p.legacyOpEx || 0, "#9ca3af")}
+        </div>
+      )}
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 4, paddingTop: 4 }}>
         {renderRow(isLoss ? "Net Loss" : "Net Profit", Math.abs(p.netProfit || 0), isLoss ? "#f87171" : "#10b981")}
       </div>

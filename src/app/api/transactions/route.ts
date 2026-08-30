@@ -99,7 +99,14 @@ export async function POST(req: NextRequest) {
     //   - T2 debit (no party) → NULL (Ambiguity 3: operating_expense vs manual_cash_out)
     // `body.source` is respected if provided (e.g., 'ocr' from OCR scanner).
     // `body.transactionSubtype` is NOT trusted from client (server-authoritative).
+    // §P16-STEP3.1-FIX-A: `body.isOperatingExpense` is a validated boolean that allows
+    // the client to explicitly mark a debit as a genuine operating expense (rent, salary,
+    // utility, marketing). The server ONLY honors this when type='debit' — credit/sale
+    // transactions can never be operating expenses. This overrides the Ambiguity 1/3
+    // NULL classification because the user has made an explicit accounting choice.
+    // This is NOT free-text category inference — it's a structured boolean intent.
     const sourceFromClient = typeof body.source === 'string' && body.source.length > 0 ? body.source : null
+    const isOperatingExpenseIntent = body.isOperatingExpense === true && body.type === 'debit'
 
     if (partyId) {
       // Verify ownership first (read-only check). Fetch type + balance for subtype classification.
@@ -143,6 +150,13 @@ export async function POST(req: NextRequest) {
         // only if this is a debit to a supplier (matching OCR scanner's behavior).
         if (sourceFromClient === 'ocr' && body.type === 'debit' && (partyType === 'supplier' || partyType === 'both')) {
           resolvedSubtype = 'ocr_purchase'
+        }
+        // §P16-STEP3.1-FIX-A: If user explicitly marks this as an operating expense,
+        // override the subtype to 'operating_expense'. This resolves Ambiguity 1/3
+        // (supplier debit no payable, no-party debit) with explicit user intent.
+        // Only honored for type='debit' (credits/sales can never be OpEx).
+        if (isOperatingExpenseIntent) {
+          resolvedSubtype = 'operating_expense'
         }
 
         // §P16-STEP1-D: Atomicity fix — BOTH the party balance update AND the
@@ -200,7 +214,13 @@ export async function POST(req: NextRequest) {
     if (body.type === 'credit') {
       fallbackSubtype = 'manual_cash_in'
     }
-    // body.type === 'debit' → fallbackSubtype stays NULL (ambiguous)
+    // §P16-STEP3.1-FIX-A: If user explicitly marks this as an operating expense,
+    // set subtype='operating_expense' (resolves Ambiguity 3: no-party debit).
+    // Only honored for type='debit' (credits/sales can never be OpEx).
+    if (isOperatingExpenseIntent) {
+      fallbackSubtype = 'operating_expense'
+    }
+    // body.type === 'debit' without isOperatingExpense → fallbackSubtype stays NULL (ambiguous)
     // body.type === 'sale' → fallbackSubtype stays NULL (not a real transaction type for this path)
     const txn = await db.transaction.create({
       data: {
