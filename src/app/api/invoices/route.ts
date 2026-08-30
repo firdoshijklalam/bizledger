@@ -367,51 +367,93 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      // 4. Create transaction record
+      // 4. Create transaction record(s)
       // §PURCHASE-LOGIC: Purchase → type='debit' (money out); Sale → type='sale'
       // §P16-STEP2: Set authoritative transactionSubtype based on invoice type + payment.
-      //   - Sale + status='paid' → sale_invoice (cash sale, revenue recognized, cash received)
-      //   - Sale + paymentMode='credit' → credit_sale (receivable ↑, cash NOT received yet)
-      //   - Purchase + status='paid' → purchase_inventory_cash (cash out, inventory ↑)
-      //   - Purchase + paymentMode='credit' → purchase_inventory_credit (payable ↑, no cash out)
+      // §P16-VERIFY-1 (Option B): Partial payments now create TWO linked transactions:
+      //   - Cash portion (amountPaid) → cash subtype (purchase_inventory_cash / sale_invoice)
+      //   - Credit portion (amountDue) → credit subtype (purchase_inventory_credit / credit_sale)
+      //   Sum of amounts = amountPaid + amountDue = grandTotal. No duplicate financial effect.
+      //   Fully-paid (amountDue=0) → ONE transaction with amount=grandTotal, cash subtype.
+      //   Fully-credit (amountPaid=0) → ONE transaction with amount=grandTotal, credit subtype.
+      //   Partial (both > 0) → TWO transactions: cash + credit.
+      //   Party balance update (line 363) uses amountDue only — unchanged.
       if (body.partyId) {
-        // §P16-STEP2: Determine subtype from invoice type + paymentMode/status.
-        // status was computed at line 179: 'paid' if amountDue<=0, 'partial' if amountPaid>0, else 'unpaid'
-        // paymentMode is body.paymentMode (cash/upi/credit/cheque) — null if not provided.
-        let invoiceSubtype: string
+        const isPartial = amountPaid > 0 && amountDue > 0
         if (isPurchase) {
           // Purchase invoice — inventory asset movement (NOT revenue, NOT OpEx)
-          if (status === 'paid') {
-            invoiceSubtype = 'purchase_inventory_cash'
-          } else if (body.paymentMode === 'credit') {
-            invoiceSubtype = 'purchase_inventory_credit'
+          if (isPartial) {
+            // §P16-VERIFY-1: Partial purchase — TWO transactions
+            await tx.transaction.create({
+              data: {
+                businessId: business.id, partyId: body.partyId, type: 'debit',
+                amount: amountPaid,
+                description: `Invoice ${invoiceNumber} (cash portion)`,
+                category: 'Purchase', invoiceId: inv.id,
+                transactionSubtype: 'purchase_inventory_cash', source: 'invoice',
+              },
+            })
+            await tx.transaction.create({
+              data: {
+                businessId: business.id, partyId: body.partyId, type: 'debit',
+                amount: amountDue,
+                description: `Invoice ${invoiceNumber} (credit portion)`,
+                category: 'Purchase', invoiceId: inv.id,
+                transactionSubtype: 'purchase_inventory_credit', source: 'invoice',
+              },
+            })
           } else {
-            // Partial or unpaid without explicit credit mode — default to credit
-            // (if not fully paid, supplier is owed → payable ↑ → credit semantic)
-            invoiceSubtype = 'purchase_inventory_credit'
+            // Fully-paid or fully-credit — ONE transaction
+            const purchaseSubtype = status === 'paid' ? 'purchase_inventory_cash' : 'purchase_inventory_credit'
+            await tx.transaction.create({
+              data: {
+                businessId: business.id, partyId: body.partyId, type: 'debit',
+                amount: grandTotal,
+                description: `Invoice ${invoiceNumber}`,
+                category: 'Purchase', invoiceId: inv.id,
+                transactionSubtype: purchaseSubtype, source: 'invoice',
+              },
+            })
           }
         } else {
           // Sale invoice — revenue recognized
-          if (body.paymentMode === 'credit') {
-            invoiceSubtype = 'credit_sale'
+          if (isPartial) {
+            // §P16-VERIFY-1: Partial sale — TWO transactions
+            await tx.transaction.create({
+              data: {
+                businessId: business.id, partyId: body.partyId, type: 'sale',
+                amount: amountPaid,
+                description: `Invoice ${invoiceNumber} (cash portion)`,
+                category: 'Sale', invoiceId: inv.id,
+                transactionSubtype: 'sale_invoice', source: 'invoice',
+              },
+            })
+            await tx.transaction.create({
+              data: {
+                businessId: business.id, partyId: body.partyId, type: 'sale',
+                amount: amountDue,
+                description: `Invoice ${invoiceNumber} (credit portion)`,
+                category: 'Sale', invoiceId: inv.id,
+                transactionSubtype: 'credit_sale', source: 'invoice',
+              },
+            })
           } else {
-            // Cash/UPI/cheque or fully paid → sale_invoice (cash sale)
-            invoiceSubtype = 'sale_invoice'
+            // Fully-paid or fully-credit — ONE transaction
+            // §P16-VERIFY-1: If amountPaid=0 (fully unpaid), it's a credit sale
+            // regardless of paymentMode — the customer owes the full amount.
+            // If amountDue=0 (fully paid), it's a cash sale.
+            const saleSubtype = amountPaid === 0 ? 'credit_sale' : 'sale_invoice'
+            await tx.transaction.create({
+              data: {
+                businessId: business.id, partyId: body.partyId, type: 'sale',
+                amount: grandTotal,
+                description: `Invoice ${invoiceNumber}`,
+                category: 'Sale', invoiceId: inv.id,
+                transactionSubtype: saleSubtype, source: 'invoice',
+              },
+            })
           }
         }
-        await tx.transaction.create({
-          data: {
-            businessId: business.id,
-            partyId: body.partyId,
-            type: isPurchase ? 'debit' : 'sale',
-            amount: grandTotal,
-            description: `Invoice ${invoiceNumber}`,
-            category: isPurchase ? 'Purchase' : 'Sale',
-            invoiceId: inv.id,
-            transactionSubtype: invoiceSubtype,
-            source: 'invoice',
-          },
-        })
       }
 
       return inv

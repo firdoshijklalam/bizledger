@@ -87,6 +87,8 @@ export async function GET(req: NextRequest) {
     cogsItems,
     gstGroups,
     expenseAgg,
+    authoritativeOpExAgg,  // §P16-VERIFY-3: only subtype='operating_expense'
+    legacyOpExAgg,          // §P16-VERIFY-3: NULL-subtype + type IN (expense/debit) + invoiceId IS NULL
     recentInvoices,
   ] = await Promise.all([
     // 1. Parties — for partyLedger, outstanding, gradeDist (not date-filtered)
@@ -179,14 +181,11 @@ export async function GET(req: NextRequest) {
     // contra entries. Without this filter, purchase cost was double-counted:
     // once in indirectExpenses (at purchase) and again in COGS (at sale).
     // §P16-STEP2: Hybrid subtype + invoiceId filter (mirrors Dashboard logic).
-    //   - subtype='operating_expense' → always counted (authoritative)
-    //   - subtype is non-NULL and != 'operating_expense' → excluded (known non-OpEx:
-    //     purchase_inventory_*, supplier_payment, void_reversal, customer_refund,
-    //     ocr_purchase, manual_cash_out, customer_collection, customer_advance, etc.)
-    //   - subtype IS NULL (legacy) → fall back to Step 1 heuristic (invoiceId IS NULL)
-    //   Per user instruction: supplier_payment is NOT automatically OpEx (it's a
-    //   payable settlement). Only operating_expense subtype counts as strict OpEx.
-    //   Legacy NULL-subtype rows use Step 1 heuristic for backward compatibility.
+    // §P16-VERIFY-3 (Option C): Separate authoritative OpEx from legacy unclassified.
+    //   - authoritativeIndirectExpenses: only subtype='operating_expense' (currently ₹0)
+    //   - legacyIndirectExpenses: NULL-subtype + type IN (expense/debit) + invoiceId IS NULL
+    //   - indirectExpenses (total) = authoritative + legacy (for backward compat with P&L)
+    //   Both are returned so the difference is NOT hidden.
     db.transaction.aggregate({
       where: {
         businessId: business.id,
@@ -203,6 +202,28 @@ export async function GET(req: NextRequest) {
       _sum: {
         amount: true,
       },
+    }),
+
+    // §P16-VERIFY-3: Authoritative OpEx — only subtype='operating_expense'
+    db.transaction.aggregate({
+      where: {
+        businessId: business.id,
+        transactionSubtype: 'operating_expense',
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      _sum: { amount: true },
+    }),
+
+    // §P16-VERIFY-3: Legacy unclassified OpEx — NULL-subtype + type IN (expense/debit) + invoiceId IS NULL
+    db.transaction.aggregate({
+      where: {
+        businessId: business.id,
+        transactionSubtype: null,
+        type: { in: ['expense', 'debit'] },
+        invoiceId: null,
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      _sum: { amount: true },
     }),
 
     // 7. §RECENT-INVOICES: Recent 10 invoices (voided or not) for the list.
@@ -264,8 +285,11 @@ export async function GET(req: NextRequest) {
     return s + (it.quantity * costPerUnit)
   }, 0)
 
-  // §INDIRECT-EXPENSES: Sum of expense + debit transactions.
+  // §INDIRECT-EXPENSES: Sum of expense + debit transactions (total = authoritative + legacy).
   const indirectExpenses = expenseAgg._sum.amount?.toNumber() ?? 0
+  // §P16-VERIFY-3: Separate authoritative OpEx from legacy unclassified.
+  const authoritativeIndirectExpenses = authoritativeOpExAgg._sum.amount?.toNumber() ?? 0
+  const legacyIndirectExpenses = legacyOpExAgg._sum.amount?.toNumber() ?? 0
   const totalExpense = cogs + indirectExpenses
 
   // §PROFIT: Gross Profit = Net Revenue − COGS. Net Profit = Gross Profit − Indirect Expenses.
@@ -327,6 +351,12 @@ export async function GET(req: NextRequest) {
       cogs,
       grossProfit,
       indirectExpenses,
+      // §P16-VERIFY-3: OpEx breakdown — authoritative vs legacy unclassified.
+      // authoritativeIndirectExpenses = only subtype='operating_expense' (currently ₹0)
+      // legacyIndirectExpenses = NULL-subtype debits (ambiguous, not authoritative)
+      // indirectExpenses = authoritative + legacy (total, for P&L backward compat)
+      authoritativeIndirectExpenses,
+      legacyIndirectExpenses,
       expense: totalExpense,
       netProfit,
       gst: totalGst,

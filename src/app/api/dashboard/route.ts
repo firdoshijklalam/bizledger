@@ -166,33 +166,37 @@ export async function GET(req: NextRequest) {
           AND "type" IN ('sales', 'retail')
       `,
       // §COMBINED-TRANSACTION: 1 raw SQL query replaces 2 separate Prisma queries
-      // §P16-STEP1-B: expense_sum now excludes invoice-linked transaction rows
-      // (purchase side-effects `type='debit'` with `invoiceId IS NOT NULL`, void
-      // reversals `type='debit'` with `invoiceId IS NOT NULL`). These are NOT
-      // operating expenses — purchase cost flows through COGS at sale time, and
-      // void reversals are contra entries. collection_sum is intentionally NOT
-      // filtered (keeps all `type='credit'` rows — manual cash-in + online order
-      // collections). The online-COD edge case (credit sale, not cash received)
-      // will be resolved in Step 2 via transactionSubtype discriminator.
-      // §P16-STEP2: Hybrid subtype + invoiceId filter. Per user instruction:
-      //   - Rows with subtype='operating_expense' → always counted (authoritative)
-      //   - Rows with subtype IN (purchase_inventory_*, supplier_payment, void_reversal,
-      //     customer_refund, ocr_purchase, manual_cash_out, customer_collection, etc.)
-      //     → explicitly EXCLUDED from OpEx (they have known non-OpEx meaning)
-      //   - Rows with subtype IS NULL (legacy or ambiguous) → fall back to Step 1
-      //     heuristic: type IN (debit/expense/purchase) AND invoiceId IS NULL.
-      //   This ensures new classified rows use authoritative semantics while legacy
-      //   rows retain Step 1 behavior (no regression).
+      // §P16-VERIFY-2 (Option A): collection_sum now ONLY counts authoritative
+      // cash-in subtypes: manual_cash_in, customer_collection, customer_advance,
+      // online_order_prepaid. Explicitly EXCLUDES:
+      //   - online_order_cod (receivable, not cash received)
+      //   - credit_sale (receivable, not cash received)
+      //   - sale_invoice (revenue, not a cash-in transaction type)
+      //   - any other non-cash credit event
+      // Legacy NULL-subtype credit rows are separated into legacy_collection_sum
+      // for disclosure (not counted as authoritative Cash Collected).
+      // §P16-VERIFY-3 (Option C): expense_sum SEPARATES authoritative OpEx from
+      // legacy unclassified. Authoritative OpEx = subtype='operating_expense' only.
+      // Legacy = NULL-subtype + type IN (debit/expense/purchase) + invoiceId IS NULL.
+      // Both are returned so the difference is NOT hidden. The card value
+      // (rangeExpense) = authoritative + legacy (total, for backward compat).
+      // authoritativeOpEx and legacyOpEx are also returned for strict accounting.
       db.$queryRaw<Array<{
-        collection_sum: bigint; expense_sum: bigint
+        collection_sum: bigint; legacy_collection_sum: bigint;
+        expense_sum: bigint; authoritative_opex_sum: bigint; legacy_opex_sum: bigint
       }>>`
         SELECT
-          COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0) AS collection_sum,
+          COALESCE(SUM(CASE WHEN type = 'credit' AND "transactionSubtype" IN (
+            'manual_cash_in', 'customer_collection', 'customer_advance', 'online_order_prepaid'
+          ) THEN amount ELSE 0 END), 0) AS collection_sum,
+          COALESCE(SUM(CASE WHEN type = 'credit' AND "transactionSubtype" IS NULL THEN amount ELSE 0 END), 0) AS legacy_collection_sum,
           COALESCE(SUM(CASE
             WHEN "transactionSubtype" = 'operating_expense' THEN amount
             WHEN "transactionSubtype" IS NOT NULL THEN 0
             ELSE CASE WHEN type IN ('debit', 'expense', 'purchase') AND "invoiceId" IS NULL THEN amount ELSE 0 END
-          END), 0) AS expense_sum
+          END), 0) AS expense_sum,
+          COALESCE(SUM(CASE WHEN "transactionSubtype" = 'operating_expense' THEN amount ELSE 0 END), 0) AS authoritative_opex_sum,
+          COALESCE(SUM(CASE WHEN "transactionSubtype" IS NULL AND type IN ('debit', 'expense', 'purchase') AND "invoiceId" IS NULL THEN amount ELSE 0 END), 0) AS legacy_opex_sum
         FROM "Transaction"
         WHERE "businessId" = ${business.id} AND "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd}
       `,
@@ -228,7 +232,15 @@ export async function GET(req: NextRequest) {
     const rangeDiscount = num(inv?.range_discount)
     const invoiceCount = num(inv?.total_count)
     const rangeCollection = num(txn?.collection_sum)
+    // §P16-VERIFY-2: Legacy collection = NULL-subtype credit rows (not authoritative cash-in)
+    const legacyCollection = num(txn?.legacy_collection_sum)
     const rangeExpense = num(txn?.expense_sum)
+    // §P16-VERIFY-3: Separate authoritative OpEx from legacy unclassified
+    // authoritativeOpEx = only subtype='operating_expense' (currently ₹0 — no path creates it)
+    // legacyOpEx = NULL-subtype + type IN (debit/expense/purchase) + invoiceId IS NULL
+    // rangeExpense = authoritativeOpEx + legacyOpEx (total, for card backward compat)
+    const authoritativeOpEx = num(txn?.authoritative_opex_sum)
+    const legacyOpEx = num(txn?.legacy_opex_sum)
     const paidCount = num(inv?.paid_count)
     const paidRatio = invoiceCount > 0 ? paidCount / invoiceCount : 1
     const nonOverdueRatio = 1 - overdueCount / Math.max(partyCount, 1)
@@ -302,7 +314,13 @@ export async function GET(req: NextRequest) {
         return EXPENSE_TYPES.includes(t.type as any) && !t.invoiceId
       }
       const expense = dayTxns.filter((t) => isOperatingExpense(t)).reduce((s, t) => s + num(t.amount), 0)
-      const collected = dayTxns.filter((t) => t.type === 'credit').reduce((s, t) => s + num(t.amount), 0)
+      // §P16-VERIFY-2 (Option A): Chart collected now ONLY counts authoritative
+      // cash-in subtypes. Explicitly EXCLUDES online_order_cod, credit_sale,
+      // sale_invoice, and legacy NULL-subtype credit rows. Matches card SQL.
+      const CASH_IN_SUBTYPES = ['manual_cash_in', 'customer_collection', 'customer_advance', 'online_order_prepaid'] as const
+      const collected = dayTxns
+        .filter((t) => t.type === 'credit' && CASH_IN_SUBTYPES.includes(t.transactionSubtype as any))
+        .reduce((s, t) => s + num(t.amount), 0)
       const creditGiven = dayInvoices
         .filter((inv) => inv.paymentMode === 'credit')
         .reduce((s, inv) => s + num(inv.grandTotal), 0)
@@ -393,7 +411,16 @@ export async function GET(req: NextRequest) {
       rangeNetRevenue,
       rangeDiscount,
       rangeCollection,
+      // §P16-VERIFY-2: Legacy collection = NULL-subtype credit rows (not authoritative cash-in).
+      // Disclosed separately so the difference is NOT hidden. Card shows rangeCollection (authoritative).
+      legacyCollection,
       rangeExpense,
+      // §P16-VERIFY-3: OpEx breakdown — authoritative vs legacy unclassified.
+      // authoritativeOpEx = only subtype='operating_expense' (currently ₹0 — no path creates it yet).
+      // legacyOpEx = NULL-subtype debits with invoiceId IS NULL (ambiguous, not authoritative).
+      // rangeExpense = authoritativeOpEx + legacyOpEx (total, for card backward compat).
+      authoritativeOpEx,
+      legacyOpEx,
       lowStockCount,
       healthScore,
       // §HEALTH-BREAKDOWN: Decomposed score components — used by Reports P&L
