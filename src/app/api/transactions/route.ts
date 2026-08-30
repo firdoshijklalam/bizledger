@@ -87,11 +87,64 @@ export async function POST(req: NextRequest) {
     let balanceAfter: number = 0
     let partyExists = false
 
+    // §P16-STEP2: Determine authoritative transactionSubtype BEFORE the write.
+    // Per approved decisions (Ambiguity 1, 2, 3 → leave NULL when uncertain):
+    //   - T1 credit + customer + balance>0 → customer_collection (HIGH confidence)
+    //   - T1 credit + customer + balance<=0 → customer_advance (HIGH confidence)
+    //   - T1 debit + customer → customer_refund (HIGH confidence)
+    //   - T1 debit + supplier/both + balance<0 → supplier_payment (HIGH confidence, payable settlement)
+    //   - T1 debit + supplier/both + balance>=0 → NULL (Ambiguity 1: supplier_advance vs operating_expense)
+    //   - T1 credit + supplier/both → NULL (Ambiguity 2: supplier_refund not in evidence)
+    //   - T2 credit (no party) → manual_cash_in (HIGH confidence)
+    //   - T2 debit (no party) → NULL (Ambiguity 3: operating_expense vs manual_cash_out)
+    // `body.source` is respected if provided (e.g., 'ocr' from OCR scanner).
+    // `body.transactionSubtype` is NOT trusted from client (server-authoritative).
+    const sourceFromClient = typeof body.source === 'string' && body.source.length > 0 ? body.source : null
+
     if (partyId) {
-      // Verify ownership first (read-only check)
-      const party = await db.party.findFirst({ where: { id: partyId, businessId: business.id } })
+      // Verify ownership first (read-only check). Fetch type + balance for subtype classification.
+      // §P16-STEP2: balance is read BEFORE the update so we can distinguish
+      // customer_collection (existing receivable) from customer_advance (no receivable).
+      const party = await db.party.findFirst({
+        where: { id: partyId, businessId: business.id },
+        select: { id: true, type: true, balance: true },
+      })
       if (party) {
         partyExists = true
+        // §P16-STEP2: Classify subtype based on party type + balance + transaction type.
+        const partyType = party.type // 'customer' | 'supplier' | 'both'
+        const balanceBefore = party.balance.toNumber() // +ve = receivable, -ve = payable
+        let resolvedSubtype: string | null = null
+        if (body.type === 'credit') {
+          if (partyType === 'customer') {
+            // Credit to customer: collection if they owed us money, else advance
+            resolvedSubtype = balanceBefore > 0 ? 'customer_collection' : 'customer_advance'
+          } else {
+            // §AMBIGUITY-2: Credit to supplier/both — leave NULL (supplier_refund not in evidence)
+            resolvedSubtype = null
+          }
+        } else if (body.type === 'debit') {
+          if (partyType === 'customer') {
+            // Debit to customer = refund (reduces receivable or pays out cash)
+            resolvedSubtype = 'customer_refund'
+          } else {
+            // supplier or both
+            if (balanceBefore < 0) {
+              // We owed the supplier (payable) — settling it = supplier_payment (NOT OpEx)
+              resolvedSubtype = 'supplier_payment'
+            } else {
+              // §AMBIGUITY-1: Supplier debit with no existing payable — leave NULL
+              // (could be supplier_advance OR operating_expense — cannot distinguish)
+              resolvedSubtype = null
+            }
+          }
+        }
+        // §P16-STEP2: OCR scanner sends source='ocr' — override subtype to ocr_purchase
+        // only if this is a debit to a supplier (matching OCR scanner's behavior).
+        if (sourceFromClient === 'ocr' && body.type === 'debit' && (partyType === 'supplier' || partyType === 'both')) {
+          resolvedSubtype = 'ocr_purchase'
+        }
+
         // §P16-STEP1-D: Atomicity fix — BOTH the party balance update AND the
         // transaction.create MUST be inside the same db.$transaction. Previously
         // transaction.create was OUTSIDE the transaction block, which meant a
@@ -114,6 +167,7 @@ export async function POST(req: NextRequest) {
           // §P16-STEP1-D: Create the transaction record INSIDE the same transaction
           // so it commits atomically with the balance update. If either fails,
           // both roll back — no orphan records.
+          // §P16-STEP2: Set transactionSubtype + source based on server-side classification.
           const txn = await tx.transaction.create({
             data: {
               businessId: business.id,
@@ -124,6 +178,8 @@ export async function POST(req: NextRequest) {
               description: body.description || null,
               category: body.category || null,
               invoiceId: body.invoiceId || null,
+              transactionSubtype: resolvedSubtype,
+              source: sourceFromClient || 'manual',
             },
           })
           return { balance: updated.balance.toNumber(), txn }
@@ -137,6 +193,15 @@ export async function POST(req: NextRequest) {
     // §P16-STEP1-D: If no partyId or party doesn't exist, create the transaction
     // standalone (no balance update needed). This is the fallback path for
     // transactions without a party linkage (e.g., generic expense without party).
+    // §P16-STEP2: T2 path — classify credit as manual_cash_in (HIGH confidence).
+    // §AMBIGUITY-3: T2 debit (no party) — leave subtype NULL (operating_expense
+    // vs manual_cash_out cannot be distinguished without more context).
+    let fallbackSubtype: string | null = null
+    if (body.type === 'credit') {
+      fallbackSubtype = 'manual_cash_in'
+    }
+    // body.type === 'debit' → fallbackSubtype stays NULL (ambiguous)
+    // body.type === 'sale' → fallbackSubtype stays NULL (not a real transaction type for this path)
     const txn = await db.transaction.create({
       data: {
         businessId: business.id,
@@ -147,6 +212,8 @@ export async function POST(req: NextRequest) {
         description: body.description || null,
         category: body.category || null,
         invoiceId: body.invoiceId || null,
+        transactionSubtype: fallbackSubtype,
+        source: sourceFromClient || 'manual',
       },
     })
 

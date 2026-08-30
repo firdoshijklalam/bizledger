@@ -174,12 +174,25 @@ export async function GET(req: NextRequest) {
       // filtered (keeps all `type='credit'` rows — manual cash-in + online order
       // collections). The online-COD edge case (credit sale, not cash received)
       // will be resolved in Step 2 via transactionSubtype discriminator.
+      // §P16-STEP2: Hybrid subtype + invoiceId filter. Per user instruction:
+      //   - Rows with subtype='operating_expense' → always counted (authoritative)
+      //   - Rows with subtype IN (purchase_inventory_*, supplier_payment, void_reversal,
+      //     customer_refund, ocr_purchase, manual_cash_out, customer_collection, etc.)
+      //     → explicitly EXCLUDED from OpEx (they have known non-OpEx meaning)
+      //   - Rows with subtype IS NULL (legacy or ambiguous) → fall back to Step 1
+      //     heuristic: type IN (debit/expense/purchase) AND invoiceId IS NULL.
+      //   This ensures new classified rows use authoritative semantics while legacy
+      //   rows retain Step 1 behavior (no regression).
       db.$queryRaw<Array<{
         collection_sum: bigint; expense_sum: bigint
       }>>`
         SELECT
           COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0) AS collection_sum,
-          COALESCE(SUM(CASE WHEN type IN ('debit', 'expense', 'purchase') AND "invoiceId" IS NULL THEN amount ELSE 0 END), 0) AS expense_sum
+          COALESCE(SUM(CASE
+            WHEN "transactionSubtype" = 'operating_expense' THEN amount
+            WHEN "transactionSubtype" IS NOT NULL THEN 0
+            ELSE CASE WHEN type IN ('debit', 'expense', 'purchase') AND "invoiceId" IS NULL THEN amount ELSE 0 END
+          END), 0) AS expense_sum
         FROM "Transaction"
         WHERE "businessId" = ${business.id} AND "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd}
       `,
@@ -187,7 +200,7 @@ export async function GET(req: NextRequest) {
       db.party.findMany({ where: { ...bizWhere, balance: { gt: 0 } }, select: { id: true, name: true, balance: true, qualityGrade: true }, orderBy: { balance: 'desc' }, take: 5 }),
       db.transaction.findMany({ where: bizWhere, select: { id: true, type: true, amount: true, createdAt: true, balanceAfter: true, partyId: true, invoiceId: true, party: { select: { id: true, name: true, balance: true, openingBalance: true } } }, orderBy: { createdAt: 'desc' }, take: 8 }),
       db.invoice.findMany({ where: { ...voidExclude, createdAt: { gte: rangeStart, lte: rangeEnd } }, select: { grandTotal: true, createdAt: true, paymentMode: true, partyId: true, party: { select: { name: true } }, items: { select: { productId: true, name: true, total: true, quantity: true } } }, orderBy: { createdAt: 'asc' } }),
-      db.transaction.findMany({ where: rangeTxnWhere, select: { amount: true, createdAt: true, type: true, invoiceId: true }, orderBy: { createdAt: 'asc' } }),
+      db.transaction.findMany({ where: rangeTxnWhere, select: { amount: true, createdAt: true, type: true, invoiceId: true, transactionSubtype: true }, orderBy: { createdAt: 'asc' } }),
     ])
 
     const p = partyRow[0]
@@ -278,7 +291,17 @@ export async function GET(req: NextRequest) {
       // Chart JS: was type === 'debit' only — missed 'expense' and 'purchase'.
       // §P16-STEP1-B: Also exclude invoice-linked transactions (purchase side-effects,
       // void reversals) — these are NOT operating expenses. Matches card SQL.
-      const expense = dayTxns.filter((t) => EXPENSE_TYPES.includes(t.type as any) && !t.invoiceId).reduce((s, t) => s + num(t.amount), 0)
+      // §P16-STEP2: Hybrid subtype filter — mirrors the card SQL logic.
+      //   - subtype='operating_expense' → counted (authoritative)
+      //   - subtype is non-NULL and != 'operating_expense' → excluded (known non-OpEx)
+      //   - subtype IS NULL (legacy) → fall back to Step 1 heuristic
+      const isOperatingExpense = (t: any): boolean => {
+        if (t.transactionSubtype === 'operating_expense') return true
+        if (t.transactionSubtype != null) return false  // any other non-null subtype → excluded
+        // legacy NULL-subtype row: apply Step 1 heuristic
+        return EXPENSE_TYPES.includes(t.type as any) && !t.invoiceId
+      }
+      const expense = dayTxns.filter((t) => isOperatingExpense(t)).reduce((s, t) => s + num(t.amount), 0)
       const collected = dayTxns.filter((t) => t.type === 'credit').reduce((s, t) => s + num(t.amount), 0)
       const creditGiven = dayInvoices
         .filter((inv) => inv.paymentMode === 'credit')

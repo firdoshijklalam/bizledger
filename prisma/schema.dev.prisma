@@ -328,6 +328,9 @@ model Transaction {
   description String?
   category    String?
   invoiceId   String?
+  // §P16-STEP2: Authoritative accounting subtype (see schema.prisma for full docs)
+  transactionSubtype String?
+  source              String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -395,6 +398,8 @@ model InvoiceItem {
   total     Decimal  @default(0)
   // §PARTIAL-FULFILLMENT: Tracks how much has been handed over
   fulfilledQty Float @default(0)
+  // §P16-STEP2: Historical cost snapshot (see schema.prisma for full docs)
+  purchasePriceSnapshot Decimal?
 
   invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)

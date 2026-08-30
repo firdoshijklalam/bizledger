@@ -365,6 +365,23 @@ model Transaction {
   description  String?
   category     String?
   invoiceId    String?
+  // §P16-STEP2: Authoritative accounting subtype — discriminator that resolves
+  // the `debit`/`credit` semantic overload. NULL for legacy/ambiguous rows that
+  // cannot be confidently classified from existing data/code. Aggregate queries
+  // MUST filter by this field (not by free-text `category`) to determine
+  // operating expense, cash in, cash out, inventory movement, etc.
+  // Authoritative subtype set (see docs/accounting-subtypes.md):
+  //   purchase_inventory, purchase_inventory_cash, purchase_inventory_credit,
+  //   manual_cash_in, manual_cash_out, operating_expense, supplier_payment,
+  //   customer_collection, customer_advance, online_order_cod,
+  //   online_order_prepaid, void_reversal, customer_refund, sale_invoice,
+  //   credit_sale, ocr_purchase, supplier_advance, supplier_refund
+  transactionSubtype String?
+  // §P16-STEP2: Provenance — which code path created this transaction.
+  // Values: manual | invoice | ocr | online_order | system | import | restore | salepad
+  // Used for audit trail + future filtering. Distinct from subtype (which is
+  // accounting meaning); source is "who wrote this row".
+  source             String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -440,6 +457,13 @@ model InvoiceItem {
   // over to the customer. 0 = nothing delivered, = quantity = fully delivered.
   // Used by the Fulfillment Dashboard for wholesale partial deliveries.
   fulfilledQty Float   @default(0)
+  // §P16-STEP2: Historical cost snapshot — captures Product.purchasePrice at
+  // the MOMENT of sale. Used by Reports P&L COGS calculation to ensure
+  // historical COGS is not distorted by later product price changes.
+  // NULL for legacy InvoiceItems created before this field existed — Reports
+  // falls back to current Product.purchasePrice (LEGACY FALLBACK, marked as
+  // approximate in the report). New sales always populate this field.
+  purchasePriceSnapshot Decimal? @db.Decimal(18, 2)
 
   invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)

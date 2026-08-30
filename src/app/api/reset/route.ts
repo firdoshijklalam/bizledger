@@ -154,6 +154,11 @@ async function seed() {
         description: t.desc,
         category: t.type === 'credit' ? 'Payment In' : 'Purchase',
         createdAt: date,
+        // §P16-STEP2: Seed transactions — leave subtype NULL (ambiguous synthetic data).
+        // The backfill script can classify these later based on party type + balance.
+        // Set source='system' to mark provenance. Reset is dev-only (prod blocked).
+        transactionSubtype: null,
+        source: 'system',
       },
     })
   }
@@ -170,8 +175,9 @@ async function seed() {
       createdAt: new Date(now.getTime() - 8 * 86400000),
       items: {
         create: [
-          { name: 'LED Bulb 9W', quantity: 30, unitPrice: 80, discount: 0, gstRate: 18, total: 2400, productId: products[0].id },
-          { name: 'Steel Glass', quantity: 24, unitPrice: 70, discount: 0, gstRate: 18, total: 1680, productId: products[5].id },
+          // §P16-STEP2: include purchasePriceSnapshot for dev seed (prod-blocked route)
+          { name: 'LED Bulb 9W', quantity: 30, unitPrice: 80, discount: 0, gstRate: 18, total: 2400, productId: products[0].id, purchasePriceSnapshot: Number(products[0].purchasePrice) },
+          { name: 'Steel Glass', quantity: 24, unitPrice: 70, discount: 0, gstRate: 18, total: 1680, productId: products[5].id, purchasePriceSnapshot: Number(products[5].purchasePrice) },
         ],
       },
     },
@@ -189,8 +195,9 @@ async function seed() {
       createdAt: new Date(now.getTime() - 5 * 86400000),
       items: {
         create: [
-          { name: 'Cement Bag 50kg', quantity: 80, unitPrice: 420, discount: 0, gstRate: 18, total: 33600, productId: products[3].id },
-          { name: 'Plastic Chair', quantity: 20, unitPrice: 450, discount: 0, gstRate: 18, total: 9000, productId: products[4].id },
+          // §P16-STEP2: include purchasePriceSnapshot for dev seed (prod-blocked route)
+          { name: 'Cement Bag 50kg', quantity: 80, unitPrice: 420, discount: 0, gstRate: 18, total: 33600, productId: products[3].id, purchasePriceSnapshot: Number(products[3].purchasePrice) },
+          { name: 'Plastic Chair', quantity: 20, unitPrice: 450, discount: 0, gstRate: 18, total: 9000, productId: products[4].id, purchasePriceSnapshot: Number(products[4].purchasePrice) },
         ],
       },
     },
@@ -208,8 +215,9 @@ async function seed() {
       createdAt: new Date(),
       items: {
         create: [
-          { name: 'Mustard Oil 1L', quantity: 8, unitPrice: 195, discount: 0, gstRate: 0, total: 1560, productId: products[2].id },
-          { name: 'Washing Powder 1kg', quantity: 6, unitPrice: 115, discount: 0, gstRate: 0, total: 690, productId: products[7].id },
+          // §P16-STEP2: include purchasePriceSnapshot for dev seed (prod-blocked route)
+          { name: 'Mustard Oil 1L', quantity: 8, unitPrice: 195, discount: 0, gstRate: 0, total: 1560, productId: products[2].id, purchasePriceSnapshot: Number(products[2].purchasePrice) },
+          { name: 'Washing Powder 1kg', quantity: 6, unitPrice: 115, discount: 0, gstRate: 0, total: 690, productId: products[7].id, purchasePriceSnapshot: Number(products[7].purchasePrice) },
         ],
       },
     },

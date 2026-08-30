@@ -201,6 +201,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       }
 
       // 3. Create a reversal transaction for audit trail
+      // §P16-STEP2: Void reversal is a CONTRA entry — excluded from Revenue,
+      // Operating Expense, COGS, and Cash Flow aggregates. subtype=void_reversal.
       if (invoice.partyId) {
         await tx.transaction.create({
           data: {
@@ -212,6 +214,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
             description: `Invoice ${invoice.invoiceNumber} voided/cancelled`,
             category: 'Invoice Voided',
             invoiceId: invoice.id,
+            transactionSubtype: 'void_reversal',
+            source: 'system',
           },
         })
       }

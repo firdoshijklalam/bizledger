@@ -210,6 +210,11 @@ export function OcrScannerView() {
           amount: Number(editGrandTotal) || 0,
           description: `Bill scanned: ${editVendor || 'Supplier'} - ${editItems.length} items`,
           category: 'Purchase',
+          // §P16-STEP2: Explicit source — server uses this to set transactionSubtype='ocr_purchase'.
+          // This is the ONLY way the server can distinguish OCR-scanned bills from manual supplier
+          // payments (both create type='debit' with category='Purchase'). Without this, OCR
+          // transactions would be ambiguous and excluded from strict accounting aggregates.
+          source: 'ocr',
         })
       }
 

@@ -156,6 +156,8 @@ export interface SanitizedInvoiceItem {
   gstRate: number
   total: number
   fulfilledQty: number
+  // §P16-STEP2: historical cost snapshot (nullable — legacy backups may omit this)
+  purchasePriceSnapshot?: number | null
 }
 
 export interface SanitizedTransaction {
@@ -168,6 +170,9 @@ export interface SanitizedTransaction {
   category: string | null
   invoiceId: string | null
   createdAt: Date | string
+  // §P16-STEP2: authoritative accounting subtype + provenance (nullable — legacy backups may omit)
+  transactionSubtype?: string | null
+  source?: string | null
 }
 
 export interface SanitizedCategory {
@@ -371,6 +376,8 @@ export function sanitizeInvoiceItem(it: any): SanitizedInvoiceItem {
     gstRate: toNum(it.gstRate),
     total: toNum(it.total),
     fulfilledQty: it.fulfilledQty ?? 0,
+    // §P16-STEP2: preserve purchasePriceSnapshot (nullable for legacy backups)
+    purchasePriceSnapshot: it.purchasePriceSnapshot != null ? toNum(it.purchasePriceSnapshot) : null,
   }
 }
 
@@ -385,6 +392,9 @@ export function sanitizeTransaction(t: any): SanitizedTransaction {
     category: t.category ?? null,
     invoiceId: t.invoiceId ?? null,
     createdAt: t.createdAt,
+    // §P16-STEP2: preserve transactionSubtype + source (nullable for legacy backups)
+    transactionSubtype: t.transactionSubtype ?? null,
+    source: t.source ?? null,
   }
 }
 

@@ -133,6 +133,20 @@ async function syncCompletedOrder(order: any, businessId: string) {
     // If the order was created manually (e.g., from the catalog), we deduct now.
     const wasStockAlreadyDeducted = order.source === 'quick-commerce' || order.source === 'catalog'
 
+    // §P16-STEP2: Pre-fetch product purchasePrices for InvoiceItem snapshot.
+    // We need the historical cost at sale time for accurate COGS in Reports.
+    // Fetch all productIds in one query (avoids N+1 inside the loop below).
+    const _productIdsForSnapshot = items.map((i) => i.productId).filter(Boolean)
+    const _productsForSnapshot = _productIdsForSnapshot.length > 0
+      ? await db.product.findMany({
+          where: { id: { in: _productIdsForSnapshot }, businessId },
+          select: { id: true, purchasePrice: true },
+        })
+      : []
+    const productPurchasePriceMap = Object.fromEntries(
+      _productsForSnapshot.map((p) => [p.id, p.purchasePrice.toNumber()])
+    )
+
     if (!wasStockAlreadyDeducted) {
       for (const item of items) {
         const product = await tx.product.findFirst({
@@ -158,6 +172,8 @@ async function syncCompletedOrder(order: any, businessId: string) {
     //   The customer's balance increases (they owe us).
     // For Prepaid: This is also a credit entry (we received payment).
     //   The customer's balance stays 0 (already paid).
+    // §P16-STEP2: Classify subtype — online_order_cod (receivable ↑, NO cash yet)
+    // vs online_order_prepaid (cash received NOW). isPrepaid computed at L121.
     const transaction = await tx.transaction.create({
       data: {
         businessId,
@@ -167,6 +183,8 @@ async function syncCompletedOrder(order: any, businessId: string) {
         description: `Online Order ${order.id.substring(0, 8)} — ${items.length} item(s)`,
         category: 'online-order',
         invoiceId: null, // Will be linked after invoice creation
+        transactionSubtype: isPrepaid ? 'online_order_prepaid' : 'online_order_cod',
+        source: 'online_order',
       },
     })
 
@@ -203,6 +221,11 @@ async function syncCompletedOrder(order: any, businessId: string) {
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             total: item.total,
+            // §P16-STEP2: Snapshot product purchasePrice at sale time for accurate historical COGS.
+            // Falls back to null if product not found (Reports will use current price as LEGACY FALLBACK).
+            purchasePriceSnapshot: item.productId
+              ? (productPurchasePriceMap[item.productId] ?? null)
+              : null,
           })),
         },
       },

@@ -558,11 +558,15 @@ async function performImport(
               invoiceId: idMap.get(it.invoiceId) || it.invoiceId, productId: it.productId ? (idMap.get(it.productId) || it.productId) : null, name: it.name,
               quantity: it.quantity, unitPrice: it.unitPrice, discount: it.discount,
               gstRate: it.gstRate, total: it.total, fulfilledQty: it.fulfilledQty,
+              // §P16-STEP2: preserve purchasePriceSnapshot on restore (nullable for legacy backups)
+              purchasePriceSnapshot: it.purchasePriceSnapshot ?? null,
             },
             create: {
               id: it.id, invoiceId: idMap.get(it.invoiceId) || it.invoiceId, productId: it.productId ? (idMap.get(it.productId) || it.productId) : null, name: it.name,
               quantity: it.quantity, unitPrice: it.unitPrice, discount: it.discount,
               gstRate: it.gstRate, total: it.total, fulfilledQty: it.fulfilledQty,
+              // §P16-STEP2: preserve purchasePriceSnapshot on restore (nullable for legacy backups)
+              purchasePriceSnapshot: it.purchasePriceSnapshot ?? null,
             },
           })
           result.imported.invoiceItems++
@@ -577,6 +581,8 @@ async function performImport(
             id: newId, invoiceId: idMap.get(it.invoiceId) || it.invoiceId, productId: it.productId ? (idMap.get(it.productId) || it.productId) : null, name: it.name,
             quantity: it.quantity, unitPrice: it.unitPrice, discount: it.discount,
             gstRate: it.gstRate, total: it.total, fulfilledQty: it.fulfilledQty,
+            // §P16-STEP2: preserve purchasePriceSnapshot on restore (nullable for legacy backups)
+            purchasePriceSnapshot: it.purchasePriceSnapshot ?? null,
           },
         })
         result.imported.invoiceItems++
@@ -593,10 +599,16 @@ async function performImport(
             update: {
               partyId: t.partyId ? (idMap.get(t.partyId) || t.partyId) : null, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter,
               description: t.description, category: t.category, invoiceId: t.invoiceId ? (idMap.get(t.invoiceId) || t.invoiceId) : null, businessId,
+              // §P16-STEP2: preserve transactionSubtype + source on restore (nullable for legacy backups)
+              transactionSubtype: t.transactionSubtype ?? null,
+              source: t.source ?? 'restore',
             },
             create: {
               id: t.id, partyId: t.partyId ? (idMap.get(t.partyId) || t.partyId) : null, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter,
               description: t.description, category: t.category, invoiceId: t.invoiceId ? (idMap.get(t.invoiceId) || t.invoiceId) : null, businessId,
+              // §P16-STEP2: preserve transactionSubtype + source on restore (nullable for legacy backups)
+              transactionSubtype: t.transactionSubtype ?? null,
+              source: t.source ?? 'restore',
             },
           })
           result.imported.transactions++
@@ -610,6 +622,9 @@ async function performImport(
           data: {
             id: newId, partyId: t.partyId ? (idMap.get(t.partyId) || t.partyId) : null, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter,
             description: t.description, category: t.category, invoiceId: t.invoiceId ? (idMap.get(t.invoiceId) || t.invoiceId) : null, businessId,
+            // §P16-STEP2: preserve transactionSubtype + source on restore (nullable for legacy backups)
+            transactionSubtype: t.transactionSubtype ?? null,
+            source: t.source ?? 'restore',
           },
         })
         result.imported.transactions++

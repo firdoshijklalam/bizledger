@@ -146,6 +146,9 @@ export async function GET(req: NextRequest) {
       select: {
         productId: true,
         quantity: true,
+        // §P16-STEP2: Fetch purchasePriceSnapshot — historical cost at sale time.
+        // Used for accurate COGS. NULL for legacy InvoiceItems (pre-Step-2 sales).
+        purchasePriceSnapshot: true,
       },
     }),
 
@@ -175,11 +178,26 @@ export async function GET(req: NextRequest) {
     // cost flows through COGS at sale time (line 218), and void reversals are
     // contra entries. Without this filter, purchase cost was double-counted:
     // once in indirectExpenses (at purchase) and again in COGS (at sale).
+    // §P16-STEP2: Hybrid subtype + invoiceId filter (mirrors Dashboard logic).
+    //   - subtype='operating_expense' → always counted (authoritative)
+    //   - subtype is non-NULL and != 'operating_expense' → excluded (known non-OpEx:
+    //     purchase_inventory_*, supplier_payment, void_reversal, customer_refund,
+    //     ocr_purchase, manual_cash_out, customer_collection, customer_advance, etc.)
+    //   - subtype IS NULL (legacy) → fall back to Step 1 heuristic (invoiceId IS NULL)
+    //   Per user instruction: supplier_payment is NOT automatically OpEx (it's a
+    //   payable settlement). Only operating_expense subtype counts as strict OpEx.
+    //   Legacy NULL-subtype rows use Step 1 heuristic for backward compatibility.
     db.transaction.aggregate({
       where: {
         businessId: business.id,
-        type: { in: ['expense', 'debit'] },
-        invoiceId: null,
+        OR: [
+          { transactionSubtype: 'operating_expense' },
+          {
+            transactionSubtype: null,
+            type: { in: ['expense', 'debit'] },
+            invoiceId: null,
+          },
+        ],
         ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
       },
       _sum: {
@@ -218,12 +236,31 @@ export async function GET(req: NextRequest) {
   // §NET-REVENUE: Total Sales (subtotal) − Discounts Given.
   const netRevenue = totalRevenue - totalDiscount
 
-  // §COGS: Cost of Goods Sold = sum of (item.quantity × product.purchasePrice)
-  // for all items in non-voided SALES invoices. Uses the current purchasePrice
-  // from the Product table (SPECIFIC IDENTIFICATION costing method).
+  // §COGS: Cost of Goods Sold = sum of (item.quantity × historical_cost_per_unit)
+  // for all items in non-voided SALES invoices.
+  // §P16-STEP2: Use purchasePriceSnapshot (captured at sale time) when available.
+  // This ensures historical COGS is NOT distorted by later product price changes.
+  // LEGACY FALLBACK: For InvoiceItems where snapshot IS NULL (pre-Step-2 sales),
+  // fall back to current Product.purchasePrice. This is an approximation — the
+  // historical cost may have been different. The `legacyCogsCount` metric below
+  // tracks how many items used the fallback so the report can disclose this.
   const productCostMap = new Map(products.map((p) => [p.id, p.purchasePrice.toNumber()]))
+  let legacyCogsCount = 0  // count of InvoiceItems that used LEGACY FALLBACK
+  let snapshotCogsCount = 0  // count of InvoiceItems that used authoritative snapshot
   const cogs = cogsItems.reduce((s, it) => {
-    const costPerUnit = it.productId ? (productCostMap.get(it.productId) ?? 0) : 0
+    // §P16-STEP2: prefer snapshot, fall back to current product.purchasePrice
+    const snapshot = it.purchasePriceSnapshot?.toNumber()
+    let costPerUnit: number
+    if (snapshot != null && !Number.isNaN(snapshot)) {
+      costPerUnit = snapshot
+      snapshotCogsCount++
+    } else if (it.productId) {
+      // LEGACY FALLBACK: snapshot is NULL → use current product price (approximate)
+      costPerUnit = productCostMap.get(it.productId) ?? 0
+      legacyCogsCount++
+    } else {
+      costPerUnit = 0
+    }
     return s + (it.quantity * costPerUnit)
   }, 0)
 
@@ -293,6 +330,14 @@ export async function GET(req: NextRequest) {
       expense: totalExpense,
       netProfit,
       gst: totalGst,
+      // §P16-STEP2: COGS accuracy disclosure — how many items used authoritative
+      // snapshot vs LEGACY FALLBACK (current product price). Frontend can show
+      // a warning if legacyCogsCount > 0 (historical COGS is approximate).
+      cogsAccuracy: {
+        snapshotItems: snapshotCogsCount,
+        legacyFallbackItems: legacyCogsCount,
+        isApproximate: legacyCogsCount > 0,
+      },
     },
     gst: {
       totalGst,

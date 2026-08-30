@@ -114,14 +114,21 @@ export async function POST(req: NextRequest) {
     // the name from the product record (business-scoped for ownership safety)
     // so the invoice item has a durable label even if the product is later
     // renamed or deleted.
+    // §P16-STEP2: Also fetch purchasePrice so we can snapshot it on each
+    // InvoiceItem at sale time — this gives accurate historical COGS even if
+    // the product's purchasePrice is later updated.
     const _productIds = items.map((i: any) => i.productId).filter(Boolean)
     const _products = _productIds.length > 0
       ? await db.product.findMany({
           where: { id: { in: _productIds }, businessId: business.id },
-          select: { id: true, name: true },
+          select: { id: true, name: true, purchasePrice: true },
         })
       : []
     const productNameMap = Object.fromEntries(_products.map((p) => [p.id, p.name]))
+    // §P16-STEP2: purchasePrice map for snapshot — keyed by productId.
+    const productPurchasePriceMap = Object.fromEntries(
+      _products.map((p) => [p.id, p.purchasePrice.toNumber()])
+    )
 
     // §STEP-1: Calculate per-item line totals (server-authoritative)
     const serverItems = items.map((i: any) => {
@@ -264,6 +271,13 @@ export async function POST(req: NextRequest) {
               discount: Number(i.discount) || 0,
               gstRate: i._serverGstRate,
               total: i._serverTotal, // §SERVER-AUTHORITATIVE: use server-calculated total
+              // §P16-STEP2: Snapshot the product's purchasePrice at sale time.
+              // This ensures Reports P&L COGS uses the HISTORICAL cost (not the
+              // current mutable product.purchasePrice). NULL for items without
+              // a productId (e.g., ad-hoc line items) — Reports falls back to 0.
+              purchasePriceSnapshot: i.productId
+                ? (productPurchasePriceMap[i.productId] ?? null)
+                : null,
             })),
           },
         },
@@ -355,7 +369,36 @@ export async function POST(req: NextRequest) {
 
       // 4. Create transaction record
       // §PURCHASE-LOGIC: Purchase → type='debit' (money out); Sale → type='sale'
+      // §P16-STEP2: Set authoritative transactionSubtype based on invoice type + payment.
+      //   - Sale + status='paid' → sale_invoice (cash sale, revenue recognized, cash received)
+      //   - Sale + paymentMode='credit' → credit_sale (receivable ↑, cash NOT received yet)
+      //   - Purchase + status='paid' → purchase_inventory_cash (cash out, inventory ↑)
+      //   - Purchase + paymentMode='credit' → purchase_inventory_credit (payable ↑, no cash out)
       if (body.partyId) {
+        // §P16-STEP2: Determine subtype from invoice type + paymentMode/status.
+        // status was computed at line 179: 'paid' if amountDue<=0, 'partial' if amountPaid>0, else 'unpaid'
+        // paymentMode is body.paymentMode (cash/upi/credit/cheque) — null if not provided.
+        let invoiceSubtype: string
+        if (isPurchase) {
+          // Purchase invoice — inventory asset movement (NOT revenue, NOT OpEx)
+          if (status === 'paid') {
+            invoiceSubtype = 'purchase_inventory_cash'
+          } else if (body.paymentMode === 'credit') {
+            invoiceSubtype = 'purchase_inventory_credit'
+          } else {
+            // Partial or unpaid without explicit credit mode — default to credit
+            // (if not fully paid, supplier is owed → payable ↑ → credit semantic)
+            invoiceSubtype = 'purchase_inventory_credit'
+          }
+        } else {
+          // Sale invoice — revenue recognized
+          if (body.paymentMode === 'credit') {
+            invoiceSubtype = 'credit_sale'
+          } else {
+            // Cash/UPI/cheque or fully paid → sale_invoice (cash sale)
+            invoiceSubtype = 'sale_invoice'
+          }
+        }
         await tx.transaction.create({
           data: {
             businessId: business.id,
@@ -365,6 +408,8 @@ export async function POST(req: NextRequest) {
             description: `Invoice ${invoiceNumber}`,
             category: isPurchase ? 'Purchase' : 'Sale',
             invoiceId: inv.id,
+            transactionSubtype: invoiceSubtype,
+            source: 'invoice',
           },
         })
       }
