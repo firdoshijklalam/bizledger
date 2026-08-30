@@ -84,7 +84,12 @@ export async function GET(req: NextRequest) {
     // through PgBouncer, so 21 queries took ~10-14s. By combining aggregates
     // into single raw SQL queries with CASE WHEN, we cut the round-trips to ~9,
     // reducing response time to ~2-3s for small datasets.
-    const voidExclude = { ...bizWhere, status: { not: 'void' } }
+    // §P16-STEP1-A: Authoritative revenue scope = sales + retail invoices only.
+    // Purchase invoices (inventory asset movement) and challan invoices (delivery
+    // notes) MUST NOT contribute to revenue, sales, top buyers, top products,
+    // top categories, chart trend, or any other revenue-oriented aggregate.
+    // This aligns Dashboard with Reports P&L (`type: { in: ['sales','retail'] }`).
+    const voidExclude = { ...bizWhere, status: { not: 'void' }, type: { in: ['sales', 'retail'] } }
     // §IST-TODAY-MONTH: Use IST-aligned boundaries for today/monthStart.
     //
     // §CALENDAR-MONTH-FIX (pre-commit FIX 1): `monthStart` uses CALENDAR
@@ -158,14 +163,23 @@ export async function GET(req: NextRequest) {
           COUNT(CASE WHEN status = 'paid' THEN 1 END) AS paid_count
         FROM "Invoice"
         WHERE "businessId" = ${business.id} AND status != 'void'
+          AND "type" IN ('sales', 'retail')
       `,
       // §COMBINED-TRANSACTION: 1 raw SQL query replaces 2 separate Prisma queries
+      // §P16-STEP1-B: expense_sum now excludes invoice-linked transaction rows
+      // (purchase side-effects `type='debit'` with `invoiceId IS NOT NULL`, void
+      // reversals `type='debit'` with `invoiceId IS NOT NULL`). These are NOT
+      // operating expenses — purchase cost flows through COGS at sale time, and
+      // void reversals are contra entries. collection_sum is intentionally NOT
+      // filtered (keeps all `type='credit'` rows — manual cash-in + online order
+      // collections). The online-COD edge case (credit sale, not cash received)
+      // will be resolved in Step 2 via transactionSubtype discriminator.
       db.$queryRaw<Array<{
         collection_sum: bigint; expense_sum: bigint
       }>>`
         SELECT
           COALESCE(SUM(CASE WHEN type = 'credit' THEN amount ELSE 0 END), 0) AS collection_sum,
-          COALESCE(SUM(CASE WHEN type IN ('debit', 'expense', 'purchase') THEN amount ELSE 0 END), 0) AS expense_sum
+          COALESCE(SUM(CASE WHEN type IN ('debit', 'expense', 'purchase') AND "invoiceId" IS NULL THEN amount ELSE 0 END), 0) AS expense_sum
         FROM "Transaction"
         WHERE "businessId" = ${business.id} AND "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd}
       `,
@@ -173,7 +187,7 @@ export async function GET(req: NextRequest) {
       db.party.findMany({ where: { ...bizWhere, balance: { gt: 0 } }, select: { id: true, name: true, balance: true, qualityGrade: true }, orderBy: { balance: 'desc' }, take: 5 }),
       db.transaction.findMany({ where: bizWhere, select: { id: true, type: true, amount: true, createdAt: true, balanceAfter: true, partyId: true, invoiceId: true, party: { select: { id: true, name: true, balance: true, openingBalance: true } } }, orderBy: { createdAt: 'desc' }, take: 8 }),
       db.invoice.findMany({ where: { ...voidExclude, createdAt: { gte: rangeStart, lte: rangeEnd } }, select: { grandTotal: true, createdAt: true, paymentMode: true, partyId: true, party: { select: { name: true } }, items: { select: { productId: true, name: true, total: true, quantity: true } } }, orderBy: { createdAt: 'asc' } }),
-      db.transaction.findMany({ where: rangeTxnWhere, select: { amount: true, createdAt: true, type: true }, orderBy: { createdAt: 'asc' } }),
+      db.transaction.findMany({ where: rangeTxnWhere, select: { amount: true, createdAt: true, type: true, invoiceId: true }, orderBy: { createdAt: 'asc' } }),
     ])
 
     const p = partyRow[0]
@@ -260,9 +274,11 @@ export async function GET(req: NextRequest) {
         (t) => new Date(t.createdAt) >= bucketStart && new Date(t.createdAt) < bucketEnd
       )
       // §FIX-1: Chart expense now matches card expense scope exactly.
-      // Card SQL: type IN ('debit', 'expense', 'purchase')
+      // Card SQL: type IN ('debit', 'expense', 'purchase') AND invoiceId IS NULL
       // Chart JS: was type === 'debit' only — missed 'expense' and 'purchase'.
-      const expense = dayTxns.filter((t) => EXPENSE_TYPES.includes(t.type as any)).reduce((s, t) => s + num(t.amount), 0)
+      // §P16-STEP1-B: Also exclude invoice-linked transactions (purchase side-effects,
+      // void reversals) — these are NOT operating expenses. Matches card SQL.
+      const expense = dayTxns.filter((t) => EXPENSE_TYPES.includes(t.type as any) && !t.invoiceId).reduce((s, t) => s + num(t.amount), 0)
       const collected = dayTxns.filter((t) => t.type === 'credit').reduce((s, t) => s + num(t.amount), 0)
       const creditGiven = dayInvoices
         .filter((inv) => inv.paymentMode === 'credit')

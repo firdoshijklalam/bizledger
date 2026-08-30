@@ -169,10 +169,17 @@ export async function GET(req: NextRequest) {
 
     // 6. §DB-AGGREGATE: Indirect expenses — sum of expense + debit transactions.
     // Pushes SUM to SQL instead of loading all transactions into memory.
+    // §P16-STEP1-C: Exclude invoice-linked transaction rows (purchase side-effects
+    // created as `type='debit'` at `invoices/route.ts:363`, void reversals at
+    // `invoices/[id]/route.ts:205`). These are NOT operating expenses — purchase
+    // cost flows through COGS at sale time (line 218), and void reversals are
+    // contra entries. Without this filter, purchase cost was double-counted:
+    // once in indirectExpenses (at purchase) and again in COGS (at sale).
     db.transaction.aggregate({
       where: {
         businessId: business.id,
         type: { in: ['expense', 'debit'] },
+        invoiceId: null,
         ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
       },
       _sum: {

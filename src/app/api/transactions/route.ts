@@ -63,6 +63,23 @@ export async function POST(req: NextRequest) {
     }
     const partyId = body.partyId
 
+    // §P16-STEP1-E: invoiceId ownership validation — if the caller provides an
+    // invoiceId, verify that the invoice belongs to the authenticated business
+    // BEFORE creating the transaction. This prevents cross-tenant injection where
+    // a crafted request could link a transaction to another business's invoice.
+    if (body.invoiceId) {
+      const linkedInvoice = await db.invoice.findFirst({
+        where: { id: body.invoiceId, businessId: business.id },
+        select: { id: true },
+      })
+      if (!linkedInvoice) {
+        return NextResponse.json(
+          { error: 'Invoice not found or does not belong to this business' },
+          { status: 403 }
+        )
+      }
+    }
+
     // §ATOMIC-BALANCE: Use atomic increment/decrement inside a transaction.
     // credit (money in) reduces receivable balance → decrement
     // debit (money out) increases payable balance → increment
@@ -75,8 +92,12 @@ export async function POST(req: NextRequest) {
       const party = await db.party.findFirst({ where: { id: partyId, businessId: business.id } })
       if (party) {
         partyExists = true
-        // §ATOMIC: Use $transaction with atomic increment/decrement.
-        // The UPDATE is atomic at the SQL level — concurrent payments are safe.
+        // §P16-STEP1-D: Atomicity fix — BOTH the party balance update AND the
+        // transaction.create MUST be inside the same db.$transaction. Previously
+        // transaction.create was OUTSIDE the transaction block, which meant a
+        // failure between the two could leave an orphaned balance update (party
+        // balance changed but no transaction record exists). Now both succeed or
+        // both roll back — atomicity preserved.
         const result = await db.$transaction(async (tx) => {
           // Atomically update balance
           const updated = await tx.party.update({
@@ -90,12 +111,32 @@ export async function POST(req: NextRequest) {
             },
             select: { balance: true },
           })
-          return updated.balance.toNumber()
+          // §P16-STEP1-D: Create the transaction record INSIDE the same transaction
+          // so it commits atomically with the balance update. If either fails,
+          // both roll back — no orphan records.
+          const txn = await tx.transaction.create({
+            data: {
+              businessId: business.id,
+              partyId: partyId || null,
+              type: body.type,
+              amount,
+              balanceAfter: updated.balance.toNumber(),
+              description: body.description || null,
+              category: body.category || null,
+              invoiceId: body.invoiceId || null,
+            },
+          })
+          return { balance: updated.balance.toNumber(), txn }
         })
-        balanceAfter = result
+        balanceAfter = result.balance
+        // §P16-STEP1-D: Return the transaction created inside the transaction block
+        return NextResponse.json(serializeDecimals(result.txn))
       }
     }
 
+    // §P16-STEP1-D: If no partyId or party doesn't exist, create the transaction
+    // standalone (no balance update needed). This is the fallback path for
+    // transactions without a party linkage (e.g., generic expense without party).
     const txn = await db.transaction.create({
       data: {
         businessId: business.id,
