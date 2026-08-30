@@ -55,8 +55,11 @@ async function main() {
     assert(src.includes('whiteSpace: \'pre-line\''),
       'Tooltip header supports multi-line (whiteSpace: pre-line) for time display')
     // §NEGATIVE: Daily/weekly/monthly buckets should NOT show time
-    assert(src.includes('Default: daily/monthly bucket'),
+    // §P16-STEP3: Default is now daily-only (monthly has its own handler)
+    assert(src.includes('Default: daily bucket'),
       'Non-hourly buckets use default date-only formatting')
+    assert(src.includes('isMonthly'),
+      '§P16-STEP3: Monthly bucket handler added (shows Month Year)')
   }
 
   // ─── Fix 3: Profit → Net Cash Flow label ─────────────────────────────────
@@ -66,25 +69,29 @@ async function main() {
       "Chart option label is 'Net Cash Flow' (not 'Profit vs Loss')")
     assert(src.includes("§FIX-3"),
       '§FIX-3 comment documents the rename')
-    // Series names
-    assert(src.includes('name="Net"') && !src.includes('name="Profit"'),
-      'Profit chart series renamed from "Profit" to "Net"')
-    assert(src.includes('name="Outflow"') && !src.includes('name="Loss"'),
-      'Loss chart series renamed from "Loss" to "Outflow"')
-    // Legend labels
-    assert(src.includes('>Net<') && !src.includes('>Profit<'),
-      'Legend label is "Net" (not "Profit")')
-    assert(src.includes('>Outflow<') && !src.includes('>Loss<'),
-      'Legend label is "Outflow" (not "Loss")')
+    // §P16-STEP3: 'profit' mode keeps 'Net'/'Outflow' labels (cash-flow proxy)
+    assert(src.includes('name="Net"'),
+      'Profit chart (cash-flow proxy) series name is "Net"')
+    assert(src.includes('name="Outflow"'),
+      'Loss chart (cash-flow proxy) series name is "Outflow"')
+    // §P16-STEP3: NEW 'profitLoss' mode uses 'Profit'/'Loss' labels (true accounting)
+    assert(src.includes("label: 'Profit vs Loss'"),
+      '§P16-STEP3: Profit vs Loss chart mode restored with true accounting')
+    assert(src.includes('name="Profit"'),
+      '§P16-STEP3: profitLoss chart series name is "Profit"')
+    assert(src.includes('name="Loss"'),
+      '§P16-STEP3: profitLoss chart series name is "Loss"')
   }
 
-  // ─── Fix 4: Inventory → Sales label ──────────────────────────────────────
-  console.log('\n  Fix 4 — Inventory → Sales label:')
+  // ─── Fix 4: Inventory chart mode removed (§P16-STEP3) ────────────────────
+  console.log('\n  Fix 4 — Inventory chart mode removed (Step 3):')
   {
-    assert(src.includes('name="Sales"') && !src.includes('name="Inventory Sales"'),
-      'Inventory chart series renamed from "Inventory Sales" to "Sales"')
-    assert(src.includes('§FIX-4'),
-      '§FIX-4 comment documents the label change')
+    // §P16-STEP3: The misleading 'inventory' chart mode was REMOVED.
+    // It used revenue data (SUM of all sales), not inventory-specific data.
+    assert(!src.includes("id: 'inventory'"),
+      '§P16-STEP3: inventory chart mode removed from chartOptions')
+    assert(src.includes('§P16-STEP3: Removed misleading'),
+      '§P16-STEP3: removal documented in source')
   }
 
   // ─── Fix 5: Weekly tooltip date range ───────────────────────────────────

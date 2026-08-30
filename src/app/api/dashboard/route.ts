@@ -52,6 +52,13 @@ export async function GET(req: NextRequest) {
     // §BUCKET-CONFIG: Chart bucket sizing based on range duration.
     // Kept here (not in date-ranges.ts) because bucketing is a Dashboard chart
     // concern, not a date-boundary concern.
+    // §P16-STEP3: Replaced discontinuous 3-tier with clean 5-tier progression:
+    //   ≤1 day       → hourly (24 buckets)
+    //   2–7 days     → daily
+    //   8–90 days    → weekly (ceil(rangeDays/7), 2–13 buckets)
+    //   91–720 days  → monthly (ceil(rangeDays/30), 4–24 buckets)
+    //   >720 days    → monthly, capped at 24 buckets (prevents unreadable charts)
+    // Eliminates the 90→91 day discontinuity (90 daily → 4 monthly jump).
     const rangeDays = Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / 86400000)
     let bucketType: 'hour' | 'day' | 'week' | 'month' = 'day'
     let bucketCount = 7
@@ -70,10 +77,19 @@ export async function GET(req: NextRequest) {
     } else if (rangeParam === '1y') {
       bucketType = 'month'; bucketCount = 12
     } else if (rangeParam === 'custom') {
-      // Custom: choose bucket type based on span
-      if (rangeDays <= 1) { bucketType = 'hour'; bucketCount = 24 }
-      else if (rangeDays <= 90) { bucketType = 'day'; bucketCount = rangeDays }
-      else { bucketType = 'month'; bucketCount = Math.ceil(rangeDays / 30) }
+      // §P16-STEP3: 5-tier progression for custom ranges
+      if (rangeDays <= 1) {
+        bucketType = 'hour'; bucketCount = 24
+      } else if (rangeDays <= 7) {
+        bucketType = 'day'; bucketCount = rangeDays
+      } else if (rangeDays <= 90) {
+        bucketType = 'week'; bucketCount = Math.ceil(rangeDays / 7)
+      } else if (rangeDays <= 720) {
+        bucketType = 'month'; bucketCount = Math.ceil(rangeDays / 30)
+      } else {
+        // >720 days: cap at 24 monthly buckets to prevent unreadable charts
+        bucketType = 'month'; bucketCount = 24
+      }
     }
 
     // §DECIMAL-FIX: Prisma Decimal fields return as string. Convert to Number.
@@ -203,7 +219,7 @@ export async function GET(req: NextRequest) {
       // §LIST-QUERIES: Top debtors + recent transactions + chart trend data
       db.party.findMany({ where: { ...bizWhere, balance: { gt: 0 } }, select: { id: true, name: true, balance: true, qualityGrade: true }, orderBy: { balance: 'desc' }, take: 5 }),
       db.transaction.findMany({ where: bizWhere, select: { id: true, type: true, amount: true, createdAt: true, balanceAfter: true, partyId: true, invoiceId: true, party: { select: { id: true, name: true, balance: true, openingBalance: true } } }, orderBy: { createdAt: 'desc' }, take: 8 }),
-      db.invoice.findMany({ where: { ...voidExclude, createdAt: { gte: rangeStart, lte: rangeEnd } }, select: { grandTotal: true, createdAt: true, paymentMode: true, partyId: true, party: { select: { name: true } }, items: { select: { productId: true, name: true, total: true, quantity: true } } }, orderBy: { createdAt: 'asc' } }),
+      db.invoice.findMany({ where: { ...voidExclude, createdAt: { gte: rangeStart, lte: rangeEnd } }, select: { grandTotal: true, subtotal: true, discountAmount: true, createdAt: true, paymentMode: true, partyId: true, party: { select: { name: true } }, items: { select: { productId: true, name: true, total: true, quantity: true, purchasePriceSnapshot: true } } }, orderBy: { createdAt: 'asc' } }),
       db.transaction.findMany({ where: rangeTxnWhere, select: { amount: true, createdAt: true, type: true, invoiceId: true, transactionSubtype: true }, orderBy: { createdAt: 'asc' } }),
     ])
 
@@ -287,14 +303,46 @@ export async function GET(req: NextRequest) {
     // 30-minute IST truncation bug that occurred when setUTCHours(18,0,0,0)
     // truncated rangeStart from 18:30 UTC (00:00 IST) to 18:00 UTC (23:30 IST).
     // Now uses time arithmetic (getTime() + i * unitMs) — exact IST boundaries.
-    const salesTrend: Array<{ date: string; fullDate?: string; revenue: number; expense: number; profit: number; collected: number; creditGiven: number }> = []
+    // §P16-STEP3: salesTrend now includes full P&L fields per bucket:
+    //   netRevenue = SUM(subtotal - discountAmount) for sales/retail invoices
+    //   cogs = SUM(item.quantity × purchasePriceSnapshot ?? product.purchasePrice)
+    //   grossProfit = netRevenue - cogs
+    //   operatingExpense = authoritative OpEx (subtype='operating_expense') + legacy fallback
+    //   netProfit = grossProfit - operatingExpense (can be NEGATIVE)
+    //   netProfitVal = max(0, netProfit) — positive series for chart
+    //   netLossVal = abs(min(0, netProfit)) — negative series for chart
+    //   cashIn = SUM(amount, type='credit' AND subtype IN cash-in subtypes)
+    //   cashOut = SUM(amount, type='debit' AND subtype IN cash-out subtypes)
+    //   revenue/expense/profit/collected/creditGiven kept for backward compat.
+    const salesTrend: Array<{
+      date: string; fullDate?: string;
+      revenue: number; expense: number; profit: number; collected: number; creditGiven: number;
+      // §P16-STEP3: True accounting P&L fields
+      netRevenue: number; cogs: number; grossProfit: number; operatingExpense: number;
+      netProfit: number; netProfitVal: number; netLossVal: number;
+      cashIn: number; cashOut: number;
+    }> = []
     const EXPENSE_TYPES = ['debit', 'expense', 'purchase'] as const
+    // §P16-STEP3: Cash-out subtypes — actual cash paid out (not payable settlements)
+    const CASH_OUT_SUBTYPES = ['purchase_inventory_cash', 'supplier_payment', 'ocr_purchase', 'manual_cash_out', 'operating_expense'] as const
     const buckets = computeBuckets(rangeStart, rangeEnd, bucketType, bucketCount)
     for (const { start: bucketStart, end: bucketEnd, label } of buckets) {
       const dayInvoices = rangeInvoicesForTrend.filter(
         (inv) => new Date(inv.createdAt) >= bucketStart && new Date(inv.createdAt) < bucketEnd
       )
       const revenue = dayInvoices.reduce((s, inv) => s + num(inv.grandTotal), 0)
+      // §P16-STEP3: Net Revenue = SUM(subtotal - discountAmount) — tax-exclusive
+      const netRevenue = dayInvoices.reduce((s, inv) => s + (num(inv.subtotal) - num(inv.discountAmount)), 0)
+      // §P16-STEP3: COGS per bucket = SUM(item.quantity × (purchasePriceSnapshot ?? product.purchasePrice ?? 0))
+      const cogs = dayInvoices.reduce((s, inv) => {
+        return s + inv.items.reduce((itemSum, item) => {
+          const snapshot = item.purchasePriceSnapshot ? num(item.purchasePriceSnapshot) : null
+          const product = item.productId ? productMap.get(item.productId) : null
+          const currentPrice = product ? num(product.purchasePrice) : 0
+          const costPerUnit = snapshot != null ? snapshot : currentPrice
+          return itemSum + (item.quantity * costPerUnit)
+        }, 0)
+      }, 0)
       const dayTxns = rangeTxnsForTrend.filter(
         (t) => new Date(t.createdAt) >= bucketStart && new Date(t.createdAt) < bucketEnd
       )
@@ -314,6 +362,10 @@ export async function GET(req: NextRequest) {
         return EXPENSE_TYPES.includes(t.type as any) && !t.invoiceId
       }
       const expense = dayTxns.filter((t) => isOperatingExpense(t)).reduce((s, t) => s + num(t.amount), 0)
+      // §P16-STEP3: operatingExpense (authoritative + legacy) — same as expense
+      // for backward compat. Frontend can use authoritativeOpEx + legacyOpEx
+      // card-level fields for the breakdown.
+      const operatingExpense = expense
       // §P16-VERIFY-2 (Option A): Chart collected now ONLY counts authoritative
       // cash-in subtypes. Explicitly EXCLUDES online_order_cod, credit_sale,
       // sale_invoice, and legacy NULL-subtype credit rows. Matches card SQL.
@@ -321,18 +373,41 @@ export async function GET(req: NextRequest) {
       const collected = dayTxns
         .filter((t) => t.type === 'credit' && CASH_IN_SUBTYPES.includes(t.transactionSubtype as any))
         .reduce((s, t) => s + num(t.amount), 0)
+      // §P16-STEP3: Cash In / Cash Out for cash flow chart
+      const cashIn = dayTxns
+        .filter((t) => t.type === 'credit' && CASH_IN_SUBTYPES.includes(t.transactionSubtype as any))
+        .reduce((s, t) => s + num(t.amount), 0)
+      const cashOut = dayTxns
+        .filter((t) => t.type === 'debit' && CASH_OUT_SUBTYPES.includes(t.transactionSubtype as any))
+        .reduce((s, t) => s + num(t.amount), 0)
       const creditGiven = dayInvoices
         .filter((inv) => inv.paymentMode === 'credit')
         .reduce((s, inv) => s + num(inv.grandTotal), 0)
+
+      // §P16-STEP3: True accounting profit
+      const grossProfit = netRevenue - cogs
+      const netProfit = grossProfit - operatingExpense
+      const netProfitVal = netProfit >= 0 ? netProfit : 0
+      const netLossVal = netProfit < 0 ? Math.abs(netProfit) : 0
 
       salesTrend.push({
         date: label,
         fullDate: bucketStart.toISOString(),
         revenue,
         expense,
-        profit: revenue - expense,
+        profit: revenue - expense,  // legacy cash-flow proxy (kept for backward compat)
         collected,
         creditGiven,
+        // §P16-STEP3: True accounting P&L fields
+        netRevenue,
+        cogs,
+        grossProfit,
+        operatingExpense,
+        netProfit,
+        netProfitVal,
+        netLossVal,
+        cashIn,
+        cashOut,
       })
     }
 

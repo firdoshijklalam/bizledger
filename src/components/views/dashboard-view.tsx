@@ -42,7 +42,7 @@ import {
   type RangeContext,
 } from '@/lib/date-ranges'
 
-type ChartType = 'revenue' | 'profit' | 'cashflow' | 'collections' | 'categories' | 'inventory'
+type ChartType = 'revenue' | 'profit' | 'profitLoss' | 'cashflow' | 'collections' | 'categories'
 type ChartView = 'line' | 'bar'
 // §TIME-RANGE: Replaced local TimeRange union with the shared DashboardRange
 // from src/lib/date-ranges.ts. This guarantees the dashboard, History, and
@@ -431,13 +431,16 @@ export function DashboardView() {
     // dashboard profit = revenue - expense (cash-flow proxy), not true
     // accounting profit. Reports P&L has the true netProfit calculation.
     { id: 'profit', label: 'Net Cash Flow' },
+    // §P16-STEP3: Restored 'Profit vs Loss' with TRUE accounting semantics.
+    // Uses netProfit = grossProfit - operatingExpense = (netRevenue - cogs) - opEx.
+    // NOT the cash-flow proxy (revenue - expense). Separate from Net Cash Flow.
+    { id: 'profitLoss', label: 'Profit vs Loss' },
     { id: 'cashflow', label: t('dash.chart.cashflow') },
     { id: 'collections', label: 'Collections vs Credit' },
     { id: 'categories', label: 'Top Categories' },
-    // §FIX-4: Renamed from 'Inventory Value' to 'Sales' because the chart
-    // uses dataKey='revenue' (= SUM of all invoice grandTotal), not
-    // inventory-specific data.
-    { id: 'inventory', label: 'Sales' },
+    // §P16-STEP3: Removed misleading 'inventory' chart mode (was labelled 'Sales'
+    // but used revenue dataKey = SUM of all sales, NOT inventory-specific data).
+    // A genuine inventory chart would need real inventory trend data, not sales.
   ]
 
   const currency = business?.currency || 'INR'
@@ -1170,27 +1173,49 @@ export function DashboardView() {
                 <Bar dataKey="profitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Net" />
                 <Bar dataKey="lossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Outflow" />
               </BarChart>
+            ) : chartType === 'profitLoss' && chartView === 'line' ? (
+              // §P16-STEP3: Profit vs Loss — LINE variant (TRUE accounting profit)
+              // Uses netProfitVal (positive) + netLossVal (negative) from salesTrend.
+              // NOT the cash-flow proxy (revenue - expense).
+              <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<ProfitLossTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <Line type="monotone" dataKey="netProfitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Profit" />
+                <Line type="monotone" dataKey="netLossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Loss" />
+              </RechartsLineChart>
+            ) : chartType === 'profitLoss' && chartView === 'bar' ? (
+              // §P16-STEP3: Profit vs Loss — BAR variant (TRUE accounting profit)
+              <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                <Tooltip content={<ProfitLossTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <Bar dataKey="netProfitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Profit" />
+                <Bar dataKey="netLossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Loss" />
+              </BarChart>
             ) : chartType === 'cashflow' && chartView === 'line' ? (
               // §TOGGLE-FIX: Cashflow — LINE variant (pure lines, no bars)
+              // §P16-STEP3: Uses cashIn/cashOut fields (authoritative cash-in/out subtypes)
               <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Line type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} dot={false} name="Cash In" />
-                <Line type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} dot={false} name="Cash Out" />
-                <Line type="monotone" dataKey="profit" stroke="#6366f1" strokeWidth={2} dot={false} name="Net" />
+                <Line type="monotone" dataKey="cashIn" stroke="#10b981" strokeWidth={2} dot={false} name="Cash In" />
+                <Line type="monotone" dataKey="cashOut" stroke="#f87171" strokeWidth={2} dot={false} name="Cash Out" />
               </RechartsLineChart>
             ) : chartType === 'cashflow' && chartView === 'bar' ? (
               // §TOGGLE-FIX: Cashflow — BAR variant (pure bars, no line)
+              // §P16-STEP3: Uses cashIn/cashOut fields (authoritative cash-in/out subtypes)
               <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Cash In" />
-                <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Cash Out" />
-                <Bar dataKey="profit" fill="#6366f1" radius={[3, 3, 0, 0]} name="Net" />
+                <Bar dataKey="cashIn" fill="#10b981" radius={[3, 3, 0, 0]} name="Cash In" />
+                <Bar dataKey="cashOut" fill="#f87171" radius={[3, 3, 0, 0]} name="Cash Out" />
               </BarChart>
             ) : chartType === 'collections' && chartView === 'line' ? (
               // §TOGGLE-FIX: Collections — LINE variant
@@ -1219,27 +1244,16 @@ export function DashboardView() {
                 </Pie>
                 <Tooltip formatter={(v: number) => formatCurrency(v, currency)} />
               </PieChart>
-            ) : chartView === 'line' ? (
-              // §TOGGLE-FIX: Inventory — LINE variant (AreaChart)
-              <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <defs><linearGradient id="inv" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.4} /><stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} /></linearGradient></defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                {/* §FIX-4: Label changed from 'Inventory Sales' to 'Sales' — data is SUM(grandTotal) for all invoices, not inventory-specific */}
-                <Area type="monotone" dataKey="revenue" stroke="#8b5cf6" strokeWidth={2} fill="url(#inv)" name="Sales" />
-              </AreaChart>
             ) : (
-              // §TOGGLE-FIX: Inventory — BAR variant
-              <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+              // §P16-STEP3: Default fallback — Revenue chart (was inventory, now removed)
+              <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.4} /><stop offset="100%" stopColor="#10b981" stopOpacity={0} /></linearGradient></defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
                 <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                {/* §FIX-4: Label changed from 'Inventory Sales' to 'Sales' */}
-                <Bar dataKey="revenue" fill="#8b5cf6" radius={[3, 3, 0, 0]} name="Sales" />
-              </BarChart>
+                <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" name="Revenue" />
+              </AreaChart>
             )}
           </ResponsiveContainer>
         </motion.div>
@@ -1247,20 +1261,19 @@ export function DashboardView() {
         })()}
 
         {/* Legend */}
-        {['revenue', 'cashflow', 'collections', 'profit'].includes(chartType) && (
+        {['revenue', 'cashflow', 'collections', 'profit', 'profitLoss'].includes(chartType) && (
           <div className="flex items-center gap-3 mt-2 text-[10px]">
             {chartType === 'revenue' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Revenue</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Expense</span></>)}
             {/* §FIX-3: Legend labels updated to match 'Net Cash Flow' chart name */}
             {chartType === 'profit' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Net</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Outflow</span></>)}
-            {chartType === 'cashflow' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />In</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Out</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500" />Net</span></>)}
+            {/* §P16-STEP3: Profit vs Loss legend — true accounting profit/loss */}
+            {chartType === 'profitLoss' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Profit</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Loss</span></>)}
+            {chartType === 'cashflow' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Cash In</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Cash Out</span></>)}
             {chartType === 'collections' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Collected</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" />New Credit</span></>)}
           </div>
         )}
 
-        {/* Inventory value summary */}
-        {chartType === 'inventory' && data.inventoryValue != null && (
-          <div className="mt-2 p-2 rounded-lg bg-purple-50 dark:bg-purple-950/30 text-center"><p className="text-[10px] text-muted-foreground">Current Stock Value</p><p className="text-sm font-bold tabular text-purple-700 dark:text-purple-300">{formatCurrency(data.inventoryValue, currency)}</p></div>
-        )}
+        {/* §P16-STEP3: Removed inventory value summary block (chart mode removed) */}
 
         {/* Top categories list */}
         {chartType === 'categories' && data.topCategories && data.topCategories.length > 0 && (
@@ -1630,6 +1643,13 @@ function CustomTooltip({ active, payload, label, currency }: any) {
   // §FIX-5: Detect if this is a weekly bucket by checking if label is "W1", "W2", etc.
   const isWeekly = /^W\d+$/i.test(label || '')
 
+  // §P16-STEP3: Detect if this is a monthly bucket by checking if label is a
+  // 3-letter month abbreviation (Jan, Feb, ..., Dec). Monthly buckets are used
+  // for 6m, 1y, and custom ranges >90 days. Without this handler, monthly
+  // buckets fell through to the default (daily) format, showing weekday+date
+  // instead of "Month Year" — misleading for monthly aggregations.
+  const isMonthly = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/i.test(label || '')
+
   const formatTooltipHeader = (d: string): string => {
     try {
       const date = new Date(d)
@@ -1654,7 +1674,12 @@ function CustomTooltip({ active, payload, label, currency }: any) {
         return `${startStr} – ${endStr}`
       }
 
-      // Default: daily/monthly bucket — date only
+      if (isMonthly) {
+        // §P16-STEP3: Monthly bucket — show "Month Year" (e.g., "August 2026")
+        return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: IST_TZ })
+      }
+
+      // Default: daily bucket — date only
       return date.toLocaleDateString('en-US', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: IST_TZ })
     } catch {
       return label || ''
@@ -1685,6 +1710,83 @@ function CustomTooltip({ active, payload, label, currency }: any) {
           </span>
         </div>
       ))}
+    </div>
+  )
+}
+
+// §P16-STEP3: ProfitLossTooltip — dedicated tooltip for the Profit vs Loss chart.
+// Shows full P&L breakdown: Revenue, COGS, Gross Profit, Operating Expense, Net Profit/Loss.
+// Uses the same header formatting logic as CustomTooltip (hourly/weekly/monthly/daily).
+function ProfitLossTooltip({ active, payload, label, currency }: any) {
+  if (!active || !payload || payload.length === 0) return null
+  const fullDate = payload[0]?.payload?.fullDate
+  const IST_TZ = 'Asia/Kolkata'
+  const isHourly = /^\d{1,2}:\d{2}\s*[ap]m$/i.test(label || '')
+  const isWeekly = /^W\d+$/i.test(label || '')
+  const isMonthly = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$/i.test(label || '')
+
+  const formatHeader = (d: string): string => {
+    try {
+      const date = new Date(d)
+      if (isNaN(date.getTime())) return label || ''
+      if (isHourly) {
+        const endDate = new Date(date.getTime() + 60 * 60 * 1000)
+        const dateStr = date.toLocaleDateString('en-US', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: IST_TZ })
+        const startTime = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: IST_TZ })
+        const endTime = endDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: IST_TZ })
+        return `${dateStr}\n${startTime} – ${endTime}`
+      }
+      if (isWeekly) {
+        const endDate = new Date(date.getTime() + 7 * 24 * 60 * 60 * 1000)
+        const startStr = date.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric', timeZone: IST_TZ })
+        const endStr = endDate.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric', timeZone: IST_TZ })
+        return `${startStr} – ${endStr}`
+      }
+      if (isMonthly) {
+        return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: IST_TZ })
+      }
+      return date.toLocaleDateString('en-US', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: IST_TZ })
+    } catch {
+      return label || ''
+    }
+  }
+
+  const headerText = fullDate ? formatHeader(fullDate) : label
+  const p = payload[0]?.payload || {}
+  const isLoss = p.netProfit < 0
+
+  // §P16-STEP3: Helper function (not a component) to render P&L rows.
+  // Using a function avoids the "components during render" lint error.
+  const renderRow = (label: string, value: number, color: string) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 3 }}>
+      <span style={{ color, fontWeight: 600, fontSize: 11 }}>{label}:</span>
+      <span style={{ fontWeight: 700, fontSize: 12, color: '#f3f4f6' }}>
+        {currency ? formatCurrency(value, currency) : `₹${value}`}
+      </span>
+    </div>
+  )
+
+  return (
+    <div style={{
+      background: 'rgba(20,20,20,0.95)',
+      border: '1px solid rgba(99,102,241,0.4)',
+      borderRadius: 10,
+      padding: '10px 14px',
+      fontSize: 12,
+      boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+      maxWidth: 200,
+      color: '#f3f4f6',
+    }}>
+      <p style={{ fontWeight: 700, marginBottom: 6, fontSize: 10, color: '#9ca3af', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 4, whiteSpace: 'pre-line' }}>
+        {headerText}
+      </p>
+      {renderRow("Revenue", p.netRevenue || 0, "#10b981")}
+      {renderRow("COGS", p.cogs || 0, "#f59e0b")}
+      {renderRow("Gross Profit", p.grossProfit || 0, "#6366f1")}
+      {renderRow("Operating Expense", p.operatingExpense || 0, "#f87171")}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 4, paddingTop: 4 }}>
+        {renderRow(isLoss ? "Net Loss" : "Net Profit", Math.abs(p.netProfit || 0), isLoss ? "#f87171" : "#10b981")}
+      </div>
     </div>
   )
 }
