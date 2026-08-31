@@ -103,7 +103,11 @@ async function main() {
 
   const dashSrc = fs.readFileSync('src/app/api/dashboard/route.ts', 'utf8')
   const reportsSrc = fs.readFileSync('src/app/api/reports/route.ts', 'utf8')
+  // §P16-STEP3.8.1: Invoice creation logic extracted to src/lib/invoice-service.ts.
+  // Source assertions check both files (route handler + service).
   const invoicesSrc = fs.readFileSync('src/app/api/invoices/route.ts', 'utf8')
+    + '\n// --- src/lib/invoice-service.ts ---\n'
+    + fs.readFileSync('src/lib/invoice-service.ts', 'utf8')
 
   // ═══════════════════════════════════════════════════════════════════════
   // §INV-A: purchase_cash.amount + purchase_credit.amount = invoice grandTotal

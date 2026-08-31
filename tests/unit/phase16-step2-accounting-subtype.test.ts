@@ -153,7 +153,12 @@ async function main() {
   const dashSrc = fs.readFileSync('src/app/api/dashboard/route.ts', 'utf8')
   const reportsSrc = fs.readFileSync('src/app/api/reports/route.ts', 'utf8')
   const txnSrc = fs.readFileSync('src/app/api/transactions/route.ts', 'utf8')
+  // §P16-STEP3.8.1: Invoice creation logic was extracted to src/lib/invoice-service.ts.
+  // Source assertions that previously checked invoices/route.ts now check BOTH files
+  // (the route handler is a thin wrapper; the accounting logic lives in the service).
   const invoicesSrc = fs.readFileSync('src/app/api/invoices/route.ts', 'utf8')
+    + '\n// --- src/lib/invoice-service.ts ---\n'
+    + fs.readFileSync('src/lib/invoice-service.ts', 'utf8')
   const invoicesIdSrc = fs.readFileSync('src/app/api/invoices/[id]/route.ts', 'utf8')
   const customerOrdersSrc = fs.readFileSync('src/app/api/customer-orders/[id]/status/route.ts', 'utf8')
   const dataImportSrc = fs.readFileSync('src/app/api/data-import/route.ts', 'utf8')

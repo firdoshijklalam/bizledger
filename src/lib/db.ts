@@ -40,7 +40,30 @@ function createPrismaClient() {
   })
 }
 
+// §P16-STEP3.8.1: Configure SQLite for better write concurrency.
+//   1. WAL mode — allows concurrent readers alongside a single writer.
+//      Without WAL, readers block writers and vice versa, causing P1008
+//      socket timeouts under concurrent invoice creation.
+//      WAL is a database-level setting (persists in the .db file).
+//   2. busy_timeout = 30s — SQLite waits up to 30s for a lock instead of
+//      failing immediately with "database is locked". Connection-level.
+// Both are NO-OPs for PostgreSQL (pragmas are SQLite-specific).
+// §NOTE: PRAGMA returns a value in SQLite, so we must use $queryRaw (not $executeRaw).
+async function configureSqliteConcurrency() {
+  if (process.env.DATABASE_URL?.startsWith('file:')) {
+    try {
+      await db.$queryRawUnsafe('PRAGMA journal_mode = WAL')
+      await db.$queryRawUnsafe('PRAGMA busy_timeout = 30000')
+    } catch {
+      // Non-fatal — proceed with defaults
+    }
+  }
+}
+
 export const db = globalForPrisma.prisma ?? createPrismaClient()
+
+// §P16-STEP3.8.1: Configure SQLite WAL + busy_timeout on first load (fire-and-forget).
+configureSqliteConcurrency().catch(() => {})
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
 

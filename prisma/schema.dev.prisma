@@ -373,7 +373,9 @@ model Invoice {
   // §3: Fulfillment status — handed | pickup | ready (for "Pick Up Later" orders)
   deliveryStatus  String?  @default("handed") // handed | pickup | ready
   // §P16-STEP3.8: Idempotency key for SalePad operations
-  saleOperationId String?  @unique
+  // §P16-STEP3.8.1: NO standalone @unique — only composite (businessId, saleOperationId).
+  // Tenant-scoped: Business A and Business B can independently reuse the same saleOperationId.
+  saleOperationId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

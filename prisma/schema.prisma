@@ -432,8 +432,11 @@ model Invoice {
   // §P16-STEP3.8: Idempotency key for SalePad operations.
   // When SalePad sends saleOperationId, the server checks if an invoice with this
   // ID already exists for this business. If so, it returns the original invoice
-  // instead of creating a duplicate. Scoped by businessId via @@unique.
-  saleOperationId     String?  @unique
+  // instead of creating a duplicate. Scoped by businessId via @@unique below.
+  // §P16-STEP3.8.1: NO standalone @unique — only the composite (businessId, saleOperationId)
+  // is unique. This allows Business A and Business B to independently use the
+  // same saleOperationId without conflict (tenant-scoped idempotency).
+  saleOperationId     String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -446,6 +449,8 @@ model Invoice {
   // Without this, concurrent requests could create invoices with the same number.
   @@unique([businessId, invoiceNumber])
   // §P16-STEP3.8: Idempotency — unique operation ID per business prevents duplicate SalePad submissions.
+  // §P16-STEP3.8.1: This is the ONLY uniqueness constraint on saleOperationId.
+  // Tenant-scoped — Business A's saleOperationId="X" never conflicts with Business B's "X".
   @@unique([businessId, saleOperationId])
   @@index([businessId])
   @@index([partyId])
