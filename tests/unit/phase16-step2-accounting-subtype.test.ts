@@ -336,8 +336,8 @@ async function main() {
       'Dashboard SQL: subtype=operating_expense → counted as OpEx')
     assert(dashSrc.includes('"transactionSubtype" IS NOT NULL THEN 0'),
       'Dashboard SQL: any other non-null subtype → excluded from OpEx')
-    assert(dashSrc.includes('type IN (\'debit\', \'expense\', \'purchase\') AND "invoiceId" IS NULL'),
-      'Dashboard SQL: legacy NULL-subtype rows use Step 1 heuristic (invoiceId IS NULL)')
+    assert(dashSrc.includes('type IN (\'debit\', \'expense\') AND "invoiceId" IS NULL'),
+      'Dashboard SQL: legacy NULL-subtype rows use Step 1 heuristic (invoiceId IS NULL, purchase removed in Step 3.1)')
     // Dashboard JS chart
     assert(dashSrc.includes('isOperatingExpense') && dashSrc.includes('t.transactionSubtype === \'operating_expense\''),
       'Dashboard JS: isOperatingExpense function uses hybrid logic')

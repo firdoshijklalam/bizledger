@@ -209,10 +209,10 @@ export async function GET(req: NextRequest) {
           COALESCE(SUM(CASE
             WHEN "transactionSubtype" = 'operating_expense' THEN amount
             WHEN "transactionSubtype" IS NOT NULL THEN 0
-            ELSE CASE WHEN type IN ('debit', 'expense', 'purchase') AND "invoiceId" IS NULL THEN amount ELSE 0 END
+            ELSE CASE WHEN type IN ('debit', 'expense') AND "invoiceId" IS NULL THEN amount ELSE 0 END
           END), 0) AS expense_sum,
           COALESCE(SUM(CASE WHEN "transactionSubtype" = 'operating_expense' THEN amount ELSE 0 END), 0) AS authoritative_opex_sum,
-          COALESCE(SUM(CASE WHEN "transactionSubtype" IS NULL AND type IN ('debit', 'expense', 'purchase') AND "invoiceId" IS NULL THEN amount ELSE 0 END), 0) AS legacy_opex_sum
+          COALESCE(SUM(CASE WHEN "transactionSubtype" IS NULL AND type IN ('debit', 'expense') AND "invoiceId" IS NULL THEN amount ELSE 0 END), 0) AS legacy_opex_sum
         FROM "Transaction"
         WHERE "businessId" = ${business.id} AND "createdAt" >= ${rangeStart} AND "createdAt" <= ${rangeEnd}
       `,
@@ -321,8 +321,14 @@ export async function GET(req: NextRequest) {
       netRevenue: number; cogs: number; grossProfit: number; operatingExpense: number;
       netProfit: number; netProfitVal: number; netLossVal: number;
       cashIn: number; cashOut: number;
+      // §P16-STEP3.1-FIX-B: Legacy OpEx per bucket (disclosed separately, NOT in operatingExpense)
+      legacyOpEx: number;
     }> = []
-    const EXPENSE_TYPES = ['debit', 'expense', 'purchase'] as const
+    // §P16-STEP3.1-FIX-C/F: Removed 'purchase' from EXPENSE_TYPES to align with Reports.
+    // The 'purchase' type is dead (no production path creates it; transactions route
+    // rejects it at line 61). Both Dashboard and Reports now use the SAME filter:
+    // type IN ('debit', 'expense') for legacy fallback.
+    const EXPENSE_TYPES = ['debit', 'expense'] as const
     // §P16-STEP3: Cash-out subtypes — actual cash paid out (not payable settlements)
     const CASH_OUT_SUBTYPES = ['purchase_inventory_cash', 'supplier_payment', 'ocr_purchase', 'manual_cash_out', 'operating_expense'] as const
     const buckets = computeBuckets(rangeStart, rangeEnd, bucketType, bucketCount)
@@ -362,10 +368,19 @@ export async function GET(req: NextRequest) {
         return EXPENSE_TYPES.includes(t.type as any) && !t.invoiceId
       }
       const expense = dayTxns.filter((t) => isOperatingExpense(t)).reduce((s, t) => s + num(t.amount), 0)
-      // §P16-STEP3: operatingExpense (authoritative + legacy) — same as expense
-      // for backward compat. Frontend can use authoritativeOpEx + legacyOpEx
-      // card-level fields for the breakdown.
-      const operatingExpense = expense
+      // §P16-STEP3.1-FIX-B: Authoritative P&L must NOT silently include legacy data.
+      // `operatingExpense` is now AUTHORITATIVE ONLY (subtype='operating_expense').
+      // Legacy NULL-subtype debits are tracked separately in `bucketLegacyOpEx`.
+      // `netProfit` uses ONLY authoritative OpEx — legacy is disclosed separately.
+      const bucketAuthoritativeOpEx = dayTxns
+        .filter((t) => t.transactionSubtype === 'operating_expense')
+        .reduce((s, t) => s + num(t.amount), 0)
+      const bucketLegacyOpEx = dayTxns
+        .filter((t) => t.transactionSubtype == null && EXPENSE_TYPES.includes(t.type as any) && !t.invoiceId)
+        .reduce((s, t) => s + num(t.amount), 0)
+      // §P16-STEP3.1-FIX-B: operatingExpense is now AUTHORITATIVE ONLY.
+      // The old `expense` (hybrid) is kept for backward compat (legacy `profit` chart).
+      const operatingExpense = bucketAuthoritativeOpEx
       // §P16-VERIFY-2 (Option A): Chart collected now ONLY counts authoritative
       // cash-in subtypes. Explicitly EXCLUDES online_order_cod, credit_sale,
       // sale_invoice, and legacy NULL-subtype credit rows. Matches card SQL.
@@ -408,6 +423,8 @@ export async function GET(req: NextRequest) {
         netLossVal,
         cashIn,
         cashOut,
+        // §P16-STEP3.1-FIX-B: Legacy OpEx per bucket (disclosed separately in UI)
+        legacyOpEx: bucketLegacyOpEx,
       })
     }
 

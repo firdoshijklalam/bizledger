@@ -361,8 +361,11 @@ async function main() {
     const allLiteralAssignments = [...txnAssignments, ...invoiceAssignments, ...voidAssignment, ...onlineAssignment]
     const hasOperatingExpenseLiteral = allLiteralAssignments.some(a => a.includes("'operating_expense'"))
 
-    assert(!hasOperatingExpenseLiteral,
-      `4A-CRITICAL: ZERO production paths assign transactionSubtype='operating_expense' as a literal`)
+    // §P16-STEP3.1-FIX-A: Step 3.1 added the isOperatingExpense write path.
+    // The server now sets transactionSubtype='operating_expense' when body.isOperatingExpense===true
+    // and type==='debit'. This is an explicit user intent, not a guess.
+    assert(hasOperatingExpenseLiteral || txnSrc.includes("resolvedSubtype = 'operating_expense'") || txnSrc.includes("fallbackSubtype = 'operating_expense'"),
+      '4A-FIX-A: Step 3.1 added operating_expense write path via isOperatingExpense intent')
 
     // §4B: List what each path CAN assign
     console.log('  ℹ️  transactions/route.ts T1 can assign:')

@@ -33,12 +33,12 @@ async function main() {
   console.log('\n  FIX 1 — Chart expense type filter consistency:')
   {
     const apiSrc = fs.readFileSync('src/app/api/dashboard/route.ts', 'utf8')
-    // §CARD-SQL: The card uses type IN ('debit', 'expense', 'purchase')
-    assert(apiSrc.includes("type IN ('debit', 'expense', 'purchase')"),
-      'Card SQL uses type IN (debit, expense, purchase)')
+    // §P16-STEP3.1-FIX-C: 'purchase' removed from EXPENSE_TYPES (dead type, aligns with Reports)
+    assert(apiSrc.includes("type IN ('debit', 'expense')") || apiSrc.includes("type IN (\"debit\", \"expense\")"),
+      'Card SQL uses type IN (debit, expense) — purchase removed in Step 3.1')
     // §CHART-JS: The chart bucket uses the same types
-    assert(apiSrc.includes("EXPENSE_TYPES = ['debit', 'expense', 'purchase']"),
-      'Chart bucket uses EXPENSE_TYPES constant matching card SQL')
+    assert(apiSrc.includes("EXPENSE_TYPES = ['debit', 'expense']"),
+      'Chart bucket uses EXPENSE_TYPES constant matching card SQL (purchase removed in Step 3.1)')
     // §VOID: Voided invoices excluded
     assert(apiSrc.includes("status: { not: 'void' }") || apiSrc.includes("status != 'void'"),
       'Voided invoices excluded from chart data')
@@ -213,18 +213,19 @@ async function main() {
   {
     // §BEHAVIORAL: Simulate mixed transactions and verify chart expense sum = card expense
     // This verifies the EXPENSE_TYPES constant matches the SQL filter.
-    const EXPENSE_TYPES = ['debit', 'expense', 'purchase'] as const
+    // §P16-STEP3.1-FIX-C: 'purchase' removed from EXPENSE_TYPES (dead type, aligns with Reports)
+    const EXPENSE_TYPES = ['debit', 'expense'] as const
 
     // Simulate transactions across 3 buckets
     const txns = [
       { type: 'debit', amount: 100, createdAt: '2026-08-25T19:00:00Z' },     // bucket 0
       { type: 'expense', amount: 200, createdAt: '2026-08-25T20:00:00Z' },    // bucket 1
-      { type: 'purchase', amount: 300, createdAt: '2026-08-25T21:00:00Z' },   // bucket 2
+      { type: 'purchase', amount: 300, createdAt: '2026-08-25T21:00:00Z' },   // bucket 2 (NOT expense — dead type)
       { type: 'credit', amount: 500, createdAt: '2026-08-25T19:30:00Z' },     // bucket 0 (not expense)
       { type: 'debit', amount: 150, createdAt: '2026-08-25T22:00:00Z' },      // bucket 3
     ]
 
-    // Card expense (SQL: type IN ('debit', 'expense', 'purchase'))
+    // Card expense (SQL: type IN ('debit', 'expense'))
     const cardExpense = txns
       .filter(t => EXPENSE_TYPES.includes(t.type as any))
       .reduce((s, t) => s + t.amount, 0)
@@ -234,9 +235,9 @@ async function main() {
       .filter(t => EXPENSE_TYPES.includes(t.type as any))
       .reduce((s, t) => s + t.amount, 0)
 
-    assert(cardExpense === 750, 'Card expense = 100+200+300+150 = 750 (debit+expense+purchase)')
+    assert(cardExpense === 450, 'Card expense = 100+200+150 = 450 (debit+expense only; purchase excluded in Step 3.1)')
     assert(chartExpense === cardExpense, 'Chart expense sum === card expense (behavioral match)')
-    assert(chartExpense !== 250, 'Chart expense ≠ 250 (old bug: only debit=100+150 would give 250)')
+    assert(chartExpense !== 750, 'Chart expense ≠ 750 (old bug: purchase included)')
   }
 
   // ─── FIX 3: Indian currency axis formatting ────────────────────────────
@@ -370,12 +371,13 @@ async function main() {
     // §REVENUE: revenue = SUM(grandTotal) for non-voided invoices (unchanged)
     assert(apiSrc.includes('grandTotal') && apiSrc.includes('revenue'),
       'Revenue still uses grandTotal (unchanged)')
-    // §EXPENSE: Card SQL uses type IN (debit, expense, purchase) (unchanged scope)
-    assert(apiSrc.includes("type IN ('debit', 'expense', 'purchase')"),
-      'Card expense SQL scope unchanged: debit + expense + purchase')
-    // §CHART-MATCHES-CARD: Chart expense now uses same scope (FIX 1)
-    assert(apiSrc.includes("EXPENSE_TYPES = ['debit', 'expense', 'purchase']"),
-      'Chart expense scope matches card scope (FIX 1 applied)')
+    // §P16-STEP3.1-FIX-C: 'purchase' removed from Dashboard scope (aligns with Reports)
+    // Check the actual SQL CASE statement (not comments) excludes 'purchase'
+    const sqlOnly = apiSrc.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    assert(!sqlOnly.includes("type IN ('debit', 'expense', 'purchase')"),
+      'Card expense SQL no longer includes purchase in actual SQL (Step 3.1 fix)')
+    assert(apiSrc.includes("EXPENSE_TYPES = ['debit', 'expense']"),
+      'Chart expense scope matches card scope: debit + expense (purchase removed in Step 3.1)')
     // §rangeNetRevenue: Still uses subtotal - discountAmount (Phase 5, unchanged)
     assert(apiSrc.includes('"subtotal" - "discountAmount"'),
       'rangeNetRevenue still uses subtotal - discountAmount (Phase 5, unchanged)')
