@@ -372,8 +372,9 @@ async function main() {
     // Both use same formula: netProfit = grossProfit - operatingExpense
     assert(dashSrc.includes('const netProfit = grossProfit - operatingExpense'),
       'INV-42: Dashboard netProfit = grossProfit - operatingExpense')
-    assert(reportsSrc.includes('netProfit = grossProfit - indirectExpenses'),
-      'INV-42: Reports netProfit = grossProfit - indirectExpenses')
+    // §P16-STEP3.1-PARITY-FIX: Both use authoritative-only OpEx for Net Profit
+    assert(reportsSrc.includes('netProfit = grossProfit - authoritativeIndirectExpenses'),
+      'INV-42: Reports netProfit = grossProfit - authoritativeIndirectExpenses (parity fixed)')
     // Both use same grossProfit = netRevenue - cogs
     assert(dashSrc.includes('const grossProfit = netRevenue - cogs'),
       'INV-42: Dashboard grossProfit = netRevenue - cogs')

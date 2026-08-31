@@ -233,7 +233,9 @@ async function queryReportsAccounting(bizId: string, rangeStart: Date, rangeEnd:
   const indirectExpenses = expenseAgg._sum.amount?.toNumber() ?? 0
   const authoritativeIndirectExpenses = authoritativeOpExAgg._sum.amount?.toNumber() ?? 0
   const legacyIndirectExpenses = legacyOpExAgg._sum.amount?.toNumber() ?? 0
-  const netProfit = grossProfit - indirectExpenses
+  // §P16-STEP3.1-PARITY-FIX: Net Profit uses authoritativeIndirectExpenses ONLY (not hybrid).
+  // This matches the production Reports route after the parity fix.
+  const netProfit = grossProfit - authoritativeIndirectExpenses
 
   return { totalRevenue, netRevenue, cogs, grossProfit, indirectExpenses, authoritativeIndirectExpenses, legacyIndirectExpenses, netProfit, snapshotCogsCount, legacyCogsCount }
 }
@@ -385,17 +387,16 @@ async function main() {
     const repF = await queryReportsAccounting(businessId, rangeStart, rangeEnd)
     assert(approxEqual(repF.authoritativeIndirectExpenses, 500), `F: Reports authoritativeIndirectExpenses = ₹500`)
     assert(approxEqual(repF.legacyIndirectExpenses, 1000), `F: Reports legacyIndirectExpenses = ₹1000`)
-    // §IMPORTANT: Reports netProfit uses hybrid indirectExpenses (authoritative + legacy).
-    // Dashboard netProfit uses authoritativeOpEx ONLY.
-    // This is a KNOWN PARITY GAP — Reports includes legacy in netProfit, Dashboard does not.
-    // The Dashboard is correct (authoritative-only). Reports is backward-compatible (hybrid).
-    // This gap is acceptable per Step 3.1 design: Dashboard shows authoritative,
-    // Reports shows hybrid with separate authoritative/legacy breakdown.
-    // Reports netProfit = grossProfit - (authoritativeIndirectExpenses + legacyIndirectExpenses)
-    // = 2000 - (500 + 1000) = 500 (NOT 1500)
-    assert(approxEqual(repF.netProfit, 500), `F: Reports netProfit = ₹500 (hybrid: ₹2000 - ₹1500)`)
-    assert(approxEqual(repF.netProfit, repF.grossProfit - (repF.authoritativeIndirectExpenses + repF.legacyIndirectExpenses)),
-      `F: Reports netProfit = grossProfit - (authoritative + legacy)`)
+    // §P16-STEP3.1-PARITY-FIX: Reports netProfit now uses authoritativeIndirectExpenses ONLY.
+    // This matches Dashboard: both use ONLY subtype='operating_expense' for Net Profit.
+    // Legacy ₹1,000 does NOT reduce authoritative Net Profit.
+    // Reports netProfit = grossProfit - authoritativeIndirectExpenses = 2000 - 500 = 1500
+    assert(approxEqual(repF.netProfit, 1500), `F: Reports netProfit = ₹1500 (authoritative only, legacy NOT included)`)
+    assert(approxEqual(repF.netProfit, repF.grossProfit - repF.authoritativeIndirectExpenses),
+      `F: Reports netProfit = grossProfit - authoritativeIndirectExpenses (NOT hybrid)`)
+    // Parity: Dashboard netProfit === Reports netProfit
+    assert(approxEqual(dashF.netProfit, repF.netProfit),
+      `F: PARITY — Dashboard netProfit (₹${dashF.netProfit}) === Reports netProfit (₹${repF.netProfit})`)
 
     // ═══════════════════════════════════════════════════════════════════
     // §SCENARIO-G: Historical COGS — snapshot unchanged after price change
@@ -441,12 +442,13 @@ async function main() {
       assert(approxEqual(dashH.bucketLegacyOpEx, repH.legacyIndirectExpenses),
         `H: legacyOpEx parity — Dashboard ₹${dashH.bucketLegacyOpEx} === Reports ₹${repH.legacyIndirectExpenses}`)
 
-      // Note: Dashboard netProfit uses authoritativeOpEx ONLY.
-      // Reports netProfit uses hybrid indirectExpenses (authoritative + legacy).
-      // This is by design — Dashboard is authoritative, Reports is backward-compatible.
+      // §P16-STEP3.1-PARITY-FIX: Both Dashboard and Reports now use authoritative-only OpEx for Net Profit.
+      // Legacy/unclassified expenses are disclosed separately but do NOT reduce authoritative Net Profit.
+      assert(approxEqual(dashH.netProfit, repH.netProfit),
+        `H: NET PROFIT PARITY — Dashboard ₹${dashH.netProfit} === Reports ₹${repH.netProfit}`)
       console.log(`  ℹ️  Dashboard netProfit = ₹${dashH.netProfit} (authoritative only)`)
-      console.log(`  ℹ️  Reports netProfit = ₹${repH.netProfit} (hybrid: authoritative + legacy)`)
-      console.log(`  ℹ️  Difference = ₹${repH.netProfit - dashH.netProfit} (legacy ₹${dashH.bucketLegacyOpEx})`)
+      console.log(`  ℹ️  Reports netProfit = ₹${repH.netProfit} (authoritative only — PARITY FIXED)`)
+      console.log(`  ℹ️  Legacy OpEx (disclosed separately) = ₹${dashH.bucketLegacyOpEx}`)
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -658,9 +660,9 @@ async function main() {
     // INV-38: Legacy OpEx does NOT silently enter authoritative Net Profit
     assert(approxEqual(finalDash.netProfit, finalDash.grossProfit - finalDash.operatingExpense),
       `INV-38: Net Profit = grossProfit - authoritativeOpEx (legacy NOT included)`)
-    // INV-42: Dashboard netRevenue == Reports netRevenue
-    assert(approxEqual(finalDash.netRevenue, finalRep.netRevenue),
-      `INV-42: Dashboard netRevenue === Reports netRevenue`)
+    // INV-42: Dashboard netProfit == Reports netProfit (PARITY FIXED)
+    assert(approxEqual(finalDash.netProfit, finalRep.netProfit),
+      `INV-42: Dashboard netProfit (₹${finalDash.netProfit}) === Reports netProfit (₹${finalRep.netProfit}) — PARITY FIXED`)
     // INV-43: Dashboard authoritativeOpEx == Reports authoritativeIndirectExpenses
     assert(approxEqual(finalDash.bucketAuthoritativeOpEx, finalRep.authoritativeIndirectExpenses),
       `INV-43: Dashboard authoritativeOpEx === Reports authoritativeIndirectExpenses`)

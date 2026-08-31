@@ -292,9 +292,13 @@ export async function GET(req: NextRequest) {
   const legacyIndirectExpenses = legacyOpExAgg._sum.amount?.toNumber() ?? 0
   const totalExpense = cogs + indirectExpenses
 
-  // §PROFIT: Gross Profit = Net Revenue − COGS. Net Profit = Gross Profit − Indirect Expenses.
+  // §PROFIT: Gross Profit = Net Revenue − COGS. Net Profit = Gross Profit − Authoritative Operating Expense.
+  // §P16-STEP3.1-PARITY-FIX: Net Profit now uses authoritativeIndirectExpenses ONLY (not hybrid).
+  // This aligns Reports with Dashboard: both use ONLY subtype='operating_expense' for Net Profit.
+  // Legacy/unclassified expenses (legacyIndirectExpenses) are still exposed separately for disclosure
+  // but do NOT silently reduce authoritative Net Profit.
   const grossProfit = netRevenue - cogs
-  const netProfit = grossProfit - indirectExpenses
+  const netProfit = grossProfit - authoritativeIndirectExpenses
 
   // §GST-BREAKDOWN: Convert groupBy results to the same format as before.
   // gst = total × gstRate / 100 for each rate group.

@@ -683,9 +683,9 @@ async function main() {
       'Dashboard SQL counts operating_expense subtype as OpEx')
     assert(reportsSrc.includes("transactionSubtype: 'operating_expense'"),
       'Reports indirectExpenses counts operating_expense subtype')
-    // Reports: netProfit = grossProfit - indirectExpenses (indirectExpenses includes operating_expense)
-    assert(reportsSrc.includes('netProfit = grossProfit - indirectExpenses'),
-      'Reports: netProfit = grossProfit - indirectExpenses (includes operating_expense)')
+    // §P16-STEP3.1-PARITY-FIX: Reports netProfit now uses authoritativeIndirectExpenses (not hybrid)
+    assert(reportsSrc.includes('netProfit = grossProfit - authoritativeIndirectExpenses'),
+      'Reports: netProfit = grossProfit - authoritativeIndirectExpenses (parity fixed — authoritative only)')
   }
 
   // ═══════════════════════════════════════════════════════════════════════
