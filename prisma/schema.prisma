@@ -429,6 +429,11 @@ model Invoice {
   //   pickup: customer will pick up later (pending)
   //   ready:  packed and ready for pick-up (intermediate state)
   deliveryStatus      String?  @default("handed") // handed | pickup | ready
+  // §P16-STEP3.8: Idempotency key for SalePad operations.
+  // When SalePad sends saleOperationId, the server checks if an invoice with this
+  // ID already exists for this business. If so, it returns the original invoice
+  // instead of creating a duplicate. Scoped by businessId via @@unique.
+  saleOperationId     String?  @unique
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -440,6 +445,8 @@ model Invoice {
   // §UNIQUE-CONSTRAINT: Prevents duplicate invoice numbers within the same business.
   // Without this, concurrent requests could create invoices with the same number.
   @@unique([businessId, invoiceNumber])
+  // §P16-STEP3.8: Idempotency — unique operation ID per business prevents duplicate SalePad submissions.
+  @@unique([businessId, saleOperationId])
   @@index([businessId])
   @@index([partyId])
   // §REPORTS-PERF: Composite index for date-range queries scoped by businessId.

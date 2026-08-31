@@ -1158,6 +1158,12 @@ export function SalePadView() {
       // §1: Split payment — amountPaid is the sum of all split modes.
       // If no split, fall back to full grand total.
       const amountPaid = hasSplitPayment ? totalSplitPaid : grandTotal
+      // §P16-STEP3.8: Generate idempotency key for this sale operation.
+      // This prevents duplicate invoice creation on retry/double-click.
+      const saleOperationId = crypto.randomUUID()
+      // §P16-STEP3.8: Send ALL accounting to invoice API in ONE atomic request.
+      // The server creates cash credit + credit debit INSIDE its db.$transaction.
+      // SalePad no longer makes separate /api/transactions calls.
       const invoice = await apiPost('/api/invoices', {
         partyId: customer?.id,
         items: cart.map((i) => ({
@@ -1176,22 +1182,19 @@ export function SalePadView() {
         type: 'retail',
         amountPaid,
         deliveryStatus: fulfillmentStatus,
-        // §P16-STEP3.7: Send deliveryCharge to server. Server includes it in grandTotal.
         deliveryCharge: deliveryChargeNum,
+        // §P16-STEP3.8: Idempotency + atomic transaction creation
+        saleOperationId,
+        salePadMode: true,
       })
-      // §P16-STEP3.7: Use SERVER-AUTHORITATIVE amounts for all accounting transactions.
-      // Never use local ledgerDue/roundedTotal for transaction creation.
+      // Server has created ALL accounting effects atomically:
+      // - Invoice + InvoiceItems + stock + party balance + sale side-effect
+      // - Cash credit (type=credit, amount=amountPaid)
+      // - Credit debit (type=debit, amount=amountDue)
+      // No separate /api/transactions calls needed.
       const serverAmountDue = Number(invoice.amountDue) || 0
       const serverAmountPaid = Number(invoice.amountPaid) || 0
-      // §2: If server says customer owes money, create credit transaction using server amountDue
-      if (serverAmountDue > 0 && customer) {
-        await apiPost('/api/transactions', {
-          partyId: customer.id,
-          type: 'debit',
-          amount: serverAmountDue,
-          description: `Ledger due (split payment) — Invoice ${invoice.invoiceNumber || invoice.id}`,
-          category: 'Credit Sale',
-        })
+      if (serverAmountDue > 0) {
         toast.success(`ইনভয়েস তৈরি · খাতায় বাকি ₹${serverAmountDue.toFixed(2)} যুক্ত হয়েছে`)
       } else {
         toast.success('ইনভয়েস তৈরি হয়েছে')
@@ -1235,9 +1238,8 @@ export function SalePadView() {
     try {
       // §1: Split payment — amountPaid is sum of all split modes (or grand total if no split)
       const amountPaid = hasSplitPayment ? totalSplitPaid : grandTotal
-      // §P16-STEP3.7: Create invoice FIRST, then use server-authoritative amounts.
-      // Previous code created cash credit BEFORE invoice — that was non-atomic and
-      // could orphan a credit transaction if invoice creation failed.
+      // §P16-STEP3.8: Generate idempotency key + send ALL accounting in ONE atomic request.
+      const saleOperationId = crypto.randomUUID()
       const invoice = await apiPost('/api/invoices', {
         partyId: customer?.id,
         items: cart.map((i) => ({
@@ -1255,41 +1257,18 @@ export function SalePadView() {
         paymentMode,
         type: 'retail',
         amountPaid,
-        // §P16-STEP3.7: Send deliveryCharge to server. Server includes it in grandTotal.
         deliveryCharge: deliveryChargeNum,
+        // §P16-STEP3.8: Idempotency + atomic transaction creation
+        saleOperationId,
+        salePadMode: true,
+        salePadCashDescription: customer ? `Sale (${mode}) — split payment` : undefined,
+        salePadWalkInDescription: `Walk-in sale (${mode}) — split payment`,
+        salePadCreditDescription: `Ledger due (split payment)`,
       })
-      // §P16-STEP3.7: Use SERVER-AUTHORITATIVE amounts for all accounting transactions.
+      // Server has created ALL accounting effects atomically inside db.$transaction.
       const serverAmountPaid = Number(invoice.amountPaid) || 0
       const serverAmountDue = Number(invoice.amountDue) || 0
-      // Create cash credit using server amountPaid (if > 0)
-      if (serverAmountPaid > 0) {
-        if (customer) {
-          await apiPost('/api/transactions', {
-            partyId: customer.id,
-            type: 'credit',
-            amount: serverAmountPaid,
-            description: `Sale (${mode}) — split payment`,
-            category: 'Cash Sale',
-          })
-        } else {
-          await apiPost('/api/transactions', {
-            partyId: null,
-            type: 'credit',
-            amount: serverAmountPaid,
-            description: `Walk-in sale (${mode}) — split payment`,
-            category: 'Cash Sale',
-          })
-        }
-      }
-      // Create credit debit using server amountDue (if customer owes)
-      if (serverAmountDue > 0 && customer) {
-        await apiPost('/api/transactions', {
-          partyId: customer.id,
-          type: 'debit',
-          amount: serverAmountDue,
-          description: `Ledger due (split payment)`,
-          category: 'Credit Sale',
-        })
+      if (serverAmountDue > 0) {
         toast.success(`সম্পন্ন · খাতায় বাকি ₹${serverAmountDue.toFixed(2)} যুক্ত হয়েছে`)
       } else {
         toast.success('সম্পন্ন হয়েছে — স্টক আপডেট হয়েছে')

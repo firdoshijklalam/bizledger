@@ -134,6 +134,8 @@ export interface SanitizedInvoice {
   grandTotal: number
   // §P16-STEP3.7: deliveryCharge stored on invoice (nullable for legacy backups)
   deliveryCharge?: number | null
+  // §P16-STEP3.8: idempotency key (nullable for legacy backups)
+  saleOperationId?: string | null
   amountPaid: number
   amountDue: number
   paymentMode: string | null
@@ -354,6 +356,8 @@ export function sanitizeInvoice(i: any): SanitizedInvoice {
     grandTotal: toNum(i.grandTotal),
     // §P16-STEP3.7: preserve deliveryCharge (nullable for legacy backups)
     deliveryCharge: i.deliveryCharge != null ? toNum(i.deliveryCharge) : 0,
+    // §P16-STEP3.8: preserve saleOperationId (nullable for legacy backups)
+    saleOperationId: i.saleOperationId ?? null,
     amountPaid: toNum(i.amountPaid),
     amountDue: toNum(i.amountDue),
     paymentMode: i.paymentMode ?? null,

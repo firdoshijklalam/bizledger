@@ -372,6 +372,8 @@ model Invoice {
   paidToRole      String? // partner | agent | primary
   // §3: Fulfillment status — handed | pickup | ready (for "Pick Up Later" orders)
   deliveryStatus  String?  @default("handed") // handed | pickup | ready
+  // §P16-STEP3.8: Idempotency key for SalePad operations
+  saleOperationId String?  @unique
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -384,6 +386,8 @@ model Invoice {
   @@index([partyId])
   // §UNIQUE-CONSTRAINT: Prevents duplicate invoice numbers within the same business.
   @@unique([businessId, invoiceNumber])
+  // §P16-STEP3.8: Idempotency — unique operation ID per business
+  @@unique([businessId, saleOperationId])
   // §REPORTS-PERF: Composite index for date-range queries scoped by businessId.
   @@index([businessId, createdAt])
 }

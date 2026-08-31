@@ -48,6 +48,24 @@ export async function POST(req: NextRequest) {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
+    // §P16-STEP3.8: IDEMPOTENCY — if saleOperationId is provided, check for existing invoice.
+    // If found, return the original invoice (duplicate request / retry / double-click).
+    // This is scoped by businessId — one business cannot read another's invoice via this path.
+    const saleOperationId = typeof body.saleOperationId === 'string' && body.saleOperationId.length > 0
+      ? body.saleOperationId
+      : null
+
+    if (saleOperationId) {
+      const existing = await db.invoice.findFirst({
+        where: { businessId: business.id, saleOperationId },
+        include: { items: true },
+      })
+      if (existing) {
+        // Return original invoice — this is a duplicate/retry request
+        return NextResponse.json(existing)
+      }
+    }
+
     // §INPUT-VALIDATION: Validate items — quantity, price, discount, gstRate
     // must be finite numbers. Reject NaN, Infinity, negative values.
     const items = body.items || []
@@ -274,6 +292,7 @@ export async function POST(req: NextRequest) {
           gstAmount,
           grandTotal,
           deliveryCharge,
+          saleOperationId,
           amountPaid,
           amountDue,
           paymentMode: body.paymentMode || null,
@@ -473,10 +492,53 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // §P16-STEP3.8: SalePad atomic transaction creation.
+      // When body.salePadMode is true, the invoice API creates the SalePad-specific
+      // cash credit and credit debit transactions INSIDE the same db.$transaction.
+      // This eliminates the non-atomic separate API calls that SalePad previously made.
+      // The sale side-effect transactions (above) are for invoice-linked accounting.
+      // The SalePad transactions below are for Khata (customer ledger) entries.
+      // They use server-authoritative amounts (amountPaid, amountDue) — never client values.
+      // Walk-in sales (no partyId) get only a cash credit (no receivable).
+      if (body.salePadMode === true && !isPurchase) {
+        // Create cash credit if customer paid anything
+        if (amountPaid > 0) {
+          if (body.partyId) {
+            await tx.transaction.create({
+              data: {
+                businessId: business.id, partyId: body.partyId, type: 'credit',
+                amount: amountPaid,
+                description: body.salePadCashDescription || `Sale (retail) — split payment`,
+                category: 'Cash Sale', invoiceId: inv.id,
+              },
+            })
+          } else {
+            // Walk-in — no party, no balance update
+            await tx.transaction.create({
+              data: {
+                businessId: business.id, partyId: null, type: 'credit',
+                amount: amountPaid,
+                description: body.salePadWalkInDescription || `Walk-in sale (retail) — split payment`,
+                category: 'Cash Sale', invoiceId: inv.id,
+              },
+            })
+          }
+        }
+        // Create credit debit if customer owes money
+        if (amountDue > 0 && body.partyId) {
+          await tx.transaction.create({
+            data: {
+              businessId: business.id, partyId: body.partyId, type: 'debit',
+              amount: amountDue,
+              description: body.salePadCreditDescription || `Ledger due (split payment)`,
+              category: 'Credit Sale', invoiceId: inv.id,
+            },
+          })
+        }
+      }
+
       return inv
     })
-
-    // 5. Trigger grade recalculation (fire-and-forget, outside transaction)
     if (body.partyId) {
       recalculatePartyGrade(body.partyId).catch((e) => console.error('Grade recalc error:', e))
     }
