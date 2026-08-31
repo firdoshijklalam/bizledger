@@ -170,7 +170,23 @@ export async function POST(req: NextRequest) {
     }, 0)
 
     // §STEP-5: Calculate grand total (server-authoritative)
-    const grandTotal = taxable + gstAmount
+    // §P16-STEP3.7: deliveryCharge is now part of grandTotal.
+    // Delivery charge is a customer-facing charge (transport/delivery fee) that
+    // the customer owes. It is NOT product revenue (not in subtotal) and NOT
+    // subject to GST (separate from taxable). It IS part of the customer's
+    // payable (grandTotal) and receivable (amountDue).
+    // Validation: must be a non-negative finite number.
+    const deliveryCharge = (() => {
+      const dc = Number(body.deliveryCharge) || 0
+      if (!Number.isFinite(dc) || dc < 0) {
+        return null // signal rejection
+      }
+      return dc
+    })()
+    if (deliveryCharge === null) {
+      return NextResponse.json({ error: 'Invalid deliveryCharge: must be a non-negative number' }, { status: 400 })
+    }
+    const grandTotal = taxable + gstAmount + deliveryCharge
 
     // §STEP-6: Validate amountPaid
     const amountPaid = Number(body.amountPaid) || 0
@@ -257,6 +273,7 @@ export async function POST(req: NextRequest) {
           discountAmount,
           gstAmount,
           grandTotal,
+          deliveryCharge,
           amountPaid,
           amountDue,
           paymentMode: body.paymentMode || null,

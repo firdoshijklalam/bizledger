@@ -358,6 +358,8 @@ model Invoice {
   discountAmount  Decimal  @default(0)
   gstAmount       Decimal  @default(0)
   grandTotal      Decimal  @default(0)
+  // §P16-STEP3.7: Delivery/transport charge added to grandTotal.
+  deliveryCharge  Decimal  @default(0)
   amountPaid      Decimal  @default(0)
   amountDue       Decimal  @default(0)
   paymentMode     String?  // cash | upi | credit | cheque

@@ -132,6 +132,8 @@ export interface SanitizedInvoice {
   discountAmount: number
   gstAmount: number
   grandTotal: number
+  // §P16-STEP3.7: deliveryCharge stored on invoice (nullable for legacy backups)
+  deliveryCharge?: number | null
   amountPaid: number
   amountDue: number
   paymentMode: string | null
@@ -350,6 +352,8 @@ export function sanitizeInvoice(i: any): SanitizedInvoice {
     discountAmount: toNum(i.discountAmount),
     gstAmount: toNum(i.gstAmount),
     grandTotal: toNum(i.grandTotal),
+    // §P16-STEP3.7: preserve deliveryCharge (nullable for legacy backups)
+    deliveryCharge: i.deliveryCharge != null ? toNum(i.deliveryCharge) : 0,
     amountPaid: toNum(i.amountPaid),
     amountDue: toNum(i.amountDue),
     paymentMode: i.paymentMode ?? null,

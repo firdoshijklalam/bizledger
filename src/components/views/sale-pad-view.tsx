@@ -1176,22 +1176,28 @@ export function SalePadView() {
         type: 'retail',
         amountPaid,
         deliveryStatus: fulfillmentStatus,
+        // §P16-STEP3.7: Send deliveryCharge to server. Server includes it in grandTotal.
+        deliveryCharge: deliveryChargeNum,
       })
-      // §2: If ledger due > 0 and customer is selected, auto-route remainder to debt ledger
-      if (ledgerDue > 0 && customer) {
+      // §P16-STEP3.7: Use SERVER-AUTHORITATIVE amounts for all accounting transactions.
+      // Never use local ledgerDue/roundedTotal for transaction creation.
+      const serverAmountDue = Number(invoice.amountDue) || 0
+      const serverAmountPaid = Number(invoice.amountPaid) || 0
+      // §2: If server says customer owes money, create credit transaction using server amountDue
+      if (serverAmountDue > 0 && customer) {
         await apiPost('/api/transactions', {
           partyId: customer.id,
           type: 'debit',
-          amount: ledgerDue,
+          amount: serverAmountDue,
           description: `Ledger due (split payment) — Invoice ${invoice.invoiceNumber || invoice.id}`,
           category: 'Credit Sale',
         })
-        toast.success(`ইনভয়েস তৈরি · খাতায় বাকি ₹${ledgerDue.toFixed(2)} যুক্ত হয়েছে`)
+        toast.success(`ইনভয়েস তৈরি · খাতায় বাকি ₹${serverAmountDue.toFixed(2)} যুক্ত হয়েছে`)
       } else {
         toast.success('ইনভয়েস তৈরি হয়েছে')
       }
       // Sound Box: announce payment received
-      soundBoxSpeak({ amount: amountPaid, customerName: customer?.name })
+      soundBoxSpeak({ amount: serverAmountPaid, customerName: customer?.name })
       triggerRefresh()
       // Clear active cart + split payment fields
       setCart([])
@@ -1229,24 +1235,10 @@ export function SalePadView() {
     try {
       // §1: Split payment — amountPaid is sum of all split modes (or grand total if no split)
       const amountPaid = hasSplitPayment ? totalSplitPaid : grandTotal
-      if (customer) {
-        await apiPost('/api/transactions', {
-          partyId: customer.id,
-          type: 'credit',
-          amount: amountPaid,
-          description: `Sale (${mode}) — split payment`,
-          category: 'Cash Sale',
-        })
-      } else {
-        await apiPost('/api/transactions', {
-          partyId: null,
-          type: 'credit',
-          amount: amountPaid,
-          description: `Walk-in sale (${mode}) — split payment`,
-          category: 'Cash Sale',
-        })
-      }
-      await apiPost('/api/invoices', {
+      // §P16-STEP3.7: Create invoice FIRST, then use server-authoritative amounts.
+      // Previous code created cash credit BEFORE invoice — that was non-atomic and
+      // could orphan a credit transaction if invoice creation failed.
+      const invoice = await apiPost('/api/invoices', {
         partyId: customer?.id,
         items: cart.map((i) => ({
           productId: i.productId,
@@ -1263,17 +1255,42 @@ export function SalePadView() {
         paymentMode,
         type: 'retail',
         amountPaid,
+        // §P16-STEP3.7: Send deliveryCharge to server. Server includes it in grandTotal.
+        deliveryCharge: deliveryChargeNum,
       })
-      // §2: Auto-route ledger due to customer's debt account
-      if (ledgerDue > 0 && customer) {
+      // §P16-STEP3.7: Use SERVER-AUTHORITATIVE amounts for all accounting transactions.
+      const serverAmountPaid = Number(invoice.amountPaid) || 0
+      const serverAmountDue = Number(invoice.amountDue) || 0
+      // Create cash credit using server amountPaid (if > 0)
+      if (serverAmountPaid > 0) {
+        if (customer) {
+          await apiPost('/api/transactions', {
+            partyId: customer.id,
+            type: 'credit',
+            amount: serverAmountPaid,
+            description: `Sale (${mode}) — split payment`,
+            category: 'Cash Sale',
+          })
+        } else {
+          await apiPost('/api/transactions', {
+            partyId: null,
+            type: 'credit',
+            amount: serverAmountPaid,
+            description: `Walk-in sale (${mode}) — split payment`,
+            category: 'Cash Sale',
+          })
+        }
+      }
+      // Create credit debit using server amountDue (if customer owes)
+      if (serverAmountDue > 0 && customer) {
         await apiPost('/api/transactions', {
           partyId: customer.id,
           type: 'debit',
-          amount: ledgerDue,
+          amount: serverAmountDue,
           description: `Ledger due (split payment)`,
           category: 'Credit Sale',
         })
-        toast.success(`সম্পন্ন · খাতায় বাকি ₹${ledgerDue.toFixed(2)} যুক্ত হয়েছে`)
+        toast.success(`সম্পন্ন · খাতায় বাকি ₹${serverAmountDue.toFixed(2)} যুক্ত হয়েছে`)
       } else {
         toast.success('সম্পন্ন হয়েছে — স্টক আপডেট হয়েছে')
       }

@@ -410,6 +410,10 @@ model Invoice {
   discountAmount      Decimal  @default(0) @db.Decimal(18, 2)
   gstAmount           Decimal  @default(0) @db.Decimal(18, 2)
   grandTotal          Decimal  @default(0) @db.Decimal(18, 2)
+  // §P16-STEP3.7: Delivery/transport charge added to grandTotal.
+  // Stored separately so Reports can distinguish product revenue from delivery income.
+  // grandTotal = taxable + gstAmount + deliveryCharge
+  deliveryCharge      Decimal  @default(0) @db.Decimal(18, 2)
   amountPaid          Decimal  @default(0) @db.Decimal(18, 2)
   amountDue           Decimal  @default(0) @db.Decimal(18, 2)
   paymentMode         String? // cash | upi | credit | cheque
