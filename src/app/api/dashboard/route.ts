@@ -490,6 +490,17 @@ export async function GET(req: NextRequest) {
       })
     }
 
+    // §P16-STEP3.8.1-DASHBOARD-CARDS: Range-level Gross Profit + Net Profit
+    // for the new "Gross Profit" and "Net Profit / Loss" dashboard cards.
+    // Computed by reducing the EXISTING salesTrend[] array (already built
+    // above). NO new queries, NO formula changes, NO write-path changes.
+    //   rangeGrossProfit = SUM(salesTrend[].grossProfit)
+    //   rangeNetProfit   = SUM(salesTrend[].netProfit) — CAN BE NEGATIVE
+    // These are READ-ONLY display values derived from the same buckets the
+    // chart already renders. Accounting semantics unchanged.
+    const rangeGrossProfit = salesTrend.reduce((s, b) => s + b.grossProfit, 0)
+    const rangeNetProfit = salesTrend.reduce((s, b) => s + b.netProfit, 0)
+
     return NextResponse.json({
       totalReceivable,
       totalPayable,
@@ -535,6 +546,13 @@ export async function GET(req: NextRequest) {
       topProductsByUnits,
       inventoryValue,
       inventoryTrend,
+      // §P16-STEP3.8.1-DASHBOARD-CARDS: Additive range-level P&L fields.
+      // Used by the new "Gross Profit" + "Net Profit / Loss" cards.
+      // Computed from the EXISTING salesTrend[] array — no formula change.
+      // rangeGrossProfit = SUM(salesTrend[].grossProfit)
+      // rangeNetProfit   = SUM(salesTrend[].netProfit) — CAN BE NEGATIVE
+      rangeGrossProfit,
+      rangeNetProfit,
     })
   } catch (e) {
     return apiError(e, 'Dashboard request failed')
