@@ -41,9 +41,11 @@ const REVENUE_INVOICE_TYPES = ['sales', 'retail'] as const
 // included (dead type, aligned with Reports).
 const EXPENSE_TYPES = ['debit', 'expense'] as const
 
-// §BUCKET-CAP: Prevent unbounded query results.
-const MAX_INVOICES_PER_BUCKET = 200
-const MAX_TRANSACTIONS_PER_BUCKET = 100
+// §FIX-FINDING-2: REMOVED MAX_INVOICES_PER_BUCKET / MAX_TRANSACTIONS_PER_BUCKET
+// caps. The dashboard route fetches ALL invoices/transactions in range with
+// NO cap — keeping caps here would cause breakdown summary ≠ dashboard bucket
+// summary for high-volume buckets. The endpoint is already scoped to one
+// bucket + one business, so the query is bounded by the bucket's time window.
 
 // §DECIMAL-FIX: Prisma Decimal fields return as string. Convert to Number.
 const num = (v: any): number => Number(v) || 0
@@ -223,13 +225,23 @@ export async function getBreakdown(
   const bucketEnd: Date = bucket.end
 
   // ─── §SELF-CONTAINED-QUERIES ──────────────────────────────────────
+  // §FIX-FINDING-1: Use HALF-OPEN interval [bucketStart, bucketEnd) — matching
+  // the dashboard route's in-memory filter (line 337: >= bucketStart && < bucketEnd).
+  // The previous `lte: bucketEnd` could double-count records exactly at bucket
+  // boundaries (where bucket[N].end === bucket[N+1].start).
+  // §FIX-FINDING-2: REMOVED take: 200 / take: 100 caps. The dashboard route
+  // fetches ALL invoices/transactions in range with NO cap. Keeping caps here
+  // would cause breakdown summary ≠ dashboard bucket summary for high-volume
+  // buckets (>200 invoices or >100 expense transactions). The endpoint is
+  // already scoped to one bucket + one business, so the query is bounded by
+  // the bucket's time window, not an arbitrary row count.
   const [bucketInvoices, bucketExpenseTxns] = await Promise.all([
     db.invoice.findMany({
       where: {
         businessId,
         type: { in: [...REVENUE_INVOICE_TYPES] },
         status: { not: 'void' },
-        createdAt: { gte: bucketStart, lte: bucketEnd },
+        createdAt: { gte: bucketStart, lt: bucketEnd },
       },
       include: {
         party: { select: { id: true, name: true } },
@@ -246,12 +258,11 @@ export async function getBreakdown(
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: MAX_INVOICES_PER_BUCKET,
     }),
     db.transaction.findMany({
       where: {
         businessId,
-        createdAt: { gte: bucketStart, lte: bucketEnd },
+        createdAt: { gte: bucketStart, lt: bucketEnd },
         OR: [
           { transactionSubtype: 'operating_expense' },
           {
@@ -262,7 +273,6 @@ export async function getBreakdown(
         ],
       },
       orderBy: { createdAt: 'desc' },
-      take: MAX_TRANSACTIONS_PER_BUCKET,
     }),
   ])
 
