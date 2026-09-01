@@ -978,30 +978,11 @@ export function DashboardView() {
           Time-dependent cards now have their own dropdown range selector.
           The chart below still has its own range selector. */}
 
-      {/* Custom Date Range Picker — used by the chart's range selector */}
-      <AnimatePresence>
-        {showCustomPicker && timeRange === 'custom' && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-            <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-purple-700 dark:text-purple-300">📅 Custom Date Range</p>
-                <button onClick={() => { setShowCustomPicker(false); setTimeRange('7d') }} className="text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] text-muted-foreground">Start Date</label>
-                  <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" />
-                </div>
-                <div>
-                  <label className="text-[10px] text-muted-foreground">End Date</label>
-                  <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" />
-                </div>
-              </div>
-              {customStart && customEnd && <p className="text-[10px] text-emerald-600">✓ Range applied — data will filter to selected dates</p>}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* §P16-STEP3.8.1-MOVED: Custom Date Range panel was moved INSIDE the
+          chart Card (below the chart-type/time-range selectors, above the
+          chart visualization). It now appears contextually near the chart
+          whose range it affects, instead of above the metric cards grid.
+          See the chart Card below for the new location. */}
 
       {/* §LOCALIZED-CARD-FILTERS: Metric cards grid.
           Lifetime cards (Receivable, Payable, Health, LowStock) have NO
@@ -1087,6 +1068,34 @@ export function DashboardView() {
             {DASHBOARD_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select>
         </div>
+
+        {/* §P16-STEP3.8.1-MOVED: Custom Date Range panel — now INSIDE the chart
+            Card, contextually below the chart-type/time-range selectors and
+            above the chart visualization. Appears ONLY when timeRange==='custom'.
+            Mobile-first: 2-col grid, no horizontal overflow, animated height. */}
+        <AnimatePresence>
+          {showCustomPicker && timeRange === 'custom' && (
+            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden mb-3">
+              <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-purple-700 dark:text-purple-300">📅 Custom Date Range</p>
+                  <button onClick={() => { setShowCustomPicker(false); setTimeRange('7d') }} className="text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-muted-foreground">Start Date</label>
+                    <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-muted-foreground">End Date</label>
+                    <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" />
+                  </div>
+                </div>
+                {customStart && customEnd && <p className="text-[10px] text-emerald-600">✓ Range applied — data will filter to selected dates</p>}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* §TOGGLE-FIX: Chart rendering respects chartView (line vs bar) for
             ALL chart types. Categories (pie) ignores the toggle. Inventory
