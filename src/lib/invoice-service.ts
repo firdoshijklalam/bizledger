@@ -676,6 +676,12 @@ export async function createInvoice(body: any, business: { id: string }): Promis
 
       return inv
     }, { timeout: TX_TIMEOUT_MS })
+    // §P16-STEP3.8.1-FIX: break out of the retry loop on SUCCESS. Without
+    // this, the loop continued to attempt 1, tried to create a duplicate
+    // invoice, hit P2002 (on (businessId, invoiceNumber) — not
+    // saleOperationId), failed the recovery's target check, and returned
+    // HTTP 500 even though the invoice WAS created. This is a ONE-LINE FIX.
+    break
   } catch (e: any) {
     // §P16-STEP3.8.1: P2002 IDEMPOTENCY RECOVERY.
     // Only handle P2002 when ALL of:
