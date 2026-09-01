@@ -70,6 +70,13 @@ interface ExtendedDashboardStats extends DashboardStats {
   // shows a distinct value from Total Sales.
   rangeNetRevenue?: number
   rangeDiscount?: number
+  // §P16-STEP3.8.1-DASHBOARD-CARDS: Range-level P&L fields (additive —
+  // computed from existing salesTrend[] buckets in /api/dashboard).
+  // Used by the new "Net Profit / Loss" + "Gross Profit" cards.
+  // rangeNetProfit CAN BE NEGATIVE (Gross Profit − authoritative OpEx).
+  // rangeGrossProfit CAN BE NEGATIVE (Net Revenue − COGS).
+  rangeGrossProfit?: number
+  rangeNetProfit?: number
   // §HEALTH-BREAKDOWN (Phase 5 D4 fix): Decomposed health score components
   // from the dashboard API. Used by Reports P&L view's Health Breakdown
   // section so the user can see WHAT contributes to the score.
@@ -503,7 +510,7 @@ export function DashboardView() {
     { id: 'lowStock', label: t('dash.lowStock'), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', description: 'Products below stock threshold', recommended: true,
       valueExtractor: (d) => d?.lowStockCount ?? 0, formatValue: (v) => String(v),
       onClick: () => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') } },
-    { id: 'totalSales', label: 'Total Sales', icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', description: 'Sales for selected period (incl. GST)', recommended: true, isTimeMetric: true, defaultRange: '1d',
+    { id: 'totalSales', label: 'Total Sales (incl. GST)', icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', description: 'Sales for selected period (incl. GST) — SUM(grandTotal)', recommended: true, isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeSales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: (ctx) => { saveScrollPos('dashboard'); setHistoryRangeContext(ctx); setActiveView('history') } },
     { id: 'totalCollection', label: 'Total Collection', icon: ArrowDownRight, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', description: 'Collections for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
@@ -512,8 +519,21 @@ export function DashboardView() {
     { id: 'totalExpense', label: 'Total Expense', icon: ArrowUpRight, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', description: 'Expenses for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeExpense ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
-    { id: 'totalRevenue', label: 'Total Revenue', icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', description: 'Net revenue (pre-tax, post-discount)', recommended: true, isTimeMetric: true, defaultRange: '1d',
+    { id: 'totalRevenue', label: 'Net Revenue (excl. GST)', icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', description: 'Net revenue (pre-tax, post-discount) — SUM(subtotal − discountAmount)', recommended: true, isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeNetRevenue ?? d?.rangeSales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
+    // §P16-STEP3.8.1-NEW-CARDS: Net Profit / Loss + Gross Profit.
+    // Values come from the additive dashboard API fields (rangeNetProfit,
+    // rangeGrossProfit) — computed from existing salesTrend[] buckets.
+    // NOT recomputed in the frontend. NOT from revenue - expense (cash-flow proxy).
+    // Net Profit = Gross Profit - Authoritative Operating Expense (CAN BE NEGATIVE).
+    // Gross Profit = Net Revenue - COGS (CAN BE NEGATIVE).
+    // Negative values display with a minus sign — never silently converted to positive.
+    { id: 'netProfitLoss', label: 'Net Profit / Loss', icon: TrendingUp, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', description: 'Net profit/loss (Gross Profit − authoritative OpEx) — can be negative', recommended: true, isTimeMetric: true, defaultRange: '1d',
+      valueExtractor: (d) => d?.rangeNetProfit ?? 0, formatValue: (v, c) => formatCurrency(v, c),
+      onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
+    { id: 'grossProfit', label: 'Gross Profit', icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Gross profit (Net Revenue − COGS) — can be negative', isTimeMetric: true, defaultRange: '1d',
+      valueExtractor: (d) => d?.rangeGrossProfit ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
     // §ADDITIONAL-CARDS: Available but hidden by default
     { id: 'totalCustomers', label: 'Total Customers', icon: Users, tint: 'bg-blue-500', bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-700 dark:text-blue-300', description: 'Total number of customers',

@@ -42,23 +42,36 @@ export interface DashboardCardDef {
   defaultRange?: string
 }
 
-// §DEFAULT-CARDS: Recommended default card IDs in order
+// §DEFAULT-CARDS: Recommended default card IDs in order.
+// §P16-STEP3.8.1: Reordered per approved Phase E priority:
+//   PRIMARY PERFORMANCE → SECONDARY FINANCIAL → INVENTORY/OPS → HEALTH
+// Added 2 new cards: netProfitLoss (visible) + grossProfit (hidden).
 export const DEFAULT_CARD_CONFIG = [
-  { id: 'totalReceivable', visible: true, order: 0 },
-  { id: 'totalPayable', visible: true, order: 1 },
-  { id: 'businessHealth', visible: true, order: 2 },
-  { id: 'lowStock', visible: true, order: 3 },
-  { id: 'totalSales', visible: true, order: 4 },
-  { id: 'totalCollection', visible: true, order: 5 },
-  { id: 'totalExpense', visible: true, order: 6 },
-  { id: 'totalRevenue', visible: true, order: 7 },
-  // Additional cards (hidden by default)
-  { id: 'totalCustomers', visible: false, order: 8 },
-  { id: 'totalProducts', visible: false, order: 9 },
-  { id: 'totalInvoices', visible: false, order: 10 },
-  { id: 'stockValue', visible: false, order: 11 },
-  { id: 'todaySales', visible: false, order: 12 },
-  { id: 'monthlyRevenue', visible: false, order: 13 },
+  // §PRIMARY-PERFORMANCE
+  { id: 'totalSales',       visible: true,  order: 0 },
+  { id: 'netProfitLoss',    visible: true,  order: 1 },
+  { id: 'totalCollection',  visible: true,  order: 2 },
+  { id: 'totalRevenue',     visible: true,  order: 3 },
+
+  // §SECONDARY-FINANCIAL
+  { id: 'totalReceivable',  visible: true,  order: 4 },
+  { id: 'totalPayable',     visible: true,  order: 5 },
+  { id: 'totalExpense',     visible: true,  order: 6 },
+
+  // §INVENTORY-OPERATIONS
+  { id: 'lowStock',         visible: true,  order: 7 },
+  { id: 'stockValue',       visible: true,  order: 8 },
+
+  // §HEALTH-INSIGHTS
+  { id: 'businessHealth',   visible: true,  order: 9 },
+
+  // §HIDDEN-BY-DEFAULT
+  { id: 'todaySales',       visible: false, order: 10 },
+  { id: 'monthlyRevenue',   visible: false, order: 11 },
+  { id: 'grossProfit',      visible: false, order: 12 },
+  { id: 'totalCustomers',   visible: false, order: 13 },
+  { id: 'totalProducts',    visible: false, order: 14 },
+  { id: 'totalInvoices',    visible: false, order: 15 },
 ]
 
 export type CardConfig = Array<{ id: string; visible: boolean; order: number }>
