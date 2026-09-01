@@ -34,6 +34,7 @@ import {
   type CardConfig,
   type DashboardCardDef,
 } from '@/components/shared/dashboard-card-management'
+import { ProfitLossDrilldownSheet } from '@/components/shared/profit-loss-drilldown-sheet'
 import {
   computeRangeBounds,
   dashboardRangeLabel,
@@ -116,6 +117,10 @@ export function DashboardView() {
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [showCustomPicker, setShowCustomPicker] = useState(false)
+  // §P16-STEP3.8.1-DRILLDOWN: State for the Profit/Loss drill-down sheet.
+  // When set, the bottom sheet opens and fetches /api/dashboard/breakdown
+  // with the dashboard's current range + the tapped bucket's index.
+  const [drilldownBucket, setDrilldownBucket] = useState<{ index: number; fullDate: string } | null>(null)
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null)
   const [topTab, setTopTab] = useState<'debtors' | 'buyers' | 'payments' | 'products' | 'defaulters'>('debtors')
   const [topExpanded, setTopExpanded] = useState(false)
@@ -1181,7 +1186,7 @@ export function DashboardView() {
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<ProfitLossTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <Tooltip content={<ProfitLossTooltip currency={currency} onViewDetails={(fullDate) => { const idx = data.salesTrend.findIndex(b => b.fullDate === fullDate); if (idx >= 0) setDrilldownBucket({ index: idx, fullDate }) }} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Line type="monotone" dataKey="netProfitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Profit" />
                 <Line type="monotone" dataKey="netLossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Loss" />
               </RechartsLineChart>
@@ -1191,7 +1196,7 @@ export function DashboardView() {
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                 <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<ProfitLossTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                <Tooltip content={<ProfitLossTooltip currency={currency} onViewDetails={(fullDate) => { const idx = data.salesTrend.findIndex(b => b.fullDate === fullDate); if (idx >= 0) setDrilldownBucket({ index: idx, fullDate }) }} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
                 <Bar dataKey="netProfitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Profit" />
                 <Bar dataKey="netLossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Loss" />
               </BarChart>
@@ -1614,6 +1619,20 @@ export function DashboardView() {
           })}
         </div>
       </Card>
+
+      {/* §P16-STEP3.8.1-DRILLDOWN: Profit/Loss drill-down bottom sheet.
+          Opens when the user taps "View Details" in the ProfitLossTooltip.
+          Fetches /api/dashboard/breakdown with the dashboard's current range
+          + the tapped bucket's index. Server derives all bucket boundaries. */}
+      <ProfitLossDrilldownSheet
+        open={!!drilldownBucket}
+        onClose={() => setDrilldownBucket(null)}
+        bucket={drilldownBucket}
+        range={timeRange}
+        customStart={customStart}
+        customEnd={customEnd}
+        currency={currency}
+      />
     </div>
   )
 }
@@ -1717,7 +1736,8 @@ function CustomTooltip({ active, payload, label, currency }: any) {
 // §P16-STEP3: ProfitLossTooltip — dedicated tooltip for the Profit vs Loss chart.
 // Shows full P&L breakdown: Revenue, COGS, Gross Profit, Operating Expense, Net Profit/Loss.
 // Uses the same header formatting logic as CustomTooltip (hourly/weekly/monthly/daily).
-function ProfitLossTooltip({ active, payload, label, currency }: any) {
+// §P16-STEP3.8.1: Added "View Details" button to open the drill-down sheet.
+function ProfitLossTooltip({ active, payload, label, currency, onViewDetails }: any) {
   if (!active || !payload || payload.length === 0) return null
   const fullDate = payload[0]?.payload?.fullDate
   const IST_TZ = 'Asia/Kolkata'
@@ -1795,6 +1815,24 @@ function ProfitLossTooltip({ active, payload, label, currency }: any) {
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: 4, paddingTop: 4 }}>
         {renderRow(isLoss ? "Net Loss" : "Net Profit", Math.abs(p.netProfit || 0), isLoss ? "#f87171" : "#10b981")}
       </div>
+      {/* §P16-STEP3.8.1: "View Details" button — opens the drill-down bottom sheet.
+          Touch-friendly (min 44px tap target). Calls onViewDetails with the
+          bucket's fullDate so the parent can find the bucket index and open
+          the sheet with the correct /api/dashboard/breakdown?bucketIndex=X. */}
+      {onViewDetails && fullDate && (
+        <button
+          onClick={() => onViewDetails(fullDate)}
+          style={{
+            marginTop: 8, padding: '6px 0', width: '100%',
+            background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.5)',
+            borderRadius: 6, color: '#c7d2fe', fontSize: 11, fontWeight: 600,
+            cursor: 'pointer', minHeight: 36, display: 'flex', alignItems: 'center',
+            justifyContent: 'center', gap: 4,
+          }}
+        >
+          View Details →
+        </button>
+      )}
     </div>
   )
 }
