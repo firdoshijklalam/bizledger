@@ -43,6 +43,7 @@ import {
   DEFAULT_DASHBOARD_CONFIG,
   parseDashboardSectionConfig,
   isSectionVisible,
+  getOrderedQuickActions,
   type DashboardSectionConfig,
 } from '@/lib/dashboard-preferences'
 import {
@@ -675,12 +676,17 @@ export function DashboardView() {
   const ALL_QUICK_ACTIONS = [
     { label: t('khata.addPartyShort'), icon: Users, view: 'khata' as const, action: 'add-party' as const, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
     { label: t('inv.addProductShort'), icon: Package, view: 'inventory' as const, action: 'add-product' as const, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
-    { label: t('bill.newInvoiceShort'), icon: Receipt, view: 'sale-pad' as const, action: 'new-invoice' as const, color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/30' },
+    { label: t('bill.newInvoiceShort'), icon: Receipt, view: 'sale-pad' as const, action: 'new-invoice' as const, color: 'text-orange-600 bg-orange-50 dark:bg-amber-950/30' },
     { label: t('qa.addTransaction'), icon: ArrowLeftRight, view: 'khata' as const, action: 'add-transaction' as const, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30' },
   ]
-  const visibleQuickActions = ALL_QUICK_ACTIONS.filter(a =>
-    dashSectionConfig.quickActions.visibleActions.includes(a.action)
-  )
+  // §STEP-1B: Use getOrderedQuickActions to respect saved order.
+  // Actions are ordered by config.quickActions.order, with enabled-but-unordered
+  // actions appended safely. Unknown IDs are already filtered by the parser.
+  const orderedActionIds = getOrderedQuickActions(dashSectionConfig)
+  const actionMap = Object.fromEntries(ALL_QUICK_ACTIONS.map(a => [a.action, a]))
+  const visibleQuickActions = orderedActionIds
+    .map(id => actionMap[id])
+    .filter(Boolean) as typeof ALL_QUICK_ACTIONS
 
   // §STEP-1A-ORDERING: Customer Quality grade distribution filtered by the
   // user's visibleGrades preference. Falls back to an empty array when all

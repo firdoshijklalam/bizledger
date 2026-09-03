@@ -88,8 +88,17 @@ const VALID_CHART_TYPES = new Set(['revenue', 'profit', 'profitLoss', 'cashflow'
 const VALID_RANGES = new Set(['1d', 'yesterday', '2d', '3d', '5d', '7d', '1m', '3m', '6m', '1y', 'custom'])
 
 function filterStringArray(arr: any, validSet: Set<string>): string[] {
-  if (!Array.isArray(arr)) return []
+  if (!Array.isArray(arr)) return null as any // null = field missing/invalid; [] = intentionally empty
   return arr.filter((s: any) => typeof s === 'string' && validSet.has(s))
+}
+
+/**
+ * Helper: if `arr` is null (field missing/invalid), return `defaults`.
+ * If `arr` is an array (including empty []), return it as-is.
+ * This distinguishes "field not provided" from "user explicitly emptied it".
+ */
+function resolveArray(arr: string[] | null, defaults: string[]): string[] {
+  return arr === null ? [...defaults] : arr
 }
 
 /**
@@ -135,17 +144,18 @@ export function parseDashboardSectionConfig(raw: any): DashboardSectionConfig {
   sections.sort((a, b) => a.order - b.order)
 
   // §CUSTOMER-QUALITY
+  // §STEP-1B: Distinguish "field missing" (→ defaults) from "empty array" (→ keep []).
   const cq = parsed.customerQuality && typeof parsed.customerQuality === 'object' ? parsed.customerQuality : {}
   const visibleGrades = filterStringArray(cq.visibleGrades, VALID_GRADES)
   const customerQuality = {
-    visibleGrades: visibleGrades.length > 0 ? visibleGrades : [...DEFAULT_DASHBOARD_CONFIG.customerQuality.visibleGrades],
+    visibleGrades: resolveArray(visibleGrades, DEFAULT_DASHBOARD_CONFIG.customerQuality.visibleGrades),
   }
 
   // §TOP-INSIGHTS
   const ti = parsed.topInsights && typeof parsed.topInsights === 'object' ? parsed.topInsights : {}
   const topTabs = filterStringArray(ti.visibleTabs, VALID_TOP_TABS)
   const topInsights = {
-    visibleTabs: topTabs.length > 0 ? topTabs : [...DEFAULT_DASHBOARD_CONFIG.topInsights.visibleTabs],
+    visibleTabs: resolveArray(topTabs, DEFAULT_DASHBOARD_CONFIG.topInsights.visibleTabs),
     defaultTab: typeof ti.defaultTab === 'string' && VALID_TOP_TABS.has(ti.defaultTab) ? ti.defaultTab : 'debtors',
   }
 
@@ -153,7 +163,7 @@ export function parseDashboardSectionConfig(raw: any): DashboardSectionConfig {
   const ba = parsed.businessActivity && typeof parsed.businessActivity === 'object' ? parsed.businessActivity : {}
   const hubTabs = filterStringArray(ba.visibleTabs, VALID_HUB_TABS)
   const businessActivity = {
-    visibleTabs: hubTabs.length > 0 ? hubTabs : [...DEFAULT_DASHBOARD_CONFIG.businessActivity.visibleTabs],
+    visibleTabs: resolveArray(hubTabs, DEFAULT_DASHBOARD_CONFIG.businessActivity.visibleTabs),
     defaultTab: typeof ba.defaultTab === 'string' && VALID_HUB_TABS.has(ba.defaultTab) ? ba.defaultTab : 'transactions',
   }
 
@@ -162,8 +172,8 @@ export function parseDashboardSectionConfig(raw: any): DashboardSectionConfig {
   const qaVisible = filterStringArray(qa.visibleActions, VALID_QUICK_ACTIONS)
   const qaOrder = filterStringArray(qa.order, VALID_QUICK_ACTIONS)
   const quickActions = {
-    visibleActions: qaVisible.length > 0 ? qaVisible : [...DEFAULT_DASHBOARD_CONFIG.quickActions.visibleActions],
-    order: qaOrder.length > 0 ? qaOrder : [...DEFAULT_DASHBOARD_CONFIG.quickActions.order],
+    visibleActions: resolveArray(qaVisible, DEFAULT_DASHBOARD_CONFIG.quickActions.visibleActions),
+    order: resolveArray(qaOrder, DEFAULT_DASHBOARD_CONFIG.quickActions.order),
   }
 
   // §DEFAULTS
@@ -192,4 +202,35 @@ export function getVisibleSections(config: DashboardSectionConfig): DashboardSec
   return config.sections
     .filter(s => s.visible)
     .sort((a, b) => a.order - b.order)
+}
+
+/**
+ * §STEP-1B: Get the ordered list of visible Quick Action IDs.
+ *
+ * Uses `visibleActions` to determine which actions are shown.
+ * Uses `order` to determine the display order among those enabled actions.
+ * Enabled actions missing from the order list are appended safely
+ * after the explicitly ordered actions.
+ * Unknown/invalid action IDs never appear (filtered by the parser).
+ *
+ * @returns string[] of action IDs in the order they should render
+ */
+export function getOrderedQuickActions(config: DashboardSectionConfig): string[] {
+  const { visibleActions, order } = config.quickActions
+  if (visibleActions.length === 0) return []
+
+  const result: string[] = []
+  // First: actions in the saved order that are also visible
+  for (const actionId of order) {
+    if (visibleActions.includes(actionId) && !result.includes(actionId)) {
+      result.push(actionId)
+    }
+  }
+  // Then: visible actions not in the order list (appended safely)
+  for (const actionId of visibleActions) {
+    if (!result.includes(actionId)) {
+      result.push(actionId)
+    }
+  }
+  return result
 }

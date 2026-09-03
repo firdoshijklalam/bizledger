@@ -27,6 +27,7 @@ import {
   parseDashboardSectionConfig,
   isSectionVisible,
   getVisibleSections,
+  getOrderedQuickActions,
   type DashboardSectionConfig,
 } from '../../src/lib/dashboard-preferences'
 
@@ -189,10 +190,10 @@ async function main() {
     const parsed = parseDashboardSectionConfig(raw)
     assertEqual(parsed.customerQuality.visibleGrades, ['A', 'C'], 'V3: explicit subset preserved')
 
-    // Parse with empty visibleGrades — should fall back to defaults.
+    // §STEP-1B: Parse with empty visibleGrades — should STAY empty (intentionally empty ≠ missing).
     const rawEmpty = { customerQuality: { visibleGrades: [] } }
     const parsedEmpty = parseDashboardSectionConfig(rawEmpty)
-    assertEqual(parsedEmpty.customerQuality.visibleGrades, ['A', 'B', 'C', 'D', 'E'], 'V4: empty visibleGrades → defaults')
+    assertEqual(parsedEmpty.customerQuality.visibleGrades, [], 'V4: empty visibleGrades → stays empty (§STEP-1B)')
 
     // Parse with unknown grades — should filter them out.
     const rawUnknown = { customerQuality: { visibleGrades: ['A', 'X', 'F'] } }
@@ -259,10 +260,10 @@ async function main() {
     const parsed = parseDashboardSectionConfig(raw)
     assertEqual(parsed.quickActions.visibleActions, ['new-invoice'], 'Q3: explicit subset preserved')
 
-    // Parse with empty visibleActions — falls back to defaults.
+    // §STEP-1B: Parse with empty visibleActions — should STAY empty (intentionally empty ≠ missing).
     const rawEmpty = { quickActions: { visibleActions: [] } }
     const parsedEmpty = parseDashboardSectionConfig(rawEmpty)
-    assertEqual(parsedEmpty.quickActions.visibleActions, ['add-party', 'add-product', 'new-invoice', 'add-transaction'], 'Q4: empty visibleActions → defaults')
+    assertEqual(parsedEmpty.quickActions.visibleActions, [], 'Q4: empty visibleActions → stays empty (§STEP-1B)')
   }
 
   // ─── 11. Custom order preserved on parse round-trip ───────────────────
@@ -365,6 +366,132 @@ async function main() {
     assert(parsed.sections.find(s => s.id === 'summaryCards')?.order === 0, 'C1: order=-5 clamped to 0')
     assert(parsed.sections.find(s => s.id === 'performanceChart')?.order === 10, 'C2: order=100 clamped to 10')
     assert(parsed.sections.find(s => s.id === 'customerQuality')?.order === 4, 'C3: order=3.7 rounded to 4')
+  }
+
+  // ─── §STEP-1B: Empty array semantics ──────────────────────────────────
+  console.log('\n  §STEP-1B: Empty array semantics (intentionally empty ≠ missing):')
+  {
+    // D1: visibleGrades=[] → stays empty
+    const config = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { visibleGrades: [] }
+    }))
+    assert(config.customerQuality.visibleGrades.length === 0, 'D1: visibleGrades=[] stays empty')
+
+    // D2: visibleGrades missing → defaults
+    const config2 = parseDashboardSectionConfig(JSON.stringify({}))
+    assert(config2.customerQuality.visibleGrades.length === 5, 'D2: visibleGrades missing → defaults (5)')
+
+    // D3: topInsights.visibleTabs=[] → stays empty
+    const config3 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: { visibleTabs: [] }
+    }))
+    assert(config3.topInsights.visibleTabs.length === 0, 'D3: topInsights.visibleTabs=[] stays empty')
+
+    // D4: topInsights missing → defaults
+    assert(config2.topInsights.visibleTabs.length === 5, 'D4: topInsights.visibleTabs missing → defaults (5)')
+
+    // D5: businessActivity.visibleTabs=[] → stays empty
+    const config4 = parseDashboardSectionConfig(JSON.stringify({
+      businessActivity: { visibleTabs: [] }
+    }))
+    assert(config4.businessActivity.visibleTabs.length === 0, 'D5: businessActivity.visibleTabs=[] stays empty')
+
+    // D6: businessActivity missing → defaults
+    assert(config2.businessActivity.visibleTabs.length === 3, 'D6: businessActivity.visibleTabs missing → defaults (3)')
+
+    // D7: quickActions.visibleActions=[] → stays empty
+    const config5 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: [], order: [] }
+    }))
+    assert(config5.quickActions.visibleActions.length === 0, 'D7: quickActions.visibleActions=[] stays empty')
+
+    // D8: quickActions missing → defaults
+    assert(config2.quickActions.visibleActions.length === 4, 'D8: quickActions.visibleActions missing → defaults (4)')
+
+    // D9: quickActions.order=[] → stays empty
+    assert(config5.quickActions.order.length === 0, 'D9: quickActions.order=[] stays empty')
+
+    // D10: null field → defaults (not empty)
+    const config6 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { visibleGrades: null }
+    }))
+    assert(config6.customerQuality.visibleGrades.length === 5, 'D10: visibleGrades=null → defaults (5)')
+
+    // D11: invalid field type → defaults
+    const config7 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { visibleGrades: 'invalid' }
+    }))
+    assert(config7.customerQuality.visibleGrades.length === 5, 'D11: visibleGrades="invalid" → defaults (5)')
+  }
+
+  // ─── §STEP-1B: getOrderedQuickActions ─────────────────────────────────
+  console.log('\n  §STEP-1B: getOrderedQuickActions:')
+  {
+    // E1: Default config → all 4 in default order
+    const ids1 = getOrderedQuickActions(DEFAULT_DASHBOARD_CONFIG)
+    assert(ids1.length === 4, 'E1: default config → 4 actions')
+    assert(ids1[0] === 'add-party', 'E1: default order[0]=add-party')
+    assert(ids1[1] === 'add-product', 'E1: default order[1]=add-product')
+    assert(ids1[2] === 'new-invoice', 'E1: default order[2]=new-invoice')
+    assert(ids1[3] === 'add-transaction', 'E1: default order[3]=add-transaction')
+
+    // E2: Custom order
+    const config2 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: {
+        visibleActions: ['add-product', 'add-party', 'new-invoice'],
+        order: ['new-invoice', 'add-party', 'add-product'],
+      }
+    }))
+    const ids2 = getOrderedQuickActions(config2)
+    assert(ids2.length === 3, 'E2: 3 visible actions')
+    assert(ids2[0] === 'new-invoice', 'E2: order[0]=new-invoice (custom order)')
+    assert(ids2[1] === 'add-party', 'E2: order[1]=add-party')
+    assert(ids2[2] === 'add-product', 'E2: order[2]=add-product')
+
+    // E3: Enabled actions missing from order → appended safely
+    const config3 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: {
+        visibleActions: ['add-party', 'add-product', 'new-invoice'],
+        order: ['new-invoice'], // only 1 in order
+      }
+    }))
+    const ids3 = getOrderedQuickActions(config3)
+    assert(ids3.length === 3, 'E3: 3 visible actions')
+    assert(ids3[0] === 'new-invoice', 'E3: order[0]=new-invoice (explicit)')
+    // add-party and add-product appended after
+    assert(ids3.includes('add-party') && ids3.includes('add-product'), 'E3: missing actions appended')
+
+    // E4: Unknown IDs in order → ignored
+    const config4 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: {
+        visibleActions: ['add-party'],
+        order: ['malicious-action', 'add-party'],
+      }
+    }))
+    const ids4 = getOrderedQuickActions(config4)
+    assert(ids4.length === 1, 'E4: 1 visible action (unknown filtered)')
+    assert(ids4[0] === 'add-party', 'E4: only add-party remains')
+
+    // E5: Empty visibleActions → empty result
+    const config5 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: [], order: [] }
+    }))
+    const ids5 = getOrderedQuickActions(config5)
+    assert(ids5.length === 0, 'E5: empty visibleActions → empty result')
+
+    // E6: All actions visible, custom order
+    const config6 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: {
+        visibleActions: ['add-party', 'add-product', 'new-invoice', 'add-transaction'],
+        order: ['add-transaction', 'new-invoice', 'add-product', 'add-party'],
+      }
+    }))
+    const ids6 = getOrderedQuickActions(config6)
+    assert(ids6.length === 4, 'E6: 4 actions')
+    assert(ids6[0] === 'add-transaction', 'E6: order[0]=add-transaction')
+    assert(ids6[1] === 'new-invoice', 'E6: order[1]=new-invoice')
+    assert(ids6[2] === 'add-product', 'E6: order[2]=add-product')
+    assert(ids6[3] === 'add-party', 'E6: order[3]=add-party')
   }
 
   // ─── Summary ─────────────────────────────────────────────────────────
