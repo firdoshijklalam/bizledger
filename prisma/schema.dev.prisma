@@ -465,6 +465,8 @@ model AppSettings {
   appMode              String   @default("merchant") // merchant | customer — current active mode
   cardPreferences      String?  // JSON: {showOwner,showAddress,showPhone,showGstin,greetingText,coverBlur,coverOverlay}
   dashboardCards       String?  // JSON: [{id,visible,order}] — user's dashboard card configuration
+  // §DASHBOARD-CUSTOMIZATION: JSON for dashboard section visibility/order + per-section prefs
+  dashboardSections    String?  // JSON: DashboardSectionConfig
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

@@ -4,9 +4,9 @@
  * Run: npx tsx tests/unit/dashboard-cards.test.ts
  *
  * Tests:
- *   1. Default card list (14 cards)
- *   2. 8 default cards visible by default
- *   3. Card destination mapping (all 14)
+ *   1. Default card list (16 cards — Phase 4 added netProfitLoss + grossProfit)
+ *   2. 10 default cards visible by default
+ *   3. Card destination mapping (all 16)
  *   4. Hidden cards not rendered
  *   5. Custom order works
  *   6. Malformed config fallback
@@ -18,6 +18,9 @@
  *   12. Persistence endpoint
  *   13. No localStorage
  *   14. No duplicate save calls
+ *   15. API validation (KNOWN_IDS includes all 16)
+ *   16. Backup/restore includes dashboardCards
+ *   17. All 16 cards use real existing API fields
  */
 export {}
 
@@ -27,22 +30,30 @@ let passed = 0, failed = 0
 function assert(cond: boolean, msg: string) { if (cond) { console.log('  ✅', msg); passed++ } else { console.log('  ❌', msg); failed++ } }
 
 // ─── Import parseCardConfig ===
+// §FIX: Updated to match the CURRENT 16-card DEFAULT_CARD_CONFIG (Phase 4 ordering).
 function parseCardConfig(raw: any): Array<{id:string;visible:boolean;order:number}> {
   const DEFAULTS = [
-    { id: 'totalReceivable', visible: true, order: 0 },
-    { id: 'totalPayable', visible: true, order: 1 },
-    { id: 'businessHealth', visible: true, order: 2 },
-    { id: 'lowStock', visible: true, order: 3 },
-    { id: 'totalSales', visible: true, order: 4 },
-    { id: 'totalCollection', visible: true, order: 5 },
+    // PRIMARY PERFORMANCE
+    { id: 'totalSales', visible: true, order: 0 },
+    { id: 'netProfitLoss', visible: true, order: 1 },
+    { id: 'totalCollection', visible: true, order: 2 },
+    { id: 'totalRevenue', visible: true, order: 3 },
+    // SECONDARY FINANCIAL
+    { id: 'totalReceivable', visible: true, order: 4 },
+    { id: 'totalPayable', visible: true, order: 5 },
     { id: 'totalExpense', visible: true, order: 6 },
-    { id: 'totalRevenue', visible: true, order: 7 },
-    { id: 'totalCustomers', visible: false, order: 8 },
-    { id: 'totalProducts', visible: false, order: 9 },
-    { id: 'totalInvoices', visible: false, order: 10 },
-    { id: 'stockValue', visible: false, order: 11 },
-    { id: 'todaySales', visible: false, order: 12 },
-    { id: 'monthlyRevenue', visible: false, order: 13 },
+    // INVENTORY / OPERATIONS
+    { id: 'lowStock', visible: true, order: 7 },
+    { id: 'stockValue', visible: true, order: 8 },
+    // HEALTH / INSIGHTS
+    { id: 'businessHealth', visible: true, order: 9 },
+    // HIDDEN BY DEFAULT
+    { id: 'todaySales', visible: false, order: 10 },
+    { id: 'monthlyRevenue', visible: false, order: 11 },
+    { id: 'grossProfit', visible: false, order: 12 },
+    { id: 'totalCustomers', visible: false, order: 13 },
+    { id: 'totalProducts', visible: false, order: 14 },
+    { id: 'totalInvoices', visible: false, order: 15 },
   ]
   if (!raw) return DEFAULTS
   try {
@@ -56,23 +67,21 @@ function parseCardConfig(raw: any): Array<{id:string;visible:boolean;order:numbe
 }
 
 console.log('\n  Default card list:')
-// 1. Default card list (14 cards)
+// 1. Default card list (16 cards)
 const defaults = parseCardConfig(null)
-assert(defaults.length === 14, 'Default card list has 14 cards')
-assert(defaults[0].id === 'totalReceivable', 'First default card is totalReceivable')
-assert(defaults[7].id === 'totalRevenue', '8th default card is totalRevenue')
-assert(defaults[13].id === 'monthlyRevenue', '14th default card is monthlyRevenue')
+assert(defaults.length === 16, 'Default card list has 16 cards')
+assert(defaults[0].id === 'totalSales', 'First default card is totalSales')
+assert(defaults[1].id === 'netProfitLoss', 'Second default card is netProfitLoss')
+assert(defaults[9].id === 'businessHealth', '10th default card is businessHealth')
+assert(defaults[15].id === 'totalInvoices', '16th default card is totalInvoices')
 
-// 2. 8 default cards visible by default
+// 2. 10 default cards visible by default
 const visibleDefaults = defaults.filter(c => c.visible)
-assert(visibleDefaults.length === 8, '8 default cards are visible by default')
-assert(visibleDefaults.every(c => c.order < 8), 'All visible defaults have order 0-7')
+assert(visibleDefaults.length === 10, '10 default cards are visible by default')
+assert(visibleDefaults.every(c => c.order < 10), 'All visible defaults have order 0-9')
 
 console.log('\n  Card destination mapping (source inspection):')
 // 3. Card destination mapping
-// §PHASE-5-D1: Updated to reflect new RangeContext-based navigation. Cards now
-// call `setHistoryRangeContext(ctx)` / `setReportsRangeContext(ctx)` instead of
-// the legacy `setHistoryDateRange(range)` / `setReportsDateRange(range)`.
 const dashSrc = fs.readFileSync('src/components/views/dashboard-view.tsx', 'utf8')
 assert(dashSrc.includes("setKhataFilter('receivable')"), 'totalReceivable → Khata receivable')
 assert(dashSrc.includes("setKhataFilter('payable')"), 'totalPayable → Khata payable')
@@ -82,6 +91,8 @@ assert(dashSrc.includes("setHistoryRangeContext") && dashSrc.includes("totalSale
 assert(dashSrc.includes("setHistoryRangeContext") && dashSrc.includes("totalCollection"), 'totalCollection → History (via RangeContext)')
 assert(dashSrc.includes("setReportsRangeContext") && dashSrc.includes("totalExpense"), 'totalExpense → Reports PL (via RangeContext)')
 assert(dashSrc.includes("setReportsRangeContext") && dashSrc.includes("totalRevenue"), 'totalRevenue → Reports PL (via RangeContext)')
+assert(dashSrc.includes("setReportsRangeContext") && dashSrc.includes("netProfitLoss"), 'netProfitLoss → Reports PL (via RangeContext)')
+assert(dashSrc.includes("setReportsRangeContext") && dashSrc.includes("grossProfit"), 'grossProfit → Reports PL (via RangeContext)')
 assert(dashSrc.includes("setKhataFilter('all')") && dashSrc.includes("totalCustomers"), 'totalCustomers → Khata all')
 assert(dashSrc.includes("setActiveView('inventory')") && dashSrc.includes("totalProducts"), 'totalProducts → Inventory')
 assert(dashSrc.includes("setActiveView('billing')") && dashSrc.includes("totalInvoices"), 'totalInvoices → Billing')
@@ -97,38 +108,38 @@ assert(dashSrc.includes('visibleCards.map'), 'Only visible cards are mapped to r
 // 5. Custom order
 const customOrder = parseCardConfig(JSON.stringify([
   {id:'totalRevenue',visible:true,order:0},
-  {id:'totalReceivable',visible:true,order:1},
-  {id:'totalPayable',visible:true,order:2},
-  {id:'businessHealth',visible:true,order:3},
-  {id:'lowStock',visible:true,order:4},
-  {id:'totalSales',visible:true,order:5},
-  {id:'totalCollection',visible:true,order:6},
-  {id:'totalExpense',visible:true,order:7},
+  {id:'netProfitLoss',visible:true,order:1},
+  {id:'totalReceivable',visible:true,order:2},
+  {id:'totalPayable',visible:true,order:3},
+  {id:'businessHealth',visible:true,order:4},
+  {id:'lowStock',visible:true,order:5},
+  {id:'totalSales',visible:true,order:6},
+  {id:'totalCollection',visible:true,order:7},
 ]))
 assert(customOrder[0].id === 'totalRevenue', 'Custom order: totalRevenue first')
-assert(customOrder[1].id === 'totalReceivable', 'Custom order: totalReceivable second')
+assert(customOrder[1].id === 'netProfitLoss', 'Custom order: netProfitLoss second')
 
 console.log('\n  Malformed/fallback:')
 // 6. Malformed config fallback
 const malformed = parseCardConfig('{invalid}')
-assert(malformed.length === 14, 'Malformed JSON → defaults (14 cards)')
-assert(malformed[0].id === 'totalReceivable', 'Malformed → first card is totalReceivable')
+assert(malformed.length === 16, 'Malformed JSON → defaults (16 cards)')
+assert(malformed[0].id === 'totalSales', 'Malformed → first card is totalSales')
 
 // 7. Unknown card IDs filtered
 const withUnknown = parseCardConfig(JSON.stringify([
-  {id:'totalReceivable',visible:true,order:0},
+  {id:'totalSales',visible:true,order:0},
   {id:'maliciousCard',visible:true,order:1},
-  {id:'totalPayable',visible:true,order:2},
+  {id:'netProfitLoss',visible:true,order:2},
 ]))
 assert(!withUnknown.find(c => c.id === 'maliciousCard'), 'Unknown card ID filtered out')
-assert(withUnknown.length === 14, 'Unknown removed, missing cards added back')
+assert(withUnknown.length === 16, 'Unknown removed, missing cards added back')
 
 // 8. Missing card recovery
 const partial = parseCardConfig(JSON.stringify([
-  {id:'totalReceivable',visible:true,order:0},
+  {id:'totalSales',visible:true,order:0},
 ]))
-assert(partial.length === 14, 'Partial config: missing cards added back')
-const addedBack = partial.find(c => c.id === 'totalPayable')
+assert(partial.length === 16, 'Partial config: missing cards added back')
+const addedBack = partial.find(c => c.id === 'netProfitLoss')
 assert(!!addedBack && addedBack.visible === false, 'Missing card added as hidden')
 
 console.log('\n  Save/Cancel/persistence:')
@@ -170,7 +181,9 @@ console.log('\n  API validation:')
 const apiSrc = fs.readFileSync('src/app/api/card-customization/route.ts', 'utf8')
 assert(apiSrc.includes('validateDashboardCards'), 'API has validateDashboardCards')
 assert(apiSrc.includes('KNOWN_IDS'), 'API has known IDs allow-list')
-assert(apiSrc.includes('totalReceivable') && apiSrc.includes('monthlyRevenue'), 'API allow-list includes all 14 IDs')
+assert(apiSrc.includes('totalSales') && apiSrc.includes('monthlyRevenue'), 'API allow-list includes existing IDs')
+assert(apiSrc.includes('netProfitLoss'), 'API allow-list includes netProfitLoss (Phase 4 fix)')
+assert(apiSrc.includes('grossProfit'), 'API allow-list includes grossProfit (Phase 4 fix)')
 
 console.log('\n  Backup/restore:')
 // 16. Backup includes dashboardCards
@@ -179,11 +192,13 @@ assert(backupSrc.includes('dashboardCards'), 'Backup format includes dashboardCa
 assert(backupSrc.includes('s.dashboardCards ?? null'), 'Backup sanitizer has null fallback')
 
 console.log('\n  Additional cards data verification:')
-// 17. All 14 cards use real existing API fields
+// 17. All 16 cards use real existing API fields
 assert(dashSrc.includes("d?.totalReceivable") && dashSrc.includes("d?.totalPayable"), 'totalReceivable/totalPayable from dashboard data')
 assert(dashSrc.includes("d?.healthScore"), 'healthScore from dashboard data')
 assert(dashSrc.includes("d?.lowStockCount"), 'lowStockCount from dashboard data')
 assert(dashSrc.includes("d?.rangeSales") && dashSrc.includes("d?.rangeCollection") && dashSrc.includes("d?.rangeExpense"), 'range fields from dashboard data')
+assert(dashSrc.includes("d?.rangeNetProfit"), 'rangeNetProfit from dashboard data (netProfitLoss card)')
+assert(dashSrc.includes("d?.rangeGrossProfit"), 'rangeGrossProfit from dashboard data (grossProfit card)')
 assert(dashSrc.includes("d?.partyCount"), 'partyCount from dashboard data')
 assert(dashSrc.includes("d?.productCount"), 'productCount from dashboard data')
 assert(dashSrc.includes("d?.invoiceCount"), 'invoiceCount from dashboard data')

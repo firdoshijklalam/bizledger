@@ -122,13 +122,16 @@ export async function POST(req: NextRequest) {
 
       // 2. Update AppSettings.cardPreferences if provided
       let updatedSettings: any = null
-      if (body.cardPreferences !== undefined || body.dashboardCards !== undefined) {
+      if (body.cardPreferences !== undefined || body.dashboardCards !== undefined || body.dashboardSections !== undefined) {
         const updateData: Record<string, unknown> = {}
         if (body.cardPreferences !== undefined) {
           updateData.cardPreferences = validateCardPreferences(body.cardPreferences)
         }
         if (body.dashboardCards !== undefined) {
           updateData.dashboardCards = validateDashboardCards(body.dashboardCards)
+        }
+        if (body.dashboardSections !== undefined) {
+          updateData.dashboardSections = validateDashboardSections(body.dashboardSections)
         }
         updatedSettings = await tx.appSettings.upsert({
           where: { businessId: business.id },
@@ -172,11 +175,13 @@ function validateDashboardCards(input: unknown): string | null {
   }
 
   // §KNOWN-CARD-IDs: Allow-list of valid dashboard card IDs
+  // §FIX: Added 'netProfitLoss' + 'grossProfit' (Phase 4 cards were missing —
+  // their config was silently dropped on save).
   const KNOWN_IDS = new Set([
     'totalReceivable', 'totalPayable', 'businessHealth', 'lowStock',
-    'totalSales', 'totalCollection', 'totalExpense', 'totalRevenue',
-    'totalCustomers', 'totalProducts', 'totalInvoices', 'stockValue',
-    'todaySales', 'monthlyRevenue',
+    'totalSales', 'netProfitLoss', 'totalCollection', 'totalRevenue',
+    'totalExpense', 'totalCustomers', 'totalProducts', 'totalInvoices',
+    'stockValue', 'todaySales', 'monthlyRevenue', 'grossProfit',
   ])
 
   const clean: Array<{ id: string; visible: boolean; order: number }> = []
@@ -190,4 +195,91 @@ function validateDashboardCards(input: unknown): string | null {
   }
 
   return clean.length > 0 ? JSON.stringify(clean) : null
+}
+
+// §DASHBOARD-CUSTOMIZATION: Validate dashboardSections JSON payload.
+// Accepts a JSON string or object. Returns a sanitized JSON string or null.
+// Uses the same defensive parsing pattern as validateDashboardCards.
+function validateDashboardSections(input: unknown): string | null {
+  if (input == null) return null
+  let parsed: any
+  if (typeof input === 'string') {
+    try { parsed = JSON.parse(input) } catch { return null }
+  } else if (typeof input === 'object') {
+    parsed = input
+  } else {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+
+  // §VALIDATE-SECTIONS: array of {id, visible, order}
+  const VALID_SECTION_IDS = new Set([
+    'summaryCards', 'performanceChart', 'customerQuality', 'topInsights', 'businessActivity', 'quickActions'
+  ])
+  const sections: Array<{ id: string; visible: boolean; order: number }> = []
+  if (Array.isArray(parsed.sections)) {
+    for (const item of parsed.sections) {
+      if (typeof item !== 'object' || item === null) continue
+      if (typeof item.id !== 'string' || !VALID_SECTION_IDS.has(item.id)) continue
+      if (typeof item.visible !== 'boolean') continue
+      if (typeof item.order !== 'number') continue
+      sections.push({ id: item.id, visible: item.visible, order: Math.max(0, Math.min(10, Math.round(item.order))) })
+    }
+  }
+
+  // §VALIDATE-STRING-ARRAY: helper for string[] fields
+  const validateStringArray = (arr: any, validSet: Set<string>): string[] => {
+    if (!Array.isArray(arr)) return []
+    return arr.filter((s: any) => typeof s === 'string' && validSet.has(s))
+  }
+
+  const GRADES = new Set(['A', 'B', 'C', 'D', 'E'])
+  const TOP_TABS = new Set(['debtors', 'buyers', 'payments', 'products', 'defaulters'])
+  const HUB_TABS = new Set(['transactions', 'lowstock', 'orders'])
+  const QUICK_ACTIONS = new Set(['add-party', 'add-product', 'new-invoice', 'add-transaction'])
+
+  const result: Record<string, unknown> = { sections }
+
+  // customerQuality
+  if (parsed.customerQuality && typeof parsed.customerQuality === 'object') {
+    result.customerQuality = {
+      visibleGrades: validateStringArray(parsed.customerQuality.visibleGrades, GRADES),
+    }
+  }
+
+  // topInsights
+  if (parsed.topInsights && typeof parsed.topInsights === 'object') {
+    result.topInsights = {
+      visibleTabs: validateStringArray(parsed.topInsights.visibleTabs, TOP_TABS),
+      defaultTab: typeof parsed.topInsights.defaultTab === 'string' && TOP_TABS.has(parsed.topInsights.defaultTab) ? parsed.topInsights.defaultTab : 'debtors',
+    }
+  }
+
+  // businessActivity
+  if (parsed.businessActivity && typeof parsed.businessActivity === 'object') {
+    result.businessActivity = {
+      visibleTabs: validateStringArray(parsed.businessActivity.visibleTabs, HUB_TABS),
+      defaultTab: typeof parsed.businessActivity.defaultTab === 'string' && HUB_TABS.has(parsed.businessActivity.defaultTab) ? parsed.businessActivity.defaultTab : 'transactions',
+    }
+  }
+
+  // quickActions
+  if (parsed.quickActions && typeof parsed.quickActions === 'object') {
+    result.quickActions = {
+      visibleActions: validateStringArray(parsed.quickActions.visibleActions, QUICK_ACTIONS),
+      order: validateStringArray(parsed.quickActions.order, QUICK_ACTIONS),
+    }
+  }
+
+  // defaults
+  if (parsed.defaults && typeof parsed.defaults === 'object') {
+    const CHART_TYPES = new Set(['revenue', 'profit', 'profitLoss', 'cashflow', 'collections', 'categories'])
+    const RANGES = new Set(['1d', 'yesterday', '2d', '3d', '5d', '7d', '1m', '3m', '6m', '1y', 'custom'])
+    result.defaults = {
+      chartType: typeof parsed.defaults.chartType === 'string' && CHART_TYPES.has(parsed.defaults.chartType) ? parsed.defaults.chartType : 'revenue',
+      timeRange: typeof parsed.defaults.timeRange === 'string' && RANGES.has(parsed.defaults.timeRange) ? parsed.defaults.timeRange : '7d',
+    }
+  }
+
+  return JSON.stringify(result)
 }

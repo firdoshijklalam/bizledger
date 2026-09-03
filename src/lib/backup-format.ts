@@ -72,6 +72,8 @@ export interface SanitizedAppSettings {
   autoBackupEnabled: boolean
   cardPreferences: string | null
   dashboardCards: string | null
+  // §DASHBOARD-CUSTOMIZATION: Dashboard section visibility/order + per-section prefs
+  dashboardSections: string | null
   // §NO-SECRETS: pinHash, pinEnabled, gateLockdownUntil are NEVER exported
 }
 
@@ -290,6 +292,7 @@ export function sanitizeAppSettings(s: any): SanitizedAppSettings | null {
     autoBackupEnabled: s.autoBackupEnabled ?? false,
     cardPreferences: s.cardPreferences ?? null,
     dashboardCards: s.dashboardCards ?? null,
+    dashboardSections: s.dashboardSections ?? null,
   }
 }
 

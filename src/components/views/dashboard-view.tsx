@@ -36,6 +36,16 @@ import {
 } from '@/components/shared/dashboard-card-management'
 import { ProfitLossDrilldownSheet } from '@/components/shared/profit-loss-drilldown-sheet'
 import {
+  DashboardCustomizationSheet,
+  SectionSettingsSheet,
+} from '@/components/shared/dashboard-customization-sheet'
+import {
+  DEFAULT_DASHBOARD_CONFIG,
+  parseDashboardSectionConfig,
+  isSectionVisible,
+  type DashboardSectionConfig,
+} from '@/lib/dashboard-preferences'
+import {
   computeRangeBounds,
   dashboardRangeLabel,
   DASHBOARD_RANGES,
@@ -133,6 +143,10 @@ export function DashboardView() {
   const [topExpanded, setTopExpanded] = useState(false)
   const [hubTab, setHubTab] = useState<'transactions' | 'lowstock' | 'orders'>('transactions')
   const [hubExpanded, setHubExpanded] = useState(false)
+  // §DASHBOARD-CUSTOMIZATION: Dashboard section visibility/order + per-section prefs
+  const [dashSectionConfig, setDashSectionConfig] = useState<DashboardSectionConfig>(DEFAULT_DASHBOARD_CONFIG)
+  const [showCustomizeDash, setShowCustomizeDash] = useState(false)
+  const [showSectionSettings, setShowSectionSettings] = useState<string | null>(null)
   // §QUICK-CUSTOMIZE: Bottom sheet for Business Overview card customization
   const [showCustomize, setShowCustomize] = useState(false)
   // §DASHBOARD-CARDS: User's dashboard card visibility/order configuration
@@ -414,6 +428,9 @@ export function DashboardView() {
     // §DASHBOARD-CARDS-LOAD: Parse dashboard card config from AppSettings
     const dashCards = parseCardConfig((appSettings as any).dashboardCards)
     setDashCardConfig(dashCards)
+    // §DASHBOARD-SECTIONS-LOAD: Parse dashboard section config from AppSettings
+    const dashSections = parseDashboardSectionConfig((appSettings as any).dashboardSections)
+    setDashSectionConfig(dashSections)
   }, [appSettings])
   // §GRADE-BOTTOM-SHEET: fetch all parties so the grade distribution bottom
   // sheet can show ALL customers in a grade (not just topDebtors which is
@@ -573,6 +590,18 @@ export function DashboardView() {
     const data = await res.json()
     if (!res.ok || !data.ok) throw new Error(data.error || 'Save failed')
     setDashCardConfig(newConfig)
+  }
+
+  // §SAVE-DASHBOARD-SECTIONS: Persist section config via atomic API
+  const saveDashboardSections = async (newConfig: DashboardSectionConfig) => {
+    const res = await fetch('/api/card-customization', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dashboardSections: JSON.stringify(newConfig) }),
+    })
+    const data = await res.json()
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Save failed')
+    setDashSectionConfig(newConfig)
   }
 
   // §MANAGE-CARDS-DEFS: Card metadata for the management sheet
@@ -1661,6 +1690,143 @@ export function DashboardView() {
         customStart={customStart}
         customEnd={customEnd}
         currency={currency}
+      />
+
+      {/* §DASHBOARD-CUSTOMIZATION: Customize Dashboard entry point + sheets */}
+      <div className="pt-2 pb-4">
+        <button
+          onClick={() => setShowCustomizeDash(true)}
+          className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border border-border text-muted-foreground hover:bg-muted transition-colors min-h-[44px]"
+        >
+          <Settings className="w-4 h-4" />
+          <span className="text-xs font-medium">Customize Dashboard</span>
+        </button>
+      </div>
+
+      {/* §CUSTOMIZE-DASHBOARD-SHEET */}
+      <DashboardCustomizationSheet
+        open={showCustomizeDash}
+        onClose={() => setShowCustomizeDash(false)}
+        savedConfig={dashSectionConfig}
+        onSave={saveDashboardSections}
+        onManageCards={() => setShowDashCardMgr(true)}
+      />
+
+      {/* §SECTION-SETTINGS-SHEET: Per-section settings (Customer Quality, Top Insights, Business Activity, Quick Actions) */}
+      <SectionSettingsSheet
+        open={showSectionSettings === 'customerQuality'}
+        onClose={() => setShowSectionSettings(null)}
+        title="Customer Quality"
+        sectionVisible={isSectionVisible(dashSectionConfig, 'customerQuality')}
+        onToggleSection={(visible) => {
+          const newConfig = { ...dashSectionConfig, sections: dashSectionConfig.sections.map(s => s.id === 'customerQuality' ? { ...s, visible } : s) }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+        items={[{ id: 'A', label: 'Grade A' }, { id: 'B', label: 'Grade B' }, { id: 'C', label: 'Grade C' }, { id: 'D', label: 'Grade D' }, { id: 'E', label: 'Grade E' }]}
+        visibleItems={dashSectionConfig.customerQuality.visibleGrades}
+        onToggleItem={(id) => {
+          const grades = dashSectionConfig.customerQuality.visibleGrades
+          const newGrades = grades.includes(id) ? grades.filter(g => g !== id) : [...grades, id]
+          const newConfig = { ...dashSectionConfig, customerQuality: { visibleGrades: newGrades } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+        onReset={() => {
+          const newConfig = { ...dashSectionConfig, customerQuality: { ...DEFAULT_DASHBOARD_CONFIG.customerQuality } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+      />
+
+      <SectionSettingsSheet
+        open={showSectionSettings === 'topInsights'}
+        onClose={() => setShowSectionSettings(null)}
+        title="Top Insights"
+        sectionVisible={isSectionVisible(dashSectionConfig, 'topInsights')}
+        onToggleSection={(visible) => {
+          const newConfig = { ...dashSectionConfig, sections: dashSectionConfig.sections.map(s => s.id === 'topInsights' ? { ...s, visible } : s) }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+        items={[{ id: 'debtors', label: 'Top Debtors' }, { id: 'buyers', label: 'Top Buyers' }, { id: 'payments', label: 'Top Payments' }, { id: 'products', label: 'Top Products' }, { id: 'defaulters', label: 'Defaulters' }]}
+        visibleItems={dashSectionConfig.topInsights.visibleTabs}
+        onToggleItem={(id) => {
+          const tabs = dashSectionConfig.topInsights.visibleTabs
+          const newTabs = tabs.includes(id) ? tabs.filter(t => t !== id) : [...tabs, id]
+          const newConfig = { ...dashSectionConfig, topInsights: { ...dashSectionConfig.topInsights, visibleTabs: newTabs } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+        defaultItemId={dashSectionConfig.topInsights.defaultTab}
+        onSetDefault={(id) => {
+          const newConfig = { ...dashSectionConfig, topInsights: { ...dashSectionConfig.topInsights, defaultTab: id } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+        onReset={() => {
+          const newConfig = { ...dashSectionConfig, topInsights: { ...DEFAULT_DASHBOARD_CONFIG.topInsights } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+      />
+
+      <SectionSettingsSheet
+        open={showSectionSettings === 'businessActivity'}
+        onClose={() => setShowSectionSettings(null)}
+        title="Business Activity"
+        sectionVisible={isSectionVisible(dashSectionConfig, 'businessActivity')}
+        onToggleSection={(visible) => {
+          const newConfig = { ...dashSectionConfig, sections: dashSectionConfig.sections.map(s => s.id === 'businessActivity' ? { ...s, visible } : s) }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+        items={[{ id: 'transactions', label: 'Transactions' }, { id: 'lowstock', label: 'Low Stock' }, { id: 'orders', label: 'Online Orders' }]}
+        visibleItems={dashSectionConfig.businessActivity.visibleTabs}
+        onToggleItem={(id) => {
+          const tabs = dashSectionConfig.businessActivity.visibleTabs
+          const newTabs = tabs.includes(id) ? tabs.filter(t => t !== id) : [...tabs, id]
+          const newConfig = { ...dashSectionConfig, businessActivity: { ...dashSectionConfig.businessActivity, visibleTabs: newTabs } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+        defaultItemId={dashSectionConfig.businessActivity.defaultTab}
+        onSetDefault={(id) => {
+          const newConfig = { ...dashSectionConfig, businessActivity: { ...dashSectionConfig.businessActivity, defaultTab: id } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+        onReset={() => {
+          const newConfig = { ...dashSectionConfig, businessActivity: { ...DEFAULT_DASHBOARD_CONFIG.businessActivity } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+      />
+
+      <SectionSettingsSheet
+        open={showSectionSettings === 'quickActions'}
+        onClose={() => setShowSectionSettings(null)}
+        title="Quick Actions"
+        sectionVisible={isSectionVisible(dashSectionConfig, 'quickActions')}
+        onToggleSection={(visible) => {
+          const newConfig = { ...dashSectionConfig, sections: dashSectionConfig.sections.map(s => s.id === 'quickActions' ? { ...s, visible } : s) }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+        items={[{ id: 'add-party', label: 'Add Party' }, { id: 'add-product', label: 'Add Product' }, { id: 'new-invoice', label: 'New Invoice' }, { id: 'add-transaction', label: 'Add Transaction' }]}
+        visibleItems={dashSectionConfig.quickActions.visibleActions}
+        onToggleItem={(id) => {
+          const actions = dashSectionConfig.quickActions.visibleActions
+          const newActions = actions.includes(id) ? actions.filter(a => a !== id) : [...actions, id]
+          const newConfig = { ...dashSectionConfig, quickActions: { ...dashSectionConfig.quickActions, visibleActions: newActions } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+        onReset={() => {
+          const newConfig = { ...dashSectionConfig, quickActions: { ...DEFAULT_DASHBOARD_CONFIG.quickActions } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
       />
     </div>
   )
