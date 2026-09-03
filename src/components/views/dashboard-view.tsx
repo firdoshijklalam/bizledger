@@ -432,6 +432,29 @@ export function DashboardView() {
     const dashSections = parseDashboardSectionConfig((appSettings as any).dashboardSections)
     setDashSectionConfig(dashSections)
   }, [appSettings])
+
+  // §STEP-1-RENDER-INTEGRATION: If the active tab falls out of the visibleTabs
+  // list (e.g., user toggled it off in the section settings sheet), fall back
+  // to the first still-visible tab. Prevents rendering orphaned tab content
+  // for a tab the user can no longer select. No-op when the active tab is
+  // still visible or when there are zero visible tabs (the empty state handles
+  // the zero case).
+  // §HOOK-ORDER: These useEffects MUST be above the early returns (loading /
+  // error / empty states) so React's rules-of-hooks sees them called in the
+  // same order on every render — even when the dashboard short-circuits.
+  useEffect(() => {
+    const visible = dashSectionConfig.topInsights.visibleTabs
+    if (visible.length > 0 && !visible.includes(topTab)) {
+      setTopTab(visible[0] as typeof topTab)
+    }
+  }, [dashSectionConfig.topInsights.visibleTabs, topTab])
+
+  useEffect(() => {
+    const visible = dashSectionConfig.businessActivity.visibleTabs
+    if (visible.length > 0 && !visible.includes(hubTab)) {
+      setHubTab(visible[0] as typeof hubTab)
+    }
+  }, [dashSectionConfig.businessActivity.visibleTabs, hubTab])
   // §GRADE-BOTTOM-SHEET: fetch all parties so the grade distribution bottom
   // sheet can show ALL customers in a grade (not just topDebtors which is
   // sliced to 5). Cached by TanStack Query so this is instant on re-open.
@@ -606,6 +629,48 @@ export function DashboardView() {
 
   // §MANAGE-CARDS-DEFS: Card metadata for the management sheet
   const manageCardDefs = allCardDefs.map(d => ({ id: d.id, label: d.label, icon: d.icon, description: d.description, recommended: d.recommended }))
+
+  // §STEP-1-RENDER-INTEGRATION: Per-section visible items, derived from
+  // dashSectionConfig. These arrays drive the filtered tab rows + empty
+  // states below. Re-derived on every render — they're 3–5 element arrays,
+  // so memoization would add overhead without measurable benefit.
+  //
+  // §ORDERING-NOTE: Section ORDER (which Card appears first on the dashboard)
+  // is NOT applied here. The six section Cards are deeply interleaved with
+  // floating modals/sheets (grade modal, drilldown sheet, customization
+  // sheets) that can't be cleanly hoisted into a render-order map without a
+  // larger refactor. Visibility is gated per-section via isSectionVisible();
+  // reordering is intentionally deferred to a future refactor that extracts
+  // each section into its own component.
+  const ALL_TOP_TABS = [
+    { id: 'debtors', label: 'Top Debtors' },
+    { id: 'buyers', label: 'Top Buyers' },
+    { id: 'payments', label: 'Top Payments' },
+    { id: 'products', label: 'Top Products' },
+    { id: 'defaulters', label: 'Defaulters' },
+  ] as const
+  const visibleTopTabs = ALL_TOP_TABS.filter(tab =>
+    dashSectionConfig.topInsights.visibleTabs.includes(tab.id)
+  )
+
+  const ALL_HUB_TABS = [
+    { id: 'transactions', label: 'Transactions' },
+    { id: 'lowstock', label: 'Low Stock' },
+    { id: 'orders', label: 'Online Orders' },
+  ] as const
+  const visibleHubTabs = ALL_HUB_TABS.filter(tab =>
+    dashSectionConfig.businessActivity.visibleTabs.includes(tab.id)
+  )
+
+  const ALL_QUICK_ACTIONS = [
+    { label: t('khata.addPartyShort'), icon: Users, view: 'khata' as const, action: 'add-party' as const, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
+    { label: t('inv.addProductShort'), icon: Package, view: 'inventory' as const, action: 'add-product' as const, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
+    { label: t('bill.newInvoiceShort'), icon: Receipt, view: 'sale-pad' as const, action: 'new-invoice' as const, color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/30' },
+    { label: t('qa.addTransaction'), icon: ArrowLeftRight, view: 'khata' as const, action: 'add-transaction' as const, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30' },
+  ]
+  const visibleQuickActions = ALL_QUICK_ACTIONS.filter(a =>
+    dashSectionConfig.quickActions.visibleActions.includes(a.action)
+  )
 
   return (
     <div className="space-y-4">
@@ -1040,52 +1105,63 @@ export function DashboardView() {
           range selector in the top-right corner. Each fetches its own
           /api/dashboard?range=X slice. */}
 
-      {/* §UNIFIED-DASHBOARD-CARDS: All visible cards in one grid.
-          Cards are rendered dynamically based on user's dashboardCards config.
-          Time-dependent cards still use TimeMetricCard for their range selector. */}
-      <div className="grid grid-cols-2 gap-3">
-        {visibleCards.map(({ config, def }, i) => {
-          if (def.isTimeMetric) {
-            return (
-              <TimeMetricCard
-                key={config.id}
-                label={def.label}
-                icon={def.icon}
-                tint={def.tint}
-                bg={def.bg}
-                text={def.text}
-                defaultRange={(def.defaultRange as any) || '1d'}
-                currency={currency}
-                valueExtractor={def.valueExtractor}
-                onClick={def.onClick}
-              />
-            )
-          }
-          const Icon = def.icon
-          const value = def.valueExtractor(data)
-          const formatted = def.formatValue(value, currency)
-          return (
-            <motion.button key={config.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={() => def.onClick({ range: '1d' })} aria-label={def.label} className="text-left focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-2xl">
-              <Card className={`p-4 ${def.bg} border-none hover:shadow-md transition-shadow h-full active:scale-[0.98]`}>
-                <div className="flex items-start justify-between mb-2"><span className={`w-8 h-8 rounded-lg ${def.tint} text-white flex items-center justify-center`}><Icon className="w-4 h-4" /></span></div>
-                <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{def.label}</p>
-                <p className={`text-base font-bold tabular ${def.text}`}>{formatted}</p>
-              </Card>
-            </motion.button>
-          )
-        })}
-      </div>
+      {/* §STEP-1-RENDER-INTEGRATION: Summary Cards section — visibility
+          gated by dashSectionConfig.sections[id=summaryCards].visible.
+          The DashboardCardManagementSheet itself is left OUTSIDE the
+          visibility wrap so the "Manage Summary Cards →" link in the
+          DashboardCustomizationSheet can still open it even when the
+          summaryCards section is hidden (lets users re-enable cards). */}
+      {isSectionVisible(dashSectionConfig, 'summaryCards') && (
+        <>
+          {/* §UNIFIED-DASHBOARD-CARDS: All visible cards in one grid.
+              Cards are rendered dynamically based on user's dashboardCards config.
+              Time-dependent cards still use TimeMetricCard for their range selector. */}
+          <div className="grid grid-cols-2 gap-3">
+            {visibleCards.map(({ config, def }, i) => {
+              if (def.isTimeMetric) {
+                return (
+                  <TimeMetricCard
+                    key={config.id}
+                    label={def.label}
+                    icon={def.icon}
+                    tint={def.tint}
+                    bg={def.bg}
+                    text={def.text}
+                    defaultRange={(def.defaultRange as any) || '1d'}
+                    currency={currency}
+                    valueExtractor={def.valueExtractor}
+                    onClick={def.onClick}
+                  />
+                )
+              }
+              const Icon = def.icon
+              const value = def.valueExtractor(data)
+              const formatted = def.formatValue(value, currency)
+              return (
+                <motion.button key={config.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={() => def.onClick({ range: '1d' })} aria-label={def.label} className="text-left focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-2xl">
+                  <Card className={`p-4 ${def.bg} border-none hover:shadow-md transition-shadow h-full active:scale-[0.98]`}>
+                    <div className="flex items-start justify-between mb-2"><span className={`w-8 h-8 rounded-lg ${def.tint} text-white flex items-center justify-center`}><Icon className="w-4 h-4" /></span></div>
+                    <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{def.label}</p>
+                    <p className={`text-base font-bold tabular ${def.text}`}>{formatted}</p>
+                  </Card>
+                </motion.button>
+              )
+            })}
+          </div>
 
-      {/* §MANAGE-DASHBOARD-CARDS: Button to open card management sheet */}
-      <button
-        onClick={() => setShowDashCardMgr(true)}
-        className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-xs font-medium text-muted-foreground min-h-[44px]"
-      >
-        <LayoutGrid className="w-3.5 h-3.5" />
-        Manage Dashboard Cards
-      </button>
+          {/* §MANAGE-DASHBOARD-CARDS: Button to open card management sheet */}
+          <button
+            onClick={() => setShowDashCardMgr(true)}
+            className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-xs font-medium text-muted-foreground min-h-[44px]"
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+            Manage Dashboard Cards
+          </button>
+        </>
+      )}
 
-      {/* §DASHBOARD-CARD-MANAGEMENT-SHEET */}
+      {/* §DASHBOARD-CARD-MANAGEMENT-SHEET (always rendered — also reachable
+          from DashboardCustomizationSheet's "Manage Summary Cards →" link) */}
       <DashboardCardManagementSheet
         open={showDashCardMgr}
         onClose={() => setShowDashCardMgr(false)}
@@ -1094,9 +1170,9 @@ export function DashboardView() {
         onSave={saveDashboardCards}
       />
 
-      {/* Chart — PRD Part 4: Chart toggle + dynamic time-frame + advanced charts.
-          §FIX-5: Added pb-16 (64px) bottom padding to the chart Card so the
-          FAB (z-50, fixed bottom-right) doesn't overlap the legend row. */}
+      {/* §STEP-1-RENDER-INTEGRATION: Performance Chart section — visibility
+          gated by dashSectionConfig.sections[id=performanceChart].visible. */}
+      {isSectionVisible(dashSectionConfig, 'performanceChart') && (
       <Card className="p-4 pb-16">
         <div className="flex items-center justify-between mb-2">
           <div>
@@ -1343,10 +1419,27 @@ export function DashboardView() {
           <div className="mt-2 space-y-1">{data.topCategories.slice(0, 4).map((c, i) => (<div key={c.name} className="flex items-center gap-2 text-[11px]"><span className="w-2 h-2 rounded-full shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} /><span className="flex-1 truncate">{c.name}</span><span className="font-semibold tabular">{formatCurrency(c.value, currency)}</span></div>))}</div>
         )}
       </Card>
+      )}
 
+      {/* §STEP-1-RENDER-INTEGRATION: Customer Quality Distribution section —
+          visibility gated by dashSectionConfig.sections[id=customerQuality].visible.
+          The floating grade modal is wrapped together — it can only be
+          triggered from inside the Card (bar tap), so hiding the section
+          also prevents opening the modal. */}
+      {isSectionVisible(dashSectionConfig, 'customerQuality') && (
+        <>
       {/* Grade distribution — Interactive Bar Chart (PRD Part 5 §1) */}
       <Card className="p-4">
-        <h3 className="text-sm font-semibold mb-1">Customer Quality Distribution</h3>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-semibold">Customer Quality Distribution</h3>
+          <button
+            onClick={() => setShowSectionSettings('customerQuality')}
+            className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
+            aria-label="Configure Customer Quality Distribution settings"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
+        </div>
         <p className="text-[10px] text-muted-foreground mb-3">Tap a bar to view customers</p>
         <div className="h-36 -ml-2">
           <ResponsiveContainer width="100%" height="100%">
@@ -1400,28 +1493,55 @@ export function DashboardView() {
           </motion.div>
         )}
       </AnimatePresence>
+        </>
+      )}
 
+      {/* §STEP-1-RENDER-INTEGRATION: Top Insights section — visibility
+          gated + filtered tabs (visibleTabs) + View All moved below tab
+          row + empty state when no tabs enabled. */}
+      {isSectionVisible(dashSectionConfig, 'topInsights') && (
       <Card className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar -mx-1 px-1">
-            {([
-              { id: 'debtors', label: 'Top Debtors' },
-              { id: 'buyers', label: 'Top Buyers' },
-              { id: 'payments', label: 'Top Payments' },
-              { id: 'products', label: 'Top Products' },
-              { id: 'defaulters', label: 'Defaulters' },
-            ] as const).map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setTopTab(tab.id)}
-                className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
-                  topTab === tab.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+        {/* §STEP-1: Section header with title + settings gear */}
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold">Top Insights</h3>
+          <button
+            onClick={() => setShowSectionSettings('topInsights')}
+            className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
+            aria-label="Configure Top Insights settings"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        {visibleTopTabs.length === 0 ? (
+          /* §STEP-1: Empty state — all Top Insights tabs disabled */
+          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40">
+            <p className="text-xs text-muted-foreground">No tabs enabled. Open settings to configure.</p>
+            <button
+              onClick={() => setShowSectionSettings('topInsights')}
+              className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground min-h-[36px]"
+              aria-label="Configure Top Insights"
+            >
+              <Settings className="w-3.5 h-3.5" />
+            </button>
           </div>
+        ) : (
+        <>
+        {/* §STEP-1: Tab row (filtered by dashSectionConfig.topInsights.visibleTabs) */}
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar -mx-1 px-1 mb-2">
+          {visibleTopTabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setTopTab(tab.id)}
+              className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
+                topTab === tab.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {/* §STEP-1: View All button — moved BELOW the tab row */}
+        <div className="mb-3">
           <button onClick={() => {
             saveScrollPos('dashboard')
             // §DYNAMIC-ROUTING: View All routes based on active tab.
@@ -1451,7 +1571,7 @@ export function DashboardView() {
               setKhataFilter('all')
               setActiveView('khata')
             }
-          }} className="text-xs text-primary font-medium flex items-center shrink-0 ml-2">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
+          }} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
         </div>
 
         {/* Tab content */}
@@ -1537,17 +1657,45 @@ export function DashboardView() {
             ) : <p className="text-sm text-muted-foreground py-4 text-center">No defaulters 🎉</p>}
           </div>
         )}
+        </>
+        )}
       </Card>
+      )}
 
-      {/* PRD Part 38: Multi-Tab Dynamic Hub (Recent Transactions / Low Stock / Online Orders) */}
+      {/* §STEP-1-RENDER-INTEGRATION: Business Activity Hub section — visibility
+          gated by dashSectionConfig.sections[id=businessActivity].visible +
+          filtered tabs (visibleTabs) + View All moved below the tab row +
+          empty state when no tabs are enabled. */}
+      {isSectionVisible(dashSectionConfig, 'businessActivity') && (
       <Card className="p-4">
-        {/* Tab buttons */}
-        <div className="flex items-center gap-1 mb-3 overflow-x-auto no-scrollbar -mx-1 px-1">
-          {([
-            { id: 'transactions', label: 'Transactions' },
-            { id: 'lowstock', label: 'Low Stock' },
-            { id: 'orders', label: 'Online Orders' },
-          ] as const).map((tab) => (
+        {/* §STEP-1: Section header with title + settings gear */}
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold">Business Activity</h3>
+          <button
+            onClick={() => setShowSectionSettings('businessActivity')}
+            className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
+            aria-label="Configure Business Activity settings"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        {visibleHubTabs.length === 0 ? (
+          /* §STEP-1: Empty state — all Business Activity tabs disabled */
+          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40">
+            <p className="text-xs text-muted-foreground">No tabs enabled. Open settings to configure.</p>
+            <button
+              onClick={() => setShowSectionSettings('businessActivity')}
+              className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground min-h-[36px]"
+              aria-label="Configure Business Activity"
+            >
+              <Settings className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+        <>
+        {/* §STEP-1: Tab buttons (filtered by dashSectionConfig.businessActivity.visibleTabs) */}
+        <div className="flex items-center gap-1 mb-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+          {visibleHubTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setHubTab(tab.id)}
@@ -1558,32 +1706,33 @@ export function DashboardView() {
               {tab.label}
             </button>
           ))}
-          <div className="ml-auto shrink-0">
-            <button onClick={() => {
-              saveScrollPos('dashboard')
-              // §DYNAMIC-ROUTING: View All routes based on active hub tab.
-              if (hubTab === 'transactions') {
-                // Transactions → History (with active time filter)
-                // §PHASE-5-D1: Pass the FULL RangeContext (not just range string)
-                // so History sees the exact same date window — including custom
-                // range's start/end dates.
-                setHistoryRangeContext({ range: timeRange, customStart, customEnd })
-                setActiveView('history')
-              } else if (hubTab === 'lowstock') {
-                // Low Stock → Inventory (with low-stock filter, no time param)
-                setInventoryFilter('low-stock')
-                setActiveView('inventory')
-              } else if (hubTab === 'orders') {
-                // §FIX: Online Orders → dedicated Online Orders view.
-                setActiveView('online-orders')
-              } else {
-                setKhataFilter('all')
-                setActiveView('khata')
-              }
-            }} className="text-xs text-primary font-medium flex items-center">
-              View All <ChevronRight className="w-3 h-3" />
-            </button>
-          </div>
+        </div>
+        {/* §STEP-1: View All — moved BELOW the tab row */}
+        <div className="mb-3">
+          <button onClick={() => {
+            saveScrollPos('dashboard')
+            // §DYNAMIC-ROUTING: View All routes based on active hub tab.
+            if (hubTab === 'transactions') {
+              // Transactions → History (with active time filter)
+              // §PHASE-5-D1: Pass the FULL RangeContext (not just range string)
+              // so History sees the exact same date window — including custom
+              // range's start/end dates.
+              setHistoryRangeContext({ range: timeRange, customStart, customEnd })
+              setActiveView('history')
+            } else if (hubTab === 'lowstock') {
+              // Low Stock → Inventory (with low-stock filter, no time param)
+              setInventoryFilter('low-stock')
+              setActiveView('inventory')
+            } else if (hubTab === 'orders') {
+              // §FIX: Online Orders → dedicated Online Orders view.
+              setActiveView('online-orders')
+            } else {
+              setKhataFilter('all')
+              setActiveView('khata')
+            }
+          }} className="text-xs text-primary font-medium flex items-center">
+            View All <ChevronRight className="w-3 h-3" />
+          </button>
         </div>
 
         {/* §FILTER-DROPDOWN: Interactive date range picker for the hub.
@@ -1655,18 +1804,42 @@ export function DashboardView() {
         {hubTab === 'orders' && (
           <OnlineOrdersList currency={currency} onNavigate={() => { saveScrollPos('dashboard'); setActiveView('khata') }} />
         )}
+        </>
+        )}
       </Card>
+      )}
 
-      {/* Quick actions */}
+      {/* §STEP-1-RENDER-INTEGRATION: Quick Actions section — visibility
+          gated by dashSectionConfig.sections[id=quickActions].visible +
+          filtered actions (visibleActions) + gear icon in header + empty
+          state when no actions enabled. */}
+      {isSectionVisible(dashSectionConfig, 'quickActions') && (
       <Card className="p-4">
-        <h3 className="text-sm font-semibold mb-3">{t('dash.quickActions')}</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold">{t('dash.quickActions')}</h3>
+          <button
+            onClick={() => setShowSectionSettings('quickActions')}
+            className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
+            aria-label="Configure Quick Actions settings"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        {visibleQuickActions.length === 0 ? (
+          /* §STEP-1: Empty state — all Quick Actions disabled */
+          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40">
+            <p className="text-xs text-muted-foreground">No actions enabled. Open settings to configure.</p>
+            <button
+              onClick={() => setShowSectionSettings('quickActions')}
+              className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground min-h-[36px]"
+              aria-label="Configure Quick Actions"
+            >
+              <Settings className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
         <div className="grid grid-cols-4 gap-2">
-          {[
-            { label: t('khata.addPartyShort'), icon: Users, view: 'khata' as const, action: 'add-party' as const, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
-            { label: t('inv.addProductShort'), icon: Package, view: 'inventory' as const, action: 'add-product' as const, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
-            { label: t('bill.newInvoiceShort'), icon: Receipt, view: 'sale-pad' as const, action: 'new-invoice' as const, color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/30' },
-            { label: t('qa.addTransaction'), icon: ArrowLeftRight, view: 'khata' as const, action: 'add-transaction' as const, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30' },
-          ].map((a) => {
+          {visibleQuickActions.map((a) => {
             const Icon = a.icon
             return (
               <button key={a.label} onClick={() => { setActiveView(a.view); triggerQuickAction({ id: crypto.randomUUID(), type: a.action }) }} className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-muted transition-colors min-h-[72px] justify-center">
@@ -1676,7 +1849,9 @@ export function DashboardView() {
             )
           })}
         </div>
+        )}
       </Card>
+      )}
 
       {/* §P16-STEP3.8.1-DRILLDOWN: Profit/Loss drill-down bottom sheet.
           Opens when the user taps "View Details" in the ProfitLossTooltip.
