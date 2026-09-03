@@ -44,6 +44,7 @@ import {
   parseDashboardSectionConfig,
   isSectionVisible,
   getOrderedQuickActions,
+  moveItemInOrder,
   type DashboardSectionConfig,
 } from '@/lib/dashboard-preferences'
 import {
@@ -2049,19 +2050,17 @@ export function DashboardView() {
           setDashSectionConfig(newConfig)
           saveDashboardSections(newConfig).catch(() => {})
         }}
-        // §STEP-1C: Reorder support
+        // §STEP-1C: Reorder support — uses moveItemInOrder to skip disabled items
         itemOrder={dashSectionConfig.quickActions.order}
         onMoveItem={(id, direction) => {
-          const order = [...dashSectionConfig.quickActions.order]
-          const idx = order.indexOf(id)
-          if (idx < 0) return
-          const swapIdx = direction === 'up' ? idx - 1 : idx + 1
-          if (swapIdx < 0 || swapIdx >= order.length) return
-          // Swap
-          const temp = order[idx]
-          order[idx] = order[swapIdx]
-          order[swapIdx] = temp
-          const newConfig = { ...dashSectionConfig, quickActions: { ...dashSectionConfig.quickActions, order } }
+          const newOrder = moveItemInOrder(
+            dashSectionConfig.quickActions.order,
+            dashSectionConfig.quickActions.visibleActions,
+            id,
+            direction,
+          )
+          if (!newOrder) return
+          const newConfig = { ...dashSectionConfig, quickActions: { ...dashSectionConfig.quickActions, order: newOrder } }
           setDashSectionConfig(newConfig)
           saveDashboardSections(newConfig).catch(() => {})
         }}

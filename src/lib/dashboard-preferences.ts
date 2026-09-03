@@ -234,3 +234,70 @@ export function getOrderedQuickActions(config: DashboardSectionConfig): string[]
   }
   return result
 }
+
+/**
+ * §STEP-1C-FIX: Move an item within the full order array, skipping over
+ * disabled (invisible) items so the visible order actually changes.
+ *
+ * Algorithm:
+ * 1. Build the visible-ordered list (enabled items in saved order).
+ * 2. Find the item's position in the visible list.
+ * 3. Swap it with the adjacent VISIBLE item (up or down).
+ * 4. Reconstruct the full order array, preserving disabled items in place.
+ *
+ * @param order - The full saved order array (includes disabled items)
+ * @param visibleActions - Which action IDs are currently enabled
+ * @param id - The action ID to move
+ * @param direction - 'up' or 'down'
+ * @returns New order array, or null if no move occurred
+ */
+export function moveItemInOrder(
+  order: string[],
+  visibleActions: string[],
+  id: string,
+  direction: 'up' | 'down',
+): string[] | null {
+  // Build visible-ordered list
+  const visibleOrdered: string[] = []
+  for (const actionId of order) {
+    if (visibleActions.includes(actionId) && !visibleOrdered.includes(actionId)) {
+      visibleOrdered.push(actionId)
+    }
+  }
+  // Append visible items not in order
+  for (const actionId of visibleActions) {
+    if (!visibleOrdered.includes(actionId)) {
+      visibleOrdered.push(actionId)
+    }
+  }
+
+  // Find position in visible list
+  const visibleIdx = visibleOrdered.indexOf(id)
+  if (visibleIdx < 0) return null
+
+  // Determine swap target in visible list
+  const swapVisibleIdx = direction === 'up' ? visibleIdx - 1 : visibleIdx + 1
+  if (swapVisibleIdx < 0 || swapVisibleIdx >= visibleOrdered.length) return null
+
+  const swapId = visibleOrdered[swapVisibleIdx]
+
+  // Reconstruct full order: walk the original order, when we encounter
+  // `id` or `swapId`, output them in swapped order. All other items
+  // (including disabled ones) stay in their original positions.
+  const newOrder: string[] = []
+  for (const actionId of order) {
+    if (actionId === id) {
+      newOrder.push(swapId)
+    } else if (actionId === swapId) {
+      newOrder.push(id)
+    } else {
+      newOrder.push(actionId)
+    }
+  }
+
+  // If id or swapId were not in the original order, append them
+  if (!order.includes(id)) newOrder.push(id)
+  if (!order.includes(swapId)) newOrder.push(swapId)
+
+  return newOrder
+}

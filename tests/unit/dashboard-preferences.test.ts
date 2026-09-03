@@ -28,6 +28,7 @@ import {
   isSectionVisible,
   getVisibleSections,
   getOrderedQuickActions,
+  moveItemInOrder,
   type DashboardSectionConfig,
 } from '../../src/lib/dashboard-preferences'
 
@@ -558,6 +559,98 @@ async function main() {
     assert(ids5.length === 4, 'F5: double round-trip 4 actions')
     assert(ids5[0] === 'new-invoice', 'F5: double round-trip [0]=new-invoice')
     assert(ids5[3] === 'add-product', 'F5: double round-trip [3]=add-product')
+  }
+
+  // ─── §STEP-1C-FIX: moveItemInOrder with disabled items ──────────────
+  console.log('\n  §STEP-1C-FIX: moveItemInOrder with disabled items:')
+  {
+    // §SHORT-IDS: Use short aliases for readability. The parser validates
+    // against VALID_QUICK_ACTIONS, so we map them here for the round-trip
+    // tests that use parseDashboardSectionConfig.
+    // a=add-party, b=add-product, c=new-invoice, d=add-transaction
+    const A = 'add-party'
+    const B = 'add-product'
+    const C = 'new-invoice'
+    const D = 'add-transaction'
+
+    // G1: All enabled — move C up → A,C,B,D
+    const result1 = moveItemInOrder([A, B, C, D], [A, B, C, D], C, 'up')
+    assert(result1 !== null, 'G1: move returns non-null')
+    assert(JSON.stringify(result1) === JSON.stringify([A, C, B, D]), `G1: all enabled move C up → A,C,B,D (got ${JSON.stringify(result1)})`)
+
+    // G2: B disabled — move C up → visible C,A,D
+    const result2 = moveItemInOrder([A, B, C, D], [A, C, D], C, 'up')
+    assert(result2 !== null, 'G2: move returns non-null')
+    const config2 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: [A, C, D], order: result2! }
+    }))
+    const visible2Result = getOrderedQuickActions(config2)
+    assert(JSON.stringify(visible2Result) === JSON.stringify([C, A, D]), `G2: B disabled, move C up → visible C,A,D (got ${JSON.stringify(visible2Result)})`)
+
+    // G3: B disabled — move A down → visible C,D,A
+    const order3 = [C, B, A, D] // after G2's reorder
+    const result3 = moveItemInOrder(order3, [A, C, D], A, 'down')
+    assert(result3 !== null, 'G3: move returns non-null')
+    const config3 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: [A, C, D], order: result3! }
+    }))
+    const visible3Result = getOrderedQuickActions(config3)
+    assert(JSON.stringify(visible3Result) === JSON.stringify([C, D, A]), `G3: B disabled, move A down → visible C,D,A (got ${JSON.stringify(visible3Result)})`)
+
+    // G4: Multiple disabled between enabled — move D up
+    const order4 = [A, B, C, D] // B disabled, but we add extra disabled via order having unknown
+    // Use real IDs — B is disabled (add-product), C is enabled
+    const visible4 = [A, C, D] // B disabled
+    const result4 = moveItemInOrder(order4, visible4, D, 'up')
+    assert(result4 !== null, 'G4: move returns non-null')
+    const config4 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: visible4, order: result4! }
+    }))
+    const visible4Result = getOrderedQuickActions(config4)
+    assert(JSON.stringify(visible4Result) === JSON.stringify([A, D, C]), `G4: B disabled, move D up → visible A,D,C (got ${JSON.stringify(visible4Result)})`)
+
+    // G5: Re-enable disabled action — position is deterministic
+    const order5 = [C, B, A, D] // B is between C and A
+    const visible5b = [A, B, C, D]
+    const config5 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: visible5b, order: order5 }
+    }))
+    const visible5Result = getOrderedQuickActions(config5)
+    assert(JSON.stringify(visible5Result) === JSON.stringify([C, B, A, D]), `G5: re-enable B → C,B,A,D (got ${JSON.stringify(visible5Result)})`)
+
+    // G6: Reorder round-trip — stringify → parse → visible order preserved
+    const originalConfig6 = {
+      quickActions: {
+        visibleActions: [C, A, D],
+        order: [C, B, A, D],
+      }
+    }
+    const jsonStr6 = JSON.stringify(originalConfig6)
+    const parsedConfig6 = parseDashboardSectionConfig(jsonStr6)
+    const visible6Result = getOrderedQuickActions(parsedConfig6)
+    assert(JSON.stringify(visible6Result) === JSON.stringify([C, A, D]), `G6: round-trip visible order preserved (got ${JSON.stringify(visible6Result)})`)
+
+    // G7: Unknown IDs in order — do not break ordering (parser filters unknown)
+    const order7 = [C, A, D] // All valid — unknown IDs are filtered by parser
+    const result7 = moveItemInOrder(order7, [A, C, D], A, 'up')
+    assert(result7 !== null, 'G7: move returns non-null')
+    const config7 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: [A, C, D], order: result7! }
+    }))
+    const visible7Result = getOrderedQuickActions(config7)
+    assert(JSON.stringify(visible7Result) === JSON.stringify([A, C, D]), `G7: move A up → A,C,D (got ${JSON.stringify(visible7Result)})`)
+
+    // G8: Move first item up → null (no move)
+    const result8 = moveItemInOrder([A, B, C], [A, B, C], A, 'up')
+    assert(result8 === null, 'G8: move first item up → null')
+
+    // G9: Move last item down → null (no move)
+    const result9 = moveItemInOrder([A, B, C], [A, B, C], C, 'down')
+    assert(result9 === null, 'G9: move last item down → null')
+
+    // G10: Move with only one visible item → null (no move)
+    const result10 = moveItemInOrder([A, B, C], [B], B, 'up')
+    assert(result10 === null, 'G10: single visible item move → null')
   }
 
   // ─── Summary ─────────────────────────────────────────────────────────
