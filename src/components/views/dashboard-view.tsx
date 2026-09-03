@@ -2049,6 +2049,22 @@ export function DashboardView() {
           setDashSectionConfig(newConfig)
           saveDashboardSections(newConfig).catch(() => {})
         }}
+        // §STEP-1C: Reorder support
+        itemOrder={dashSectionConfig.quickActions.order}
+        onMoveItem={(id, direction) => {
+          const order = [...dashSectionConfig.quickActions.order]
+          const idx = order.indexOf(id)
+          if (idx < 0) return
+          const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+          if (swapIdx < 0 || swapIdx >= order.length) return
+          // Swap
+          const temp = order[idx]
+          order[idx] = order[swapIdx]
+          order[swapIdx] = temp
+          const newConfig = { ...dashSectionConfig, quickActions: { ...dashSectionConfig.quickActions, order } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
         onReset={() => {
           const newConfig = { ...dashSectionConfig, quickActions: { ...DEFAULT_DASHBOARD_CONFIG.quickActions } }
           setDashSectionConfig(newConfig)

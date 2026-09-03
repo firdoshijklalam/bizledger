@@ -494,6 +494,72 @@ async function main() {
     assert(ids6[3] === 'add-party', 'E6: order[3]=add-party')
   }
 
+  // ─── §STEP-1C: Reorder tests ─────────────────────────────────────────
+  console.log('\n  §STEP-1C: Reorder tests:')
+  {
+    // F1: Reorder A,B,C → C,A,B
+    const config1 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: {
+        visibleActions: ['add-party', 'add-product', 'new-invoice'],
+        order: ['new-invoice', 'add-party', 'add-product'], // C,A,B
+      }
+    }))
+    const ids1 = getOrderedQuickActions(config1)
+    assert(ids1[0] === 'new-invoice', 'F1: reorder A,B,C → C,A,B: [0]=new-invoice')
+    assert(ids1[1] === 'add-party', 'F1: reorder: [1]=add-party')
+    assert(ids1[2] === 'add-product', 'F1: reorder: [2]=add-product')
+
+    // F2: Disabled action + reorder
+    const config2 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: {
+        visibleActions: ['add-party', 'new-invoice'], // add-product disabled
+        order: ['new-invoice', 'add-party', 'add-product'], // add-product still in order
+      }
+    }))
+    const ids2 = getOrderedQuickActions(config2)
+    assert(ids2.length === 2, 'F2: disabled action excluded (2 visible)')
+    assert(ids2[0] === 'new-invoice', 'F2: [0]=new-invoice')
+    assert(ids2[1] === 'add-party', 'F2: [1]=add-party')
+    assert(!ids2.includes('add-product'), 'F2: add-product excluded (disabled)')
+
+    // F3: Re-enable action — it appears in saved order position
+    const config3 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: {
+        visibleActions: ['add-party', 'add-product', 'new-invoice'], // all enabled
+        order: ['new-invoice', 'add-party', 'add-product'],
+      }
+    }))
+    const ids3 = getOrderedQuickActions(config3)
+    assert(ids3.length === 3, 'F3: all 3 actions visible')
+    assert(ids3[0] === 'new-invoice', 'F3: [0]=new-invoice')
+    assert(ids3[1] === 'add-party', 'F3: [1]=add-party')
+    assert(ids3[2] === 'add-product', 'F3: [2]=add-product')
+
+    // F4: Persistence round-trip — stringify → parse → same order
+    const originalConfig = {
+      quickActions: {
+        visibleActions: ['new-invoice', 'add-transaction', 'add-party', 'add-product'],
+        order: ['new-invoice', 'add-transaction', 'add-party', 'add-product'],
+      }
+    }
+    const jsonStr = JSON.stringify(originalConfig)
+    const parsedConfig = parseDashboardSectionConfig(jsonStr)
+    const ids4 = getOrderedQuickActions(parsedConfig)
+    assert(ids4.length === 4, 'F4: round-trip 4 actions')
+    assert(ids4[0] === 'new-invoice', 'F4: round-trip [0]=new-invoice')
+    assert(ids4[1] === 'add-transaction', 'F4: round-trip [1]=add-transaction')
+    assert(ids4[2] === 'add-party', 'F4: round-trip [2]=add-party')
+    assert(ids4[3] === 'add-product', 'F4: round-trip [3]=add-product')
+
+    // F5: Stringify → parse → stringify → parse (double round-trip)
+    const jsonStr2 = JSON.stringify(parsedConfig)
+    const parsedConfig2 = parseDashboardSectionConfig(jsonStr2)
+    const ids5 = getOrderedQuickActions(parsedConfig2)
+    assert(ids5.length === 4, 'F5: double round-trip 4 actions')
+    assert(ids5[0] === 'new-invoice', 'F5: double round-trip [0]=new-invoice')
+    assert(ids5[3] === 'add-product', 'F5: double round-trip [3]=add-product')
+  }
+
   // ─── Summary ─────────────────────────────────────────────────────────
   console.log(`\n✅ Passed: ${passed}`)
   console.log(`❌ Failed: ${failed}`)

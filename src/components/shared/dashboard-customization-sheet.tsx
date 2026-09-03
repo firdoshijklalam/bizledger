@@ -290,6 +290,9 @@ interface SectionSettingsSheetProps {
   // Default item selector
   defaultItemId?: string
   onSetDefault?: (id: string) => void
+  // §STEP-1C: Item reordering (optional — used by Quick Actions)
+  itemOrder?: string[]
+  onMoveItem?: (id: string, direction: 'up' | 'down') => void
   // Reset
   onReset: () => void
 }
@@ -297,6 +300,7 @@ interface SectionSettingsSheetProps {
 export function SectionSettingsSheet({
   open, onClose, title, sectionVisible, onToggleSection,
   items, visibleItems, onToggleItem, defaultItemId, onSetDefault, onReset,
+  itemOrder, onMoveItem,
 }: SectionSettingsSheetProps) {
   const [showResetConfirm, setShowResetConfirm] = useState(false)
 
@@ -355,11 +359,29 @@ export function SectionSettingsSheet({
               {/* Items (tabs/actions) */}
               {items.length > 0 && (
                 <div>
-                  <p className="text-xs font-semibold text-muted-foreground mb-2">Visible Items</p>
+                  <p className="text-xs font-semibold text-muted-foreground mb-2">
+                    {onMoveItem ? 'Actions' : 'Visible Items'}
+                  </p>
                   <div className="space-y-1">
-                    {items.map(item => {
+                    {/* §STEP-1C: If onMoveItem is provided, sort items by itemOrder */}
+                    {(() => {
+                      const sortedItems = onMoveItem && itemOrder
+                        ? [...items].sort((a, b) => {
+                            const aIdx = itemOrder.indexOf(a.id)
+                            const bIdx = itemOrder.indexOf(b.id)
+                            return (aIdx < 0 ? 999 : aIdx) - (bIdx < 0 ? 999 : bIdx)
+                          })
+                        : items
+                      return sortedItems.map((item, displayIndex) => {
                       const isVisible = visibleItems.includes(item.id)
                       const isDefault = defaultItemId === item.id
+                      // §STEP-1C: For reorder, determine if move up/down is possible
+                      const visibleSorted = onMoveItem && itemOrder
+                        ? sortedItems.filter(i => visibleItems.includes(i.id))
+                        : []
+                      const visibleIndex = visibleSorted.findIndex(i => i.id === item.id)
+                      const canMoveUp = onMoveItem && isVisible && visibleIndex > 0
+                      const canMoveDown = onMoveItem && isVisible && visibleIndex >= 0 && visibleIndex < visibleSorted.length - 1
                       return (
                         <div key={item.id} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50">
                           <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -374,17 +396,41 @@ export function SectionSettingsSheet({
                               {item.label}
                             </span>
                           </div>
-                          {onSetDefault && isVisible && (
-                            <button
-                              onClick={() => onSetDefault(item.id)}
-                              className={`text-[10px] px-2 py-1 rounded-md shrink-0 ${isDefault ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'}`}
-                            >
-                              {isDefault ? '✓ Default' : 'Set Default'}
-                            </button>
-                          )}
+                          <div className="flex items-center gap-1 shrink-0">
+                            {/* §STEP-1C: Move Up / Move Down controls for reordering */}
+                            {onMoveItem && isVisible && (
+                              <div className="flex items-center gap-0.5">
+                                <button
+                                  onClick={() => onMoveItem(item.id, 'up')}
+                                  disabled={!canMoveUp}
+                                  className="w-7 h-7 rounded hover:bg-muted flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                  aria-label={`Move ${item.label} up`}
+                                >
+                                  <ChevronUp className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => onMoveItem(item.id, 'down')}
+                                  disabled={!canMoveDown}
+                                  className="w-7 h-7 rounded hover:bg-muted flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                  aria-label={`Move ${item.label} down`}
+                                >
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
+                            {onSetDefault && isVisible && (
+                              <button
+                                onClick={() => onSetDefault(item.id)}
+                                className={`text-[10px] px-2 py-1 rounded-md shrink-0 ${isDefault ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'}`}
+                              >
+                                {isDefault ? '✓ Default' : 'Set Default'}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       )
-                    })}
+                      })
+                    })()}
                   </div>
                 </div>
               )}
