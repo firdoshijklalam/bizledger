@@ -26,7 +26,7 @@ import { useScrollRetention } from '@/hooks/use-scroll-retention'
 import { useScrollStore } from '@/store/scroll-store'
 import { useRealtimeOrders } from '@/hooks/use-realtime-orders'
 import { toNumber } from '@/lib/numeric'
-import { useMemo, useState, useEffect, useRef } from 'react'
+import { Fragment, useMemo, useState, useEffect, useRef } from 'react'
 import {
   DashboardCardManagementSheet,
   DEFAULT_CARD_CONFIG,
@@ -455,6 +455,16 @@ export function DashboardView() {
       setHubTab(visible[0] as typeof hubTab)
     }
   }, [dashSectionConfig.businessActivity.visibleTabs, hubTab])
+
+  // §STEP-1A-ORDERING: Customer Quality grade fallback. If the user disabled
+  // the currently-selected grade in the SectionSettingsSheet (or via API),
+  // clear the selection so we don't render the floating modal for a hidden
+  // grade. Mirrors the topTab/hubTab fallbacks above.
+  useEffect(() => {
+    if (selectedGrade && !dashSectionConfig.customerQuality.visibleGrades.includes(selectedGrade)) {
+      setSelectedGrade(null)
+    }
+  }, [dashSectionConfig.customerQuality.visibleGrades, selectedGrade])
   // §GRADE-BOTTOM-SHEET: fetch all parties so the grade distribution bottom
   // sheet can show ALL customers in a grade (not just topDebtors which is
   // sliced to 5). Cached by TanStack Query so this is instant on re-open.
@@ -671,6 +681,770 @@ export function DashboardView() {
   const visibleQuickActions = ALL_QUICK_ACTIONS.filter(a =>
     dashSectionConfig.quickActions.visibleActions.includes(a.action)
   )
+
+  // §STEP-1A-ORDERING: Customer Quality grade distribution filtered by the
+  // user's visibleGrades preference. Falls back to an empty array when all
+  // grades are disabled — the customerQuality section shows an empty state
+  // with a settings button instead of an empty chart in that case.
+  const visibleGradeData = (data.gradeDistribution || []).filter(g =>
+    dashSectionConfig.customerQuality.visibleGrades.includes(g.grade)
+  )
+
+  // §STEP-1A-ORDERING: Render a single dashboard section by ID. Each case
+  // returns the section's full JSX (without its visibility wrapper — that's
+  // handled by the ordering map in the main return). The caller is:
+  //   dashSectionConfig.sections.filter(visible).sort(order).map(s => renderSection(s.id))
+  //
+  // §DOUBLE-CHECK: isSectionVisible() is called inside renderSection as a
+  // safety net even though the caller already filters by `s.visible`. This
+  // guards against callers that bypass the filter (e.g., direct calls).
+  //
+  // §MOVED-JSX: Each case's JSX is MOVED (not duplicated) from the main
+  // render — the original `{isSectionVisible(...) && (...)}` blocks were
+  // removed and replaced with the ordering map below.
+  const renderSection = (id: string): React.ReactNode => {
+    if (!isSectionVisible(dashSectionConfig, id)) return null
+    switch (id) {
+      case 'summaryCards':
+        return (
+          <>
+            {/* §UNIFIED-DASHBOARD-CARDS: All visible cards in one grid.
+                Cards are rendered dynamically based on user's dashboardCards config.
+                Time-dependent cards still use TimeMetricCard for their range selector. */}
+            <div className="grid grid-cols-2 gap-3">
+              {visibleCards.map(({ config, def }, i) => {
+                if (def.isTimeMetric) {
+                  return (
+                    <TimeMetricCard
+                      key={config.id}
+                      label={def.label}
+                      icon={def.icon}
+                      tint={def.tint}
+                      bg={def.bg}
+                      text={def.text}
+                      defaultRange={(def.defaultRange as any) || '1d'}
+                      currency={currency}
+                      valueExtractor={def.valueExtractor}
+                      onClick={def.onClick}
+                    />
+                  )
+                }
+                const Icon = def.icon
+                const value = def.valueExtractor(data)
+                const formatted = def.formatValue(value, currency)
+                return (
+                  <motion.button key={config.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={() => def.onClick({ range: '1d' })} aria-label={def.label} className="text-left focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-2xl">
+                    <Card className={`p-4 ${def.bg} border-none hover:shadow-md transition-shadow h-full active:scale-[0.98]`}>
+                      <div className="flex items-start justify-between mb-2"><span className={`w-8 h-8 rounded-lg ${def.tint} text-white flex items-center justify-center`}><Icon className="w-4 h-4" /></span></div>
+                      <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{def.label}</p>
+                      <p className={`text-base font-bold tabular ${def.text}`}>{formatted}</p>
+                    </Card>
+                  </motion.button>
+                )
+              })}
+            </div>
+
+            {/* §MANAGE-DASHBOARD-CARDS: Button to open card management sheet */}
+            <button
+              onClick={() => setShowDashCardMgr(true)}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-xs font-medium text-muted-foreground min-h-[44px]"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              Manage Dashboard Cards
+            </button>
+          </>
+        )
+
+      case 'performanceChart':
+        return (
+          <Card className="p-4 pb-16">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h3 className="text-sm font-semibold">{chartOptions.find((o) => o.id === chartType)?.label || 'Business Analytics'}</h3>
+              </div>
+              {chartType !== 'categories' && (
+                <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
+                  <button onClick={() => setChartView('line')} className={`px-2 py-1 rounded-md transition-colors ${chartView === 'line' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`} aria-label="Line chart view"><LineChart className="w-4 h-4" /></button>
+                  <button onClick={() => setChartView('bar')} className={`px-2 py-1 rounded-md transition-colors ${chartView === 'bar' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`} aria-label="Bar chart view"><BarChart3 className="w-4 h-4" /></button>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 mb-3">
+              <select value={chartType} onChange={(e) => setChartType(e.target.value as ChartType)} className="text-xs bg-muted rounded-lg px-2 py-1.5 border-0 outline-none h-8 font-medium flex-1 min-w-0">
+                {chartOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+              <select value={timeRange} onChange={(e) => { const val = e.target.value as TimeRange; setTimeRange(val); if (val === 'custom') setShowCustomPicker(true) }} className="text-xs bg-muted rounded-lg px-2 py-1.5 border-0 outline-none h-8 font-medium shrink-0">
+                {DASHBOARD_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+              </select>
+            </div>
+
+            {/* §P16-STEP3.8.1-MOVED: Custom Date Range panel — now INSIDE the chart
+                Card, contextually below the chart-type/time-range selectors and
+                above the chart visualization. Appears ONLY when timeRange==='custom'.
+                Mobile-first: 2-col grid, no horizontal overflow, animated height. */}
+            <AnimatePresence>
+              {showCustomPicker && timeRange === 'custom' && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden mb-3">
+                  <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-purple-700 dark:text-purple-300">📅 Custom Date Range</p>
+                      <button onClick={() => { setShowCustomPicker(false); setTimeRange('7d') }} className="text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">Start Date</label>
+                        <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">End Date</label>
+                        <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" />
+                      </div>
+                    </div>
+                    {customStart && customEnd && <p className="text-[10px] text-emerald-600">✓ Range applied — data will filter to selected dates</p>}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* §TOGGLE-FIX: Chart rendering respects chartView (line vs bar) for
+                ALL chart types. Categories (pie) ignores the toggle. Inventory
+                uses AreaChart (line variant) / BarChart (bar variant).
+                §FIX-6: Per-chart loading state — shows spinner when revalidating
+                (apiLoading && data present from previous range). Doesn't hide
+                the entire dashboard; only the chart area shows the loader.
+                §FIX-7: Empty state — when all buckets have zero values, shows
+                "No activity in this period" instead of a blank chart.
+                §FIX-8: Accessibility — chart container has role="img" + aria-label.
+                §FIX-9: Performance — profit chart's data.map() is memoized. */}
+
+            {/* §FIX-9: Memoize profit chart data transformation to avoid recompute on every render */}
+            {(() => {
+              // §CHECK-EMPTY: Determine if all chart values are zero
+              const allZero = data.salesTrend.length > 0 && data.salesTrend.every(d =>
+                d.revenue === 0 && d.expense === 0 && d.profit === 0 &&
+                d.collected === 0 && d.creditGiven === 0
+              )
+
+              // §FIX-6: Per-chart loading indicator (stale-while-revalidate)
+              if (apiLoading && data) {
+                return (
+                  <div className="h-44 flex items-center justify-center" role="status" aria-live="polite">
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                      <span className="text-[10px] text-muted-foreground">Updating chart…</span>
+                    </div>
+                  </div>
+                )
+              }
+
+              // §FIX-7: Empty state
+              if (allZero) {
+                return (
+                  <div className="h-44 flex items-center justify-center" role="img" aria-label="No chart data available">
+                    <div className="flex flex-col items-center gap-1">
+                      <p className="text-xs text-muted-foreground">No revenue or expense activity in this period</p>
+                      <p className="text-[10px] text-muted-foreground/60">Try a wider date range</p>
+                    </div>
+                  </div>
+                )
+              }
+
+              // §FIX-8: ARIA label for screen readers
+              const ariaLabel = `${chartOptions.find((o) => o.id === chartType)?.label || 'Business'} chart for ${dashboardRangeLabel(timeRange, customStart, customEnd)} — ${data.salesTrend.length} data points`
+
+              return (
+                <motion.div key={chartType + chartView} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }} className="h-44 -ml-2" role="img" aria-label={ariaLabel}>
+              <ResponsiveContainer width="100%" height="100%">
+                {chartType === 'revenue' && chartView === 'line' ? (
+                  <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.4} /><stop offset="100%" stopColor="#10b981" stopOpacity={0} /></linearGradient><linearGradient id="exp" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f87171" stopOpacity={0.3} /><stop offset="100%" stopColor="#f87171" stopOpacity={0} /></linearGradient></defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" name="Revenue" />
+                    <Area type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} fill="url(#exp)" name="Expense" />
+                  </AreaChart>
+                ) : chartType === 'revenue' && chartView === 'bar' ? (
+                  <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Revenue" />
+                    <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Expense" />
+                  </BarChart>
+                ) : chartType === 'profit' && chartView === 'line' ? (
+                  // §TOGGLE-FIX: Profit vs Loss — LINE variant (LineChart)
+                  <RechartsLineChart data={data.salesTrend.map((d) => ({ ...d, profitVal: d.profit >= 0 ? d.profit : 0, lossVal: d.profit < 0 ? Math.abs(d.profit) : 0 }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    {/* §FIX-3: Series names updated to match 'Net Cash Flow' semantics */}
+                    <Line type="monotone" dataKey="profitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Net" />
+                    <Line type="monotone" dataKey="lossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Outflow" />
+                  </RechartsLineChart>
+                ) : chartType === 'profit' && chartView === 'bar' ? (
+                  // §TOGGLE-FIX: Profit vs Loss — BAR variant (BarChart)
+                  <BarChart data={data.salesTrend.map((d) => ({ ...d, profitVal: d.profit >= 0 ? d.profit : 0, lossVal: d.profit < 0 ? Math.abs(d.profit) : 0 }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    {/* §FIX-3: Series names updated to match 'Net Cash Flow' semantics */}
+                    <Bar dataKey="profitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Net" />
+                    <Bar dataKey="lossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Outflow" />
+                  </BarChart>
+                ) : chartType === 'profitLoss' && chartView === 'line' ? (
+                  // §P16-STEP3: Profit vs Loss — LINE variant (TRUE accounting profit)
+                  // Uses netProfitVal (positive) + netLossVal (negative) from salesTrend.
+                  // NOT the cash-flow proxy (revenue - expense).
+                  <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                    <Tooltip content={<ProfitLossTooltip currency={currency} onViewDetails={(fullDate) => { const idx = data.salesTrend.findIndex(b => b.fullDate === fullDate); if (idx >= 0) setDrilldownBucket({ index: idx, fullDate }) }} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Line type="monotone" dataKey="netProfitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Profit" />
+                    <Line type="monotone" dataKey="netLossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Loss" />
+                  </RechartsLineChart>
+                ) : chartType === 'profitLoss' && chartView === 'bar' ? (
+                  // §P16-STEP3: Profit vs Loss — BAR variant (TRUE accounting profit)
+                  <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                    <Tooltip content={<ProfitLossTooltip currency={currency} onViewDetails={(fullDate) => { const idx = data.salesTrend.findIndex(b => b.fullDate === fullDate); if (idx >= 0) setDrilldownBucket({ index: idx, fullDate }) }} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Bar dataKey="netProfitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Profit" />
+                    <Bar dataKey="netLossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Loss" />
+                  </BarChart>
+                ) : chartType === 'cashflow' && chartView === 'line' ? (
+                  // §TOGGLE-FIX: Cashflow — LINE variant (pure lines, no bars)
+                  // §P16-STEP3: Uses cashIn/cashOut fields (authoritative cash-in/out subtypes)
+                  <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Line type="monotone" dataKey="cashIn" stroke="#10b981" strokeWidth={2} dot={false} name="Cash In" />
+                    <Line type="monotone" dataKey="cashOut" stroke="#f87171" strokeWidth={2} dot={false} name="Cash Out" />
+                  </RechartsLineChart>
+                ) : chartType === 'cashflow' && chartView === 'bar' ? (
+                  // §TOGGLE-FIX: Cashflow — BAR variant (pure bars, no line)
+                  // §P16-STEP3: Uses cashIn/cashOut fields (authoritative cash-in/out subtypes)
+                  <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Bar dataKey="cashIn" fill="#10b981" radius={[3, 3, 0, 0]} name="Cash In" />
+                    <Bar dataKey="cashOut" fill="#f87171" radius={[3, 3, 0, 0]} name="Cash Out" />
+                  </BarChart>
+                ) : chartType === 'collections' && chartView === 'line' ? (
+                  // §TOGGLE-FIX: Collections — LINE variant
+                  <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Line type="monotone" dataKey="collected" stroke="#10b981" strokeWidth={2} dot={false} name="Collected" />
+                    <Line type="monotone" dataKey="creditGiven" stroke="#ef4444" strokeWidth={2} dot={false} name="New Credit" />
+                  </RechartsLineChart>
+                ) : chartType === 'collections' && chartView === 'bar' ? (
+                  // §TOGGLE-FIX: Collections — BAR variant
+                  <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Bar dataKey="collected" fill="#10b981" radius={[3, 3, 0, 0]} name="Collected" />
+                    <Bar dataKey="creditGiven" fill="#ef4444" radius={[3, 3, 0, 0]} name="New Credit" />
+                  </BarChart>
+                ) : chartType === 'categories' ? (
+                  <PieChart>
+                    <Pie data={data.topCategories || []} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={(e: any) => e.name} labelLine={false} style={{ fontSize: 9 }}>
+                      {(data.topCategories || []).map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => formatCurrency(v, currency)} />
+                  </PieChart>
+                ) : (
+                  // §P16-STEP3: Default fallback — Revenue chart (was inventory, now removed)
+                  <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                    <defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.4} /><stop offset="100%" stopColor="#10b981" stopOpacity={0} /></linearGradient></defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" name="Revenue" />
+                  </AreaChart>
+                )}
+              </ResponsiveContainer>
+            </motion.div>
+              )
+            })()}
+
+            {/* Legend */}
+            {['revenue', 'cashflow', 'collections', 'profit', 'profitLoss'].includes(chartType) && (
+              <div className="flex items-center gap-3 mt-2 text-[10px]">
+                {chartType === 'revenue' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Revenue</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Expense</span></>)}
+                {/* §FIX-3: Legend labels updated to match 'Net Cash Flow' chart name */}
+                {chartType === 'profit' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Net</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Outflow</span></>)}
+                {/* §P16-STEP3: Profit vs Loss legend — true accounting profit/loss */}
+                {chartType === 'profitLoss' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Profit</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Loss</span></>)}
+                {chartType === 'cashflow' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Cash In</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Cash Out</span></>)}
+                {chartType === 'collections' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Collected</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" />New Credit</span></>)}
+              </div>
+            )}
+
+            {/* §P16-STEP3: Removed inventory value summary block (chart mode removed) */}
+
+            {/* Top categories list */}
+            {chartType === 'categories' && data.topCategories && data.topCategories.length > 0 && (
+              <div className="mt-2 space-y-1">{data.topCategories.slice(0, 4).map((c, i) => (<div key={c.name} className="flex items-center gap-2 text-[11px]"><span className="w-2 h-2 rounded-full shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} /><span className="flex-1 truncate">{c.name}</span><span className="font-semibold tabular">{formatCurrency(c.value, currency)}</span></div>))}</div>
+            )}
+          </Card>
+        )
+
+      case 'customerQuality':
+        return (
+          <>
+            {/* Grade distribution — Interactive Bar Chart (PRD Part 5 §1) */}
+            <Card className="p-4">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-sm font-semibold">Customer Quality Distribution</h3>
+                <button
+                  onClick={() => setShowSectionSettings('customerQuality')}
+                  className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
+                  aria-label="Configure Customer Quality Distribution settings"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-3">Tap a bar to view customers</p>
+              {visibleGradeData.length === 0 ? (
+                /* §STEP-1A-ORDERING: Empty state — all grades disabled.
+                    Render a clean message + a settings button instead of an
+                    empty chart (an empty chart with no bars looks broken). */
+                <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40">
+                  <p className="text-xs text-muted-foreground">No grades enabled. Open settings to configure.</p>
+                  <button
+                    onClick={() => setShowSectionSettings('customerQuality')}
+                    className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground min-h-[36px]"
+                    aria-label="Configure Customer Quality"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="h-36 -ml-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={visibleGradeData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} onClick={(e: any) => { if (e && e.activeLabel) setSelectedGrade(e.activeLabel) }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                      <XAxis dataKey="grade" tick={{ fontSize: 12, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={24} allowDecimals={false} />
+                      <Tooltip cursor={{ fill: 'oklch(0.9 0.005 145 / 0.3)' }} contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => [`${v} customers`, 'Count']} />
+                      <Bar dataKey="count" radius={[6, 6, 0, 0]} cursor="pointer">
+                        {visibleGradeData.map((_, i) => <Cell key={i} fill={['#10b981', '#14b8a6', '#f59e0b', '#f97316', '#ef4444'][i] || '#6366f1'} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </Card>
+
+            {/* Floating modal for grade-filtered customers (PRD Part 5 §2) */}
+            <AnimatePresence>
+              {selectedGrade && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedGrade(null)} className="fixed inset-0 z-[80] bg-black/40 backdrop-blur-[2px] flex items-end sm:items-center justify-center">
+                  <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', stiffness: 400, damping: 32 }} onClick={(e) => e.stopPropagation()} className="bg-card rounded-t-3xl sm:rounded-3xl border-t sm:border border-border w-full max-w-md max-h-[70vh] flex flex-col">
+                    <div className="flex items-center justify-between p-4 border-b border-border">
+                      <div className="flex items-center gap-2"><span className={`text-xs font-bold px-2 py-0.5 rounded-full ${GRADE_META[selectedGrade]?.bg} ${GRADE_META[selectedGrade]?.color}`}>Grade {selectedGrade}</span><span className="text-sm font-semibold">{GRADE_META[selectedGrade]?.desc}</span></div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => { setKhataGradeFilter(selectedGrade); setSelectedGrade(null); setKhataFilter('all'); setReturnToView('dashboard'); setActiveView('khata') }} className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-1 rounded-lg">Go to Khata →</button>
+                        <button onClick={() => setSelectedGrade(null)} className="text-muted-foreground"><X className="w-4 h-4" /></button>
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto scroll-area p-3 space-y-1">
+                      {(() => {
+                        const count = data.gradeDistribution.find((g) => g.grade === selectedGrade)?.count || 0
+                        if (count === 0) return <p className="text-sm text-muted-foreground text-center py-8">No customers in this grade</p>
+                        // §FIX: use allParties (full list) instead of topDebtors (sliced to 5)
+                        const gradeParties = (allParties || []).filter((p) => p.qualityGrade === selectedGrade)
+                        return (
+                          <>
+                            <p className="text-xs text-muted-foreground px-1 mb-2">{count} customer{count !== 1 ? 's' : ''} in this grade</p>
+                            {gradeParties.map((p) => (
+                              <button key={p.id} onClick={() => { saveScrollPos('dashboard'); setSelectedGrade(null); setOverlayPartyId(p.id) }} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
+                                <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center font-bold text-emerald-700">{p.name.charAt(0)}</span>
+                                <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.name}</p><p className="text-[11px] text-muted-foreground">Balance: {formatCurrency(p.balance, currency)}</p></div>
+                                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                              </button>
+                            ))}
+                            {gradeParties.length === 0 && <p className="text-xs text-muted-foreground text-center py-4">Tap "Go to Khata" to see all {count} customers</p>}
+                          </>
+                        )
+                      })()}
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        )
+
+      case 'topInsights':
+        return (
+          <Card className="p-4">
+            {/* §STEP-1: Section header with title + settings gear */}
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold">Top Insights</h3>
+              <button
+                onClick={() => setShowSectionSettings('topInsights')}
+                className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
+                aria-label="Configure Top Insights settings"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {visibleTopTabs.length === 0 ? (
+              /* §STEP-1: Empty state — all Top Insights tabs disabled */
+              <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40">
+                <p className="text-xs text-muted-foreground">No tabs enabled. Open settings to configure.</p>
+                <button
+                  onClick={() => setShowSectionSettings('topInsights')}
+                  className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground min-h-[36px]"
+                  aria-label="Configure Top Insights"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+            <>
+            {/* §STEP-1: Tab row (filtered by dashSectionConfig.topInsights.visibleTabs) */}
+            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar -mx-1 px-1 mb-2">
+              {visibleTopTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setTopTab(tab.id)}
+                  className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
+                    topTab === tab.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            {/* §STEP-1: View All button — moved BELOW the tab row */}
+            <div className="mb-3">
+              <button onClick={() => {
+                saveScrollPos('dashboard')
+                // §DYNAMIC-ROUTING: View All routes based on active tab.
+                if (topTab === 'debtors') {
+                  // Top Debtors → Outstanding Payments (Receivables)
+                  setActiveView('reports')
+                  setReportsTab('outstanding')
+                } else if (topTab === 'buyers') {
+                  // Top Buyers → Party Ledger (sorted by sales volume)
+                  setActiveView('reports')
+                  setReportsTab('party')
+                } else if (topTab === 'payments') {
+                  // Top Payments → History/Transactions (payments received)
+                  // §PHASE-5-D1: Use RangeContext for full custom-range support.
+                  setHistoryRangeContext({ range: '7d' })
+                  setActiveView('history')
+                } else if (topTab === 'products') {
+                  // Top Products → Inventory
+                  setInventoryFilter('all')
+                  setActiveView('inventory')
+                } else if (topTab === 'defaulters') {
+                  // Defaulters → Outstanding Payments (Grade D & E)
+                  setKhataGradeFilter('D') // pre-filter to D (E also shown in outstanding)
+                  setActiveView('reports')
+                  setReportsTab('outstanding')
+                } else {
+                  setKhataFilter('all')
+                  setActiveView('khata')
+                }
+              }} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
+            </div>
+
+            {/* Tab content */}
+            {topTab === 'debtors' && (
+              <div className="space-y-2">
+                {data.topDebtors.length === 0 ? <p className="text-sm text-muted-foreground py-4 text-center">No outstanding receivables 🎉</p> : (
+                  <>
+                    {data.topDebtors.slice(0, 5).map((d) => {
+                      const meta = GRADE_META[d.grade]
+                      return (
+                        <button key={d.id} onClick={() => { saveScrollAndOpenParty(d.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
+                          <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-xs font-bold">{d.name.charAt(0)}</div>
+                          <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
+                          <div className="text-right"><p className="text-sm font-semibold tabular text-emerald-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>
+                        </button>
+                      )
+                    })}
+                  </>
+                )}
+              </div>
+            )}
+
+            {topTab === 'buyers' && (
+              <div className="space-y-2">
+                {data.topBuyers && data.topBuyers.length > 0 ? (
+                  <>
+                    {data.topBuyers.slice(0, 5).map((b, i) => (
+                      <button key={b.id} onClick={() => { saveScrollPos('dashboard'); setOverlayPartyId(b.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
+                        <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-xs font-bold text-emerald-600">#{i + 1}</div>
+                        <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{b.name}</p><p className="text-[11px] text-muted-foreground">Top buyer</p></div>
+                        <p className="text-sm font-semibold tabular">{formatCurrency(b.value, currency)}</p>
+                      </button>
+                    ))}
+                  </>
+                ) : <p className="text-sm text-muted-foreground py-4 text-center">No buyer data yet</p>}
+              </div>
+            )}
+
+            {topTab === 'payments' && (
+              <div className="space-y-2">
+                {data.recentTransactions.filter(t => t.type === 'credit').slice(0, 5).map((tx) => (
+                  <div key={tx.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
+                    <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center"><ArrowDownRight className="w-4 h-4 text-emerald-600" /></div>
+                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || 'Payment'}</p><p className="text-[11px] text-muted-foreground">{timeAgo(tx.createdAt)}</p></div>
+                    <p className="text-sm font-semibold tabular text-emerald-600">+{formatCurrency(tx.amount, currency)}</p>
+                  </div>
+                ))}
+                {data.recentTransactions.filter(t => t.type === 'credit').length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">No payments yet</p>}
+              </div>
+            )}
+
+            {topTab === 'products' && (
+              <div className="space-y-2">
+                {data.topProductsByUnits && data.topProductsByUnits.length > 0 ? (
+                  <>
+                    {data.topProductsByUnits.slice(0, 5).map((p, i) => (
+                      <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
+                        <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: PIE_COLORS[i % PIE_COLORS.length] + '20', color: PIE_COLORS[i % PIE_COLORS.length] }}>#{i + 1}</div>
+                        <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.name}</p><p className="text-[11px] text-muted-foreground">{p.value} units sold · {formatCurrency(p.revenue, currency)}</p></div>
+                        <p className="text-sm font-semibold tabular">{p.value}</p>
+                      </div>
+                    ))}
+                  </>
+                ) : <p className="text-sm text-muted-foreground py-4 text-center">No product sales data yet</p>}
+              </div>
+            )}
+
+            {topTab === 'defaulters' && (
+              <div className="space-y-2">
+                {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').length > 0 ? (
+                  <>
+                    {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').slice(0, 5).map((d) => {
+                      const meta = GRADE_META[d.grade]
+                      return (
+                        <button key={d.id} onClick={() => { saveScrollAndOpenParty(d.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted text-left">
+                          <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-xs font-bold text-red-600">!</div>
+                          <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
+                          <div className="text-right"><p className="text-sm font-semibold tabular text-red-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>
+                        </button>
+                      )
+                    })}
+                  </>
+                ) : <p className="text-sm text-muted-foreground py-4 text-center">No defaulters 🎉</p>}
+              </div>
+            )}
+            </>
+            )}
+          </Card>
+        )
+
+      case 'businessActivity':
+        return (
+          <Card className="p-4">
+            {/* §STEP-1: Section header with title + settings gear */}
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold">Business Activity</h3>
+              <button
+                onClick={() => setShowSectionSettings('businessActivity')}
+                className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
+                aria-label="Configure Business Activity settings"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {visibleHubTabs.length === 0 ? (
+              /* §STEP-1: Empty state — all Business Activity tabs disabled */
+              <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40">
+                <p className="text-xs text-muted-foreground">No tabs enabled. Open settings to configure.</p>
+                <button
+                  onClick={() => setShowSectionSettings('businessActivity')}
+                  className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground min-h-[36px]"
+                  aria-label="Configure Business Activity"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+            <>
+            {/* §STEP-1: Tab buttons (filtered by dashSectionConfig.businessActivity.visibleTabs) */}
+            <div className="flex items-center gap-1 mb-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+              {visibleHubTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setHubTab(tab.id)}
+                  className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    hubTab === tab.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            {/* §STEP-1: View All — moved BELOW the tab row */}
+            <div className="mb-3">
+              <button onClick={() => {
+                saveScrollPos('dashboard')
+                // §DYNAMIC-ROUTING: View All routes based on active hub tab.
+                if (hubTab === 'transactions') {
+                  // Transactions → History (with active time filter)
+                  // §PHASE-5-D1: Pass the FULL RangeContext (not just range string)
+                  // so History sees the exact same date window — including custom
+                  // range's start/end dates.
+                  setHistoryRangeContext({ range: timeRange, customStart, customEnd })
+                  setActiveView('history')
+                } else if (hubTab === 'lowstock') {
+                  // Low Stock → Inventory (with low-stock filter, no time param)
+                  setInventoryFilter('low-stock')
+                  setActiveView('inventory')
+                } else if (hubTab === 'orders') {
+                  // §FIX: Online Orders → dedicated Online Orders view.
+                  setActiveView('online-orders')
+                } else {
+                  setKhataFilter('all')
+                  setActiveView('khata')
+                }
+              }} className="text-xs text-primary font-medium flex items-center">
+                View All <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* §FILTER-DROPDOWN: Interactive date range picker for the hub.
+                Transactions + Orders respect this filter. Low Stock tab hides
+                it completely (stock is real-time, not historical). */}
+            {hubTab !== 'lowstock' && (
+              <div className="flex items-center gap-1 mb-2">
+                <Calendar className="w-3 h-3 text-muted-foreground shrink-0" />
+                <select
+                  value={timeRange}
+                  onChange={(e) => { const val = e.target.value as TimeRange; setTimeRange(val); if (val === 'custom') setShowCustomPicker(true) }}
+                  className="text-[10px] bg-muted rounded-md px-1.5 py-0.5 border-0 outline-none font-medium text-muted-foreground cursor-pointer"
+                >
+                  {DASHBOARD_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Tab 1: Recent Transactions with Cash Flow Summary */}
+            {hubTab === 'transactions' && (
+              <div>
+                {/* Cash Flow Summary indicators */}
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+                    <p className="text-[9px] text-muted-foreground">Total In</p>
+                    <p className="text-sm font-bold tabular text-emerald-600">
+                      +{formatCurrency(data.recentTransactions.filter(t => t.type === 'credit').reduce((s, t) => s + toNumber(t.amount), 0), currency)}
+                    </p>
+                  </div>
+                  <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
+                    <p className="text-[9px] text-muted-foreground">Total Out</p>
+                    <p className="text-sm font-bold tabular text-red-600">
+                      -{formatCurrency(data.recentTransactions.filter(t => t.type !== 'credit').reduce((s, t) => s + toNumber(t.amount), 0), currency)}
+                    </p>
+                  </div>
+                </div>
+                {/* Transaction list */}
+                {data.recentTransactions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">No transactions in this period</p>
+                ) : (
+                  <div className="space-y-1">
+                    {data.recentTransactions.slice(0, 5).map((tx) => {
+                      const isCredit = tx.type === 'credit'
+                      return (
+                        <button key={tx.id} onClick={() => { saveScrollPos('dashboard'); if (tx.invoiceId) { setOverlayInvoiceId(tx.invoiceId) } else if (tx.partyId) { setOverlayPartyId(tx.partyId) } }} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left">
+                          <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isCredit ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>{isCredit ? <ArrowDownRight className="w-4 h-4 text-emerald-600" /> : <ArrowUpRight className="w-4 h-4 text-red-600" />}</span>
+                          <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || tx.type}</p><p className="text-[11px] text-muted-foreground">{(tx as any)?.party?.name || "—"} · {timeAgo(tx.createdAt)}</p></div>
+                          <span className={`text-sm font-semibold tabular shrink-0 ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>{isCredit ? '+' : '-'}{formatCurrency(tx.amount, currency)}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 2: Low Stock Alert */}
+            {hubTab === 'lowstock' && (
+              <div>
+                {data.lowStockCount === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">All products well stocked ✅</p>
+                ) : (
+                  <LowStockList currency={currency} onNavigate={() => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') }} />
+                )}
+              </div>
+            )}
+
+            {/* Tab 3: Online Orders */}
+            {hubTab === 'orders' && (
+              <OnlineOrdersList currency={currency} onNavigate={() => { saveScrollPos('dashboard'); setActiveView('khata') }} />
+            )}
+            </>
+            )}
+          </Card>
+        )
+
+      case 'quickActions':
+        return (
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold">{t('dash.quickActions')}</h3>
+              <button
+                onClick={() => setShowSectionSettings('quickActions')}
+                className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
+                aria-label="Configure Quick Actions settings"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {visibleQuickActions.length === 0 ? (
+              /* §STEP-1: Empty state — all Quick Actions disabled */
+              <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40">
+                <p className="text-xs text-muted-foreground">No actions enabled. Open settings to configure.</p>
+                <button
+                  onClick={() => setShowSectionSettings('quickActions')}
+                  className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground min-h-[36px]"
+                  aria-label="Configure Quick Actions"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+            <div className="grid grid-cols-4 gap-2">
+              {visibleQuickActions.map((a) => {
+                const Icon = a.icon
+                return (
+                  <button key={a.label} onClick={() => { setActiveView(a.view); triggerQuickAction({ id: crypto.randomUUID(), type: a.action }) }} className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-muted transition-colors min-h-[72px] justify-center">
+                    <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${a.color}`}><Icon className="w-5 h-5" /></span>
+                    <span className="text-[10px] font-medium text-center leading-tight">{a.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+            )}
+          </Card>
+        )
+
+      default:
+        return null
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -1105,60 +1879,15 @@ export function DashboardView() {
           range selector in the top-right corner. Each fetches its own
           /api/dashboard?range=X slice. */}
 
-      {/* §STEP-1-RENDER-INTEGRATION: Summary Cards section — visibility
-          gated by dashSectionConfig.sections[id=summaryCards].visible.
-          The DashboardCardManagementSheet itself is left OUTSIDE the
-          visibility wrap so the "Manage Summary Cards →" link in the
-          DashboardCustomizationSheet can still open it even when the
-          summaryCards section is hidden (lets users re-enable cards). */}
-      {isSectionVisible(dashSectionConfig, 'summaryCards') && (
-        <>
-          {/* §UNIFIED-DASHBOARD-CARDS: All visible cards in one grid.
-              Cards are rendered dynamically based on user's dashboardCards config.
-              Time-dependent cards still use TimeMetricCard for their range selector. */}
-          <div className="grid grid-cols-2 gap-3">
-            {visibleCards.map(({ config, def }, i) => {
-              if (def.isTimeMetric) {
-                return (
-                  <TimeMetricCard
-                    key={config.id}
-                    label={def.label}
-                    icon={def.icon}
-                    tint={def.tint}
-                    bg={def.bg}
-                    text={def.text}
-                    defaultRange={(def.defaultRange as any) || '1d'}
-                    currency={currency}
-                    valueExtractor={def.valueExtractor}
-                    onClick={def.onClick}
-                  />
-                )
-              }
-              const Icon = def.icon
-              const value = def.valueExtractor(data)
-              const formatted = def.formatValue(value, currency)
-              return (
-                <motion.button key={config.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={() => def.onClick({ range: '1d' })} aria-label={def.label} className="text-left focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-2xl">
-                  <Card className={`p-4 ${def.bg} border-none hover:shadow-md transition-shadow h-full active:scale-[0.98]`}>
-                    <div className="flex items-start justify-between mb-2"><span className={`w-8 h-8 rounded-lg ${def.tint} text-white flex items-center justify-center`}><Icon className="w-4 h-4" /></span></div>
-                    <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{def.label}</p>
-                    <p className={`text-base font-bold tabular ${def.text}`}>{formatted}</p>
-                  </Card>
-                </motion.button>
-              )
-            })}
-          </div>
-
-          {/* §MANAGE-DASHBOARD-CARDS: Button to open card management sheet */}
-          <button
-            onClick={() => setShowDashCardMgr(true)}
-            className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-muted/50 hover:bg-muted transition-colors text-xs font-medium text-muted-foreground min-h-[44px]"
-          >
-            <LayoutGrid className="w-3.5 h-3.5" />
-            Manage Dashboard Cards
-          </button>
-        </>
-      )}
+      {/* §STEP-1A-ORDERING: Render sections in dashSectionConfig order.
+          Visibility (filter) + order (sort) are both driven by the config.
+          The DashboardCardManagementSheet stays OUTSIDE the ordering map so
+          it's always mounted (reachable from DashboardCustomizationSheet's
+          "Manage Summary Cards →" link even when summaryCards is hidden). */}
+      {dashSectionConfig.sections
+        .filter(s => s.visible)
+        .sort((a, b) => a.order - b.order)
+        .map(s => <Fragment key={s.id}>{renderSection(s.id)}</Fragment>)}
 
       {/* §DASHBOARD-CARD-MANAGEMENT-SHEET (always rendered — also reachable
           from DashboardCustomizationSheet's "Manage Summary Cards →" link) */}
@@ -1169,689 +1898,6 @@ export function DashboardView() {
         savedConfig={dashCardConfig}
         onSave={saveDashboardCards}
       />
-
-      {/* §STEP-1-RENDER-INTEGRATION: Performance Chart section — visibility
-          gated by dashSectionConfig.sections[id=performanceChart].visible. */}
-      {isSectionVisible(dashSectionConfig, 'performanceChart') && (
-      <Card className="p-4 pb-16">
-        <div className="flex items-center justify-between mb-2">
-          <div>
-            <h3 className="text-sm font-semibold">{chartOptions.find((o) => o.id === chartType)?.label || 'Business Analytics'}</h3>
-          </div>
-          {chartType !== 'categories' && (
-            <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
-              <button onClick={() => setChartView('line')} className={`px-2 py-1 rounded-md transition-colors ${chartView === 'line' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`} aria-label="Line chart view"><LineChart className="w-4 h-4" /></button>
-              <button onClick={() => setChartView('bar')} className={`px-2 py-1 rounded-md transition-colors ${chartView === 'bar' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`} aria-label="Bar chart view"><BarChart3 className="w-4 h-4" /></button>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 mb-3">
-          <select value={chartType} onChange={(e) => setChartType(e.target.value as ChartType)} className="text-xs bg-muted rounded-lg px-2 py-1.5 border-0 outline-none h-8 font-medium flex-1 min-w-0">
-            {chartOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-          </select>
-          <select value={timeRange} onChange={(e) => { const val = e.target.value as TimeRange; setTimeRange(val); if (val === 'custom') setShowCustomPicker(true) }} className="text-xs bg-muted rounded-lg px-2 py-1.5 border-0 outline-none h-8 font-medium shrink-0">
-            {DASHBOARD_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-          </select>
-        </div>
-
-        {/* §P16-STEP3.8.1-MOVED: Custom Date Range panel — now INSIDE the chart
-            Card, contextually below the chart-type/time-range selectors and
-            above the chart visualization. Appears ONLY when timeRange==='custom'.
-            Mobile-first: 2-col grid, no horizontal overflow, animated height. */}
-        <AnimatePresence>
-          {showCustomPicker && timeRange === 'custom' && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden mb-3">
-              <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold text-purple-700 dark:text-purple-300">📅 Custom Date Range</p>
-                  <button onClick={() => { setShowCustomPicker(false); setTimeRange('7d') }} className="text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] text-muted-foreground">Start Date</label>
-                    <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-muted-foreground">End Date</label>
-                    <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="w-full h-9 rounded-lg bg-card border border-border px-2 text-xs outline-none" />
-                  </div>
-                </div>
-                {customStart && customEnd && <p className="text-[10px] text-emerald-600">✓ Range applied — data will filter to selected dates</p>}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* §TOGGLE-FIX: Chart rendering respects chartView (line vs bar) for
-            ALL chart types. Categories (pie) ignores the toggle. Inventory
-            uses AreaChart (line variant) / BarChart (bar variant).
-            §FIX-6: Per-chart loading state — shows spinner when revalidating
-            (apiLoading && data present from previous range). Doesn't hide
-            the entire dashboard; only the chart area shows the loader.
-            §FIX-7: Empty state — when all buckets have zero values, shows
-            "No activity in this period" instead of a blank chart.
-            §FIX-8: Accessibility — chart container has role="img" + aria-label.
-            §FIX-9: Performance — profit chart's data.map() is memoized. */}
-
-        {/* §FIX-9: Memoize profit chart data transformation to avoid recompute on every render */}
-        {(() => {
-          // §CHECK-EMPTY: Determine if all chart values are zero
-          const allZero = data.salesTrend.length > 0 && data.salesTrend.every(d =>
-            d.revenue === 0 && d.expense === 0 && d.profit === 0 &&
-            d.collected === 0 && d.creditGiven === 0
-          )
-
-          // §FIX-6: Per-chart loading indicator (stale-while-revalidate)
-          if (apiLoading && data) {
-            return (
-              <div className="h-44 flex items-center justify-center" role="status" aria-live="polite">
-                <div className="flex flex-col items-center gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-                  <span className="text-[10px] text-muted-foreground">Updating chart…</span>
-                </div>
-              </div>
-            )
-          }
-
-          // §FIX-7: Empty state
-          if (allZero) {
-            return (
-              <div className="h-44 flex items-center justify-center" role="img" aria-label="No chart data available">
-                <div className="flex flex-col items-center gap-1">
-                  <p className="text-xs text-muted-foreground">No revenue or expense activity in this period</p>
-                  <p className="text-[10px] text-muted-foreground/60">Try a wider date range</p>
-                </div>
-              </div>
-            )
-          }
-
-          // §FIX-8: ARIA label for screen readers
-          const ariaLabel = `${chartOptions.find((o) => o.id === chartType)?.label || 'Business'} chart for ${dashboardRangeLabel(timeRange, customStart, customEnd)} — ${data.salesTrend.length} data points`
-
-          return (
-            <motion.div key={chartType + chartView} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }} className="h-44 -ml-2" role="img" aria-label={ariaLabel}>
-          <ResponsiveContainer width="100%" height="100%">
-            {chartType === 'revenue' && chartView === 'line' ? (
-              <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.4} /><stop offset="100%" stopColor="#10b981" stopOpacity={0} /></linearGradient><linearGradient id="exp" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f87171" stopOpacity={0.3} /><stop offset="100%" stopColor="#f87171" stopOpacity={0} /></linearGradient></defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" name="Revenue" />
-                <Area type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} fill="url(#exp)" name="Expense" />
-              </AreaChart>
-            ) : chartType === 'revenue' && chartView === 'bar' ? (
-              <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Revenue" />
-                <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Expense" />
-              </BarChart>
-            ) : chartType === 'profit' && chartView === 'line' ? (
-              // §TOGGLE-FIX: Profit vs Loss — LINE variant (LineChart)
-              <RechartsLineChart data={data.salesTrend.map((d) => ({ ...d, profitVal: d.profit >= 0 ? d.profit : 0, lossVal: d.profit < 0 ? Math.abs(d.profit) : 0 }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                {/* §FIX-3: Series names updated to match 'Net Cash Flow' semantics */}
-                <Line type="monotone" dataKey="profitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Net" />
-                <Line type="monotone" dataKey="lossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Outflow" />
-              </RechartsLineChart>
-            ) : chartType === 'profit' && chartView === 'bar' ? (
-              // §TOGGLE-FIX: Profit vs Loss — BAR variant (BarChart)
-              <BarChart data={data.salesTrend.map((d) => ({ ...d, profitVal: d.profit >= 0 ? d.profit : 0, lossVal: d.profit < 0 ? Math.abs(d.profit) : 0 }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                {/* §FIX-3: Series names updated to match 'Net Cash Flow' semantics */}
-                <Bar dataKey="profitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Net" />
-                <Bar dataKey="lossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Outflow" />
-              </BarChart>
-            ) : chartType === 'profitLoss' && chartView === 'line' ? (
-              // §P16-STEP3: Profit vs Loss — LINE variant (TRUE accounting profit)
-              // Uses netProfitVal (positive) + netLossVal (negative) from salesTrend.
-              // NOT the cash-flow proxy (revenue - expense).
-              <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<ProfitLossTooltip currency={currency} onViewDetails={(fullDate) => { const idx = data.salesTrend.findIndex(b => b.fullDate === fullDate); if (idx >= 0) setDrilldownBucket({ index: idx, fullDate }) }} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Line type="monotone" dataKey="netProfitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Profit" />
-                <Line type="monotone" dataKey="netLossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Loss" />
-              </RechartsLineChart>
-            ) : chartType === 'profitLoss' && chartView === 'bar' ? (
-              // §P16-STEP3: Profit vs Loss — BAR variant (TRUE accounting profit)
-              <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<ProfitLossTooltip currency={currency} onViewDetails={(fullDate) => { const idx = data.salesTrend.findIndex(b => b.fullDate === fullDate); if (idx >= 0) setDrilldownBucket({ index: idx, fullDate }) }} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Bar dataKey="netProfitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Profit" />
-                <Bar dataKey="netLossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Loss" />
-              </BarChart>
-            ) : chartType === 'cashflow' && chartView === 'line' ? (
-              // §TOGGLE-FIX: Cashflow — LINE variant (pure lines, no bars)
-              // §P16-STEP3: Uses cashIn/cashOut fields (authoritative cash-in/out subtypes)
-              <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Line type="monotone" dataKey="cashIn" stroke="#10b981" strokeWidth={2} dot={false} name="Cash In" />
-                <Line type="monotone" dataKey="cashOut" stroke="#f87171" strokeWidth={2} dot={false} name="Cash Out" />
-              </RechartsLineChart>
-            ) : chartType === 'cashflow' && chartView === 'bar' ? (
-              // §TOGGLE-FIX: Cashflow — BAR variant (pure bars, no line)
-              // §P16-STEP3: Uses cashIn/cashOut fields (authoritative cash-in/out subtypes)
-              <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Bar dataKey="cashIn" fill="#10b981" radius={[3, 3, 0, 0]} name="Cash In" />
-                <Bar dataKey="cashOut" fill="#f87171" radius={[3, 3, 0, 0]} name="Cash Out" />
-              </BarChart>
-            ) : chartType === 'collections' && chartView === 'line' ? (
-              // §TOGGLE-FIX: Collections — LINE variant
-              <RechartsLineChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Line type="monotone" dataKey="collected" stroke="#10b981" strokeWidth={2} dot={false} name="Collected" />
-                <Line type="monotone" dataKey="creditGiven" stroke="#ef4444" strokeWidth={2} dot={false} name="New Credit" />
-              </RechartsLineChart>
-            ) : chartType === 'collections' && chartView === 'bar' ? (
-              // §TOGGLE-FIX: Collections — BAR variant
-              <BarChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Bar dataKey="collected" fill="#10b981" radius={[3, 3, 0, 0]} name="Collected" />
-                <Bar dataKey="creditGiven" fill="#ef4444" radius={[3, 3, 0, 0]} name="New Credit" />
-              </BarChart>
-            ) : chartType === 'categories' ? (
-              <PieChart>
-                <Pie data={data.topCategories || []} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={(e: any) => e.name} labelLine={false} style={{ fontSize: 9 }}>
-                  {(data.topCategories || []).map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                </Pie>
-                <Tooltip formatter={(v: number) => formatCurrency(v, currency)} />
-              </PieChart>
-            ) : (
-              // §P16-STEP3: Default fallback — Revenue chart (was inventory, now removed)
-              <AreaChart data={data.salesTrend} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
-                <defs><linearGradient id="rev" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.4} /><stop offset="100%" stopColor="#10b981" stopOpacity={0} /></linearGradient></defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" name="Revenue" />
-              </AreaChart>
-            )}
-          </ResponsiveContainer>
-        </motion.div>
-          )
-        })()}
-
-        {/* Legend */}
-        {['revenue', 'cashflow', 'collections', 'profit', 'profitLoss'].includes(chartType) && (
-          <div className="flex items-center gap-3 mt-2 text-[10px]">
-            {chartType === 'revenue' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Revenue</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Expense</span></>)}
-            {/* §FIX-3: Legend labels updated to match 'Net Cash Flow' chart name */}
-            {chartType === 'profit' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Net</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Outflow</span></>)}
-            {/* §P16-STEP3: Profit vs Loss legend — true accounting profit/loss */}
-            {chartType === 'profitLoss' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Profit</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Loss</span></>)}
-            {chartType === 'cashflow' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Cash In</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" />Cash Out</span></>)}
-            {chartType === 'collections' && (<><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />Collected</span><span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" />New Credit</span></>)}
-          </div>
-        )}
-
-        {/* §P16-STEP3: Removed inventory value summary block (chart mode removed) */}
-
-        {/* Top categories list */}
-        {chartType === 'categories' && data.topCategories && data.topCategories.length > 0 && (
-          <div className="mt-2 space-y-1">{data.topCategories.slice(0, 4).map((c, i) => (<div key={c.name} className="flex items-center gap-2 text-[11px]"><span className="w-2 h-2 rounded-full shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} /><span className="flex-1 truncate">{c.name}</span><span className="font-semibold tabular">{formatCurrency(c.value, currency)}</span></div>))}</div>
-        )}
-      </Card>
-      )}
-
-      {/* §STEP-1-RENDER-INTEGRATION: Customer Quality Distribution section —
-          visibility gated by dashSectionConfig.sections[id=customerQuality].visible.
-          The floating grade modal is wrapped together — it can only be
-          triggered from inside the Card (bar tap), so hiding the section
-          also prevents opening the modal. */}
-      {isSectionVisible(dashSectionConfig, 'customerQuality') && (
-        <>
-      {/* Grade distribution — Interactive Bar Chart (PRD Part 5 §1) */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="text-sm font-semibold">Customer Quality Distribution</h3>
-          <button
-            onClick={() => setShowSectionSettings('customerQuality')}
-            className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
-            aria-label="Configure Customer Quality Distribution settings"
-          >
-            <Settings className="w-3.5 h-3.5" />
-          </button>
-        </div>
-        <p className="text-[10px] text-muted-foreground mb-3">Tap a bar to view customers</p>
-        <div className="h-36 -ml-2">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.gradeDistribution} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} onClick={(e: any) => { if (e && e.activeLabel) setSelectedGrade(e.activeLabel) }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-              <XAxis dataKey="grade" tick={{ fontSize: 12, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={24} allowDecimals={false} />
-              <Tooltip cursor={{ fill: 'oklch(0.9 0.005 145 / 0.3)' }} contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => [`${v} customers`, 'Count']} />
-              <Bar dataKey="count" radius={[6, 6, 0, 0]} cursor="pointer">
-                {data.gradeDistribution.map((_, i) => <Cell key={i} fill={['#10b981', '#14b8a6', '#f59e0b', '#f97316', '#ef4444'][i] || '#6366f1'} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
-
-      {/* Floating modal for grade-filtered customers (PRD Part 5 §2) */}
-      <AnimatePresence>
-        {selectedGrade && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedGrade(null)} className="fixed inset-0 z-[80] bg-black/40 backdrop-blur-[2px] flex items-end sm:items-center justify-center">
-            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', stiffness: 400, damping: 32 }} onClick={(e) => e.stopPropagation()} className="bg-card rounded-t-3xl sm:rounded-3xl border-t sm:border border-border w-full max-w-md max-h-[70vh] flex flex-col">
-              <div className="flex items-center justify-between p-4 border-b border-border">
-                <div className="flex items-center gap-2"><span className={`text-xs font-bold px-2 py-0.5 rounded-full ${GRADE_META[selectedGrade]?.bg} ${GRADE_META[selectedGrade]?.color}`}>Grade {selectedGrade}</span><span className="text-sm font-semibold">{GRADE_META[selectedGrade]?.desc}</span></div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => { setKhataGradeFilter(selectedGrade); setSelectedGrade(null); setKhataFilter('all'); setReturnToView('dashboard'); setActiveView('khata') }} className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-1 rounded-lg">Go to Khata →</button>
-                  <button onClick={() => setSelectedGrade(null)} className="text-muted-foreground"><X className="w-4 h-4" /></button>
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto scroll-area p-3 space-y-1">
-                {(() => {
-                  const count = data.gradeDistribution.find((g) => g.grade === selectedGrade)?.count || 0
-                  if (count === 0) return <p className="text-sm text-muted-foreground text-center py-8">No customers in this grade</p>
-                  // §FIX: use allParties (full list) instead of topDebtors (sliced to 5)
-                  const gradeParties = (allParties || []).filter((p) => p.qualityGrade === selectedGrade)
-                  return (
-                    <>
-                      <p className="text-xs text-muted-foreground px-1 mb-2">{count} customer{count !== 1 ? 's' : ''} in this grade</p>
-                      {gradeParties.map((p) => (
-                        <button key={p.id} onClick={() => { saveScrollPos('dashboard'); setSelectedGrade(null); setOverlayPartyId(p.id) }} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted text-left">
-                          <span className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center font-bold text-emerald-700">{p.name.charAt(0)}</span>
-                          <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.name}</p><p className="text-[11px] text-muted-foreground">Balance: {formatCurrency(p.balance, currency)}</p></div>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                        </button>
-                      ))}
-                      {gradeParties.length === 0 && <p className="text-xs text-muted-foreground text-center py-4">Tap "Go to Khata" to see all {count} customers</p>}
-                    </>
-                  )
-                })()}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-        </>
-      )}
-
-      {/* §STEP-1-RENDER-INTEGRATION: Top Insights section — visibility
-          gated + filtered tabs (visibleTabs) + View All moved below tab
-          row + empty state when no tabs enabled. */}
-      {isSectionVisible(dashSectionConfig, 'topInsights') && (
-      <Card className="p-4">
-        {/* §STEP-1: Section header with title + settings gear */}
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold">Top Insights</h3>
-          <button
-            onClick={() => setShowSectionSettings('topInsights')}
-            className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
-            aria-label="Configure Top Insights settings"
-          >
-            <Settings className="w-3.5 h-3.5" />
-          </button>
-        </div>
-        {visibleTopTabs.length === 0 ? (
-          /* §STEP-1: Empty state — all Top Insights tabs disabled */
-          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40">
-            <p className="text-xs text-muted-foreground">No tabs enabled. Open settings to configure.</p>
-            <button
-              onClick={() => setShowSectionSettings('topInsights')}
-              className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground min-h-[36px]"
-              aria-label="Configure Top Insights"
-            >
-              <Settings className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ) : (
-        <>
-        {/* §STEP-1: Tab row (filtered by dashSectionConfig.topInsights.visibleTabs) */}
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar -mx-1 px-1 mb-2">
-          {visibleTopTabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setTopTab(tab.id)}
-              className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all ${
-                topTab === tab.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        {/* §STEP-1: View All button — moved BELOW the tab row */}
-        <div className="mb-3">
-          <button onClick={() => {
-            saveScrollPos('dashboard')
-            // §DYNAMIC-ROUTING: View All routes based on active tab.
-            if (topTab === 'debtors') {
-              // Top Debtors → Outstanding Payments (Receivables)
-              setActiveView('reports')
-              setReportsTab('outstanding')
-            } else if (topTab === 'buyers') {
-              // Top Buyers → Party Ledger (sorted by sales volume)
-              setActiveView('reports')
-              setReportsTab('party')
-            } else if (topTab === 'payments') {
-              // Top Payments → History/Transactions (payments received)
-              // §PHASE-5-D1: Use RangeContext for full custom-range support.
-              setHistoryRangeContext({ range: '7d' })
-              setActiveView('history')
-            } else if (topTab === 'products') {
-              // Top Products → Inventory
-              setInventoryFilter('all')
-              setActiveView('inventory')
-            } else if (topTab === 'defaulters') {
-              // Defaulters → Outstanding Payments (Grade D & E)
-              setKhataGradeFilter('D') // pre-filter to D (E also shown in outstanding)
-              setActiveView('reports')
-              setReportsTab('outstanding')
-            } else {
-              setKhataFilter('all')
-              setActiveView('khata')
-            }
-          }} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
-        </div>
-
-        {/* Tab content */}
-        {topTab === 'debtors' && (
-          <div className="space-y-2">
-            {data.topDebtors.length === 0 ? <p className="text-sm text-muted-foreground py-4 text-center">No outstanding receivables 🎉</p> : (
-              <>
-                {data.topDebtors.slice(0, 5).map((d) => {
-                  const meta = GRADE_META[d.grade]
-                  return (
-                    <button key={d.id} onClick={() => { saveScrollAndOpenParty(d.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
-                      <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-xs font-bold">{d.name.charAt(0)}</div>
-                      <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
-                      <div className="text-right"><p className="text-sm font-semibold tabular text-emerald-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>
-                    </button>
-                  )
-                })}
-              </>
-            )}
-          </div>
-        )}
-
-        {topTab === 'buyers' && (
-          <div className="space-y-2">
-            {data.topBuyers && data.topBuyers.length > 0 ? (
-              <>
-                {data.topBuyers.slice(0, 5).map((b, i) => (
-                  <button key={b.id} onClick={() => { saveScrollPos('dashboard'); setOverlayPartyId(b.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
-                    <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-xs font-bold text-emerald-600">#{i + 1}</div>
-                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{b.name}</p><p className="text-[11px] text-muted-foreground">Top buyer</p></div>
-                    <p className="text-sm font-semibold tabular">{formatCurrency(b.value, currency)}</p>
-                  </button>
-                ))}
-              </>
-            ) : <p className="text-sm text-muted-foreground py-4 text-center">No buyer data yet</p>}
-          </div>
-        )}
-
-        {topTab === 'payments' && (
-          <div className="space-y-2">
-            {data.recentTransactions.filter(t => t.type === 'credit').slice(0, 5).map((tx) => (
-              <div key={tx.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
-                <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center"><ArrowDownRight className="w-4 h-4 text-emerald-600" /></div>
-                <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || 'Payment'}</p><p className="text-[11px] text-muted-foreground">{timeAgo(tx.createdAt)}</p></div>
-                <p className="text-sm font-semibold tabular text-emerald-600">+{formatCurrency(tx.amount, currency)}</p>
-              </div>
-            ))}
-            {data.recentTransactions.filter(t => t.type === 'credit').length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">No payments yet</p>}
-          </div>
-        )}
-
-        {topTab === 'products' && (
-          <div className="space-y-2">
-            {data.topProductsByUnits && data.topProductsByUnits.length > 0 ? (
-              <>
-                {data.topProductsByUnits.slice(0, 5).map((p, i) => (
-                  <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: PIE_COLORS[i % PIE_COLORS.length] + '20', color: PIE_COLORS[i % PIE_COLORS.length] }}>#{i + 1}</div>
-                    <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.name}</p><p className="text-[11px] text-muted-foreground">{p.value} units sold · {formatCurrency(p.revenue, currency)}</p></div>
-                    <p className="text-sm font-semibold tabular">{p.value}</p>
-                  </div>
-                ))}
-              </>
-            ) : <p className="text-sm text-muted-foreground py-4 text-center">No product sales data yet</p>}
-          </div>
-        )}
-
-        {topTab === 'defaulters' && (
-          <div className="space-y-2">
-            {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').length > 0 ? (
-              <>
-                {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').slice(0, 5).map((d) => {
-                  const meta = GRADE_META[d.grade]
-                  return (
-                    <button key={d.id} onClick={() => { saveScrollAndOpenParty(d.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted text-left">
-                      <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-xs font-bold text-red-600">!</div>
-                      <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
-                      <div className="text-right"><p className="text-sm font-semibold tabular text-red-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>
-                    </button>
-                  )
-                })}
-              </>
-            ) : <p className="text-sm text-muted-foreground py-4 text-center">No defaulters 🎉</p>}
-          </div>
-        )}
-        </>
-        )}
-      </Card>
-      )}
-
-      {/* §STEP-1-RENDER-INTEGRATION: Business Activity Hub section — visibility
-          gated by dashSectionConfig.sections[id=businessActivity].visible +
-          filtered tabs (visibleTabs) + View All moved below the tab row +
-          empty state when no tabs are enabled. */}
-      {isSectionVisible(dashSectionConfig, 'businessActivity') && (
-      <Card className="p-4">
-        {/* §STEP-1: Section header with title + settings gear */}
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold">Business Activity</h3>
-          <button
-            onClick={() => setShowSectionSettings('businessActivity')}
-            className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
-            aria-label="Configure Business Activity settings"
-          >
-            <Settings className="w-3.5 h-3.5" />
-          </button>
-        </div>
-        {visibleHubTabs.length === 0 ? (
-          /* §STEP-1: Empty state — all Business Activity tabs disabled */
-          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40">
-            <p className="text-xs text-muted-foreground">No tabs enabled. Open settings to configure.</p>
-            <button
-              onClick={() => setShowSectionSettings('businessActivity')}
-              className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground min-h-[36px]"
-              aria-label="Configure Business Activity"
-            >
-              <Settings className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ) : (
-        <>
-        {/* §STEP-1: Tab buttons (filtered by dashSectionConfig.businessActivity.visibleTabs) */}
-        <div className="flex items-center gap-1 mb-2 overflow-x-auto no-scrollbar -mx-1 px-1">
-          {visibleHubTabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setHubTab(tab.id)}
-              className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                hubTab === tab.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        {/* §STEP-1: View All — moved BELOW the tab row */}
-        <div className="mb-3">
-          <button onClick={() => {
-            saveScrollPos('dashboard')
-            // §DYNAMIC-ROUTING: View All routes based on active hub tab.
-            if (hubTab === 'transactions') {
-              // Transactions → History (with active time filter)
-              // §PHASE-5-D1: Pass the FULL RangeContext (not just range string)
-              // so History sees the exact same date window — including custom
-              // range's start/end dates.
-              setHistoryRangeContext({ range: timeRange, customStart, customEnd })
-              setActiveView('history')
-            } else if (hubTab === 'lowstock') {
-              // Low Stock → Inventory (with low-stock filter, no time param)
-              setInventoryFilter('low-stock')
-              setActiveView('inventory')
-            } else if (hubTab === 'orders') {
-              // §FIX: Online Orders → dedicated Online Orders view.
-              setActiveView('online-orders')
-            } else {
-              setKhataFilter('all')
-              setActiveView('khata')
-            }
-          }} className="text-xs text-primary font-medium flex items-center">
-            View All <ChevronRight className="w-3 h-3" />
-          </button>
-        </div>
-
-        {/* §FILTER-DROPDOWN: Interactive date range picker for the hub.
-            Transactions + Orders respect this filter. Low Stock tab hides
-            it completely (stock is real-time, not historical). */}
-        {hubTab !== 'lowstock' && (
-          <div className="flex items-center gap-1 mb-2">
-            <Calendar className="w-3 h-3 text-muted-foreground shrink-0" />
-            <select
-              value={timeRange}
-              onChange={(e) => { const val = e.target.value as TimeRange; setTimeRange(val); if (val === 'custom') setShowCustomPicker(true) }}
-              className="text-[10px] bg-muted rounded-md px-1.5 py-0.5 border-0 outline-none font-medium text-muted-foreground cursor-pointer"
-            >
-              {DASHBOARD_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
-            </select>
-          </div>
-        )}
-
-        {/* Tab 1: Recent Transactions with Cash Flow Summary */}
-        {hubTab === 'transactions' && (
-          <div>
-            {/* Cash Flow Summary indicators */}
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
-                <p className="text-[9px] text-muted-foreground">Total In</p>
-                <p className="text-sm font-bold tabular text-emerald-600">
-                  +{formatCurrency(data.recentTransactions.filter(t => t.type === 'credit').reduce((s, t) => s + toNumber(t.amount), 0), currency)}
-                </p>
-              </div>
-              <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
-                <p className="text-[9px] text-muted-foreground">Total Out</p>
-                <p className="text-sm font-bold tabular text-red-600">
-                  -{formatCurrency(data.recentTransactions.filter(t => t.type !== 'credit').reduce((s, t) => s + toNumber(t.amount), 0), currency)}
-                </p>
-              </div>
-            </div>
-            {/* Transaction list */}
-            {data.recentTransactions.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No transactions in this period</p>
-            ) : (
-              <div className="space-y-1">
-                {data.recentTransactions.slice(0, 5).map((tx) => {
-                  const isCredit = tx.type === 'credit'
-                  return (
-                    <button key={tx.id} onClick={() => { saveScrollPos('dashboard'); if (tx.invoiceId) { setOverlayInvoiceId(tx.invoiceId) } else if (tx.partyId) { setOverlayPartyId(tx.partyId) } }} className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left">
-                      <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isCredit ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>{isCredit ? <ArrowDownRight className="w-4 h-4 text-emerald-600" /> : <ArrowUpRight className="w-4 h-4 text-red-600" />}</span>
-                      <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || tx.type}</p><p className="text-[11px] text-muted-foreground">{(tx as any)?.party?.name || "—"} · {timeAgo(tx.createdAt)}</p></div>
-                      <span className={`text-sm font-semibold tabular shrink-0 ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>{isCredit ? '+' : '-'}{formatCurrency(tx.amount, currency)}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tab 2: Low Stock Alert */}
-        {hubTab === 'lowstock' && (
-          <div>
-            {data.lowStockCount === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">All products well stocked ✅</p>
-            ) : (
-              <LowStockList currency={currency} onNavigate={() => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') }} />
-            )}
-          </div>
-        )}
-
-        {/* Tab 3: Online Orders */}
-        {hubTab === 'orders' && (
-          <OnlineOrdersList currency={currency} onNavigate={() => { saveScrollPos('dashboard'); setActiveView('khata') }} />
-        )}
-        </>
-        )}
-      </Card>
-      )}
-
-      {/* §STEP-1-RENDER-INTEGRATION: Quick Actions section — visibility
-          gated by dashSectionConfig.sections[id=quickActions].visible +
-          filtered actions (visibleActions) + gear icon in header + empty
-          state when no actions enabled. */}
-      {isSectionVisible(dashSectionConfig, 'quickActions') && (
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold">{t('dash.quickActions')}</h3>
-          <button
-            onClick={() => setShowSectionSettings('quickActions')}
-            className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors min-h-[36px]"
-            aria-label="Configure Quick Actions settings"
-          >
-            <Settings className="w-3.5 h-3.5" />
-          </button>
-        </div>
-        {visibleQuickActions.length === 0 ? (
-          /* §STEP-1: Empty state — all Quick Actions disabled */
-          <div className="flex items-center justify-between p-3 rounded-xl bg-muted/40">
-            <p className="text-xs text-muted-foreground">No actions enabled. Open settings to configure.</p>
-            <button
-              onClick={() => setShowSectionSettings('quickActions')}
-              className="w-8 h-8 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground min-h-[36px]"
-              aria-label="Configure Quick Actions"
-            >
-              <Settings className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ) : (
-        <div className="grid grid-cols-4 gap-2">
-          {visibleQuickActions.map((a) => {
-            const Icon = a.icon
-            return (
-              <button key={a.label} onClick={() => { setActiveView(a.view); triggerQuickAction({ id: crypto.randomUUID(), type: a.action }) }} className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-muted transition-colors min-h-[72px] justify-center">
-                <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${a.color}`}><Icon className="w-5 h-5" /></span>
-                <span className="text-[10px] font-medium text-center leading-tight">{a.label}</span>
-              </button>
-            )
-          })}
-        </div>
-        )}
-      </Card>
-      )}
 
       {/* §P16-STEP3.8.1-DRILLDOWN: Profit/Loss drill-down bottom sheet.
           Opens when the user taps "View Details" in the ProfitLossTooltip.
