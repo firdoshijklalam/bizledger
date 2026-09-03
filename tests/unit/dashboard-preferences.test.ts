@@ -653,6 +653,105 @@ async function main() {
     assert(result10 === null, 'G10: single visible item move → null')
   }
 
+  // ─── §STEP-1C-REVIEW: Explicit semantics verification ───────────────
+  console.log('\n  §STEP-1C-REVIEW: Explicit Move Up/Down semantics:')
+  {
+    const A = 'add-party'
+    const B = 'add-product'
+    const C = 'new-invoice'
+    const D = 'add-transaction'
+
+    // H1: All enabled — move new-invoice UP
+    // order: A, B, C, D → visible: A, B, C, D
+    // Move C up → swap with B → visible: A, C, B, D
+    const r1 = moveItemInOrder([A, B, C, D], [A, B, C, D], C, 'up')
+    assert(r1 !== null, 'H1: move returns non-null')
+    const cfg1 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: [A, B, C, D], order: r1! }
+    }))
+    const v1 = getOrderedQuickActions(cfg1)
+    assert(JSON.stringify(v1) === JSON.stringify([A, C, B, D]),
+      `H1: all enabled, move new-invoice up → A,C,B,D (got ${JSON.stringify(v1)})`)
+
+    // H2: B disabled — move add-party DOWN
+    // order: A, B, C, D → visible: A, C, D
+    // Move A down → swap with C (next visible) → visible: C, A, D
+    const r2 = moveItemInOrder([A, B, C, D], [A, C, D], A, 'down')
+    assert(r2 !== null, 'H2: move returns non-null')
+    const cfg2 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: [A, C, D], order: r2! }
+    }))
+    const v2 = getOrderedQuickActions(cfg2)
+    assert(JSON.stringify(v2) === JSON.stringify([C, A, D]),
+      `H2: B disabled, move add-party down → C,A,D (got ${JSON.stringify(v2)})`)
+
+    // H3: From H2's result, move add-party DOWN again
+    // H2 produced order: [C, B, A, D] (A and C swapped in full order)
+    // visible: C, A, D → Move A down → swap with D → visible: C, D, A
+    const order3 = r2! // [C, B, A, D]
+    const r3 = moveItemInOrder(order3, [A, C, D], A, 'down')
+    assert(r3 !== null, 'H3: move returns non-null')
+    const cfg3 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: [A, C, D], order: r3! }
+    }))
+    const v3 = getOrderedQuickActions(cfg3)
+    assert(JSON.stringify(v3) === JSON.stringify([C, D, A]),
+      `H3: from H2, move add-party down again → C,D,A (got ${JSON.stringify(v3)})`)
+
+    // H4: Disabled items remain in full persisted order
+    // After H3, the full order should still contain B (add-product)
+    assert(r3!.includes(B), `H4: disabled add-product still in order (got ${JSON.stringify(r3)})`)
+
+    // H5: Re-enable disabled item — position is deterministic
+    // After H3, order is [C, B, D, A] (or similar with B preserved)
+    // Re-enable B → visible: all 4, ordered by saved order
+    const cfg5 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: [A, B, C, D], order: r3! }
+    }))
+    const v5 = getOrderedQuickActions(cfg5)
+    // B should appear at its saved position. Let's verify the full order:
+    // r3 was derived from [C, B, A, D] with A and D swapped → [C, B, D, A]
+    // So visible order with all enabled: C, B, D, A
+    assert(JSON.stringify(v5) === JSON.stringify([C, B, D, A]),
+      `H5: re-enable add-product → C,B,D,A (got ${JSON.stringify(v5)})`)
+
+    // H6: Round-trip stringify → parse preserves the resulting order
+    const original6 = {
+      quickActions: {
+        visibleActions: [C, A, D],
+        order: r2!, // the order from H2
+      }
+    }
+    const json6 = JSON.stringify(original6)
+    const parsed6 = parseDashboardSectionConfig(json6)
+    const v6 = getOrderedQuickActions(parsed6)
+    assert(JSON.stringify(v6) === JSON.stringify([C, A, D]),
+      `H6: round-trip preserves C,A,D (got ${JSON.stringify(v6)})`)
+
+    // H7: Two-step move: A,C,D → move A down → C,A,D → move A down → C,D,A
+    // Start fresh
+    const startOrder = [A, B, C, D]
+    const visible = [A, C, D]
+    // Step 1: move A down
+    const step1 = moveItemInOrder(startOrder, visible, A, 'down')
+    assert(step1 !== null, 'H7 step1: move returns non-null')
+    const cfgStep1 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: visible, order: step1! }
+    }))
+    const vStep1 = getOrderedQuickActions(cfgStep1)
+    assert(JSON.stringify(vStep1) === JSON.stringify([C, A, D]),
+      `H7 step1: move A down → C,A,D (got ${JSON.stringify(vStep1)})`)
+    // Step 2: move A down again (using step1's order)
+    const step2 = moveItemInOrder(step1!, visible, A, 'down')
+    assert(step2 !== null, 'H7 step2: move returns non-null')
+    const cfgStep2 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: visible, order: step2! }
+    }))
+    const vStep2 = getOrderedQuickActions(cfgStep2)
+    assert(JSON.stringify(vStep2) === JSON.stringify([C, D, A]),
+      `H7 step2: move A down again → C,D,A (got ${JSON.stringify(vStep2)})`)
+  }
+
   // ─── Summary ─────────────────────────────────────────────────────────
   console.log(`\n✅ Passed: ${passed}`)
   console.log(`❌ Failed: ${failed}`)
