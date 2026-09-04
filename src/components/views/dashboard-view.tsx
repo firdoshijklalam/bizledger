@@ -44,6 +44,8 @@ import {
   parseDashboardSectionConfig,
   isSectionVisible,
   getOrderedQuickActions,
+  getOrderedTopInsightsTabs,
+  getOrderedBusinessActivityTabs,
   moveItemInOrder,
   type DashboardSectionConfig,
 } from '@/lib/dashboard-preferences'
@@ -661,18 +663,24 @@ export function DashboardView() {
     { id: 'products', label: 'Top Products' },
     { id: 'defaulters', label: 'Defaulters' },
   ] as const
-  const visibleTopTabs = ALL_TOP_TABS.filter(tab =>
-    dashSectionConfig.topInsights.visibleTabs.includes(tab.id)
-  )
+  // §STEP-1D: Use getOrderedTopInsightsTabs to respect saved tab order
+  const orderedTopTabIds = getOrderedTopInsightsTabs(dashSectionConfig)
+  const topTabMap = Object.fromEntries(ALL_TOP_TABS.map(t => [t.id, t]))
+  const visibleTopTabs: typeof ALL_TOP_TABS[number][] = orderedTopTabIds
+    .map(id => topTabMap[id])
+    .filter(Boolean)
 
   const ALL_HUB_TABS = [
     { id: 'transactions', label: 'Transactions' },
     { id: 'lowstock', label: 'Low Stock' },
     { id: 'orders', label: 'Online Orders' },
   ] as const
-  const visibleHubTabs = ALL_HUB_TABS.filter(tab =>
-    dashSectionConfig.businessActivity.visibleTabs.includes(tab.id)
-  )
+  // §STEP-1D: Use getOrderedBusinessActivityTabs to respect saved tab order
+  const orderedHubTabIds = getOrderedBusinessActivityTabs(dashSectionConfig)
+  const hubTabMap = Object.fromEntries(ALL_HUB_TABS.map(t => [t.id, t]))
+  const visibleHubTabs: typeof ALL_HUB_TABS[number][] = orderedHubTabIds
+    .map(id => hubTabMap[id])
+    .filter(Boolean)
 
   const ALL_QUICK_ACTIONS = [
     { label: t('khata.addPartyShort'), icon: Users, view: 'khata' as const, action: 'add-party' as const, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
@@ -1986,6 +1994,20 @@ export function DashboardView() {
           setDashSectionConfig(newConfig)
           saveDashboardSections(newConfig).catch(() => {})
         }}
+        // §STEP-1D: Reorder support
+        itemOrder={dashSectionConfig.topInsights.order}
+        onMoveItem={(id, direction) => {
+          const newOrder = moveItemInOrder(
+            dashSectionConfig.topInsights.order,
+            dashSectionConfig.topInsights.visibleTabs,
+            id,
+            direction,
+          )
+          if (!newOrder) return
+          const newConfig = { ...dashSectionConfig, topInsights: { ...dashSectionConfig.topInsights, order: newOrder } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
         defaultItemId={dashSectionConfig.topInsights.defaultTab}
         onSetDefault={(id) => {
           const newConfig = { ...dashSectionConfig, topInsights: { ...dashSectionConfig.topInsights, defaultTab: id } }
@@ -2015,6 +2037,20 @@ export function DashboardView() {
           const tabs = dashSectionConfig.businessActivity.visibleTabs
           const newTabs = tabs.includes(id) ? tabs.filter(t => t !== id) : [...tabs, id]
           const newConfig = { ...dashSectionConfig, businessActivity: { ...dashSectionConfig.businessActivity, visibleTabs: newTabs } }
+          setDashSectionConfig(newConfig)
+          saveDashboardSections(newConfig).catch(() => {})
+        }}
+        // §STEP-1D: Reorder support
+        itemOrder={dashSectionConfig.businessActivity.order}
+        onMoveItem={(id, direction) => {
+          const newOrder = moveItemInOrder(
+            dashSectionConfig.businessActivity.order,
+            dashSectionConfig.businessActivity.visibleTabs,
+            id,
+            direction,
+          )
+          if (!newOrder) return
+          const newConfig = { ...dashSectionConfig, businessActivity: { ...dashSectionConfig.businessActivity, order: newOrder } }
           setDashSectionConfig(newConfig)
           saveDashboardSections(newConfig).catch(() => {})
         }}

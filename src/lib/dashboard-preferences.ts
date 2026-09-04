@@ -25,10 +25,12 @@ export interface DashboardSectionConfig {
   }
   topInsights: {
     visibleTabs: string[]
+    order: string[]
     defaultTab: string
   }
   businessActivity: {
     visibleTabs: string[]
+    order: string[]
     defaultTab: string
   }
   quickActions: {
@@ -59,10 +61,12 @@ export const DEFAULT_DASHBOARD_CONFIG: DashboardSectionConfig = {
   },
   topInsights: {
     visibleTabs: ['debtors', 'buyers', 'payments', 'products', 'defaulters'],
+    order: ['debtors', 'buyers', 'payments', 'products', 'defaulters'],
     defaultTab: 'debtors',
   },
   businessActivity: {
     visibleTabs: ['transactions', 'lowstock', 'orders'],
+    order: ['transactions', 'lowstock', 'orders'],
     defaultTab: 'transactions',
   },
   quickActions: {
@@ -152,18 +156,24 @@ export function parseDashboardSectionConfig(raw: any): DashboardSectionConfig {
   }
 
   // §TOP-INSIGHTS
+  // §STEP-1D: Added order field for tab reordering
   const ti = parsed.topInsights && typeof parsed.topInsights === 'object' ? parsed.topInsights : {}
   const topTabs = filterStringArray(ti.visibleTabs, VALID_TOP_TABS)
+  const topOrder = filterStringArray(ti.order, VALID_TOP_TABS)
   const topInsights = {
     visibleTabs: resolveArray(topTabs, DEFAULT_DASHBOARD_CONFIG.topInsights.visibleTabs),
+    order: resolveArray(topOrder, DEFAULT_DASHBOARD_CONFIG.topInsights.order),
     defaultTab: typeof ti.defaultTab === 'string' && VALID_TOP_TABS.has(ti.defaultTab) ? ti.defaultTab : 'debtors',
   }
 
   // §BUSINESS-ACTIVITY
+  // §STEP-1D: Added order field for tab reordering
   const ba = parsed.businessActivity && typeof parsed.businessActivity === 'object' ? parsed.businessActivity : {}
   const hubTabs = filterStringArray(ba.visibleTabs, VALID_HUB_TABS)
+  const hubOrder = filterStringArray(ba.order, VALID_HUB_TABS)
   const businessActivity = {
     visibleTabs: resolveArray(hubTabs, DEFAULT_DASHBOARD_CONFIG.businessActivity.visibleTabs),
+    order: resolveArray(hubOrder, DEFAULT_DASHBOARD_CONFIG.businessActivity.order),
     defaultTab: typeof ba.defaultTab === 'string' && VALID_HUB_TABS.has(ba.defaultTab) ? ba.defaultTab : 'transactions',
   }
 
@@ -206,34 +216,9 @@ export function getVisibleSections(config: DashboardSectionConfig): DashboardSec
 
 /**
  * §STEP-1B: Get the ordered list of visible Quick Action IDs.
- *
- * Uses `visibleActions` to determine which actions are shown.
- * Uses `order` to determine the display order among those enabled actions.
- * Enabled actions missing from the order list are appended safely
- * after the explicitly ordered actions.
- * Unknown/invalid action IDs never appear (filtered by the parser).
- *
- * @returns string[] of action IDs in the order they should render
+ * §STEP-1D: Refactored to use the shared getOrderedVisibleIds helper.
+ * See implementation at the bottom of the file.
  */
-export function getOrderedQuickActions(config: DashboardSectionConfig): string[] {
-  const { visibleActions, order } = config.quickActions
-  if (visibleActions.length === 0) return []
-
-  const result: string[] = []
-  // First: actions in the saved order that are also visible
-  for (const actionId of order) {
-    if (visibleActions.includes(actionId) && !result.includes(actionId)) {
-      result.push(actionId)
-    }
-  }
-  // Then: visible actions not in the order list (appended safely)
-  for (const actionId of visibleActions) {
-    if (!result.includes(actionId)) {
-      result.push(actionId)
-    }
-  }
-  return result
-}
 
 /**
  * §STEP-1C-FIX: Move an item within the full order array, skipping over
@@ -300,4 +285,45 @@ export function moveItemInOrder(
   if (!order.includes(swapId)) newOrder.push(swapId)
 
   return newOrder
+}
+
+/**
+ * §STEP-1D: Generic helper — get ordered visible IDs from any order+visible pair.
+ * Used by getOrderedTopInsightsTabs, getOrderedBusinessActivityTabs, and getOrderedQuickActions.
+ */
+function getOrderedVisibleIds(order: string[], visibleIds: string[]): string[] {
+  if (visibleIds.length === 0) return []
+  const result: string[] = []
+  for (const id of order) {
+    if (visibleIds.includes(id) && !result.includes(id)) {
+      result.push(id)
+    }
+  }
+  for (const id of visibleIds) {
+    if (!result.includes(id)) {
+      result.push(id)
+    }
+  }
+  return result
+}
+
+/**
+ * §STEP-1D: Get the ordered list of visible Top Insights tab IDs.
+ */
+export function getOrderedTopInsightsTabs(config: DashboardSectionConfig): string[] {
+  return getOrderedVisibleIds(config.topInsights.order, config.topInsights.visibleTabs)
+}
+
+/**
+ * §STEP-1D: Get the ordered list of visible Business Activity tab IDs.
+ */
+export function getOrderedBusinessActivityTabs(config: DashboardSectionConfig): string[] {
+  return getOrderedVisibleIds(config.businessActivity.order, config.businessActivity.visibleTabs)
+}
+
+/**
+ * §STEP-1D: Refactored to use the shared getOrderedVisibleIds helper.
+ */
+export function getOrderedQuickActions(config: DashboardSectionConfig): string[] {
+  return getOrderedVisibleIds(config.quickActions.order, config.quickActions.visibleActions)
 }

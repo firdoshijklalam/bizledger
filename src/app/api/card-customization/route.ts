@@ -251,6 +251,8 @@ function validateDashboardSections(input: unknown): string | null {
   if (parsed.topInsights && typeof parsed.topInsights === 'object') {
     result.topInsights = {
       visibleTabs: validateStringArray(parsed.topInsights.visibleTabs, TOP_TABS),
+      // §STEP-1D: Added order field for tab reordering
+      order: validateStringArray(parsed.topInsights.order, TOP_TABS),
       defaultTab: typeof parsed.topInsights.defaultTab === 'string' && TOP_TABS.has(parsed.topInsights.defaultTab) ? parsed.topInsights.defaultTab : 'debtors',
     }
   }
@@ -259,6 +261,8 @@ function validateDashboardSections(input: unknown): string | null {
   if (parsed.businessActivity && typeof parsed.businessActivity === 'object') {
     result.businessActivity = {
       visibleTabs: validateStringArray(parsed.businessActivity.visibleTabs, HUB_TABS),
+      // §STEP-1D: Added order field for tab reordering
+      order: validateStringArray(parsed.businessActivity.order, HUB_TABS),
       defaultTab: typeof parsed.businessActivity.defaultTab === 'string' && HUB_TABS.has(parsed.businessActivity.defaultTab) ? parsed.businessActivity.defaultTab : 'transactions',
     }
   }
