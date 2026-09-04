@@ -27,6 +27,7 @@ import { useScrollStore } from '@/store/scroll-store'
 import { useRealtimeOrders } from '@/hooks/use-realtime-orders'
 import { toNumber } from '@/lib/numeric'
 import { Fragment, useMemo, useState, useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   DashboardCardManagementSheet,
   DEFAULT_CARD_CONFIG,
@@ -52,6 +53,7 @@ import {
   type CustomerQualityChartShape,
   type CustomerQualitySortOrder,
 } from '@/lib/dashboard-preferences'
+import { SaveQueue } from '@/lib/dashboard-save-queue'
 import {
   computeRangeBounds,
   dashboardRangeLabel,
@@ -135,6 +137,10 @@ const PIE_COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b
 export function DashboardView() {
   const { business, setActiveView, setKhataFilter, setKhataGradeFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setHistoryRangeContext, setReportsDateRange, setReportsRangeContext, setReportsTab } = useAppStore()
   const { t } = useI18n()
+  // §STEP-3D: queryClient for cache reconciliation after dashboardSections save.
+  // The /api/app-settings query key is built by useFetch as [url, refreshKey, timeoutMs, ...deps].
+  // We invalidate by prefix [url] so all cache entries for that URL revalidate.
+  const queryClient = useQueryClient()
   const [chartType, setChartType] = useState<ChartType>('revenue')
   const [chartView, setChartView] = useState<ChartView>('line')
   const [timeRange, setTimeRange] = useState<TimeRange>('7d')
@@ -152,6 +158,15 @@ export function DashboardView() {
   const [hubExpanded, setHubExpanded] = useState(false)
   // §DASHBOARD-CUSTOMIZATION: Dashboard section visibility/order + per-section prefs
   const [dashSectionConfig, setDashSectionConfig] = useState<DashboardSectionConfig>(DEFAULT_DASHBOARD_CONFIG)
+  // §STEP-3D: Save serialization queue. Declared here (above early returns) so
+  // React's rules-of-hooks sees it called unconditionally on every render.
+  // The queue ensures at most ONE dashboardSections POST is in flight at a time,
+  // coalesces pending configs (latest wins), and reconciles committed state from
+  // the server response on success.
+  const saveQueueRef = useRef<SaveQueue<DashboardSectionConfig> | null>(null)
+  if (!saveQueueRef.current) {
+    saveQueueRef.current = new SaveQueue<DashboardSectionConfig>()
+  }
   const [showCustomizeDash, setShowCustomizeDash] = useState(false)
   const [showSectionSettings, setShowSectionSettings] = useState<string | null>(null)
   // §QUICK-CUSTOMIZE: Bottom sheet for Business Overview card customization
@@ -661,16 +676,58 @@ export function DashboardView() {
     setDashCardConfig(newConfig)
   }
 
-  // §SAVE-DASHBOARD-SECTIONS: Persist section config via atomic API
-  const saveDashboardSections = async (newConfig: DashboardSectionConfig) => {
+  // §STEP-3D: Save serialization queue for dashboardSections.
+  // §GUARANTEES:
+  //   - At most ONE dashboardSections POST in flight at any time.
+  //   - If a new save is requested while one is in flight, retain only the LATEST
+  //     pending config (older pending configs are coalesced away).
+  //   - After the in-flight POST finishes, if a pending config exists, flush it.
+  //   - Never send an older queued config after a newer one has replaced it.
+  //   - On success: reconcile dashSectionConfig from the SERVER RESPONSE (canonical),
+  //     not the request payload. Update the /api/app-settings cache.
+  //   - On failure: reject the caller's promise, clear the pending queue, do NOT
+  //     advance committed state. The SectionSettingsSheet stays open with the draft intact.
+  // §LIFECYCLE-SAFETY: the queue ref (declared above early returns) persists across
+  // renders; promises settle on the component instance that started them. If the
+  // component unmounts mid-save, the settled promise's setDashSectionConfig is a
+  // no-op (React swallows state updates on unmounted components, and the queue ref is GC'd).
+
+  // §STEP-3D: Single-flight save executor. Performs exactly ONE POST, reconciles
+  // state from the server response, updates the cache.
+  const executeSave = async (config: DashboardSectionConfig): Promise<void> => {
     const res = await fetch('/api/card-customization', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dashboardSections: JSON.stringify(newConfig) }),
+      body: JSON.stringify({ dashboardSections: JSON.stringify(config) }),
     })
     const data = await res.json()
     if (!res.ok || !data.ok) throw new Error(data.error || 'Save failed')
-    setDashSectionConfig(newConfig)
+
+    // §STEP-3D: Reconcile from the SERVER RESPONSE (canonical), not the request payload.
+    // The /api/card-customization response shape is { ok, business, settings } where
+    // settings is the full AppSettings row (incl. dashboardSections as a JSON string).
+    // We parse it via the same defensive parser the hydration effect uses, so the
+    // committed state is always derived from what the server actually persisted.
+    if (data.settings?.dashboardSections) {
+      const reconciled = parseDashboardSectionConfig(data.settings.dashboardSections)
+      setDashSectionConfig(reconciled)
+    } else {
+      // §FALLBACK: server response didn't include settings.dashboardSections
+      // (shouldn't happen with the current API, but be safe). Fall back to the request config.
+      setDashSectionConfig(config)
+    }
+    // §STEP-3D: Invalidate the /api/app-settings TanStack cache so the next read
+    // fetches fresh server state. The query key is built by useFetch as
+    // [url, refreshKey, timeoutMs, ...deps]. We invalidate by the URL prefix
+    // so all cache entries for /api/app-settings revalidate regardless of refreshKey.
+    queryClient.invalidateQueries({ queryKey: ['/api/app-settings'] })
+  }
+
+  // §SAVE-DASHBOARD-SECTIONS: §STEP-3D serialized save entry point.
+  // Keeps the same signature so SectionSettingsSheet + DashboardCustomizationSheet
+  // are unchanged. Returns a promise that resolves on success or rejects on failure.
+  const saveDashboardSections = (newConfig: DashboardSectionConfig): Promise<void> => {
+    return saveQueueRef.current!.enqueue(newConfig, executeSave)
   }
 
   // §MANAGE-CARDS-DEFS: Card metadata for the management sheet
