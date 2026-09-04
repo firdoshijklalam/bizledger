@@ -47,7 +47,6 @@ import {
   getOrderedTopInsightsTabs,
   getOrderedBusinessActivityTabs,
   resolveDefaultTab,
-  moveItemInOrder,
   getSortedGradeData,
   type DashboardSectionConfig,
   type CustomerQualityChartShape,
@@ -470,19 +469,18 @@ export function DashboardView() {
   // same order on every render — even when the dashboard short-circuits.
   // §STEP-1D-FINAL: Use resolveDefaultTab so the fallback respects the saved
   // defaultTab when it's still visible, and selects the first ordered visible
-  // tab when it's not. Also normalizes the persisted defaultTab.
+  // tab when it's not.
+  // §STEP-3C: Removed the auto-save side-effect. Normalization of the persisted
+  // defaultTab now happens in the SectionSettingsSheet draft (on Save), NOT as
+  // a fire-and-forget server write. This effect only reconciles the ACTIVE tab
+  // UI state (setTopTab) when the committed config changes — it does NOT write
+  // to the server.
   useEffect(() => {
     const orderedVisible = getOrderedTopInsightsTabs(dashSectionConfig)
     const effective = resolveDefaultTab(orderedVisible, dashSectionConfig.topInsights.defaultTab)
     // Update active tab if it's not visible
     if (orderedVisible.length > 0 && !orderedVisible.includes(topTab)) {
       setTopTab(effective as typeof topTab)
-    }
-    // Normalize persisted defaultTab if it's hidden
-    if (effective && effective !== dashSectionConfig.topInsights.defaultTab) {
-      const newConfig = { ...dashSectionConfig, topInsights: { ...dashSectionConfig.topInsights, defaultTab: effective } }
-      setDashSectionConfig(newConfig)
-      saveDashboardSections(newConfig).catch(() => {})
     }
   }, [dashSectionConfig, topTab])
 
@@ -491,11 +489,6 @@ export function DashboardView() {
     const effective = resolveDefaultTab(orderedVisible, dashSectionConfig.businessActivity.defaultTab)
     if (orderedVisible.length > 0 && !orderedVisible.includes(hubTab)) {
       setHubTab(effective as typeof hubTab)
-    }
-    if (effective && effective !== dashSectionConfig.businessActivity.defaultTab) {
-      const newConfig = { ...dashSectionConfig, businessActivity: { ...dashSectionConfig.businessActivity, defaultTab: effective } }
-      setDashSectionConfig(newConfig)
-      saveDashboardSections(newConfig).catch(() => {})
     }
   }, [dashSectionConfig, hubTab])
 
@@ -2087,262 +2080,55 @@ export function DashboardView() {
       />
 
       {/* §SECTION-SETTINGS-SHEET: Per-section settings (Customer Quality, Top Insights, Business Activity, Quick Actions) */}
+      {/* §STEP-3C: Converted to draft + explicit Save. The sheet owns its own draft;
+          parent dashSectionConfig is updated only on successful save. */}
       <SectionSettingsSheet
         open={showSectionSettings === 'customerQuality'}
         onClose={() => setShowSectionSettings(null)}
         title="Customer Quality"
-        sectionVisible={isSectionVisible(dashSectionConfig, 'customerQuality')}
-        onToggleSection={(visible) => {
-          const newConfig = { ...dashSectionConfig, sections: dashSectionConfig.sections.map(s => s.id === 'customerQuality' ? { ...s, visible } : s) }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
+        sectionId="customerQuality"
+        savedConfig={dashSectionConfig}
+        onSave={saveDashboardSections}
         items={[{ id: 'A', label: 'Grade A' }, { id: 'B', label: 'Grade B' }, { id: 'C', label: 'Grade C' }, { id: 'D', label: 'Grade D' }, { id: 'E', label: 'Grade E' }]}
-        visibleItems={dashSectionConfig.customerQuality.visibleGrades}
-        onToggleItem={(id) => {
-          // §STEP-2C: Preserve advanced fields when toggling grades
-          const cq = dashSectionConfig.customerQuality
-          const newGrades = cq.visibleGrades.includes(id) ? cq.visibleGrades.filter(g => g !== id) : [...cq.visibleGrades, id]
-          const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, visibleGrades: newGrades } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
-        onReset={() => {
-          // §STEP-2C: Reset to full default customerQuality (includes advanced fields)
-          const newConfig = { ...dashSectionConfig, customerQuality: { ...DEFAULT_DASHBOARD_CONFIG.customerQuality } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
-        // §STEP-2C: Advanced controls panel for chartShape, display toggles, tapBehavior, sortOrder
-        advancedPanel={
-          <div className="pt-2 border-t border-border space-y-3">
-            <p className="text-xs font-semibold text-muted-foreground">Chart & Display</p>
-
-            {/* Chart shape selector */}
-            <div>
-              <p className="text-[10px] text-muted-foreground mb-1.5">Chart Shape</p>
-              <div className="grid grid-cols-3 gap-1">
-                {(['bar', 'donut', 'horizontal'] as const).map((shape) => (
-                  <button
-                    key={shape}
-                    onClick={() => {
-                      const cq = dashSectionConfig.customerQuality
-                      const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, chartShape: shape } }
-                      setDashSectionConfig(newConfig)
-                      saveDashboardSections(newConfig).catch(() => {})
-                    }}
-                    className={`py-1.5 rounded-lg text-[11px] font-medium transition-colors min-h-[36px] ${dashSectionConfig.customerQuality.chartShape === shape ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
-                  >
-                    {shape === 'bar' ? 'Bar' : shape === 'donut' ? 'Donut' : 'Horizontal'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Sort order selector */}
-            <div>
-              <p className="text-[10px] text-muted-foreground mb-1.5">Sort Order</p>
-              <div className="grid grid-cols-2 gap-1">
-                {([['grade', 'Grade (A→E)'], ['count-desc', 'Highest Count']] as const).map(([order, label]) => (
-                  <button
-                    key={order}
-                    onClick={() => {
-                      const cq = dashSectionConfig.customerQuality
-                      const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, sortOrder: order } }
-                      setDashSectionConfig(newConfig)
-                      saveDashboardSections(newConfig).catch(() => {})
-                    }}
-                    className={`py-1.5 rounded-lg text-[11px] font-medium transition-colors min-h-[36px] ${dashSectionConfig.customerQuality.sortOrder === order ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* §STEP-2C-REVIEW: Tap enabled ON/OFF toggle (replaces tapBehavior selector) */}
-            <div>
-              <p className="text-[10px] text-muted-foreground mb-1.5">Tap to open customers</p>
-              <button
-                onClick={() => {
-                  const cq = dashSectionConfig.customerQuality
-                  const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, tapEnabled: !cq.tapEnabled } }
-                  setDashSectionConfig(newConfig)
-                  saveDashboardSections(newConfig).catch(() => {})
-                }}
-                className="w-full flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50"
-              >
-                <span className="text-xs font-medium">
-                  {dashSectionConfig.customerQuality.tapEnabled ? 'Enabled' : 'Disabled'}
-                </span>
-                <span className={`w-9 h-5 rounded-full transition-colors relative ${dashSectionConfig.customerQuality.tapEnabled ? 'bg-primary' : 'bg-muted'}`}>
-                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${dashSectionConfig.customerQuality.tapEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                </span>
-              </button>
-            </div>
-
-            {/* Display toggles */}
-            <div className="space-y-1">
-              <p className="text-[10px] text-muted-foreground mb-1">Display</p>
-              {([
-                ['showCount', 'Show Count'],
-                ['showPercentage', 'Show Percentage'],
-                ['showDescription', 'Show Description'],
-              ] as const).map(([field, label]) => {
-                const cq = dashSectionConfig.customerQuality
-                const isEnabled = cq[field]
-                return (
-                  <button
-                    key={field}
-                    onClick={() => {
-                      const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, [field]: !isEnabled } }
-                      setDashSectionConfig(newConfig)
-                      saveDashboardSections(newConfig).catch(() => {})
-                    }}
-                    className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-muted/50"
-                  >
-                    <span className="text-xs font-medium">{label}</span>
-                    <span className={`w-9 h-5 rounded-full transition-colors relative ${isEnabled ? 'bg-primary' : 'bg-muted'}`}>
-                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        }
+        sectionDefaults={DEFAULT_DASHBOARD_CONFIG.customerQuality}
       />
 
       <SectionSettingsSheet
         open={showSectionSettings === 'topInsights'}
         onClose={() => setShowSectionSettings(null)}
         title="Top Insights"
-        sectionVisible={isSectionVisible(dashSectionConfig, 'topInsights')}
-        onToggleSection={(visible) => {
-          const newConfig = { ...dashSectionConfig, sections: dashSectionConfig.sections.map(s => s.id === 'topInsights' ? { ...s, visible } : s) }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
+        sectionId="topInsights"
+        savedConfig={dashSectionConfig}
+        onSave={saveDashboardSections}
         items={[{ id: 'debtors', label: 'Top Debtors' }, { id: 'buyers', label: 'Top Buyers' }, { id: 'payments', label: 'Top Payments' }, { id: 'products', label: 'Top Products' }, { id: 'defaulters', label: 'Defaulters' }]}
-        visibleItems={dashSectionConfig.topInsights.visibleTabs}
-        onToggleItem={(id) => {
-          const tabs = dashSectionConfig.topInsights.visibleTabs
-          const newTabs = tabs.includes(id) ? tabs.filter(t => t !== id) : [...tabs, id]
-          const newConfig = { ...dashSectionConfig, topInsights: { ...dashSectionConfig.topInsights, visibleTabs: newTabs } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
-        // §STEP-1D: Reorder support
-        itemOrder={dashSectionConfig.topInsights.order}
-        onMoveItem={(id, direction) => {
-          const newOrder = moveItemInOrder(
-            dashSectionConfig.topInsights.order,
-            dashSectionConfig.topInsights.visibleTabs,
-            id,
-            direction,
-          )
-          if (!newOrder) return
-          const newConfig = { ...dashSectionConfig, topInsights: { ...dashSectionConfig.topInsights, order: newOrder } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
-        defaultItemId={dashSectionConfig.topInsights.defaultTab}
-        onSetDefault={(id) => {
-          const newConfig = { ...dashSectionConfig, topInsights: { ...dashSectionConfig.topInsights, defaultTab: id } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
-        onReset={() => {
-          const newConfig = { ...dashSectionConfig, topInsights: { ...DEFAULT_DASHBOARD_CONFIG.topInsights } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
+        supportsDefault
+        supportsReorder
+        sectionDefaults={DEFAULT_DASHBOARD_CONFIG.topInsights}
       />
 
       <SectionSettingsSheet
         open={showSectionSettings === 'businessActivity'}
         onClose={() => setShowSectionSettings(null)}
         title="Business Activity"
-        sectionVisible={isSectionVisible(dashSectionConfig, 'businessActivity')}
-        onToggleSection={(visible) => {
-          const newConfig = { ...dashSectionConfig, sections: dashSectionConfig.sections.map(s => s.id === 'businessActivity' ? { ...s, visible } : s) }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
+        sectionId="businessActivity"
+        savedConfig={dashSectionConfig}
+        onSave={saveDashboardSections}
         items={[{ id: 'transactions', label: 'Transactions' }, { id: 'lowstock', label: 'Low Stock' }, { id: 'orders', label: 'Online Orders' }]}
-        visibleItems={dashSectionConfig.businessActivity.visibleTabs}
-        onToggleItem={(id) => {
-          const tabs = dashSectionConfig.businessActivity.visibleTabs
-          const newTabs = tabs.includes(id) ? tabs.filter(t => t !== id) : [...tabs, id]
-          const newConfig = { ...dashSectionConfig, businessActivity: { ...dashSectionConfig.businessActivity, visibleTabs: newTabs } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
-        // §STEP-1D: Reorder support
-        itemOrder={dashSectionConfig.businessActivity.order}
-        onMoveItem={(id, direction) => {
-          const newOrder = moveItemInOrder(
-            dashSectionConfig.businessActivity.order,
-            dashSectionConfig.businessActivity.visibleTabs,
-            id,
-            direction,
-          )
-          if (!newOrder) return
-          const newConfig = { ...dashSectionConfig, businessActivity: { ...dashSectionConfig.businessActivity, order: newOrder } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
-        defaultItemId={dashSectionConfig.businessActivity.defaultTab}
-        onSetDefault={(id) => {
-          const newConfig = { ...dashSectionConfig, businessActivity: { ...dashSectionConfig.businessActivity, defaultTab: id } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
-        onReset={() => {
-          const newConfig = { ...dashSectionConfig, businessActivity: { ...DEFAULT_DASHBOARD_CONFIG.businessActivity } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
+        supportsDefault
+        supportsReorder
+        sectionDefaults={DEFAULT_DASHBOARD_CONFIG.businessActivity}
       />
 
       <SectionSettingsSheet
         open={showSectionSettings === 'quickActions'}
         onClose={() => setShowSectionSettings(null)}
         title="Quick Actions"
-        sectionVisible={isSectionVisible(dashSectionConfig, 'quickActions')}
-        onToggleSection={(visible) => {
-          const newConfig = { ...dashSectionConfig, sections: dashSectionConfig.sections.map(s => s.id === 'quickActions' ? { ...s, visible } : s) }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
+        sectionId="quickActions"
+        savedConfig={dashSectionConfig}
+        onSave={saveDashboardSections}
         items={[{ id: 'add-party', label: 'Add Party' }, { id: 'add-product', label: 'Add Product' }, { id: 'new-invoice', label: 'New Invoice' }, { id: 'add-transaction', label: 'Add Transaction' }]}
-        visibleItems={dashSectionConfig.quickActions.visibleActions}
-        onToggleItem={(id) => {
-          const actions = dashSectionConfig.quickActions.visibleActions
-          const newActions = actions.includes(id) ? actions.filter(a => a !== id) : [...actions, id]
-          const newConfig = { ...dashSectionConfig, quickActions: { ...dashSectionConfig.quickActions, visibleActions: newActions } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
-        // §STEP-1C: Reorder support — uses moveItemInOrder to skip disabled items
-        itemOrder={dashSectionConfig.quickActions.order}
-        onMoveItem={(id, direction) => {
-          const newOrder = moveItemInOrder(
-            dashSectionConfig.quickActions.order,
-            dashSectionConfig.quickActions.visibleActions,
-            id,
-            direction,
-          )
-          if (!newOrder) return
-          const newConfig = { ...dashSectionConfig, quickActions: { ...dashSectionConfig.quickActions, order: newOrder } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
-        onReset={() => {
-          const newConfig = { ...dashSectionConfig, quickActions: { ...DEFAULT_DASHBOARD_CONFIG.quickActions } }
-          setDashSectionConfig(newConfig)
-          saveDashboardSections(newConfig).catch(() => {})
-        }}
+        supportsReorder
+        sectionDefaults={DEFAULT_DASHBOARD_CONFIG.quickActions}
       />
     </div>
   )

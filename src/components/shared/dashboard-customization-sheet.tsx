@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X, Loader2, Settings, ChevronUp, ChevronDown, Eye, EyeOff,
@@ -10,6 +10,8 @@ import {
 import {
   DEFAULT_DASHBOARD_CONFIG,
   parseDashboardSectionConfig,
+  isSectionVisible,
+  moveItemInOrder,
   type DashboardSectionConfig,
   type DashboardSection,
 } from '@/lib/dashboard-preferences'
@@ -275,43 +277,184 @@ export function DashboardCustomizationSheet({
 }
 
 // ─── Section Settings Sheet (reusable per-section settings) ─────────────
+//
+// §STEP-3C: Converted from immediate-save to local draft + explicit Save.
+//   - The sheet owns a `draft: DashboardSectionConfig` initialized from savedConfig.
+//   - All toggle/move/default/reset operations mutate ONLY the draft (no network).
+//   - Save persists via the parent's onSave callback (one POST), closes on success.
+//   - On failure, the sheet stays open, draft intact, error shown.
+//   - The parent's dashSectionConfig is NOT mutated until save succeeds.
+//   - The Customer Quality advanced panel is rendered inside the sheet (via sectionId)
+//     so it can mutate the draft directly.
 
 interface SectionSettingsSheetProps {
   open: boolean
   onClose: () => void
   title: string
-  // Section-level visibility toggle
-  sectionVisible: boolean
-  onToggleSection: (visible: boolean) => void
-  // Tab/action items to toggle
+  // §STEP-3C: the section this sheet configures — drives which sub-config + advanced panel to render
+  sectionId: 'customerQuality' | 'topInsights' | 'businessActivity' | 'quickActions'
+  // §STEP-3C: the committed config from the parent — draft initializes from this on open
+  savedConfig: DashboardSectionConfig
+  // §STEP-3C: persist the draft — called on Save. Throws on failure.
+  onSave: (config: DashboardSectionConfig) => Promise<void>
+  // Static item metadata (labels) for the toggle list
   items: Array<{ id: string; label: string }>
-  visibleItems: string[]
-  onToggleItem: (id: string) => void
-  // Default item selector
-  defaultItemId?: string
-  onSetDefault?: (id: string) => void
-  // §STEP-1C: Item reordering (optional — used by Quick Actions)
-  itemOrder?: string[]
-  onMoveItem?: (id: string, direction: 'up' | 'down') => void
-  // §STEP-2C: Optional advanced controls panel (used by Customer Quality)
-  advancedPanel?: ReactNode
-  // Reset
-  onReset: () => void
+  // §STEP-3C: whether this section supports a default-item selector + reordering
+  supportsDefault?: boolean
+  supportsReorder?: boolean
+  // §STEP-3C: the section-level reset target (defaults for THIS section only)
+  sectionDefaults: DashboardSectionConfig['customerQuality'] | DashboardSectionConfig['topInsights'] | DashboardSectionConfig['businessActivity'] | DashboardSectionConfig['quickActions']
 }
 
 export function SectionSettingsSheet({
-  open, onClose, title, sectionVisible, onToggleSection,
-  items, visibleItems, onToggleItem, defaultItemId, onSetDefault, onReset,
-  itemOrder, onMoveItem, advancedPanel,
+  open, onClose, title, sectionId, savedConfig, onSave, items,
+  supportsDefault, supportsReorder, sectionDefaults,
 }: SectionSettingsSheetProps) {
+  const [draft, setDraft] = useState<DashboardSectionConfig>(savedConfig)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
 
-  // Reset confirm state when sheet opens (use key change pattern to avoid setState-in-effect)
+  // §STEP-3C: Re-sync draft to savedConfig when the sheet opens (false→true).
+  // Mirrors the DashboardCustomizationSheet pattern (L61-66).
   const [prevOpen, setPrevOpen] = useState(false)
   if (open !== prevOpen) {
     setPrevOpen(open)
-    if (open) setShowResetConfirm(false)
+    if (open) {
+      setDraft(savedConfig)
+      setSaveError(null)
+      setShowResetConfirm(false)
+    }
   }
+
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(savedConfig)
+
+  // ── Draft mutation helpers (NO network) ──────────────────────────────
+  const sectionVisible = isSectionVisible(draft, sectionId)
+
+  const toggleSection = (visible: boolean) => {
+    setDraft(prev => ({ ...prev, sections: prev.sections.map(s => s.id === sectionId ? { ...s, visible } : s) }))
+  }
+
+  // §STEP-3C: generic per-section field updater — used for visibleTabs/visibleActions etc.
+  const updateSection = (updater: (prev: DashboardSectionConfig) => DashboardSectionConfig) => {
+    setDraft(prev => updater(prev))
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await onSave(draft)
+      // §STEP-3C: parent's onSave updates dashSectionConfig on success.
+      // Close after a short delay to let the success state show (matches DashboardCustomizationSheet).
+      setTimeout(() => onClose(), 300)
+    } catch (e: any) {
+      // §STEP-3C: failure — sheet stays open, draft intact, error visible.
+      setSaveError(e?.message || 'Save failed. Please retry.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const tryClose = () => {
+    if (isDirty) {
+      // §STEP-3C: if dirty, show the reset-confirm as a "discard changes?" prompt
+      setShowResetConfirm(true)
+    } else {
+      onClose()
+    }
+  }
+
+  const handleReset = () => {
+    // §STEP-3C: reset ONLY this section's sub-config to defaults (in draft, not persisted)
+    setDraft(prev => ({ ...prev, [sectionId]: JSON.parse(JSON.stringify(sectionDefaults)) }))
+    setShowResetConfirm(false)
+  }
+
+  // ── Derive display values from the DRAFT (not savedConfig) ────────────
+  const cq = draft.customerQuality
+  const ti = draft.topInsights
+  const ba = draft.businessActivity
+  const qa = draft.quickActions
+
+  // visibleItems + itemOrder + defaultItemId come from the draft's section
+  const visibleItems =
+    sectionId === 'customerQuality' ? cq.visibleGrades
+    : sectionId === 'topInsights' ? ti.visibleTabs
+    : sectionId === 'businessActivity' ? ba.visibleTabs
+    : qa.visibleActions
+  const itemOrder = supportsReorder
+    ? (sectionId === 'topInsights' ? ti.order
+      : sectionId === 'businessActivity' ? ba.order
+      : qa.order)
+    : undefined
+  const defaultItemId = supportsDefault
+    ? (sectionId === 'topInsights' ? ti.defaultTab
+      : sectionId === 'businessActivity' ? ba.defaultTab
+      : undefined)
+    : undefined
+
+  // ── Item-level draft mutations ───────────────────────────────────────
+  const onToggleItem = (id: string) => {
+    updateSection(prev => {
+      if (sectionId === 'customerQuality') {
+        const grades = prev.customerQuality.visibleGrades
+        const newGrades = grades.includes(id) ? grades.filter(g => g !== id) : [...grades, id]
+        return { ...prev, customerQuality: { ...prev.customerQuality, visibleGrades: newGrades } }
+      }
+      if (sectionId === 'topInsights') {
+        const tabs = prev.topInsights.visibleTabs
+        const newTabs = tabs.includes(id) ? tabs.filter(t => t !== id) : [...tabs, id]
+        return { ...prev, topInsights: { ...prev.topInsights, visibleTabs: newTabs } }
+      }
+      if (sectionId === 'businessActivity') {
+        const tabs = prev.businessActivity.visibleTabs
+        const newTabs = tabs.includes(id) ? tabs.filter(t => t !== id) : [...tabs, id]
+        return { ...prev, businessActivity: { ...prev.businessActivity, visibleTabs: newTabs } }
+      }
+      // quickActions
+      const actions = prev.quickActions.visibleActions
+      const newActions = actions.includes(id) ? actions.filter(a => a !== id) : [...actions, id]
+      return { ...prev, quickActions: { ...prev.quickActions, visibleActions: newActions } }
+    })
+  }
+
+  const onMoveItem = supportsReorder ? (id: string, direction: 'up' | 'down') => {
+    updateSection(prev => {
+      if (sectionId === 'topInsights') {
+        const newOrder = moveItemInOrder(prev.topInsights.order, prev.topInsights.visibleTabs, id, direction)
+        if (!newOrder) return prev
+        return { ...prev, topInsights: { ...prev.topInsights, order: newOrder } }
+      }
+      if (sectionId === 'businessActivity') {
+        const newOrder = moveItemInOrder(prev.businessActivity.order, prev.businessActivity.visibleTabs, id, direction)
+        if (!newOrder) return prev
+        return { ...prev, businessActivity: { ...prev.businessActivity, order: newOrder } }
+      }
+      // quickActions
+      const newOrder = moveItemInOrder(prev.quickActions.order, prev.quickActions.visibleActions, id, direction)
+      if (!newOrder) return prev
+      return { ...prev, quickActions: { ...prev.quickActions, order: newOrder } }
+    })
+  } : undefined
+
+  const onSetDefault = supportsDefault ? (id: string) => {
+    updateSection(prev => {
+      if (sectionId === 'topInsights') return { ...prev, topInsights: { ...prev.topInsights, defaultTab: id } }
+      if (sectionId === 'businessActivity') return { ...prev, businessActivity: { ...prev.businessActivity, defaultTab: id } }
+      return prev
+    })
+  } : undefined
+
+  // Sort items by draft order for display (when reorder is supported)
+  const sortedItems = supportsReorder && itemOrder
+    ? [...items].sort((a, b) => {
+        const aIdx = itemOrder.indexOf(a.id)
+        const bIdx = itemOrder.indexOf(b.id)
+        return (aIdx < 0 ? 999 : aIdx) - (bIdx < 0 ? 999 : bIdx)
+      })
+    : items
 
   return (
     <AnimatePresence>
@@ -321,7 +464,7 @@ export function SectionSettingsSheet({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
+            onClick={tryClose}
             className="fixed inset-0 z-[95] bg-black/40 backdrop-blur-[2px]"
           />
           <motion.div
@@ -336,7 +479,7 @@ export function SectionSettingsSheet({
               <h3 className="text-sm font-semibold flex items-center gap-1.5">
                 <Settings className="w-4 h-4" /> {title} Settings
               </h3>
-              <button onClick={onClose} className="w-9 h-9 rounded-full hover:bg-muted flex items-center justify-center" aria-label="Close">
+              <button onClick={tryClose} className="w-9 h-9 rounded-full hover:bg-muted flex items-center justify-center" aria-label="Close">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -350,7 +493,7 @@ export function SectionSettingsSheet({
                   <p className="text-[10px] text-muted-foreground">Toggle this section on the dashboard</p>
                 </div>
                 <button
-                  onClick={() => onToggleSection(!sectionVisible)}
+                  onClick={() => toggleSection(!sectionVisible)}
                   className={`w-12 h-7 rounded-full transition-colors relative ${sectionVisible ? 'bg-primary' : 'bg-muted'}`}
                   aria-label={sectionVisible ? 'Hide section' : 'Show section'}
                 >
@@ -362,28 +505,19 @@ export function SectionSettingsSheet({
               {items.length > 0 && (
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground mb-2">
-                    {onMoveItem ? 'Actions' : 'Visible Items'}
+                    {supportsReorder ? 'Actions' : 'Visible Items'}
                   </p>
                   <div className="space-y-1">
-                    {/* §STEP-1C: If onMoveItem is provided, sort items by itemOrder */}
-                    {(() => {
-                      const sortedItems = onMoveItem && itemOrder
-                        ? [...items].sort((a, b) => {
-                            const aIdx = itemOrder.indexOf(a.id)
-                            const bIdx = itemOrder.indexOf(b.id)
-                            return (aIdx < 0 ? 999 : aIdx) - (bIdx < 0 ? 999 : bIdx)
-                          })
-                        : items
-                      return sortedItems.map((item, displayIndex) => {
+                    {sortedItems.map((item) => {
                       const isVisible = visibleItems.includes(item.id)
                       const isDefault = defaultItemId === item.id
-                      // §STEP-1C: For reorder, determine if move up/down is possible
-                      const visibleSorted = onMoveItem && itemOrder
+                      // For reorder, determine if move up/down is possible
+                      const visibleSorted = supportsReorder && itemOrder
                         ? sortedItems.filter(i => visibleItems.includes(i.id))
                         : []
                       const visibleIndex = visibleSorted.findIndex(i => i.id === item.id)
-                      const canMoveUp = onMoveItem && isVisible && visibleIndex > 0
-                      const canMoveDown = onMoveItem && isVisible && visibleIndex >= 0 && visibleIndex < visibleSorted.length - 1
+                      const canMoveUp = !!onMoveItem && isVisible && visibleIndex > 0
+                      const canMoveDown = !!onMoveItem && isVisible && visibleIndex >= 0 && visibleIndex < visibleSorted.length - 1
                       return (
                         <div key={item.id} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50">
                           <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -399,7 +533,7 @@ export function SectionSettingsSheet({
                             </span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            {/* §STEP-1C: Move Up / Move Down controls for reordering */}
+                            {/* Move Up / Move Down controls for reordering */}
                             {onMoveItem && isVisible && (
                               <div className="flex items-center gap-0.5">
                                 <button
@@ -431,25 +565,121 @@ export function SectionSettingsSheet({
                           </div>
                         </div>
                       )
-                      })
-                    })()}
+                    })}
                   </div>
                 </div>
               )}
 
-              {/* §STEP-2C: Optional advanced controls panel (used by Customer Quality) */}
-              {advancedPanel}
+              {/* §STEP-2C: Customer Quality advanced controls panel — now mutates the DRAFT */}
+              {sectionId === 'customerQuality' && (
+                <div className="pt-2 border-t border-border space-y-3">
+                  <p className="text-xs font-semibold text-muted-foreground">Chart & Display</p>
+
+                  {/* Chart shape selector */}
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-1.5">Chart Shape</p>
+                    <div className="grid grid-cols-3 gap-1">
+                      {(['bar', 'donut', 'horizontal'] as const).map((shape) => (
+                        <button
+                          key={shape}
+                          onClick={() => updateSection(prev => ({ ...prev, customerQuality: { ...prev.customerQuality, chartShape: shape } }))}
+                          className={`py-1.5 rounded-lg text-[11px] font-medium transition-colors min-h-[36px] ${cq.chartShape === shape ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+                        >
+                          {shape === 'bar' ? 'Bar' : shape === 'donut' ? 'Donut' : 'Horizontal'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Sort order selector */}
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-1.5">Sort Order</p>
+                    <div className="grid grid-cols-2 gap-1">
+                      {([['grade', 'Grade (A→E)'], ['count-desc', 'Highest Count']] as const).map(([order, label]) => (
+                        <button
+                          key={order}
+                          onClick={() => updateSection(prev => ({ ...prev, customerQuality: { ...prev.customerQuality, sortOrder: order } }))}
+                          className={`py-1.5 rounded-lg text-[11px] font-medium transition-colors min-h-[36px] ${cq.sortOrder === order ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* §STEP-2C-REVIEW: Tap enabled ON/OFF toggle */}
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-1.5">Tap to open customers</p>
+                    <button
+                      onClick={() => updateSection(prev => ({ ...prev, customerQuality: { ...prev.customerQuality, tapEnabled: !prev.customerQuality.tapEnabled } }))}
+                      className="w-full flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50"
+                    >
+                      <span className="text-xs font-medium">
+                        {cq.tapEnabled ? 'Enabled' : 'Disabled'}
+                      </span>
+                      <span className={`w-9 h-5 rounded-full transition-colors relative ${cq.tapEnabled ? 'bg-primary' : 'bg-muted'}`}>
+                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${cq.tapEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Display toggles */}
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-muted-foreground mb-1">Display</p>
+                    {([
+                      ['showCount', 'Show Count'],
+                      ['showPercentage', 'Show Percentage'],
+                      ['showDescription', 'Show Description'],
+                    ] as const).map(([field, label]) => {
+                      const isEnabled = cq[field]
+                      return (
+                        <button
+                          key={field}
+                          onClick={() => updateSection(prev => ({ ...prev, customerQuality: { ...prev.customerQuality, [field]: !isEnabled } }))}
+                          className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-muted/50"
+                        >
+                          <span className="text-xs font-medium">{label}</span>
+                          <span className={`w-9 h-5 rounded-full transition-colors relative ${isEnabled ? 'bg-primary' : 'bg-muted'}`}>
+                            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* §STEP-3C: Save error (visible only on failure) */}
+              {saveError && (
+                <div className="p-2.5 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900">
+                  <p className="text-xs text-red-600 dark:text-red-400">{saveError}</p>
+                </div>
+              )}
 
               {/* Reset */}
               <div className="pt-2 border-t border-border">
                 {showResetConfirm ? (
                   <div className="space-y-2">
                     <p className="text-xs text-muted-foreground text-center py-1">
-                      Restore {title} settings to defaults?
+                      {isDirty ? `Discard unsaved changes to ${title}?` : `Restore ${title} settings to defaults?`}
                     </p>
                     <div className="flex gap-2">
                       <button onClick={() => setShowResetConfirm(false)} className="flex-1 py-2 rounded-lg bg-muted text-xs font-medium min-h-[44px]">Cancel</button>
-                      <button onClick={() => { onReset(); setShowResetConfirm(false) }} className="flex-1 py-2 rounded-lg bg-red-500 text-white text-xs font-medium min-h-[44px]">Reset</button>
+                      <button
+                        onClick={() => {
+                          if (isDirty) {
+                            // §STEP-3C: discard draft → re-sync to savedConfig + close
+                            setDraft(savedConfig)
+                            setShowResetConfirm(false)
+                            onClose()
+                          } else {
+                            handleReset()
+                          }
+                        }}
+                        className="flex-1 py-2 rounded-lg bg-red-500 text-white text-xs font-medium min-h-[44px]"
+                      >
+                        {isDirty ? 'Discard' : 'Reset'}
+                      </button>
                     </div>
                   </div>
                 ) : (
@@ -462,6 +692,24 @@ export function SectionSettingsSheet({
                   </button>
                 )}
               </div>
+            </div>
+
+            {/* §STEP-3C: Footer with explicit Save / Cancel */}
+            <div className="p-4 pt-2 border-t border-border shrink-0 flex gap-2">
+              <button
+                onClick={tryClose}
+                className="flex-1 py-2.5 rounded-xl bg-muted text-xs font-medium hover:bg-muted/80 min-h-[44px]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving || !isDirty}
+                className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 min-h-[44px]"
+              >
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isDirty ? <Check className="w-3.5 h-3.5" /> : null}
+                {saving ? 'Saving...' : isDirty ? 'Save Changes' : 'No changes'}
+              </button>
             </div>
           </motion.div>
         </>
