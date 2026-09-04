@@ -46,6 +46,7 @@ import {
   getOrderedQuickActions,
   getOrderedTopInsightsTabs,
   getOrderedBusinessActivityTabs,
+  resolveDefaultTab,
   moveItemInOrder,
   type DashboardSectionConfig,
 } from '@/lib/dashboard-preferences'
@@ -435,6 +436,13 @@ export function DashboardView() {
     // §DASHBOARD-SECTIONS-LOAD: Parse dashboard section config from AppSettings
     const dashSections = parseDashboardSectionConfig((appSettings as any).dashboardSections)
     setDashSectionConfig(dashSections)
+    // §STEP-1D-FINAL: Initialize tabs from saved defaultTab (not hardcoded 'debtors'/'transactions')
+    const orderedTop = getOrderedTopInsightsTabs(dashSections)
+    const effectiveTopTab = resolveDefaultTab(orderedTop, dashSections.topInsights.defaultTab)
+    if (effectiveTopTab) setTopTab(effectiveTopTab as typeof topTab)
+    const orderedHub = getOrderedBusinessActivityTabs(dashSections)
+    const effectiveHubTab = resolveDefaultTab(orderedHub, dashSections.businessActivity.defaultTab)
+    if (effectiveHubTab) setHubTab(effectiveHubTab as typeof hubTab)
   }, [appSettings])
 
   // §STEP-1-RENDER-INTEGRATION: If the active tab falls out of the visibleTabs
@@ -446,20 +454,34 @@ export function DashboardView() {
   // §HOOK-ORDER: These useEffects MUST be above the early returns (loading /
   // error / empty states) so React's rules-of-hooks sees them called in the
   // same order on every render — even when the dashboard short-circuits.
-  // §STEP-1D-CORRECTION: Use getOrderedTopInsightsTabs so the fallback
-  // selects the first tab in the CURRENT ORDERED visible list, not just
-  // visibleTabs[0] (which is the raw config array, not display order).
+  // §STEP-1D-FINAL: Use resolveDefaultTab so the fallback respects the saved
+  // defaultTab when it's still visible, and selects the first ordered visible
+  // tab when it's not. Also normalizes the persisted defaultTab.
   useEffect(() => {
     const orderedVisible = getOrderedTopInsightsTabs(dashSectionConfig)
+    const effective = resolveDefaultTab(orderedVisible, dashSectionConfig.topInsights.defaultTab)
+    // Update active tab if it's not visible
     if (orderedVisible.length > 0 && !orderedVisible.includes(topTab)) {
-      setTopTab(orderedVisible[0] as typeof topTab)
+      setTopTab(effective as typeof topTab)
+    }
+    // Normalize persisted defaultTab if it's hidden
+    if (effective && effective !== dashSectionConfig.topInsights.defaultTab) {
+      const newConfig = { ...dashSectionConfig, topInsights: { ...dashSectionConfig.topInsights, defaultTab: effective } }
+      setDashSectionConfig(newConfig)
+      saveDashboardSections(newConfig).catch(() => {})
     }
   }, [dashSectionConfig, topTab])
 
   useEffect(() => {
     const orderedVisible = getOrderedBusinessActivityTabs(dashSectionConfig)
+    const effective = resolveDefaultTab(orderedVisible, dashSectionConfig.businessActivity.defaultTab)
     if (orderedVisible.length > 0 && !orderedVisible.includes(hubTab)) {
-      setHubTab(orderedVisible[0] as typeof hubTab)
+      setHubTab(effective as typeof hubTab)
+    }
+    if (effective && effective !== dashSectionConfig.businessActivity.defaultTab) {
+      const newConfig = { ...dashSectionConfig, businessActivity: { ...dashSectionConfig.businessActivity, defaultTab: effective } }
+      setDashSectionConfig(newConfig)
+      saveDashboardSections(newConfig).catch(() => {})
     }
   }, [dashSectionConfig, hubTab])
 

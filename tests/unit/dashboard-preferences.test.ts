@@ -30,6 +30,7 @@ import {
   getOrderedQuickActions,
   getOrderedTopInsightsTabs,
   getOrderedBusinessActivityTabs,
+  resolveDefaultTab,
   moveItemInOrder,
   type DashboardSectionConfig,
 } from '../../src/lib/dashboard-preferences'
@@ -1055,6 +1056,98 @@ async function main() {
     const v11b = getOrderedQuickActions(cfg11b)
     assert(JSON.stringify(v11b) === JSON.stringify([C, A, D]),
       `R11b: B disabled, move C up → C,A,D (got ${JSON.stringify(v11b)})`)
+  }
+
+  // ─── §STEP-1D-FINAL: Default-tab resolution tests T1-T8 ──────────────
+  console.log('\n  §STEP-1D-FINAL: Default-tab resolution:')
+  {
+    // T1: saved Top Insights default = products, all visible → effective = products
+    const cfg1 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: {
+        visibleTabs: ['debtors', 'buyers', 'payments', 'products', 'defaulters'],
+        order: ['debtors', 'buyers', 'payments', 'products', 'defaulters'],
+        defaultTab: 'products',
+      }
+    }))
+    const ordered1 = getOrderedTopInsightsTabs(cfg1)
+    const effective1 = resolveDefaultTab(ordered1, cfg1.topInsights.defaultTab)
+    assert(effective1 === 'products', `T1: effective tab = products (got ${effective1})`)
+
+    // T2: saved Business Activity default = orders, all visible → effective = orders
+    const cfg2 = parseDashboardSectionConfig(JSON.stringify({
+      businessActivity: {
+        visibleTabs: ['transactions', 'lowstock', 'orders'],
+        order: ['transactions', 'lowstock', 'orders'],
+        defaultTab: 'orders',
+      }
+    }))
+    const ordered2 = getOrderedBusinessActivityTabs(cfg2)
+    const effective2 = resolveDefaultTab(ordered2, cfg2.businessActivity.defaultTab)
+    assert(effective2 === 'orders', `T2: effective tab = orders (got ${effective2})`)
+
+    // T3: saved Top Insights default = products, products hidden, custom order = [buyers, debtors, ...]
+    // → effective = buyers (first ordered visible)
+    const cfg3 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: {
+        visibleTabs: ['debtors', 'buyers', 'payments', 'defaulters'], // products hidden
+        order: ['buyers', 'debtors', 'payments', 'products', 'defaulters'],
+        defaultTab: 'products', // products is disabled
+      }
+    }))
+    const ordered3 = getOrderedTopInsightsTabs(cfg3)
+    const effective3 = resolveDefaultTab(ordered3, cfg3.topInsights.defaultTab)
+    assert(effective3 === 'buyers', `T3: effective tab = buyers (first ordered visible) (got ${effective3})`)
+
+    // T4: saved Business Activity default = orders, orders hidden, custom order = [lowstock, transactions]
+    // → effective = lowstock (first ordered visible)
+    const cfg4 = parseDashboardSectionConfig(JSON.stringify({
+      businessActivity: {
+        visibleTabs: ['transactions', 'lowstock'], // orders hidden
+        order: ['lowstock', 'transactions', 'orders'],
+        defaultTab: 'orders', // orders is disabled
+      }
+    }))
+    const ordered4 = getOrderedBusinessActivityTabs(cfg4)
+    const effective4 = resolveDefaultTab(ordered4, cfg4.businessActivity.defaultTab)
+    assert(effective4 === 'lowstock', `T4: effective tab = lowstock (first ordered visible) (got ${effective4})`)
+
+    // T5: all Top Insights tabs hidden → null (safe empty state)
+    const cfg5 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: { visibleTabs: [], order: [], defaultTab: 'debtors' }
+    }))
+    const ordered5 = getOrderedTopInsightsTabs(cfg5)
+    const effective5 = resolveDefaultTab(ordered5, cfg5.topInsights.defaultTab)
+    assert(effective5 === null, `T5: all hidden → null (got ${effective5})`)
+
+    // T6: all Business Activity tabs hidden → null (safe empty state)
+    const cfg6 = parseDashboardSectionConfig(JSON.stringify({
+      businessActivity: { visibleTabs: [], order: [], defaultTab: 'transactions' }
+    }))
+    const ordered6 = getOrderedBusinessActivityTabs(cfg6)
+    const effective6 = resolveDefaultTab(ordered6, cfg6.businessActivity.defaultTab)
+    assert(effective6 === null, `T6: all hidden → null (got ${effective6})`)
+
+    // T7: hidden default is normalized — verify resolveDefaultTab returns a visible tab
+    // and that the normalization logic would persist it
+    const cfg7 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: {
+        visibleTabs: ['buyers', 'debtors'],
+        order: ['buyers', 'debtors', 'payments', 'products', 'defaulters'],
+        defaultTab: 'payments', // payments is hidden
+      }
+    }))
+    const ordered7 = getOrderedTopInsightsTabs(cfg7)
+    const effective7 = resolveDefaultTab(ordered7, cfg7.topInsights.defaultTab)
+    assert(effective7 === 'buyers', `T7: normalized default = buyers (got ${effective7})`)
+    assert(effective7 !== 'payments', 'T7: hidden payments NOT used as default')
+
+    // T8: existing H1-H7 and R1-R11 still pass — verify a key H test
+    const r8 = moveItemInOrder(['add-party', 'add-product', 'new-invoice', 'add-transaction'],
+      ['add-party', 'add-product', 'new-invoice', 'add-transaction'],
+      'new-invoice', 'up')
+    assert(r8 !== null, 'T8: H1 move returns non-null')
+    assert(JSON.stringify(r8) === JSON.stringify(['add-party', 'new-invoice', 'add-product', 'add-transaction']),
+      `T8: H1 all enabled move C up → A,C,B,D (got ${JSON.stringify(r8)})`)
   }
 
   // ─── Summary ─────────────────────────────────────────────────────────

@@ -338,3 +338,23 @@ export function getOrderedBusinessActivityTabs(config: DashboardSectionConfig): 
 export function getOrderedQuickActions(config: DashboardSectionConfig): string[] {
   return getOrderedVisibleIds(config.quickActions.order, config.quickActions.visibleActions)
 }
+
+/**
+ * §STEP-1D-FINAL: Resolve the effective default tab for a section.
+ *
+ * If savedDefaultTab is visible (in the ordered visible list), use it.
+ * Otherwise, use the first tab from the ordered visible list.
+ * If no tabs are visible, return null (safe empty state).
+ *
+ * @param orderedVisible - Result of getOrderedTopInsightsTabs or getOrderedBusinessActivityTabs
+ * @param savedDefaultTab - The persisted defaultTab value
+ * @returns The effective tab ID, or null if no tabs are visible
+ */
+export function resolveDefaultTab(
+  orderedVisible: string[],
+  savedDefaultTab: string,
+): string | null {
+  if (orderedVisible.length === 0) return null
+  if (orderedVisible.includes(savedDefaultTab)) return savedDefaultTab
+  return orderedVisible[0]
+}
