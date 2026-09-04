@@ -594,6 +594,213 @@ console.log('\nTEST 14: Absent entity arrays → empty (backward compat)')
   assert(r.envelope?.parties.length === 1, 'present parties → 1')
 }
 
+// ─── TEST 15: §STEP-2B.2 AppSettings restore contract ──────────────────
+//
+// §CONTEXT: /api/data-import now restores safe AppSettings prefs via
+// tx.appSettings.upsert() inside the import $transaction. The restore reads
+// from envelope.settings (produced by sanitizeAppSettings allow-list).
+// These tests prove the CONTRACT that the restore upsert relies on:
+//   1. envelope.settings contains EXACTLY the 8 safe fields (no more)
+//   2. security/credential/session fields are NEVER present
+//   3. null settings → restore is skipped (no create/modify)
+//   4. tenant isolation: businessId is never in envelope.settings
+//   5. malicious extra fields in raw input are stripped by the sanitizer
+
+console.log('\nTEST 15: §STEP-2B.2 AppSettings restore contract')
+{
+  // A. Basic restore — all 8 safe fields survive sanitizeAppSettings
+  const fullSettings = {
+    language: 'hi',
+    dateFormat: 'MM/DD/YYYY',
+    invoicePrefix: 'BIZ',
+    notificationsEnabled: false,
+    autoBackupEnabled: true,
+    cardPreferences: '{"showOwner":true}',
+    dashboardCards: '[{"id":"totalSales","visible":true,"order":0}]',
+    dashboardSections: '{"sections":[]}',
+    // §MALICIOUS-EXTRA: these must be STRIPPED by the allow-list
+    pinHash: 'EVIL-HASH',
+    pinEnabled: true,
+    userRole: 'owner',
+    biometricEnabled: true,
+    gateLockdownUntil: '2026-01-01',
+    gateOwnerSwitch: false,
+    gateHighValueDiscount: false,
+    gateDiscountLimit: 99999,
+    gateDataExport: false,
+    gateInventoryPrice: false,
+    gateDangerZone: false,
+    externalScannerEnabled: true,
+    defaulterRegistryEnabled: false,
+    onlineSalesEnabled: false,
+    offlineOnlyMode: true,
+    cloudSyncMode: true,
+    telegramFileIdMode: true,
+    appMode: 'customer',
+    telegramEnabled: true,
+    driveEnabled: true,
+  }
+  const sanitized = sanitizeAppSettings(fullSettings)!
+  assert(sanitized !== null, 'A: non-null settings → sanitized object')
+
+  // A1-A8: each safe field preserved
+  assert(sanitized.language === 'hi', 'A1: language restored')
+  assert(sanitized.dateFormat === 'MM/DD/YYYY', 'A2: dateFormat restored')
+  assert(sanitized.invoicePrefix === 'BIZ', 'A3: invoicePrefix restored')
+  assert(sanitized.notificationsEnabled === false, 'A4: notificationsEnabled restored')
+  assert(sanitized.autoBackupEnabled === true, 'A5: autoBackupEnabled restored')
+  assert(sanitized.cardPreferences === '{"showOwner":true}', 'A6: cardPreferences restored')
+  assert(sanitized.dashboardCards === '[{"id":"totalSales","visible":true,"order":0}]', 'A7: dashboardCards restored')
+  assert(sanitized.dashboardSections === '{"sections":[]}', 'A8: dashboardSections restored')
+
+  // G. Security preservation — ALL security fields absent from sanitized output
+  // (The restore upsert can ONLY write fields present in envelope.settings.
+  //  Absent fields → Prisma leaves target's existing values untouched.)
+  const s = sanitized as any
+  assert(!('pinHash' in s), 'G1: pinHash stripped → target unchanged')
+  assert(!('pinEnabled' in s), 'G2: pinEnabled stripped → target unchanged')
+  assert(!('gateLockdownUntil' in s), 'G3: gateLockdownUntil stripped → target unchanged')
+  assert(!('userRole' in s), 'G4: userRole stripped → target unchanged')
+  assert(!('biometricEnabled' in s), 'G5: biometricEnabled stripped → target unchanged')
+  assert(!('gateOwnerSwitch' in s), 'G6: gateOwnerSwitch stripped → target unchanged')
+  assert(!('gateHighValueDiscount' in s), 'G7: gateHighValueDiscount stripped → target unchanged')
+  assert(!('gateDiscountLimit' in s), 'G8: gateDiscountLimit stripped → target unchanged')
+  assert(!('gateDataExport' in s), 'G9: gateDataExport stripped → target unchanged')
+  assert(!('gateInventoryPrice' in s), 'G10: gateInventoryPrice stripped → target unchanged')
+  assert(!('gateDangerZone' in s), 'G11: gateDangerZone stripped → target unchanged')
+  assert(!('externalScannerEnabled' in s), 'G12: externalScannerEnabled stripped → target unchanged')
+  assert(!('defaulterRegistryEnabled' in s), 'G13: defaulterRegistryEnabled stripped → target unchanged')
+  assert(!('onlineSalesEnabled' in s), 'G14: onlineSalesEnabled stripped → target unchanged')
+  assert(!('offlineOnlyMode' in s), 'G15: offlineOnlyMode stripped → target unchanged')
+  assert(!('cloudSyncMode' in s), 'G16: cloudSyncMode stripped → target unchanged')
+  assert(!('telegramFileIdMode' in s), 'G17: telegramFileIdMode stripped → target unchanged')
+  assert(!('appMode' in s), 'G18: appMode stripped → target unchanged')
+  assert(!('telegramEnabled' in s), 'G19: telegramEnabled stripped → target unchanged')
+  assert(!('driveEnabled' in s), 'G20: driveEnabled stripped → target unchanged')
+
+  // F. Tenant isolation — businessId is never in sanitized settings
+  // (The restore upsert uses the CURRENT session businessId, never from backup)
+  assert(!('businessId' in s), 'F: businessId stripped from settings → restore uses session businessId')
+
+  // B. Existing AppSettings update — sanitizeAppSettings preserves all safe fields
+  // (When target already has AppSettings, the upsert's `update` path runs.
+  //  This test confirms the sanitized object has exactly 8 keys → update writes 8 fields.)
+  const keys = Object.keys(sanitized)
+  assert(keys.length === 8, `B: sanitized settings has exactly 8 keys (got ${keys.length})`)
+  assert(keys.includes('language'), 'B: language key present')
+  assert(keys.includes('dateFormat'), 'B: dateFormat key present')
+  assert(keys.includes('invoicePrefix'), 'B: invoicePrefix key present')
+  assert(keys.includes('notificationsEnabled'), 'B: notificationsEnabled key present')
+  assert(keys.includes('autoBackupEnabled'), 'B: autoBackupEnabled key present')
+  assert(keys.includes('cardPreferences'), 'B: cardPreferences key present')
+  assert(keys.includes('dashboardCards'), 'B: dashboardCards key present')
+  assert(keys.includes('dashboardSections'), 'B: dashboardSections key present')
+}
+
+console.log('\nTEST 16: §STEP-2B.2 Null/absent settings → restore skipped')
+{
+  // E. envelope.settings null → restore is skipped (no create/modify)
+  // The route code: `if (envelope.settings) { ... }` — null is falsy → skipped.
+  const r = validateBackup({
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    business: { id: 'b1', name: 'No Settings', currency: 'INR' },
+    // settings ABSENT
+    parties: [],
+  })
+  assert(r.ok, 'E1: backup with absent settings is valid')
+  assert(r.envelope?.settings === null, 'E2: absent settings → envelope.settings is null')
+  assert(r.envelope?.settings == null, 'E3: null settings → falsy → restore skipped (route `if (envelope.settings)` guards)')
+
+  // E4: explicitly null settings in raw input → also null after validation
+  const r2 = validateBackup({
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    business: { id: 'b1', name: 'Null Settings', currency: 'INR' },
+    settings: null,
+    parties: [],
+  })
+  assert(r2.ok, 'E4: backup with explicit null settings is valid')
+  assert(r2.envelope?.settings === null, 'E5: explicit null settings → envelope.settings null → restore skipped')
+}
+
+console.log('\nTEST 17: §STEP-2B.2 Partial settings → safe fields with defaults')
+{
+  // §PARTIAL: backup settings may have only SOME safe fields present.
+  // sanitizeAppSettings fills missing safe fields with defaults.
+  // The restore upsert uses `s.field ?? default` so even if a field is
+  // undefined in the sanitized object, it gets a safe default.
+  const partial = sanitizeAppSettings({ language: 'bn' })!
+  assert(partial.language === 'bn', 'partial: language preserved')
+  assert(partial.dateFormat === 'DD/MM/YYYY', 'partial: missing dateFormat → default DD/MM/YYYY')
+  assert(partial.invoicePrefix === 'INV', 'partial: missing invoicePrefix → default INV')
+  assert(partial.notificationsEnabled === true, 'partial: missing notificationsEnabled → default true')
+  assert(partial.autoBackupEnabled === false, 'partial: missing autoBackupEnabled → default false')
+  assert(partial.cardPreferences === null, 'partial: missing cardPreferences → null')
+  assert(partial.dashboardCards === null, 'partial: missing dashboardCards → null')
+  assert(partial.dashboardSections === null, 'partial: missing dashboardSections → null')
+}
+
+console.log('\nTEST 18: §STEP-2B.2 Full backup round-trip preserves safe settings')
+{
+  // §ROUND-TRIP: buildBackupEnvelope → validateBackup → restore-ready.
+  // This proves the end-to-end contract: a business with safe prefs exports
+  // them, the envelope validates, and envelope.settings is ready for the
+  // restore upsert to consume.
+  const mockSettingsWithPrefs = {
+    businessId: 'biz-1', // §WILL-BE-STRIPPED — not in allow-list
+    language: 'hi',
+    dateFormat: 'MM/DD/YYYY',
+    invoicePrefix: 'BIZ',
+    notificationsEnabled: false,
+    autoBackupEnabled: true,
+    cardPreferences: '{"showOwner":true,"showPhone":false}',
+    dashboardCards: '[{"id":"totalSales","visible":true,"order":0}]',
+    dashboardSections: '{"sections":[{"id":"summaryCards","visible":true,"order":0}]}',
+    // security fields present in source — must be stripped
+    pinHash: 'source-hash',
+    pinEnabled: true,
+    userRole: 'owner',
+    biometricEnabled: true,
+    gateDangerZone: false,
+    telegramEnabled: true,
+  }
+  const envelope = buildBackupEnvelope({
+    business: mockBusiness,
+    settings: mockSettingsWithPrefs,
+    parties: [], products: [], invoices: [], invoiceItems: [],
+    transactions: [], categories: [], customPrices: [], staff: [],
+    partyNotes: [], stockMovements: [],
+  })
+  assert(envelope.settings !== null, 'round-trip: settings present in envelope')
+
+  // Validate the envelope (simulates the import route's validation step)
+  const r = validateBackup(envelope)
+  assert(r.ok, 'round-trip: envelope validates')
+  assert(r.envelope?.settings !== null, 'round-trip: settings survive validation')
+
+  // All 8 safe fields preserved end-to-end
+  const s = r.envelope!.settings!
+  assert(s.language === 'hi', 'round-trip: language preserved')
+  assert(s.dateFormat === 'MM/DD/YYYY', 'round-trip: dateFormat preserved')
+  assert(s.invoicePrefix === 'BIZ', 'round-trip: invoicePrefix preserved')
+  assert(s.notificationsEnabled === false, 'round-trip: notificationsEnabled preserved')
+  assert(s.autoBackupEnabled === true, 'round-trip: autoBackupEnabled preserved')
+  assert(s.cardPreferences === '{"showOwner":true,"showPhone":false}', 'round-trip: cardPreferences preserved')
+  assert(s.dashboardCards === '[{"id":"totalSales","visible":true,"order":0}]', 'round-trip: dashboardCards preserved')
+  assert(s.dashboardSections === '{"sections":[{"id":"summaryCards","visible":true,"order":0}]}', 'round-trip: dashboardSections preserved')
+
+  // No security fields present (would-be-restore cannot touch them)
+  const sAny = s as any
+  assert(!('pinHash' in sAny), 'round-trip: pinHash NOT in restored settings')
+  assert(!('pinEnabled' in sAny), 'round-trip: pinEnabled NOT in restored settings')
+  assert(!('userRole' in sAny), 'round-trip: userRole NOT in restored settings')
+  assert(!('biometricEnabled' in sAny), 'round-trip: biometricEnabled NOT in restored settings')
+  assert(!('gateDangerZone' in sAny), 'round-trip: gateDangerZone NOT in restored settings')
+  assert(!('telegramEnabled' in sAny), 'round-trip: telegramEnabled NOT in restored settings')
+  assert(!('businessId' in sAny), 'round-trip: businessId NOT in restored settings (tenant isolation)')
+}
+
 // ─── Summary ─────────────────────────────────────────────────────────────
 console.log('\n==================================================')
 console.log(`✅ Passed: ${passed}`)

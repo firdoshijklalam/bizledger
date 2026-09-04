@@ -711,6 +711,72 @@ async function performImport(
         result.imported.customPrices++
       }
     }
+
+    // §ORDER-11: AppSettings restore (STEP 2B.2)
+    //
+    // §GAP-FIX: Prior to this, /api/data-export included safe AppSettings prefs
+    // (language, dateFormat, invoicePrefix, notificationsEnabled, autoBackupEnabled,
+    // cardPreferences, dashboardCards, dashboardSections) in the backup envelope,
+    // but /api/data-import NEVER wrote them back. Users lost their dashboard layout
+    // + business card prefs on every restore.
+    //
+    // §SAFE-FIELDS-ONLY: envelope.settings is produced by sanitizeAppSettings()
+    // (an allow-list), so it can ONLY contain the 8 safe preference fields below.
+    // Credentials, security gates, session state, integration state, device state,
+    // and role/privilege fields are NEVER present in envelope.settings and are
+    // NEVER written here. Existing target security values remain untouched.
+    //
+    // §TENANT-ISOLATION: businessId is the CURRENT authenticated session's id
+    // (passed into performImport), NEVER envelope.business.id. The target
+    // business's AppSettings row is the only one upserted.
+    //
+    // §NULL-SAFE: If envelope.settings is null/absent (e.g., backup from a
+    // business that had no AppSettings row), we do NOT create or modify the
+    // target's AppSettings. The target keeps its existing settings untouched.
+    //
+    // §MERGE-REPLACE: Both 'merge' and 'replace' strategies upsert the safe
+    // fields. 'replace' deletes entity data (Parties/Invoices/etc.) at L258-282
+    // but does NOT delete AppSettings (intentionally — the comment at L257
+    // notes "except the Business + User + AppSettings records themselves").
+    // So this upsert works identically under both strategies.
+    if (envelope.settings) {
+      const s = envelope.settings
+      await tx.appSettings.upsert({
+        where: { businessId },
+        update: {
+          // §SAFE-FIELDS: only these 8 are restored
+          language: s.language ?? 'en',
+          dateFormat: s.dateFormat ?? 'DD/MM/YYYY',
+          invoicePrefix: s.invoicePrefix ?? 'INV',
+          notificationsEnabled: s.notificationsEnabled ?? true,
+          autoBackupEnabled: s.autoBackupEnabled ?? false,
+          cardPreferences: s.cardPreferences ?? null,
+          dashboardCards: s.dashboardCards ?? null,
+          dashboardSections: s.dashboardSections ?? null,
+          // §SECURITY-FIELDS-NOT-LISTED: pinHash, pinEnabled, gateLockdownUntil,
+          // userRole, biometricEnabled, all gate*, externalScannerEnabled,
+          // defaulterRegistryEnabled, onlineSalesEnabled, offlineOnlyMode,
+          // cloudSyncMode, telegramFileIdMode, appMode, telegramEnabled,
+          // driveEnabled — NONE of these appear in the update object, so
+          // Prisma leaves the target's existing values untouched.
+        },
+        create: {
+          businessId,
+          // §CREATE-SAFE-FIELDS: same 8 safe fields for the create path
+          language: s.language ?? 'en',
+          dateFormat: s.dateFormat ?? 'DD/MM/YYYY',
+          invoicePrefix: s.invoicePrefix ?? 'INV',
+          notificationsEnabled: s.notificationsEnabled ?? true,
+          autoBackupEnabled: s.autoBackupEnabled ?? false,
+          cardPreferences: s.cardPreferences ?? null,
+          dashboardCards: s.dashboardCards ?? null,
+          dashboardSections: s.dashboardSections ?? null,
+          // §CREATE-SECURITY-FIELDS: Prisma schema defaults apply for all
+          // security fields (pinEnabled=false, pinHash=null, userRole='owner',
+          // gate*=true, etc.). We do NOT set any of them here.
+        },
+      })
+    }
   })
 
   return result
