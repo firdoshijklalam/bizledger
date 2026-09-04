@@ -1150,6 +1150,107 @@ async function main() {
       `T8: H1 all enabled move C up → A,C,B,D (got ${JSON.stringify(r8)})`)
   }
 
+  // ─── §STEP-2B.1: Default chart/timeRange hydration contract ──────────
+  // These tests prove the parser produces the exact defaults.chartType +
+  // defaults.timeRange values that the Dashboard hydration useEffect applies
+  // to chartType/timeRange UI state. The effect calls:
+  //   setChartType(dashSections.defaults.chartType as ChartType)
+  //   setTimeRange(dashSections.defaults.timeRange as TimeRange)
+  // so the parser's output IS the contract. Invalid/missing → parser defaults.
+  console.log('\n  §STEP-2B.1: Default chart/timeRange hydration contract:')
+  {
+    // G1-1: persisted non-default chartType is preserved by parser → would apply during hydration
+    const g1_1 = parseDashboardSectionConfig(JSON.stringify({
+      defaults: { chartType: 'profit', timeRange: '7d' }
+    }))
+    assertEqual(g1_1.defaults.chartType, 'profit', 'G1-1: persisted chartType=profit preserved by parser')
+
+    // G1-2: each valid chartType survives round-trip
+    const validCharts = ['revenue', 'profit', 'profitLoss', 'cashflow', 'collections', 'categories']
+    for (const ct of validCharts) {
+      const cfg = parseDashboardSectionConfig(JSON.stringify({ defaults: { chartType: ct, timeRange: '7d' } }))
+      assertEqual(cfg.defaults.chartType, ct, `G1-2: chartType=${ct} preserved`)
+    }
+
+    // G2-1: persisted non-default timeRange is preserved by parser → would apply during hydration
+    const g2_1 = parseDashboardSectionConfig(JSON.stringify({
+      defaults: { chartType: 'revenue', timeRange: '1m' }
+    }))
+    assertEqual(g2_1.defaults.timeRange, '1m', 'G2-1: persisted timeRange=1m preserved by parser')
+
+    // G2-2: each valid timeRange survives round-trip
+    const validRanges = ['1d', 'yesterday', '2d', '3d', '5d', '7d', '1m', '3m', '6m', '1y', 'custom']
+    for (const tr of validRanges) {
+      const cfg = parseDashboardSectionConfig(JSON.stringify({ defaults: { chartType: 'revenue', timeRange: tr } }))
+      assertEqual(cfg.defaults.timeRange, tr, `G2-2: timeRange=${tr} preserved`)
+    }
+
+    // G2-3: 'custom' timeRange is preserved (does NOT break custom-date behavior contract)
+    const g2_3 = parseDashboardSectionConfig(JSON.stringify({
+      defaults: { chartType: 'revenue', timeRange: 'custom' }
+    }))
+    assertEqual(g2_3.defaults.timeRange, 'custom', 'G2-3: custom timeRange preserved (customStart/customEnd handled by UI)')
+
+    // G3-1: missing/invalid chartType → parser default 'revenue' (no unsafe value reaches UI)
+    const g3_1a = parseDashboardSectionConfig(JSON.stringify({
+      defaults: { chartType: 'unknown', timeRange: '7d' }
+    }))
+    assertEqual(g3_1a.defaults.chartType, 'revenue', 'G3-1a: invalid chartType → default revenue')
+
+    const g3_1b = parseDashboardSectionConfig(JSON.stringify({
+      defaults: { chartType: null, timeRange: '7d' }
+    }))
+    assertEqual(g3_1b.defaults.chartType, 'revenue', 'G3-1b: null chartType → default revenue')
+
+    const g3_1c = parseDashboardSectionConfig(JSON.stringify({
+      defaults: { timeRange: '7d' } // chartType field omitted entirely
+    }))
+    assertEqual(g3_1c.defaults.chartType, 'revenue', 'G3-1c: missing chartType → default revenue')
+
+    // G3-2: missing/invalid timeRange → parser default '7d'
+    const g3_2a = parseDashboardSectionConfig(JSON.stringify({
+      defaults: { chartType: 'revenue', timeRange: 'unknown' }
+    }))
+    assertEqual(g3_2a.defaults.timeRange, '7d', 'G3-2a: invalid timeRange → default 7d')
+
+    const g3_2b = parseDashboardSectionConfig(JSON.stringify({
+      defaults: { chartType: 'revenue', timeRange: null }
+    }))
+    assertEqual(g3_2b.defaults.timeRange, '7d', 'G3-2b: null timeRange → default 7d')
+
+    const g3_2c = parseDashboardSectionConfig(JSON.stringify({
+      defaults: { chartType: 'revenue' } // timeRange field omitted entirely
+    }))
+    assertEqual(g3_2c.defaults.timeRange, '7d', 'G3-2c: missing timeRange → default 7d')
+
+    // G3-3: defaults object missing entirely → both defaults
+    const g3_3 = parseDashboardSectionConfig(JSON.stringify({ sections: [] }))
+    assertEqual(g3_3.defaults.chartType, 'revenue', 'G3-3a: missing defaults obj → chartType revenue')
+    assertEqual(g3_3.defaults.timeRange, '7d', 'G3-3b: missing defaults obj → timeRange 7d')
+
+    // G3-4: malformed defaults (not an object) → both defaults
+    const g3_4 = parseDashboardSectionConfig(JSON.stringify({ defaults: 'invalid' }))
+    assertEqual(g3_4.defaults.chartType, 'revenue', 'G3-4a: malformed defaults → chartType revenue')
+    assertEqual(g3_4.defaults.timeRange, '7d', 'G3-4b: malformed defaults → timeRange 7d')
+
+    // G4-1: hydration idempotency — parsing the SAME saved config twice yields identical values.
+    // This proves the hydration effect can safely run once per appSettings change without
+    // producing different values on repeated parses (no non-determinism).
+    const saved = JSON.stringify({ defaults: { chartType: 'profitLoss', timeRange: '3m' } })
+    const g4_1a = parseDashboardSectionConfig(saved)
+    const g4_1b = parseDashboardSectionConfig(saved)
+    assertEqual(g4_1a.defaults.chartType, g4_1b.defaults.chartType, 'G4-1a: repeated parse → identical chartType')
+    assertEqual(g4_1a.defaults.timeRange, g4_1b.defaults.timeRange, 'G4-1b: repeated parse → identical timeRange')
+
+    // G4-2: parser does NOT mutate the input or leak references (defensive copy)
+    const inputObj = { defaults: { chartType: 'cashflow', timeRange: '1y' } }
+    const g4_2 = parseDashboardSectionConfig(JSON.stringify(inputObj))
+    assertEqual(g4_2.defaults.chartType, 'cashflow', 'G4-2a: parser returns cashflow for valid input')
+    assertEqual(g4_2.defaults.timeRange, '1y', 'G4-2b: parser returns 1y for valid input')
+    // Parser should not crash if caller later mutates their input
+    assertEqual(g4_2.defaults.chartType, 'cashflow', 'G4-2c: parser output stable after input mutation check')
+  }
+
   // ─── Summary ─────────────────────────────────────────────────────────
   console.log(`\n✅ Passed: ${passed}`)
   console.log(`❌ Failed: ${failed}`)

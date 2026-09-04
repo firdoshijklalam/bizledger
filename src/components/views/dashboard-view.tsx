@@ -436,6 +436,17 @@ export function DashboardView() {
     // §DASHBOARD-SECTIONS-LOAD: Parse dashboard section config from AppSettings
     const dashSections = parseDashboardSectionConfig((appSettings as any).dashboardSections)
     setDashSectionConfig(dashSections)
+    // §STEP-2B.1: Propagate saved default chart + time range into Dashboard UI state.
+    // The parser already validated these against VALID_CHART_TYPES / VALID_RANGES,
+    // falling back to 'revenue' / '7d' for missing/invalid values, so they are
+    // safe to apply directly. This effect runs once when appSettings hydrates
+    // (null → object); later manual changes via the chart/range <select> do NOT
+    // re-trigger this effect (dep is [appSettings]), so user selections are
+    // never overwritten. Custom-range behavior is preserved: if the saved range
+    // is 'custom', we set timeRange='custom' but leave customStart/customEnd
+    // empty — the user picks dates via the existing custom-picker UI.
+    setChartType(dashSections.defaults.chartType as ChartType)
+    setTimeRange(dashSections.defaults.timeRange as TimeRange)
     // §STEP-1D-FINAL: Initialize tabs from saved defaultTab (not hardcoded 'debtors'/'transactions')
     const orderedTop = getOrderedTopInsightsTabs(dashSections)
     const effectiveTopTab = resolveDefaultTab(orderedTop, dashSections.topInsights.defaultTab)
