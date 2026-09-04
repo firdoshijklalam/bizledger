@@ -1069,17 +1069,15 @@ export function DashboardView() {
       case 'customerQuality':
         // §STEP-2C: Read advanced settings from config
         const cqConfig = dashSectionConfig.customerQuality
-        // §TAP-BEHAVIOR: 'modal' = existing (open grade-filtered customer modal).
-        // 'filter' = navigate directly to Khata with the grade filter applied.
+        // §STEP-2C-REVIEW: tapEnabled replaces tapBehavior.
+        //   tapEnabled=true  → existing modal behavior (setSelectedGrade opens grade customer modal)
+        //   tapEnabled=false → chart is non-interactive (no onClick, no modal, no navigation)
+        //   The old 'filter' Khata-navigation behavior is REMOVED and NOT retained.
         const handleGradeTap = (grade: string) => {
-          if (cqConfig.tapBehavior === 'filter') {
-            setKhataGradeFilter(grade)
-            setKhataFilter('all')
-            setReturnToView('dashboard')
-            setActiveView('khata')
-          } else {
+          if (cqConfig.tapEnabled) {
             setSelectedGrade(grade)
           }
+          // §DISABLED: tapEnabled=false → no-op (no modal, no navigation, no filter)
         }
         // §CHART-COLORS: consistent grade colors across all chart shapes
         const gradeColors = ['#10b981', '#14b8a6', '#f59e0b', '#f97316', '#ef4444']
@@ -1108,11 +1106,9 @@ export function DashboardView() {
                   <Settings className="w-3.5 h-3.5" />
                 </button>
               </div>
-              {/* §STEP-2C: subtitle reflects tapBehavior */}
+              {/* §STEP-2C-REVIEW: subtitle reflects tapEnabled */}
               <p className="text-[10px] text-muted-foreground mb-3">
-                {cqConfig.tapBehavior === 'filter'
-                  ? 'Tap a grade to filter Khata'
-                  : 'Tap a bar to view customers'}
+                {cqConfig.tapEnabled ? 'Tap a bar to view customers' : 'Non-interactive'}
               </p>
               {visibleGradeData.length === 0 ? (
                 /* §STEP-1A-ORDERING: Empty state — all grades disabled.
@@ -1144,8 +1140,8 @@ export function DashboardView() {
                           innerRadius={45}
                           outerRadius={70}
                           paddingAngle={2}
-                          onClick={(e: any) => { if (e && e.grade) handleGradeTap(e.grade) }}
-                          cursor="pointer"
+                          onClick={cqConfig.tapEnabled ? (e: any) => { if (e && e.grade) handleGradeTap(e.grade) } : undefined}
+                          cursor={cqConfig.tapEnabled ? 'pointer' : 'default'}
                         >
                           {visibleGradeData.map((_, i) => <Cell key={i} fill={gradeColors[i % gradeColors.length]} />)}
                         </Pie>
@@ -1156,12 +1152,12 @@ export function DashboardView() {
                 ) : cqConfig.chartShape === 'horizontal' ? (
                   <div className="h-44 -ml-2">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={visibleGradeData} layout="vertical" margin={{ top: 8, right: 8, bottom: 0, left: 0 }} onClick={(e: any) => { if (e && e.activeLabel) handleGradeTap(e.activeLabel) }}>
+                      <BarChart data={visibleGradeData} layout="vertical" margin={{ top: 8, right: 8, bottom: 0, left: 0 }} onClick={cqConfig.tapEnabled ? (e: any) => { if (e && e.activeLabel) handleGradeTap(e.activeLabel) } : undefined}>
                         <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" horizontal={false} />
                         <XAxis type="number" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
                         <YAxis type="category" dataKey="grade" tick={{ fontSize: 12, fontWeight: 'bold' }} axisLine={false} tickLine={false} width={24} />
                         <Tooltip cursor={{ fill: 'oklch(0.9 0.005 145 / 0.3)' }} contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={gradeTooltipFormatter} />
-                        <Bar dataKey="count" radius={[0, 6, 6, 0]} cursor="pointer">
+                        <Bar dataKey="count" radius={[0, 6, 6, 0]} cursor={cqConfig.tapEnabled ? 'pointer' : 'default'}>
                           {visibleGradeData.map((_, i) => <Cell key={i} fill={gradeColors[i % gradeColors.length]} />)}
                         </Bar>
                       </BarChart>
@@ -1171,12 +1167,12 @@ export function DashboardView() {
                   /* §DEFAULT chartShape='bar' — existing vertical bar chart */
                   <div className="h-36 -ml-2">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={visibleGradeData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} onClick={(e: any) => { if (e && e.activeLabel) handleGradeTap(e.activeLabel) }}>
+                      <BarChart data={visibleGradeData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} onClick={cqConfig.tapEnabled ? (e: any) => { if (e && e.activeLabel) handleGradeTap(e.activeLabel) } : undefined}>
                         <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                         <XAxis dataKey="grade" tick={{ fontSize: 12, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
                         <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={24} allowDecimals={false} />
                         <Tooltip cursor={{ fill: 'oklch(0.9 0.005 145 / 0.3)' }} contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={gradeTooltipFormatter} />
-                        <Bar dataKey="count" radius={[6, 6, 0, 0]} cursor="pointer">
+                        <Bar dataKey="count" radius={[6, 6, 0, 0]} cursor={cqConfig.tapEnabled ? 'pointer' : 'default'}>
                           {visibleGradeData.map((_, i) => <Cell key={i} fill={gradeColors[i % gradeColors.length]} />)}
                         </Bar>
                       </BarChart>
@@ -1208,10 +1204,10 @@ export function DashboardView() {
               )}
             </Card>
 
-            {/* §STEP-2C: tapBehavior='modal' renders the floating grade modal.
-                tapBehavior='filter' never shows this modal (it navigates to Khata instead). */}
+            {/* §STEP-2C-REVIEW: tapEnabled=true renders the floating grade modal.
+                tapEnabled=false never shows this modal (chart is non-interactive). */}
             <AnimatePresence>
-              {cqConfig.tapBehavior === 'modal' && selectedGrade && (
+              {cqConfig.tapEnabled && selectedGrade && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedGrade(null)} className="fixed inset-0 z-[80] bg-black/40 backdrop-blur-[2px] flex items-end sm:items-center justify-center">
                   <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', stiffness: 400, damping: 32 }} onClick={(e) => e.stopPropagation()} className="bg-card rounded-t-3xl sm:rounded-3xl border-t sm:border border-border w-full max-w-md max-h-[70vh] flex flex-col">
                     <div className="flex items-center justify-between p-4 border-b border-border">
@@ -2164,25 +2160,25 @@ export function DashboardView() {
               </div>
             </div>
 
-            {/* Tap behavior selector */}
+            {/* §STEP-2C-REVIEW: Tap enabled ON/OFF toggle (replaces tapBehavior selector) */}
             <div>
-              <p className="text-[10px] text-muted-foreground mb-1.5">Tap Behavior</p>
-              <div className="grid grid-cols-2 gap-1">
-                {([['modal', 'Open Modal'], ['filter', 'Filter Khata']] as const).map(([behavior, label]) => (
-                  <button
-                    key={behavior}
-                    onClick={() => {
-                      const cq = dashSectionConfig.customerQuality
-                      const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, tapBehavior: behavior } }
-                      setDashSectionConfig(newConfig)
-                      saveDashboardSections(newConfig).catch(() => {})
-                    }}
-                    className={`py-1.5 rounded-lg text-[11px] font-medium transition-colors min-h-[36px] ${dashSectionConfig.customerQuality.tapBehavior === behavior ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <p className="text-[10px] text-muted-foreground mb-1.5">Tap to open customers</p>
+              <button
+                onClick={() => {
+                  const cq = dashSectionConfig.customerQuality
+                  const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, tapEnabled: !cq.tapEnabled } }
+                  setDashSectionConfig(newConfig)
+                  saveDashboardSections(newConfig).catch(() => {})
+                }}
+                className="w-full flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50"
+              >
+                <span className="text-xs font-medium">
+                  {dashSectionConfig.customerQuality.tapEnabled ? 'Enabled' : 'Disabled'}
+                </span>
+                <span className={`w-9 h-5 rounded-full transition-colors relative ${dashSectionConfig.customerQuality.tapEnabled ? 'bg-primary' : 'bg-muted'}`}>
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${dashSectionConfig.customerQuality.tapEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </span>
+              </button>
             </div>
 
             {/* Display toggles */}

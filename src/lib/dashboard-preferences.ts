@@ -30,7 +30,11 @@ export interface DashboardSectionConfig {
     showCount: boolean
     showPercentage: boolean
     showDescription: boolean
-    tapBehavior: 'modal' | 'filter'
+    // §STEP-2C-REVIEW: Replaced tapBehavior ('modal'|'filter') with tapEnabled (boolean).
+    // tapEnabled=true preserves the existing grade-modal behavior exactly.
+    // tapEnabled=false makes the chart non-interactive (no modal, no navigation).
+    // The old 'filter' navigation behavior is REMOVED and NOT retained.
+    tapEnabled: boolean
     sortOrder: CustomerQualitySortOrder
   }
   topInsights: {
@@ -73,7 +77,8 @@ export const DEFAULT_DASHBOARD_CONFIG: DashboardSectionConfig = {
     showCount: true,
     showPercentage: true,
     showDescription: true,
-    tapBehavior: 'modal', // existing behavior: tap opens grade-filtered customer modal
+    // §STEP-2C-REVIEW: tapEnabled=true preserves existing modal behavior (default).
+    tapEnabled: true,
     sortOrder: 'grade',   // existing order: A → E
   },
   topInsights: {
@@ -104,7 +109,10 @@ const VALID_SECTION_IDS = new Set([
 const VALID_GRADES = new Set(['A', 'B', 'C', 'D', 'E'])
 const VALID_CQ_CHART_SHAPES = new Set<CustomerQualityChartShape>(['bar', 'donut', 'horizontal'])
 const VALID_CQ_SORT_ORDERS = new Set<CustomerQualitySortOrder>(['grade', 'count-desc'])
-const VALID_CQ_TAP_BEHAVIORS = new Set(['modal', 'filter'])
+// §STEP-2C-REVIEW: tapBehavior enum REMOVED. tapEnabled is a boolean.
+// Old saved configs with tapBehavior='modal' are migrated to tapEnabled=true.
+// Old saved configs with tapBehavior='filter' are migrated to tapEnabled=true
+// (the filter/navigation behavior is NOT retained — see parseDashboardSectionConfig).
 const VALID_TOP_TABS = new Set(['debtors', 'buyers', 'payments', 'products', 'defaulters'])
 const VALID_HUB_TABS = new Set(['transactions', 'lowstock', 'orders'])
 const VALID_QUICK_ACTIONS = new Set(['add-party', 'add-product', 'new-invoice', 'add-transaction'])
@@ -169,11 +177,27 @@ export function parseDashboardSectionConfig(raw: any): DashboardSectionConfig {
 
   // §CUSTOMER-QUALITY
   // §STEP-1B: Distinguish "field missing" (→ defaults) from "empty array" (→ keep []).
-  // §STEP-2C: Added chartShape, showCount, showPercentage, showDescription, tapBehavior, sortOrder.
+  // §STEP-2C: Added chartShape, showCount, showPercentage, showDescription, tapEnabled, sortOrder.
+  // §STEP-2C-REVIEW: Replaced tapBehavior with tapEnabled (boolean).
+  //   Migration: old tapBehavior='modal' → tapEnabled=true
+  //              old tapBehavior='filter' → tapEnabled=true (filter/nav behavior REMOVED)
+  //              missing/invalid → tapEnabled=true (default)
   const cq = parsed.customerQuality && typeof parsed.customerQuality === 'object' ? parsed.customerQuality : {}
   const visibleGrades = filterStringArray(cq.visibleGrades, VALID_GRADES)
-  // §STEP-2C: Each advanced field is validated independently. Invalid/missing → default.
-  // Explicit false values are preserved (typeof === 'boolean' check accepts false).
+  // §STEP-2C-REVIEW: Resolve tapEnabled with backwards-compatible migration.
+  //   Priority: explicit boolean tapEnabled > migrate old tapBehavior > default true.
+  //   Old 'filter' value migrates to true but does NOT retain navigation behavior
+  //   (the navigation code path was removed from dashboard-view.tsx).
+  let tapEnabled: boolean
+  if (typeof cq.tapEnabled === 'boolean') {
+    tapEnabled = cq.tapEnabled
+  } else if (typeof cq.tapBehavior === 'string') {
+    // §MIGRATE: old tapBehavior → tapEnabled=true regardless of value.
+    // 'modal' → true (preserves modal). 'filter' → true (modal, NOT navigation).
+    tapEnabled = true
+  } else {
+    tapEnabled = DEFAULT_DASHBOARD_CONFIG.customerQuality.tapEnabled
+  }
   const customerQuality = {
     visibleGrades: resolveArray(visibleGrades, DEFAULT_DASHBOARD_CONFIG.customerQuality.visibleGrades),
     chartShape: typeof cq.chartShape === 'string' && VALID_CQ_CHART_SHAPES.has(cq.chartShape as CustomerQualityChartShape)
@@ -182,9 +206,7 @@ export function parseDashboardSectionConfig(raw: any): DashboardSectionConfig {
     showCount: typeof cq.showCount === 'boolean' ? cq.showCount : DEFAULT_DASHBOARD_CONFIG.customerQuality.showCount,
     showPercentage: typeof cq.showPercentage === 'boolean' ? cq.showPercentage : DEFAULT_DASHBOARD_CONFIG.customerQuality.showPercentage,
     showDescription: typeof cq.showDescription === 'boolean' ? cq.showDescription : DEFAULT_DASHBOARD_CONFIG.customerQuality.showDescription,
-    tapBehavior: typeof cq.tapBehavior === 'string' && VALID_CQ_TAP_BEHAVIORS.has(cq.tapBehavior)
-      ? cq.tapBehavior as 'modal' | 'filter'
-      : DEFAULT_DASHBOARD_CONFIG.customerQuality.tapBehavior,
+    tapEnabled,
     sortOrder: typeof cq.sortOrder === 'string' && VALID_CQ_SORT_ORDERS.has(cq.sortOrder as CustomerQualitySortOrder)
       ? cq.sortOrder as CustomerQualitySortOrder
       : DEFAULT_DASHBOARD_CONFIG.customerQuality.sortOrder,

@@ -1253,8 +1253,9 @@ async function main() {
   }
 
   // ─── §STEP-2C: Customer Quality Advanced Settings ─────────────────────
-  // Tests chartShape, showCount/showPercentage/showDescription, tapBehavior,
+  // Tests chartShape, showCount/showPercentage/showDescription, tapEnabled,
   // sortOrder, and getSortedGradeData() pure helper.
+  // §STEP-2C-REVIEW: tapBehavior replaced with tapEnabled (boolean).
   console.log('\n  §STEP-2C: Customer Quality Advanced Settings:')
   {
     // 1. chartShape values — each valid shape survives round-trip
@@ -1390,7 +1391,7 @@ async function main() {
     assertEqual(cfg12.customerQuality.showCount, true, 'CQ12c: showCount defaults to true (old JSON)')
     assertEqual(cfg12.customerQuality.showPercentage, true, 'CQ12d: showPercentage defaults to true (old JSON)')
     assertEqual(cfg12.customerQuality.showDescription, true, 'CQ12e: showDescription defaults to true (old JSON)')
-    assertEqual(cfg12.customerQuality.tapBehavior, 'modal', 'CQ12f: tapBehavior defaults to modal (old JSON)')
+    assertEqual(cfg12.customerQuality.tapEnabled, true, 'CQ12f: tapEnabled defaults to true (old JSON without tapEnabled)')
     assertEqual(cfg12.customerQuality.sortOrder, 'grade', 'CQ12g: sortOrder defaults to grade (old JSON)')
 
     // 13. all grades hidden (visibleGrades=[]) — parser preserves empty array
@@ -1407,27 +1408,101 @@ async function main() {
     getSortedGradeData(input14, cfg14)
     assertEqual(input14[0].grade, 'B', 'CQ14: input array NOT mutated by getSortedGradeData')
 
-    // 15. tapBehavior values — each valid value survives round-trip
-    for (const tb of ['modal', 'filter'] as const) {
-      const cfg = parseDashboardSectionConfig(JSON.stringify({
-        customerQuality: { tapBehavior: tb }
-      }))
-      assertEqual(cfg.customerQuality.tapBehavior, tb, `CQ15: tapBehavior=${tb} preserved`)
-    }
+    // §STEP-2C-REVIEW: tapEnabled tests (replaced tapBehavior tests)
 
-    // 16. invalid tapBehavior → default 'modal'
-    const cq16 = parseDashboardSectionConfig(JSON.stringify({
-      customerQuality: { tapBehavior: 'unknown' }
+    // 15. tapEnabled=true — explicit true preserved
+    const cq15a = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { tapEnabled: true }
     }))
-    assertEqual(cq16.customerQuality.tapBehavior, 'modal', 'CQ16: invalid tapBehavior → default modal')
+    assertEqual(cq15a.customerQuality.tapEnabled, true, 'CQ15a: tapEnabled=true preserved')
 
-    // 17. malformed customerQuality (not an object) → all defaults
-    const cfg17 = parseDashboardSectionConfig(JSON.stringify({
+    // 16. tapEnabled=false — explicit false preserved (the key semantic: chart non-interactive)
+    const cq16 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { tapEnabled: false }
+    }))
+    assertEqual(cq16.customerQuality.tapEnabled, false, 'CQ16: tapEnabled=false preserved (chart non-interactive)')
+
+    // 17. missing tapEnabled → default true
+    const cq17 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { chartShape: 'bar' } // tapEnabled absent
+    }))
+    assertEqual(cq17.customerQuality.tapEnabled, true, 'CQ17: missing tapEnabled → default true')
+
+    // 18. invalid tapEnabled (non-boolean) → default true
+    const cq18 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { tapEnabled: 'yes' } // string, not boolean
+    }))
+    assertEqual(cq18.customerQuality.tapEnabled, true, 'CQ18: non-boolean tapEnabled → default true')
+
+    // 19. BACKWARDS COMPAT: old tapBehavior='modal' → tapEnabled=true
+    const cq19 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { tapBehavior: 'modal' }
+    }))
+    assertEqual(cq19.customerQuality.tapEnabled, true, 'CQ19: old tapBehavior=modal → tapEnabled=true (migrated)')
+
+    // 20. BACKWARDS COMPAT: old tapBehavior='filter' → tapEnabled=true
+    //     The 'filter' Khata-navigation behavior is NOT retained (only modal behavior remains).
+    const cq20 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { tapBehavior: 'filter' }
+    }))
+    assertEqual(cq20.customerQuality.tapEnabled, true, 'CQ20a: old tapBehavior=filter → tapEnabled=true (migrated)')
+    // §SEMANTIC-PROOF: tapEnabled=true means ONLY modal behavior (the 'filter' navigation is gone).
+    // There is no 'tapBehavior' field in the parsed output — only 'tapEnabled'.
+    assert(!('tapBehavior' in cq20.customerQuality), 'CQ20b: parsed config has NO tapBehavior field (migration complete)')
+    // §PROOF-OF-REMOVAL: the only interaction when tapEnabled=true is setSelectedGrade (modal).
+    // When tapEnabled=false, handleGradeTap is a no-op. There is no Khata filter path.
+
+    // 21. tapEnabled takes priority over old tapBehavior (explicit boolean wins)
+    const cq21 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { tapEnabled: false, tapBehavior: 'modal' }
+    }))
+    assertEqual(cq21.customerQuality.tapEnabled, false, 'CQ21: explicit tapEnabled=false wins over old tapBehavior=modal')
+
+    // 22. explicit tapEnabled=false + old tapBehavior='filter' → tapEnabled=false (no nav behavior)
+    const cq22 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { tapEnabled: false, tapBehavior: 'filter' }
+    }))
+    assertEqual(cq22.customerQuality.tapEnabled, false, 'CQ22: explicit tapEnabled=false wins; filter nav NOT retained')
+
+    // 23. malformed customerQuality (not an object) → all defaults INCLUDING tapEnabled=true
+    const cfg23 = parseDashboardSectionConfig(JSON.stringify({
       customerQuality: 'invalid'
     }))
-    assertEqual(cfg17.customerQuality.chartShape, 'bar', 'CQ17a: malformed customerQuality → chartShape bar')
-    assertEqual(cfg17.customerQuality.showCount, true, 'CQ17b: malformed → showCount true')
-    assertEqual(cfg17.customerQuality.sortOrder, 'grade', 'CQ17c: malformed → sortOrder grade')
+    assertEqual(cfg23.customerQuality.chartShape, 'bar', 'CQ23a: malformed customerQuality → chartShape bar')
+    assertEqual(cfg23.customerQuality.showCount, true, 'CQ23b: malformed → showCount true')
+    assertEqual(cfg23.customerQuality.tapEnabled, true, 'CQ23c: malformed → tapEnabled true (default)')
+    assertEqual(cfg23.customerQuality.sortOrder, 'grade', 'CQ23d: malformed → sortOrder grade')
+
+    // 24. SEMANTIC VERIFICATION: tapEnabled=false means NO interaction path.
+    //     The parser output for tapEnabled=false is a boolean false.
+    //     In dashboard-view.tsx, handleGradeTap is:
+    //       if (cqConfig.tapEnabled) { setSelectedGrade(grade) }
+    //     When false, the function body is a no-op (no setSelectedGrade, no navigation).
+    //     The chart onClick is set to undefined and cursor='default' when tapEnabled=false.
+    //     This test verifies the parsed value is exactly boolean false (not a string, not undefined).
+    const cq24 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { tapEnabled: false }
+    }))
+    assertEqual(typeof cq24.customerQuality.tapEnabled, 'boolean', 'CQ24a: tapEnabled is boolean type')
+    assertEqual(cq24.customerQuality.tapEnabled === false, true, 'CQ24b: tapEnabled is exactly false (no interaction)')
+
+    // 25. NO REGRESSION: chartShape/sort/display settings unchanged by tapEnabled
+    const cq25 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: {
+        chartShape: 'donut',
+        showCount: false,
+        showPercentage: false,
+        showDescription: false,
+        tapEnabled: false,
+        sortOrder: 'count-desc',
+      }
+    }))
+    assertEqual(cq25.customerQuality.chartShape, 'donut', 'CQ25a: chartShape=donut preserved alongside tapEnabled=false')
+    assertEqual(cq25.customerQuality.showCount, false, 'CQ25b: showCount=false preserved')
+    assertEqual(cq25.customerQuality.showPercentage, false, 'CQ25c: showPercentage=false preserved')
+    assertEqual(cq25.customerQuality.showDescription, false, 'CQ25d: showDescription=false preserved')
+    assertEqual(cq25.customerQuality.sortOrder, 'count-desc', 'CQ25e: sortOrder=count-desc preserved')
+    assertEqual(cq25.customerQuality.tapEnabled, false, 'CQ25f: tapEnabled=false preserved with other settings')
   }
 
   // ─── Summary ─────────────────────────────────────────────────────────

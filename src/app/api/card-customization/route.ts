@@ -251,14 +251,25 @@ function validateDashboardSections(input: unknown): string | null {
   const result: Record<string, unknown> = { sections }
 
   // customerQuality
-  // §STEP-2C: Added chartShape, showCount, showPercentage, showDescription, tapBehavior, sortOrder.
-  // Mirrors the parser in dashboard-preferences.ts. Invalid values are dropped;
-  // the parser falls back to defaults for missing/invalid fields.
+  // §STEP-2C: Added chartShape, showCount, showPercentage, showDescription, tapEnabled, sortOrder.
+  // §STEP-2C-REVIEW: Replaced tapBehavior ('modal'|'filter') with tapEnabled (boolean).
+  //   Migration: old tapBehavior='modal'/'filter' → tapEnabled=true (filter/nav behavior REMOVED).
+  //   Invalid/missing → tapEnabled=true (default).
+  // Mirrors the parser in dashboard-preferences.ts.
   if (parsed.customerQuality && typeof parsed.customerQuality === 'object') {
     const cq = parsed.customerQuality
     const CQ_SHAPES = new Set(['bar', 'donut', 'horizontal'])
     const CQ_SORTS = new Set(['grade', 'count-desc'])
-    const CQ_TAPS = new Set(['modal', 'filter'])
+    // §STEP-2C-REVIEW: Resolve tapEnabled with backwards-compatible migration.
+    let tapEnabled: boolean
+    if (typeof cq.tapEnabled === 'boolean') {
+      tapEnabled = cq.tapEnabled
+    } else if (typeof cq.tapBehavior === 'string') {
+      // §MIGRATE: old tapBehavior → tapEnabled=true (filter/nav behavior NOT retained)
+      tapEnabled = true
+    } else {
+      tapEnabled = true
+    }
     result.customerQuality = {
       visibleGrades: validateStringArray(cq.visibleGrades, GRADES),
       chartShape: typeof cq.chartShape === 'string' && CQ_SHAPES.has(cq.chartShape) ? cq.chartShape : 'bar',
@@ -266,7 +277,7 @@ function validateDashboardSections(input: unknown): string | null {
       showCount: typeof cq.showCount === 'boolean' ? cq.showCount : true,
       showPercentage: typeof cq.showPercentage === 'boolean' ? cq.showPercentage : true,
       showDescription: typeof cq.showDescription === 'boolean' ? cq.showDescription : true,
-      tapBehavior: typeof cq.tapBehavior === 'string' && CQ_TAPS.has(cq.tapBehavior) ? cq.tapBehavior : 'modal',
+      tapEnabled,
       sortOrder: typeof cq.sortOrder === 'string' && CQ_SORTS.has(cq.sortOrder) ? cq.sortOrder : 'grade',
     }
   }
