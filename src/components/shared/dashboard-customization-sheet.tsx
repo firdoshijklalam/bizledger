@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X, Loader2, Settings, ChevronUp, ChevronDown, Eye, EyeOff,
@@ -293,6 +293,8 @@ interface SectionSettingsSheetProps {
   // §STEP-1C: Item reordering (optional — used by Quick Actions)
   itemOrder?: string[]
   onMoveItem?: (id: string, direction: 'up' | 'down') => void
+  // §STEP-2C: Optional advanced controls panel (used by Customer Quality)
+  advancedPanel?: ReactNode
   // Reset
   onReset: () => void
 }
@@ -300,7 +302,7 @@ interface SectionSettingsSheetProps {
 export function SectionSettingsSheet({
   open, onClose, title, sectionVisible, onToggleSection,
   items, visibleItems, onToggleItem, defaultItemId, onSetDefault, onReset,
-  itemOrder, onMoveItem,
+  itemOrder, onMoveItem, advancedPanel,
 }: SectionSettingsSheetProps) {
   const [showResetConfirm, setShowResetConfirm] = useState(false)
 
@@ -434,6 +436,9 @@ export function SectionSettingsSheet({
                   </div>
                 </div>
               )}
+
+              {/* §STEP-2C: Optional advanced controls panel (used by Customer Quality) */}
+              {advancedPanel}
 
               {/* Reset */}
               <div className="pt-2 border-t border-border">

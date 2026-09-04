@@ -32,6 +32,7 @@ import {
   getOrderedBusinessActivityTabs,
   resolveDefaultTab,
   moveItemInOrder,
+  getSortedGradeData,
   type DashboardSectionConfig,
 } from '../../src/lib/dashboard-preferences'
 
@@ -1249,6 +1250,184 @@ async function main() {
     assertEqual(g4_2.defaults.timeRange, '1y', 'G4-2b: parser returns 1y for valid input')
     // Parser should not crash if caller later mutates their input
     assertEqual(g4_2.defaults.chartType, 'cashflow', 'G4-2c: parser output stable after input mutation check')
+  }
+
+  // ─── §STEP-2C: Customer Quality Advanced Settings ─────────────────────
+  // Tests chartShape, showCount/showPercentage/showDescription, tapBehavior,
+  // sortOrder, and getSortedGradeData() pure helper.
+  console.log('\n  §STEP-2C: Customer Quality Advanced Settings:')
+  {
+    // 1. chartShape values — each valid shape survives round-trip
+    for (const shape of ['bar', 'donut', 'horizontal'] as const) {
+      const cfg = parseDashboardSectionConfig(JSON.stringify({
+        customerQuality: { chartShape: shape }
+      }))
+      assertEqual(cfg.customerQuality.chartShape, shape, `CQ1: chartShape=${shape} preserved`)
+    }
+
+    // 2. invalid chartShape fallback → default 'bar'
+    const cq2a = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { chartShape: 'invalid' }
+    }))
+    assertEqual(cq2a.customerQuality.chartShape, 'bar', 'CQ2a: invalid chartShape → default bar')
+    const cq2b = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { chartShape: null }
+    }))
+    assertEqual(cq2b.customerQuality.chartShape, 'bar', 'CQ2b: null chartShape → default bar')
+    const cq2c = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { chartShape: 123 }
+    }))
+    assertEqual(cq2c.customerQuality.chartShape, 'bar', 'CQ2c: non-string chartShape → default bar')
+
+    // 3. showCount false — explicit false preserved
+    const cq3 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { showCount: false }
+    }))
+    assertEqual(cq3.customerQuality.showCount, false, 'CQ3: showCount=false preserved (explicit false)')
+
+    // 4. showPercentage false — explicit false preserved
+    const cq4 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { showPercentage: false }
+    }))
+    assertEqual(cq4.customerQuality.showPercentage, false, 'CQ4: showPercentage=false preserved')
+
+    // 5. showDescription false — explicit false preserved
+    const cq5 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { showDescription: false }
+    }))
+    assertEqual(cq5.customerQuality.showDescription, false, 'CQ5: showDescription=false preserved')
+
+    // 6. explicit false values survive parsing (all three at once)
+    const cq6 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { showCount: false, showPercentage: false, showDescription: false }
+    }))
+    assertEqual(cq6.customerQuality.showCount, false, 'CQ6a: showCount=false survives')
+    assertEqual(cq6.customerQuality.showPercentage, false, 'CQ6b: showPercentage=false survives')
+    assertEqual(cq6.customerQuality.showDescription, false, 'CQ6c: showDescription=false survives')
+
+    // 6b. non-boolean showCount → default true (not false)
+    const cq6b = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { showCount: 'yes', showPercentage: 1, showDescription: null }
+    }))
+    assertEqual(cq6b.customerQuality.showCount, true, 'CQ6b1: non-boolean showCount → default true')
+    assertEqual(cq6b.customerQuality.showPercentage, true, 'CQ6b2: non-boolean showPercentage → default true')
+    assertEqual(cq6b.customerQuality.showDescription, true, 'CQ6b3: null showDescription → default true')
+
+    // 7. sortOrder grade — preserved
+    const cq7 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { sortOrder: 'grade' }
+    }))
+    assertEqual(cq7.customerQuality.sortOrder, 'grade', 'CQ7: sortOrder=grade preserved')
+
+    // 8. sortOrder count-desc — preserved
+    const cq8 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { sortOrder: 'count-desc' }
+    }))
+    assertEqual(cq8.customerQuality.sortOrder, 'count-desc', 'CQ8: sortOrder=count-desc preserved')
+
+    // 9. invalid sortOrder fallback → default 'grade'
+    const cq9a = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { sortOrder: 'invalid' }
+    }))
+    assertEqual(cq9a.customerQuality.sortOrder, 'grade', 'CQ9a: invalid sortOrder → default grade')
+    const cq9b = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { sortOrder: null }
+    }))
+    assertEqual(cq9b.customerQuality.sortOrder, 'grade', 'CQ9b: null sortOrder → default grade')
+
+    // 10. getSortedGradeData — grade order (A → E)
+    const gradeData10 = [
+      { grade: 'C', count: 5 },
+      { grade: 'A', count: 3 },
+      { grade: 'E', count: 1 },
+      { grade: 'B', count: 7 },
+      { grade: 'D', count: 2 },
+    ]
+    const cfg10 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { sortOrder: 'grade' }
+    }))
+    const sorted10 = getSortedGradeData(gradeData10, cfg10)
+    assertEqual(sorted10[0].grade, 'A', 'CQ10a: grade order → A first')
+    assertEqual(sorted10[1].grade, 'B', 'CQ10b: grade order → B second')
+    assertEqual(sorted10[2].grade, 'C', 'CQ10c: grade order → C third')
+    assertEqual(sorted10[3].grade, 'D', 'CQ10d: grade order → D fourth')
+    assertEqual(sorted10[4].grade, 'E', 'CQ10e: grade order → E fifth')
+
+    // 11. getSortedGradeData — count-desc (highest count first)
+    const cfg11 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { sortOrder: 'count-desc' }
+    }))
+    const sorted11 = getSortedGradeData(gradeData10, cfg11)
+    assertEqual(sorted11[0].grade, 'B', 'CQ11a: count-desc → B first (count=7)')
+    assertEqual(sorted11[1].grade, 'C', 'CQ11b: count-desc → C second (count=5)')
+    assertEqual(sorted11[2].grade, 'A', 'CQ11c: count-desc → A third (count=3)')
+    assertEqual(sorted11[3].grade, 'D', 'CQ11d: count-desc → D fourth (count=2)')
+    assertEqual(sorted11[4].grade, 'E', 'CQ11e: count-desc → E fifth (count=1)')
+
+    // 11b. count-desc with ties → grade order breaks ties (A before B)
+    const gradeData11b = [
+      { grade: 'B', count: 5 },
+      { grade: 'A', count: 5 },
+      { grade: 'C', count: 5 },
+    ]
+    const cfg11b = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { sortOrder: 'count-desc' }
+    }))
+    const sorted11b = getSortedGradeData(gradeData11b, cfg11b)
+    assertEqual(sorted11b[0].grade, 'A', 'CQ11b1: tie → A before B (grade order)')
+    assertEqual(sorted11b[1].grade, 'B', 'CQ11b2: tie → B second')
+    assertEqual(sorted11b[2].grade, 'C', 'CQ11b3: tie → C third')
+
+    // 12. backwards compatibility — old dashboardSections JSON (no advanced fields) → all defaults
+    const oldJson12 = JSON.stringify({
+      sections: [{ id: 'customerQuality', visible: true, order: 2 }],
+      customerQuality: { visibleGrades: ['A', 'B'] }
+      // §NO advanced fields present — must default
+    })
+    const cfg12 = parseDashboardSectionConfig(oldJson12)
+    assertEqual(cfg12.customerQuality.visibleGrades, ['A', 'B'] as any, 'CQ12a: visibleGrades preserved from old JSON')
+    assertEqual(cfg12.customerQuality.chartShape, 'bar', 'CQ12b: chartShape defaults to bar (old JSON)')
+    assertEqual(cfg12.customerQuality.showCount, true, 'CQ12c: showCount defaults to true (old JSON)')
+    assertEqual(cfg12.customerQuality.showPercentage, true, 'CQ12d: showPercentage defaults to true (old JSON)')
+    assertEqual(cfg12.customerQuality.showDescription, true, 'CQ12e: showDescription defaults to true (old JSON)')
+    assertEqual(cfg12.customerQuality.tapBehavior, 'modal', 'CQ12f: tapBehavior defaults to modal (old JSON)')
+    assertEqual(cfg12.customerQuality.sortOrder, 'grade', 'CQ12g: sortOrder defaults to grade (old JSON)')
+
+    // 13. all grades hidden (visibleGrades=[]) — parser preserves empty array
+    const cfg13 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { visibleGrades: [] }
+    }))
+    assertEqual(cfg13.customerQuality.visibleGrades.length, 0, 'CQ13: empty visibleGrades preserved (not replaced by defaults)')
+    // Advanced fields still default correctly
+    assertEqual(cfg13.customerQuality.chartShape, 'bar', 'CQ13b: chartShape default even with empty grades')
+
+    // 14. getSortedGradeData does NOT mutate input (pure function)
+    const input14 = [{ grade: 'B', count: 2 }, { grade: 'A', count: 1 }]
+    const cfg14 = parseDashboardSectionConfig(JSON.stringify({ customerQuality: { sortOrder: 'grade' } }))
+    getSortedGradeData(input14, cfg14)
+    assertEqual(input14[0].grade, 'B', 'CQ14: input array NOT mutated by getSortedGradeData')
+
+    // 15. tapBehavior values — each valid value survives round-trip
+    for (const tb of ['modal', 'filter'] as const) {
+      const cfg = parseDashboardSectionConfig(JSON.stringify({
+        customerQuality: { tapBehavior: tb }
+      }))
+      assertEqual(cfg.customerQuality.tapBehavior, tb, `CQ15: tapBehavior=${tb} preserved`)
+    }
+
+    // 16. invalid tapBehavior → default 'modal'
+    const cq16 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: { tapBehavior: 'unknown' }
+    }))
+    assertEqual(cq16.customerQuality.tapBehavior, 'modal', 'CQ16: invalid tapBehavior → default modal')
+
+    // 17. malformed customerQuality (not an object) → all defaults
+    const cfg17 = parseDashboardSectionConfig(JSON.stringify({
+      customerQuality: 'invalid'
+    }))
+    assertEqual(cfg17.customerQuality.chartShape, 'bar', 'CQ17a: malformed customerQuality → chartShape bar')
+    assertEqual(cfg17.customerQuality.showCount, true, 'CQ17b: malformed → showCount true')
+    assertEqual(cfg17.customerQuality.sortOrder, 'grade', 'CQ17c: malformed → sortOrder grade')
   }
 
   // ─── Summary ─────────────────────────────────────────────────────────

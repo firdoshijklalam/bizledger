@@ -48,7 +48,10 @@ import {
   getOrderedBusinessActivityTabs,
   resolveDefaultTab,
   moveItemInOrder,
+  getSortedGradeData,
   type DashboardSectionConfig,
+  type CustomerQualityChartShape,
+  type CustomerQualitySortOrder,
 } from '@/lib/dashboard-preferences'
 import {
   computeRangeBounds,
@@ -737,9 +740,16 @@ export function DashboardView() {
   // user's visibleGrades preference. Falls back to an empty array when all
   // grades are disabled — the customerQuality section shows an empty state
   // with a settings button instead of an empty chart in that case.
-  const visibleGradeData = (data.gradeDistribution || []).filter(g =>
-    dashSectionConfig.customerQuality.visibleGrades.includes(g.grade)
+  // §STEP-2C: Apply sortOrder (grade order vs count-desc) via the pure helper.
+  const visibleGradeData = getSortedGradeData(
+    (data.gradeDistribution || []).filter(g =>
+      dashSectionConfig.customerQuality.visibleGrades.includes(g.grade)
+    ),
+    dashSectionConfig,
   )
+
+  // §STEP-2C: Compute total for percentage display
+  const gradeTotal = visibleGradeData.reduce((sum, g) => sum + g.count, 0)
 
   // §STEP-1A-ORDERING: Render a single dashboard section by ID. Each case
   // returns the section's full JSX (without its visibility wrapper — that's
@@ -1057,9 +1067,36 @@ export function DashboardView() {
         )
 
       case 'customerQuality':
+        // §STEP-2C: Read advanced settings from config
+        const cqConfig = dashSectionConfig.customerQuality
+        // §TAP-BEHAVIOR: 'modal' = existing (open grade-filtered customer modal).
+        // 'filter' = navigate directly to Khata with the grade filter applied.
+        const handleGradeTap = (grade: string) => {
+          if (cqConfig.tapBehavior === 'filter') {
+            setKhataGradeFilter(grade)
+            setKhataFilter('all')
+            setReturnToView('dashboard')
+            setActiveView('khata')
+          } else {
+            setSelectedGrade(grade)
+          }
+        }
+        // §CHART-COLORS: consistent grade colors across all chart shapes
+        const gradeColors = ['#10b981', '#14b8a6', '#f59e0b', '#f97316', '#ef4444']
+        // §TOOLTIP-FORMATTER: respects showCount + showPercentage
+        const gradeTooltipFormatter = (v: number, _name: any, entry: any) => {
+          const grade = entry?.payload?.grade ?? ''
+          const pct = gradeTotal > 0 ? Math.round((v / gradeTotal) * 100) : 0
+          const parts: string[] = []
+          if (cqConfig.showCount) parts.push(`${v} customers`)
+          if (cqConfig.showPercentage) parts.push(`${pct}%`)
+          // §DEFAULT: if both toggles off, still show count so tooltip isn't empty
+          if (parts.length === 0) parts.push(`${v} customers`)
+          return [parts.join(' · '), `Grade ${grade}`]
+        }
         return (
           <>
-            {/* Grade distribution — Interactive Bar Chart (PRD Part 5 §1) */}
+            {/* Grade distribution — Interactive Chart (PRD Part 5 §1) */}
             <Card className="p-4">
               <div className="flex items-center justify-between mb-1">
                 <h3 className="text-sm font-semibold">Customer Quality Distribution</h3>
@@ -1071,7 +1108,12 @@ export function DashboardView() {
                   <Settings className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <p className="text-[10px] text-muted-foreground mb-3">Tap a bar to view customers</p>
+              {/* §STEP-2C: subtitle reflects tapBehavior */}
+              <p className="text-[10px] text-muted-foreground mb-3">
+                {cqConfig.tapBehavior === 'filter'
+                  ? 'Tap a grade to filter Khata'
+                  : 'Tap a bar to view customers'}
+              </p>
               {visibleGradeData.length === 0 ? (
                 /* §STEP-1A-ORDERING: Empty state — all grades disabled.
                     Render a clean message + a settings button instead of an
@@ -1087,25 +1129,89 @@ export function DashboardView() {
                   </button>
                 </div>
               ) : (
-                <div className="h-36 -ml-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={visibleGradeData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} onClick={(e: any) => { if (e && e.activeLabel) setSelectedGrade(e.activeLabel) }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
-                      <XAxis dataKey="grade" tick={{ fontSize: 12, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={24} allowDecimals={false} />
-                      <Tooltip cursor={{ fill: 'oklch(0.9 0.005 145 / 0.3)' }} contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={(v: number) => [`${v} customers`, 'Count']} />
-                      <Bar dataKey="count" radius={[6, 6, 0, 0]} cursor="pointer">
-                        {visibleGradeData.map((_, i) => <Cell key={i} fill={['#10b981', '#14b8a6', '#f59e0b', '#f97316', '#ef4444'][i] || '#6366f1'} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <>
+                {/* §STEP-2C: chartShape switch — bar / donut / horizontal */}
+                {cqConfig.chartShape === 'donut' ? (
+                  <div className="h-44 flex items-center justify-center">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={visibleGradeData}
+                          dataKey="count"
+                          nameKey="grade"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={70}
+                          paddingAngle={2}
+                          onClick={(e: any) => { if (e && e.grade) handleGradeTap(e.grade) }}
+                          cursor="pointer"
+                        >
+                          {visibleGradeData.map((_, i) => <Cell key={i} fill={gradeColors[i % gradeColors.length]} />)}
+                        </Pie>
+                        <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={gradeTooltipFormatter} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : cqConfig.chartShape === 'horizontal' ? (
+                  <div className="h-44 -ml-2">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={visibleGradeData} layout="vertical" margin={{ top: 8, right: 8, bottom: 0, left: 0 }} onClick={(e: any) => { if (e && e.activeLabel) handleGradeTap(e.activeLabel) }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" horizontal={false} />
+                        <XAxis type="number" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                        <YAxis type="category" dataKey="grade" tick={{ fontSize: 12, fontWeight: 'bold' }} axisLine={false} tickLine={false} width={24} />
+                        <Tooltip cursor={{ fill: 'oklch(0.9 0.005 145 / 0.3)' }} contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={gradeTooltipFormatter} />
+                        <Bar dataKey="count" radius={[0, 6, 6, 0]} cursor="pointer">
+                          {visibleGradeData.map((_, i) => <Cell key={i} fill={gradeColors[i % gradeColors.length]} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  /* §DEFAULT chartShape='bar' — existing vertical bar chart */
+                  <div className="h-36 -ml-2">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={visibleGradeData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} onClick={(e: any) => { if (e && e.activeLabel) handleGradeTap(e.activeLabel) }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
+                        <XAxis dataKey="grade" tick={{ fontSize: 12, fontWeight: 'bold' }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={24} allowDecimals={false} />
+                        <Tooltip cursor={{ fill: 'oklch(0.9 0.005 145 / 0.3)' }} contentStyle={{ borderRadius: 12, border: '1px solid oklch(0.9 0.005 145)', fontSize: 12 }} formatter={gradeTooltipFormatter} />
+                        <Bar dataKey="count" radius={[6, 6, 0, 0]} cursor="pointer">
+                          {visibleGradeData.map((_, i) => <Cell key={i} fill={gradeColors[i % gradeColors.length]} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {/* §STEP-2C: Grade legend with count + percentage + description */}
+                {(cqConfig.showCount || cqConfig.showPercentage || cqConfig.showDescription) && (
+                  <div className="mt-2 space-y-1">
+                    {visibleGradeData.map((g, i) => {
+                      const meta = GRADE_META[g.grade]
+                      const pct = gradeTotal > 0 ? Math.round((g.count / gradeTotal) * 100) : 0
+                      return (
+                        <div key={g.grade} className="flex items-center gap-2 text-[11px]">
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: gradeColors[i % gradeColors.length] }} />
+                          <span className="font-semibold w-6">Grade {g.grade}</span>
+                          {cqConfig.showDescription && meta?.desc && (
+                            <span className="text-muted-foreground flex-1 truncate">{meta.desc}</span>
+                          )}
+                          {!cqConfig.showDescription && <span className="flex-1" />}
+                          {cqConfig.showCount && <span className="tabular-nums">{g.count}</span>}
+                          {cqConfig.showPercentage && <span className="text-muted-foreground tabular-nums">{pct}%</span>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                </>
               )}
             </Card>
 
-            {/* Floating modal for grade-filtered customers (PRD Part 5 §2) */}
+            {/* §STEP-2C: tapBehavior='modal' renders the floating grade modal.
+                tapBehavior='filter' never shows this modal (it navigates to Khata instead). */}
             <AnimatePresence>
-              {selectedGrade && (
+              {cqConfig.tapBehavior === 'modal' && selectedGrade && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedGrade(null)} className="fixed inset-0 z-[80] bg-black/40 backdrop-blur-[2px] flex items-end sm:items-center justify-center">
                   <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', stiffness: 400, damping: 32 }} onClick={(e) => e.stopPropagation()} className="bg-card rounded-t-3xl sm:rounded-3xl border-t sm:border border-border w-full max-w-md max-h-[70vh] flex flex-col">
                     <div className="flex items-center justify-between p-4 border-b border-border">
@@ -1998,17 +2104,117 @@ export function DashboardView() {
         items={[{ id: 'A', label: 'Grade A' }, { id: 'B', label: 'Grade B' }, { id: 'C', label: 'Grade C' }, { id: 'D', label: 'Grade D' }, { id: 'E', label: 'Grade E' }]}
         visibleItems={dashSectionConfig.customerQuality.visibleGrades}
         onToggleItem={(id) => {
-          const grades = dashSectionConfig.customerQuality.visibleGrades
-          const newGrades = grades.includes(id) ? grades.filter(g => g !== id) : [...grades, id]
-          const newConfig = { ...dashSectionConfig, customerQuality: { visibleGrades: newGrades } }
+          // §STEP-2C: Preserve advanced fields when toggling grades
+          const cq = dashSectionConfig.customerQuality
+          const newGrades = cq.visibleGrades.includes(id) ? cq.visibleGrades.filter(g => g !== id) : [...cq.visibleGrades, id]
+          const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, visibleGrades: newGrades } }
           setDashSectionConfig(newConfig)
           saveDashboardSections(newConfig).catch(() => {})
         }}
         onReset={() => {
+          // §STEP-2C: Reset to full default customerQuality (includes advanced fields)
           const newConfig = { ...dashSectionConfig, customerQuality: { ...DEFAULT_DASHBOARD_CONFIG.customerQuality } }
           setDashSectionConfig(newConfig)
           saveDashboardSections(newConfig).catch(() => {})
         }}
+        // §STEP-2C: Advanced controls panel for chartShape, display toggles, tapBehavior, sortOrder
+        advancedPanel={
+          <div className="pt-2 border-t border-border space-y-3">
+            <p className="text-xs font-semibold text-muted-foreground">Chart & Display</p>
+
+            {/* Chart shape selector */}
+            <div>
+              <p className="text-[10px] text-muted-foreground mb-1.5">Chart Shape</p>
+              <div className="grid grid-cols-3 gap-1">
+                {(['bar', 'donut', 'horizontal'] as const).map((shape) => (
+                  <button
+                    key={shape}
+                    onClick={() => {
+                      const cq = dashSectionConfig.customerQuality
+                      const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, chartShape: shape } }
+                      setDashSectionConfig(newConfig)
+                      saveDashboardSections(newConfig).catch(() => {})
+                    }}
+                    className={`py-1.5 rounded-lg text-[11px] font-medium transition-colors min-h-[36px] ${dashSectionConfig.customerQuality.chartShape === shape ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+                  >
+                    {shape === 'bar' ? 'Bar' : shape === 'donut' ? 'Donut' : 'Horizontal'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Sort order selector */}
+            <div>
+              <p className="text-[10px] text-muted-foreground mb-1.5">Sort Order</p>
+              <div className="grid grid-cols-2 gap-1">
+                {([['grade', 'Grade (A→E)'], ['count-desc', 'Highest Count']] as const).map(([order, label]) => (
+                  <button
+                    key={order}
+                    onClick={() => {
+                      const cq = dashSectionConfig.customerQuality
+                      const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, sortOrder: order } }
+                      setDashSectionConfig(newConfig)
+                      saveDashboardSections(newConfig).catch(() => {})
+                    }}
+                    className={`py-1.5 rounded-lg text-[11px] font-medium transition-colors min-h-[36px] ${dashSectionConfig.customerQuality.sortOrder === order ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Tap behavior selector */}
+            <div>
+              <p className="text-[10px] text-muted-foreground mb-1.5">Tap Behavior</p>
+              <div className="grid grid-cols-2 gap-1">
+                {([['modal', 'Open Modal'], ['filter', 'Filter Khata']] as const).map(([behavior, label]) => (
+                  <button
+                    key={behavior}
+                    onClick={() => {
+                      const cq = dashSectionConfig.customerQuality
+                      const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, tapBehavior: behavior } }
+                      setDashSectionConfig(newConfig)
+                      saveDashboardSections(newConfig).catch(() => {})
+                    }}
+                    className={`py-1.5 rounded-lg text-[11px] font-medium transition-colors min-h-[36px] ${dashSectionConfig.customerQuality.tapBehavior === behavior ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Display toggles */}
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground mb-1">Display</p>
+              {([
+                ['showCount', 'Show Count'],
+                ['showPercentage', 'Show Percentage'],
+                ['showDescription', 'Show Description'],
+              ] as const).map(([field, label]) => {
+                const cq = dashSectionConfig.customerQuality
+                const isEnabled = cq[field]
+                return (
+                  <button
+                    key={field}
+                    onClick={() => {
+                      const newConfig = { ...dashSectionConfig, customerQuality: { ...cq, [field]: !isEnabled } }
+                      setDashSectionConfig(newConfig)
+                      saveDashboardSections(newConfig).catch(() => {})
+                    }}
+                    className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-muted/50"
+                  >
+                    <span className="text-xs font-medium">{label}</span>
+                    <span className={`w-9 h-5 rounded-full transition-colors relative ${isEnabled ? 'bg-primary' : 'bg-muted'}`}>
+                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        }
       />
 
       <SectionSettingsSheet

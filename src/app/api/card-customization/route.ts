@@ -251,9 +251,23 @@ function validateDashboardSections(input: unknown): string | null {
   const result: Record<string, unknown> = { sections }
 
   // customerQuality
+  // §STEP-2C: Added chartShape, showCount, showPercentage, showDescription, tapBehavior, sortOrder.
+  // Mirrors the parser in dashboard-preferences.ts. Invalid values are dropped;
+  // the parser falls back to defaults for missing/invalid fields.
   if (parsed.customerQuality && typeof parsed.customerQuality === 'object') {
+    const cq = parsed.customerQuality
+    const CQ_SHAPES = new Set(['bar', 'donut', 'horizontal'])
+    const CQ_SORTS = new Set(['grade', 'count-desc'])
+    const CQ_TAPS = new Set(['modal', 'filter'])
     result.customerQuality = {
-      visibleGrades: validateStringArray(parsed.customerQuality.visibleGrades, GRADES),
+      visibleGrades: validateStringArray(cq.visibleGrades, GRADES),
+      chartShape: typeof cq.chartShape === 'string' && CQ_SHAPES.has(cq.chartShape) ? cq.chartShape : 'bar',
+      // §EXPLICIT-FALSE: typeof === 'boolean' accepts false (not just truthy)
+      showCount: typeof cq.showCount === 'boolean' ? cq.showCount : true,
+      showPercentage: typeof cq.showPercentage === 'boolean' ? cq.showPercentage : true,
+      showDescription: typeof cq.showDescription === 'boolean' ? cq.showDescription : true,
+      tapBehavior: typeof cq.tapBehavior === 'string' && CQ_TAPS.has(cq.tapBehavior) ? cq.tapBehavior : 'modal',
+      sortOrder: typeof cq.sortOrder === 'string' && CQ_SORTS.has(cq.sortOrder) ? cq.sortOrder : 'grade',
     }
   }
 

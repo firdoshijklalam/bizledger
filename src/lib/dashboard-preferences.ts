@@ -18,10 +18,20 @@ export interface DashboardSection {
   order: number
 }
 
+export type CustomerQualityChartShape = 'bar' | 'donut' | 'horizontal'
+export type CustomerQualitySortOrder = 'grade' | 'count-desc'
+
 export interface DashboardSectionConfig {
   sections: DashboardSection[]
   customerQuality: {
     visibleGrades: string[]
+    // §STEP-2C: Advanced Customer Quality settings
+    chartShape: CustomerQualityChartShape
+    showCount: boolean
+    showPercentage: boolean
+    showDescription: boolean
+    tapBehavior: 'modal' | 'filter'
+    sortOrder: CustomerQualitySortOrder
   }
   topInsights: {
     visibleTabs: string[]
@@ -58,6 +68,13 @@ export const DEFAULT_DASHBOARD_CONFIG: DashboardSectionConfig = {
   sections: DEFAULT_DASHBOARD_SECTIONS,
   customerQuality: {
     visibleGrades: ['A', 'B', 'C', 'D', 'E'],
+    // §STEP-2C: Advanced defaults — preserve existing visual/behavior as defaults
+    chartShape: 'bar',
+    showCount: true,
+    showPercentage: true,
+    showDescription: true,
+    tapBehavior: 'modal', // existing behavior: tap opens grade-filtered customer modal
+    sortOrder: 'grade',   // existing order: A → E
   },
   topInsights: {
     visibleTabs: ['debtors', 'buyers', 'payments', 'products', 'defaulters'],
@@ -85,6 +102,9 @@ const VALID_SECTION_IDS = new Set([
   'summaryCards', 'performanceChart', 'customerQuality', 'topInsights', 'businessActivity', 'quickActions'
 ])
 const VALID_GRADES = new Set(['A', 'B', 'C', 'D', 'E'])
+const VALID_CQ_CHART_SHAPES = new Set<CustomerQualityChartShape>(['bar', 'donut', 'horizontal'])
+const VALID_CQ_SORT_ORDERS = new Set<CustomerQualitySortOrder>(['grade', 'count-desc'])
+const VALID_CQ_TAP_BEHAVIORS = new Set(['modal', 'filter'])
 const VALID_TOP_TABS = new Set(['debtors', 'buyers', 'payments', 'products', 'defaulters'])
 const VALID_HUB_TABS = new Set(['transactions', 'lowstock', 'orders'])
 const VALID_QUICK_ACTIONS = new Set(['add-party', 'add-product', 'new-invoice', 'add-transaction'])
@@ -149,10 +169,25 @@ export function parseDashboardSectionConfig(raw: any): DashboardSectionConfig {
 
   // §CUSTOMER-QUALITY
   // §STEP-1B: Distinguish "field missing" (→ defaults) from "empty array" (→ keep []).
+  // §STEP-2C: Added chartShape, showCount, showPercentage, showDescription, tapBehavior, sortOrder.
   const cq = parsed.customerQuality && typeof parsed.customerQuality === 'object' ? parsed.customerQuality : {}
   const visibleGrades = filterStringArray(cq.visibleGrades, VALID_GRADES)
+  // §STEP-2C: Each advanced field is validated independently. Invalid/missing → default.
+  // Explicit false values are preserved (typeof === 'boolean' check accepts false).
   const customerQuality = {
     visibleGrades: resolveArray(visibleGrades, DEFAULT_DASHBOARD_CONFIG.customerQuality.visibleGrades),
+    chartShape: typeof cq.chartShape === 'string' && VALID_CQ_CHART_SHAPES.has(cq.chartShape as CustomerQualityChartShape)
+      ? cq.chartShape as CustomerQualityChartShape
+      : DEFAULT_DASHBOARD_CONFIG.customerQuality.chartShape,
+    showCount: typeof cq.showCount === 'boolean' ? cq.showCount : DEFAULT_DASHBOARD_CONFIG.customerQuality.showCount,
+    showPercentage: typeof cq.showPercentage === 'boolean' ? cq.showPercentage : DEFAULT_DASHBOARD_CONFIG.customerQuality.showPercentage,
+    showDescription: typeof cq.showDescription === 'boolean' ? cq.showDescription : DEFAULT_DASHBOARD_CONFIG.customerQuality.showDescription,
+    tapBehavior: typeof cq.tapBehavior === 'string' && VALID_CQ_TAP_BEHAVIORS.has(cq.tapBehavior)
+      ? cq.tapBehavior as 'modal' | 'filter'
+      : DEFAULT_DASHBOARD_CONFIG.customerQuality.tapBehavior,
+    sortOrder: typeof cq.sortOrder === 'string' && VALID_CQ_SORT_ORDERS.has(cq.sortOrder as CustomerQualitySortOrder)
+      ? cq.sortOrder as CustomerQualitySortOrder
+      : DEFAULT_DASHBOARD_CONFIG.customerQuality.sortOrder,
   }
 
   // §TOP-INSIGHTS
@@ -357,4 +392,41 @@ export function resolveDefaultTab(
   if (orderedVisible.length === 0) return null
   if (orderedVisible.includes(savedDefaultTab)) return savedDefaultTab
   return orderedVisible[0]
+}
+
+/**
+ * §STEP-2C: Pure helper — sort grade distribution data per the user's sortOrder preference.
+ *
+ * Input: gradeData = [{ grade: 'A', count: 5 }, { grade: 'B', count: 10 }, ...]
+ *        config = the parsed DashboardSectionConfig (reads config.customerQuality.sortOrder)
+ *
+ * Behavior:
+ *   'grade'      → A, B, C, D, E (natural grade order — the existing default)
+ *   'count-desc' → highest count first, ties broken by grade order (A before B)
+ *
+ * This is a PURE function (no side effects) so it can be unit-tested directly
+ * without React/DOM. The dashboard-view calls this to derive the sorted
+ * visible grade data before rendering.
+ *
+ * §NOTE: This does NOT filter by visibleGrades — the caller is responsible for
+ * filtering. This only sorts.
+ */
+export function getSortedGradeData(
+  gradeData: Array<{ grade: string; count: number }>,
+  config: DashboardSectionConfig,
+): Array<{ grade: string; count: number }> {
+  const sortOrder = config.customerQuality.sortOrder
+  const arr = [...gradeData] // shallow copy — never mutate caller's array
+  if (sortOrder === 'count-desc') {
+    // Highest count first; ties broken by natural grade order (A < B < C < D < E)
+    const gradeOrder: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, E: 4 }
+    arr.sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count
+      return (gradeOrder[a.grade] ?? 99) - (gradeOrder[b.grade] ?? 99)
+    })
+  } else {
+    // 'grade' — natural A → E order. Unknown grades sort last alphabetically.
+    arr.sort((a, b) => a.grade.localeCompare(b.grade))
+  }
+  return arr
 }
