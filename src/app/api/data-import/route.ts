@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
 
 // ─── Helper: gather all existing IDs for the current business ─────────────
 
-async function gatherExistingIds(businessId: string): Promise<ExistingIds> {
+export async function gatherExistingIds(businessId: string): Promise<ExistingIds> {
   const [
     parties, products, invoices, invoiceItems, transactions,
     categories, customPrices, staff, partyNotes, stockMovements,
@@ -240,7 +240,7 @@ interface ImportResult {
  *   9. StockMovements (depends on Product)
  *   10. CustomPrices (depends on Product + Party)
  */
-async function performImport(
+export async function performImport(
   envelope: BackupEnvelope,
   businessId: string,
   existing: ExistingIds,
