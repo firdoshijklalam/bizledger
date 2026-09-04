@@ -55,6 +55,10 @@ server.log
 # Skills directory
 /skills/*.db
 *.db
+# SQLite WAL-mode runtime artifacts
+*.db-shm
+*.db-wal
+*.db-journal
 upload/
 worklog.md
 *.log
