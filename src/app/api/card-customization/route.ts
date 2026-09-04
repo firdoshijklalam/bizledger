@@ -228,8 +228,18 @@ function validateDashboardSections(input: unknown): string | null {
   }
 
   // §VALIDATE-STRING-ARRAY: helper for string[] fields
+  // Returns [] for non-arrays (field missing/invalid → treated as empty, parser defaults handle fallback)
   const validateStringArray = (arr: any, validSet: Set<string>): string[] => {
     if (!Array.isArray(arr)) return []
+    return arr.filter((s: any) => typeof s === 'string' && validSet.has(s))
+  }
+
+  // §STEP-1D-CORRECTION: Validate `order` fields — null-safe.
+  // If the field is missing/invalid (not an array), return null so the parser
+  // falls back to defaults. If it's an explicit empty array [], preserve it.
+  const validateOrderArray = (arr: any, validSet: Set<string>): string[] | null => {
+    if (arr === null || arr === undefined) return null // missing → parser uses defaults
+    if (!Array.isArray(arr)) return null // invalid type → parser uses defaults
     return arr.filter((s: any) => typeof s === 'string' && validSet.has(s))
   }
 
@@ -251,8 +261,8 @@ function validateDashboardSections(input: unknown): string | null {
   if (parsed.topInsights && typeof parsed.topInsights === 'object') {
     result.topInsights = {
       visibleTabs: validateStringArray(parsed.topInsights.visibleTabs, TOP_TABS),
-      // §STEP-1D: Added order field for tab reordering
-      order: validateStringArray(parsed.topInsights.order, TOP_TABS),
+      // §STEP-1D-CORRECTION: Use validateOrderArray for order fields (null-safe)
+      order: validateOrderArray(parsed.topInsights.order, TOP_TABS),
       defaultTab: typeof parsed.topInsights.defaultTab === 'string' && TOP_TABS.has(parsed.topInsights.defaultTab) ? parsed.topInsights.defaultTab : 'debtors',
     }
   }
@@ -261,8 +271,8 @@ function validateDashboardSections(input: unknown): string | null {
   if (parsed.businessActivity && typeof parsed.businessActivity === 'object') {
     result.businessActivity = {
       visibleTabs: validateStringArray(parsed.businessActivity.visibleTabs, HUB_TABS),
-      // §STEP-1D: Added order field for tab reordering
-      order: validateStringArray(parsed.businessActivity.order, HUB_TABS),
+      // §STEP-1D-CORRECTION: Use validateOrderArray for order fields (null-safe)
+      order: validateOrderArray(parsed.businessActivity.order, HUB_TABS),
       defaultTab: typeof parsed.businessActivity.defaultTab === 'string' && HUB_TABS.has(parsed.businessActivity.defaultTab) ? parsed.businessActivity.defaultTab : 'transactions',
     }
   }
@@ -271,7 +281,8 @@ function validateDashboardSections(input: unknown): string | null {
   if (parsed.quickActions && typeof parsed.quickActions === 'object') {
     result.quickActions = {
       visibleActions: validateStringArray(parsed.quickActions.visibleActions, QUICK_ACTIONS),
-      order: validateStringArray(parsed.quickActions.order, QUICK_ACTIONS),
+      // §STEP-1D-CORRECTION: Use validateOrderArray for order fields (null-safe)
+      order: validateOrderArray(parsed.quickActions.order, QUICK_ACTIONS),
     }
   }
 

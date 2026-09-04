@@ -242,16 +242,28 @@ export function moveItemInOrder(
   id: string,
   direction: 'up' | 'down',
 ): string[] | null {
-  // Build visible-ordered list
-  const visibleOrdered: string[] = []
+  // §STEP-1D-CORRECTION: Normalize the full order FIRST.
+  // This ensures every valid ID from BOTH `order` and `visibleActions` is
+  // preserved. Disabled IDs already in `order` stay in place. Visible IDs
+  // missing from `order` are appended deterministically.
+  const normalizedOrder: string[] = []
+  // 1. Keep all IDs from the original order (both visible and disabled)
   for (const actionId of order) {
-    if (visibleActions.includes(actionId) && !visibleOrdered.includes(actionId)) {
-      visibleOrdered.push(actionId)
+    if (!normalizedOrder.includes(actionId)) {
+      normalizedOrder.push(actionId)
     }
   }
-  // Append visible items not in order
+  // 2. Append visible IDs not already in the order
   for (const actionId of visibleActions) {
-    if (!visibleOrdered.includes(actionId)) {
+    if (!normalizedOrder.includes(actionId)) {
+      normalizedOrder.push(actionId)
+    }
+  }
+
+  // Build visible-ordered list from the NORMALIZED order
+  const visibleOrdered: string[] = []
+  for (const actionId of normalizedOrder) {
+    if (visibleActions.includes(actionId) && !visibleOrdered.includes(actionId)) {
       visibleOrdered.push(actionId)
     }
   }
@@ -266,11 +278,10 @@ export function moveItemInOrder(
 
   const swapId = visibleOrdered[swapVisibleIdx]
 
-  // Reconstruct full order: walk the original order, when we encounter
-  // `id` or `swapId`, output them in swapped order. All other items
-  // (including disabled ones) stay in their original positions.
+  // Reconstruct full order: walk the NORMALIZED order, swap `id` and `swapId`.
+  // All other items (including disabled ones) stay in their original positions.
   const newOrder: string[] = []
-  for (const actionId of order) {
+  for (const actionId of normalizedOrder) {
     if (actionId === id) {
       newOrder.push(swapId)
     } else if (actionId === swapId) {
@@ -280,9 +291,9 @@ export function moveItemInOrder(
     }
   }
 
-  // If id or swapId were not in the original order, append them
-  if (!order.includes(id)) newOrder.push(id)
-  if (!order.includes(swapId)) newOrder.push(swapId)
+  // §STEP-1D-CORRECTION: No need to append id/swapId — they're already in
+  // normalizedOrder (id is visible → was added in step 2 if missing;
+  // swapId is visible → same).
 
   return newOrder
 }

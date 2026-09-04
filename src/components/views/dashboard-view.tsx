@@ -446,19 +446,22 @@ export function DashboardView() {
   // §HOOK-ORDER: These useEffects MUST be above the early returns (loading /
   // error / empty states) so React's rules-of-hooks sees them called in the
   // same order on every render — even when the dashboard short-circuits.
+  // §STEP-1D-CORRECTION: Use getOrderedTopInsightsTabs so the fallback
+  // selects the first tab in the CURRENT ORDERED visible list, not just
+  // visibleTabs[0] (which is the raw config array, not display order).
   useEffect(() => {
-    const visible = dashSectionConfig.topInsights.visibleTabs
-    if (visible.length > 0 && !visible.includes(topTab)) {
-      setTopTab(visible[0] as typeof topTab)
+    const orderedVisible = getOrderedTopInsightsTabs(dashSectionConfig)
+    if (orderedVisible.length > 0 && !orderedVisible.includes(topTab)) {
+      setTopTab(orderedVisible[0] as typeof topTab)
     }
-  }, [dashSectionConfig.topInsights.visibleTabs, topTab])
+  }, [dashSectionConfig, topTab])
 
   useEffect(() => {
-    const visible = dashSectionConfig.businessActivity.visibleTabs
-    if (visible.length > 0 && !visible.includes(hubTab)) {
-      setHubTab(visible[0] as typeof hubTab)
+    const orderedVisible = getOrderedBusinessActivityTabs(dashSectionConfig)
+    if (orderedVisible.length > 0 && !orderedVisible.includes(hubTab)) {
+      setHubTab(orderedVisible[0] as typeof hubTab)
     }
-  }, [dashSectionConfig.businessActivity.visibleTabs, hubTab])
+  }, [dashSectionConfig, hubTab])
 
   // §STEP-1A-ORDERING: Customer Quality grade fallback. If the user disabled
   // the currently-selected grade in the SectionSettingsSheet (or via API),

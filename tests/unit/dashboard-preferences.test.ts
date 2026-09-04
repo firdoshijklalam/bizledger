@@ -926,6 +926,137 @@ async function main() {
     assert(getOrderedBusinessActivityTabs(cfg16).length === 0, 'I16: all businessActivity tabs disabled → empty')
   }
 
+  // ─── §STEP-1D-CORRECTION: Regression tests R1-R11 ───────────────────
+  console.log('\n  §STEP-1D-CORRECTION: Regression tests:')
+  {
+    const A = 'add-party'
+    const B = 'add-product'
+    const C = 'new-invoice'
+    const D = 'add-transaction'
+    const T1 = 'debtors'
+    const T2 = 'buyers'
+    const T3 = 'payments'
+    const T4 = 'products'
+    const T5 = 'defaulters'
+    const H1 = 'transactions'
+    const H2 = 'lowstock'
+    const H3 = 'orders'
+
+    // R1: empty order + 3 visible tabs + move middle tab → all preserved
+    const r1 = moveItemInOrder([], [T1, T2, T3, T4, T5], T3, 'up')
+    assert(r1 !== null, 'R1: move returns non-null')
+    assert(r1!.length === 5, `R1: 5 tabs preserved (got ${r1!.length})`)
+    // Verify visible order: T3 moved up → T1,T3,T2,...
+    const cfg1 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: { visibleTabs: [T1, T2, T3, T4, T5], order: r1!, defaultTab: T1 }
+    }))
+    const v1 = getOrderedTopInsightsTabs(cfg1)
+    assert(JSON.stringify(v1) === JSON.stringify([T1, T3, T2, T4, T5]),
+      `R1: move T3 up → T1,T3,T2,T4,T5 (got ${JSON.stringify(v1)})`)
+
+    // R2: partial order + visible tabs missing from order → all preserved
+    const r2 = moveItemInOrder([T1], [T1, T2, T3, T4, T5], T1, 'down')
+    assert(r2 !== null, 'R2: move returns non-null')
+    assert(r2!.length === 5, `R2: 5 tabs in order (got ${r2!.length})`)
+    const cfg2 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: { visibleTabs: [T1, T2, T3, T4, T5], order: r2!, defaultTab: T1 }
+    }))
+    const v2 = getOrderedTopInsightsTabs(cfg2)
+    // T1 moved down → T2,T1,T3,T4,T5
+    assert(JSON.stringify(v2) === JSON.stringify([T2, T1, T3, T4, T5]),
+      `R2: move T1 down → T2,T1,T3,T4,T5 (got ${JSON.stringify(v2)})`)
+
+    // R3: empty Business Activity order + move tab → all 3 preserved
+    const r3 = moveItemInOrder([], [H1, H2, H3], H3, 'up')
+    assert(r3 !== null, 'R3: move returns non-null')
+    assert(r3!.length === 3, `R3: 3 tabs preserved (got ${r3!.length})`)
+    const cfg3 = parseDashboardSectionConfig(JSON.stringify({
+      businessActivity: { visibleTabs: [H1, H2, H3], order: r3!, defaultTab: H1 }
+    }))
+    const v3 = getOrderedBusinessActivityTabs(cfg3)
+    assert(JSON.stringify(v3) === JSON.stringify([H1, H3, H2]),
+      `R3: move H3 up → H1,H3,H2 (got ${JSON.stringify(v3)})`)
+
+    // R4: partial Quick Actions order + move tab → all preserved
+    const r4 = moveItemInOrder([A], [A, B, C, D], A, 'down')
+    assert(r4 !== null, 'R4: move returns non-null')
+    assert(r4!.length === 4, `R4: 4 actions preserved (got ${r4!.length})`)
+    const cfg4 = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: [A, B, C, D], order: r4! }
+    }))
+    const v4 = getOrderedQuickActions(cfg4)
+    assert(JSON.stringify(v4) === JSON.stringify([B, A, C, D]),
+      `R4: move A down → B,A,C,D (got ${JSON.stringify(v4)})`)
+
+    // R5: missing order in parsed old config → default order
+    const cfg5 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: { visibleTabs: [T1, T2, T3, T4, T5], defaultTab: T1 }
+      // no order field
+    }))
+    assert(JSON.stringify(cfg5.topInsights.order) === JSON.stringify([T1, T2, T3, T4, T5]),
+      `R5: missing order → default (got ${JSON.stringify(cfg5.topInsights.order)})`)
+
+    // R6: invalid/non-array order → default order
+    const cfg6 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: { visibleTabs: [T1, T2], order: 'invalid', defaultTab: T1 }
+    }))
+    assert(JSON.stringify(cfg6.topInsights.order) === JSON.stringify([T1, T2, T3, T4, T5]),
+      `R6: invalid order → default (got ${JSON.stringify(cfg6.topInsights.order)})`)
+
+    // R7: explicit [] order remains []
+    const cfg7 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: { visibleTabs: [T1, T2], order: [], defaultTab: T1 }
+    }))
+    assert(cfg7.topInsights.order.length === 0, `R7: explicit [] order stays [] (got ${cfg7.topInsights.order.length})`)
+
+    // R8: custom Top Insights order + hidden current tab → fallback to first ORDERED visible
+    const cfg8 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: {
+        visibleTabs: [T2, T4], // T1 (debtors) disabled
+        order: [T4, T2, T1, T3, T5], // T4 first in order
+        defaultTab: T1, // T1 is disabled
+      }
+    }))
+    const v8 = getOrderedTopInsightsTabs(cfg8)
+    assert(v8[0] === T4, `R8: first ordered visible is T4 (not T1 which is hidden) (got ${JSON.stringify(v8)})`)
+    assert(!v8.includes(T1), 'R8: hidden T1 not in visible result')
+
+    // R9: custom Business Activity order + hidden current tab → fallback
+    const cfg9 = parseDashboardSectionConfig(JSON.stringify({
+      businessActivity: {
+        visibleTabs: [H2, H3], // H1 (transactions) disabled
+        order: [H3, H2, H1], // H3 first in order
+        defaultTab: H1, // H1 is disabled
+      }
+    }))
+    const v9 = getOrderedBusinessActivityTabs(cfg9)
+    assert(v9[0] === H3, `R9: first ordered visible is H3 (not H1 which is hidden) (got ${JSON.stringify(v9)})`)
+
+    // R10: all tabs hidden → no crash, safe empty
+    const cfg10 = parseDashboardSectionConfig(JSON.stringify({
+      topInsights: { visibleTabs: [], order: [], defaultTab: T1 },
+      businessActivity: { visibleTabs: [], order: [], defaultTab: H1 },
+    }))
+    assert(getOrderedTopInsightsTabs(cfg10).length === 0, 'R10: all topInsights hidden → empty')
+    assert(getOrderedBusinessActivityTabs(cfg10).length === 0, 'R10: all businessActivity hidden → empty')
+
+    // R11: disabled-item preservation — H1-H7 tests still pass
+    // Re-run a key H-test to verify no regression
+    const r11 = moveItemInOrder([A, B, C, D], [A, B, C, D], C, 'up')
+    assert(r11 !== null, 'R11: H1 still passes (move returns non-null)')
+    assert(JSON.stringify(r11) === JSON.stringify([A, C, B, D]),
+      `R11: H1 all enabled move C up → A,C,B,D (got ${JSON.stringify(r11)})`)
+    // H2-style: B disabled, move C up → visible C,A,D
+    const r11b = moveItemInOrder([A, B, C, D], [A, C, D], C, 'up')
+    assert(r11b !== null, 'R11b: H2 move returns non-null')
+    const cfg11b = parseDashboardSectionConfig(JSON.stringify({
+      quickActions: { visibleActions: [A, C, D], order: r11b! }
+    }))
+    const v11b = getOrderedQuickActions(cfg11b)
+    assert(JSON.stringify(v11b) === JSON.stringify([C, A, D]),
+      `R11b: B disabled, move C up → C,A,D (got ${JSON.stringify(v11b)})`)
+  }
+
   // ─── Summary ─────────────────────────────────────────────────────────
   console.log(`\n✅ Passed: ${passed}`)
   console.log(`❌ Failed: ${failed}`)
