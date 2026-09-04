@@ -12,6 +12,7 @@ import {
   parseDashboardSectionConfig,
   isSectionVisible,
   moveItemInOrder,
+  resolveConfirmMode,
   type DashboardSectionConfig,
   type DashboardSection,
 } from '@/lib/dashboard-preferences'
@@ -313,7 +314,13 @@ export function SectionSettingsSheet({
   const [draft, setDraft] = useState<DashboardSectionConfig>(savedConfig)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [showResetConfirm, setShowResetConfirm] = useState(false)
+  // §STEP-3C-FIX: Replaced ambiguous `showResetConfirm: boolean` with an explicit
+  // intent state. This fixes the bug where the Restore Default button was
+  // hijacked by the discard-confirm path when the draft was dirty.
+  //   'discard' = user is closing/discard-ending a dirty sheet (from X/backdrop/Cancel)
+  //   'reset'   = user clicked Restore Default (wants to reset draft to defaults, stay open)
+  //   null      = no confirmation shown
+  const [confirmMode, setConfirmMode] = useState<'discard' | 'reset' | null>(null)
 
   // §STEP-3C: Re-sync draft to savedConfig when the sheet opens (false→true).
   // Mirrors the DashboardCustomizationSheet pattern (L61-66).
@@ -323,7 +330,7 @@ export function SectionSettingsSheet({
     if (open) {
       setDraft(savedConfig)
       setSaveError(null)
-      setShowResetConfirm(false)
+      setConfirmMode(null)
     }
   }
 
@@ -358,18 +365,21 @@ export function SectionSettingsSheet({
   }
 
   const tryClose = () => {
-    if (isDirty) {
-      // §STEP-3C: if dirty, show the reset-confirm as a "discard changes?" prompt
-      setShowResetConfirm(true)
-    } else {
+    // §STEP-3C-FIX: dirty close → discard confirmation intent (NOT reset).
+    // Uses the pure resolveConfirmMode helper so the tested logic matches the component.
+    const mode = resolveConfirmMode('close', isDirty)
+    if (mode === null) {
       onClose()
+    } else {
+      setConfirmMode(mode)
     }
   }
 
   const handleReset = () => {
-    // §STEP-3C: reset ONLY this section's sub-config to defaults (in draft, not persisted)
+    // §STEP-3C: reset ONLY this section's sub-config to defaults (in draft, not persisted).
+    // §STEP-3C-FIX: other sections of the draft remain unchanged. No network request.
     setDraft(prev => ({ ...prev, [sectionId]: JSON.parse(JSON.stringify(sectionDefaults)) }))
-    setShowResetConfirm(false)
+    setConfirmMode(null)
   }
 
   // ── Derive display values from the DRAFT (not savedConfig) ────────────
@@ -656,35 +666,48 @@ export function SectionSettingsSheet({
                 </div>
               )}
 
-              {/* Reset */}
+              {/* §STEP-3C-FIX: Confirmation dispatches on `confirmMode` (the intent),
+                  NOT on `isDirty`. This fixes the bug where Restore Default was
+                  hijacked by the discard path when the draft was dirty. */}
               <div className="pt-2 border-t border-border">
-                {showResetConfirm ? (
+                {confirmMode === 'discard' ? (
                   <div className="space-y-2">
                     <p className="text-xs text-muted-foreground text-center py-1">
-                      {isDirty ? `Discard unsaved changes to ${title}?` : `Restore ${title} settings to defaults?`}
+                      Discard unsaved changes to {title}?
                     </p>
                     <div className="flex gap-2">
-                      <button onClick={() => setShowResetConfirm(false)} className="flex-1 py-2 rounded-lg bg-muted text-xs font-medium min-h-[44px]">Cancel</button>
+                      <button onClick={() => setConfirmMode(null)} className="flex-1 py-2 rounded-lg bg-muted text-xs font-medium min-h-[44px]">Continue Editing</button>
                       <button
                         onClick={() => {
-                          if (isDirty) {
-                            // §STEP-3C: discard draft → re-sync to savedConfig + close
-                            setDraft(savedConfig)
-                            setShowResetConfirm(false)
-                            onClose()
-                          } else {
-                            handleReset()
-                          }
+                          // §STEP-3C-FIX: discard draft → re-sync to savedConfig + close
+                          setDraft(savedConfig)
+                          setConfirmMode(null)
+                          onClose()
                         }}
                         className="flex-1 py-2 rounded-lg bg-red-500 text-white text-xs font-medium min-h-[44px]"
                       >
-                        {isDirty ? 'Discard' : 'Reset'}
+                        Discard
+                      </button>
+                    </div>
+                  </div>
+                ) : confirmMode === 'reset' ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground text-center py-1">
+                      Restore {title} settings to defaults?
+                    </p>
+                    <div className="flex gap-2">
+                      <button onClick={() => setConfirmMode(null)} className="flex-1 py-2 rounded-lg bg-muted text-xs font-medium min-h-[44px]">Cancel</button>
+                      <button
+                        onClick={() => { handleReset() }}
+                        className="flex-1 py-2 rounded-lg bg-red-500 text-white text-xs font-medium min-h-[44px]"
+                      >
+                        Reset
                       </button>
                     </div>
                   </div>
                 ) : (
                   <button
-                    onClick={() => setShowResetConfirm(true)}
+                    onClick={() => setConfirmMode(resolveConfirmMode('reset', isDirty) ?? 'reset')}
                     className="w-full flex items-center justify-center gap-2 p-3 rounded-xl text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors min-h-[44px]"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />

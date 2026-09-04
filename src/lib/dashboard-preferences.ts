@@ -452,3 +452,35 @@ export function getSortedGradeData(
   }
   return arr
 }
+
+/**
+ * §STEP-3C-FIX: Pure helper — resolve the confirmation intent for SectionSettingsSheet.
+ *
+ * This extracts the confirmation-mode decision logic into a testable pure function
+ * (separate from the React component). The component calls this to decide which
+ * confirmation UI to render when the user attempts to close or reset.
+ *
+ * §BEHAVIOR:
+ *   - User clicks Restore Default → always returns 'reset' (regardless of dirty state).
+ *     This fixes the bug where the dirty-state branch hijacked the reset intent.
+ *   - User tries to close (X/backdrop/Cancel) AND draft is dirty → 'discard'.
+ *   - User tries to close AND draft is clean → null (close immediately, no confirm).
+ *
+ * @param trigger  - what the user did: 'close' (X/backdrop/Cancel) or 'reset' (Restore Default button)
+ * @param isDirty  - whether the draft differs from savedConfig
+ * @returns 'discard' | 'reset' | null
+ */
+export type SectionConfirmMode = 'discard' | 'reset' | null
+
+export function resolveConfirmMode(
+  trigger: 'close' | 'reset',
+  isDirty: boolean,
+): SectionConfirmMode {
+  // §STEP-3C-FIX: Restore Default ALWAYS opens the reset confirmation, even when
+  // the draft is dirty. This is the core fix — previously the dirty branch
+  // redirected to the discard confirmation.
+  if (trigger === 'reset') return 'reset'
+  // trigger === 'close'
+  if (isDirty) return 'discard'
+  return null
+}
