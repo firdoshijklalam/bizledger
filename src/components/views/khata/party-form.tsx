@@ -70,7 +70,7 @@ export function PartyForm({ open, onOpenChange, partyId, onSuccess, initialType 
       setOpeningBalance('0'); setBalanceType('receivable')
       setCreditLimit(''); setAddress(''); setGstin(''); setNotes('')
     }
-  }, [existing, partyId, open])
+  }, [existing, partyId, open, initialType])
 
   const isCustomer = type === 'customer' || type === 'both'
   const isSupplier = type === 'supplier' || type === 'both'

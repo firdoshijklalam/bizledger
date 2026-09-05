@@ -13,6 +13,7 @@ import { EmptyState, LoadingState } from '@/components/shared/states'
 import { highlightWeighted } from '@/lib/highlight'
 import { toast } from 'sonner'
 import { useEffect, useMemo, useState } from 'react'
+import { resolvePartyTypeFromAction, shouldOpenPartyForm } from '@/lib/quick-action-resolver'
 import { PartyForm } from './khata/party-form'
 import { PartyDetail } from './khata/party-detail'
 import { Input } from '@/components/ui/input'
@@ -84,8 +85,9 @@ export function KhataView() {
   useEffect(() => {
     if (!pendingQuickAction) return
     const actionType = pendingQuickAction.type
-    if (actionType === 'add-party' || actionType === 'add-customer' || actionType === 'add-supplier') {
-      const partyType = actionType === 'add-customer' ? 'customer' : actionType === 'add-supplier' ? 'supplier' : null
+    if (shouldOpenPartyForm(actionType)) {
+      const partyType = resolvePartyTypeFromAction(actionType)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPendingPartyType(partyType)
       setShowPartyForm(true)
       clearQuickAction()
