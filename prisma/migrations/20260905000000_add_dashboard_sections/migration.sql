@@ -1,0 +1,28 @@
+-- §STEP-4B-FIX-A: Add dashboardSections column to AppSettings.
+--
+-- §ROOT-CAUSE: The dashboardSections column was added to prisma/schema.prisma
+-- (L541: `dashboardSections String?`) during the STEP-1D Dashboard Customization
+-- work, but no Prisma migration was created for it. The production PostgreSQL
+-- database (Neon) was never updated — `prisma migrate deploy` only applies
+-- migration files, and none existed for this column.
+--
+-- §IMPACT: Every Prisma query against AppSettings (findUnique, upsert, etc.)
+-- generates SQL that includes the dashboardSections column (because it's in
+-- the schema). PostgreSQL rejects the query with "column does not exist",
+-- causing HTTP 500 on:
+--   - GET /api/app-settings (SELECT includes dashboardSections)
+--   - POST /api/card-customization (upsert includes dashboardSections)
+-- This breaks ALL dashboard customization saves on production, not just
+-- Top Insights — the error surfaces as "Card customization save failed".
+--
+-- §SAFETY: This migration is purely additive — it adds one nullable TEXT
+-- column with no default. Existing rows get NULL for dashboardSections,
+-- which the parser treats as "use defaults" (all sections visible, default
+-- order, default tabs). No existing data is modified or lost.
+--
+-- §COMPATIBILITY: The column is nullable (String? in schema.prisma), so it
+-- does NOT require a NOT NULL constraint or a default value. PostgreSQL
+-- allows adding nullable columns without a table rewrite (instant operation
+-- for small tables, no lock contention).
+
+ALTER TABLE "AppSettings" ADD COLUMN "dashboardSections" TEXT;
