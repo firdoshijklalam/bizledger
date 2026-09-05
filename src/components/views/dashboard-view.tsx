@@ -1337,39 +1337,6 @@ export function DashboardView() {
                 </button>
               ))}
             </div>
-            {/* §STEP-1: View All button — moved BELOW the tab row */}
-            <div className="mb-3">
-              <button onClick={() => {
-                saveScrollPos('dashboard')
-                // §DYNAMIC-ROUTING: View All routes based on active tab.
-                if (topTab === 'debtors') {
-                  // Top Debtors → Outstanding Payments (Receivables)
-                  setActiveView('reports')
-                  setReportsTab('outstanding')
-                } else if (topTab === 'buyers') {
-                  // Top Buyers → Party Ledger (sorted by sales volume)
-                  setActiveView('reports')
-                  setReportsTab('party')
-                } else if (topTab === 'payments') {
-                  // Top Payments → History/Transactions (payments received)
-                  // §PHASE-5-D1: Use RangeContext for full custom-range support.
-                  setHistoryRangeContext({ range: '7d' })
-                  setActiveView('history')
-                } else if (topTab === 'products') {
-                  // Top Products → Inventory
-                  setInventoryFilter('all')
-                  setActiveView('inventory')
-                } else if (topTab === 'defaulters') {
-                  // Defaulters → Outstanding Payments (Grade D & E)
-                  setKhataGradeFilter('D') // pre-filter to D (E also shown in outstanding)
-                  setActiveView('reports')
-                  setReportsTab('outstanding')
-                } else {
-                  setKhataFilter('all')
-                  setActiveView('khata')
-                }
-              }} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
-            </div>
 
             {/* Tab content */}
             {topTab === 'debtors' && (
@@ -1456,6 +1423,32 @@ export function DashboardView() {
             )}
             </>
             )}
+            {/* §STEP-4D: View All — moved BELOW tab content */}
+            <div className="mt-3">
+              <button onClick={() => {
+                saveScrollPos('dashboard')
+                if (topTab === 'debtors') {
+                  setActiveView('reports')
+                  setReportsTab('outstanding')
+                } else if (topTab === 'buyers') {
+                  setActiveView('reports')
+                  setReportsTab('party')
+                } else if (topTab === 'payments') {
+                  setHistoryRangeContext({ range: '7d' })
+                  setActiveView('history')
+                } else if (topTab === 'products') {
+                  setInventoryFilter('all')
+                  setActiveView('inventory')
+                } else if (topTab === 'defaulters') {
+                  setKhataGradeFilter('D')
+                  setActiveView('reports')
+                  setReportsTab('outstanding')
+                } else {
+                  setKhataFilter('all')
+                  setActiveView('khata')
+                }
+              }} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
+            </div>
           </Card>
         )
 
@@ -1500,33 +1493,6 @@ export function DashboardView() {
                   {tab.label}
                 </button>
               ))}
-            </div>
-            {/* §STEP-1: View All — moved BELOW the tab row */}
-            <div className="mb-3">
-              <button onClick={() => {
-                saveScrollPos('dashboard')
-                // §DYNAMIC-ROUTING: View All routes based on active hub tab.
-                if (hubTab === 'transactions') {
-                  // Transactions → History (with active time filter)
-                  // §PHASE-5-D1: Pass the FULL RangeContext (not just range string)
-                  // so History sees the exact same date window — including custom
-                  // range's start/end dates.
-                  setHistoryRangeContext({ range: timeRange, customStart, customEnd })
-                  setActiveView('history')
-                } else if (hubTab === 'lowstock') {
-                  // Low Stock → Inventory (with low-stock filter, no time param)
-                  setInventoryFilter('low-stock')
-                  setActiveView('inventory')
-                } else if (hubTab === 'orders') {
-                  // §FIX: Online Orders → dedicated Online Orders view.
-                  setActiveView('online-orders')
-                } else {
-                  setKhataFilter('all')
-                  setActiveView('khata')
-                }
-              }} className="text-xs text-primary font-medium flex items-center">
-                View All <ChevronRight className="w-3 h-3" />
-              </button>
             </div>
 
             {/* §FILTER-DROPDOWN: Interactive date range picker for the hub.
@@ -1600,6 +1566,26 @@ export function DashboardView() {
             )}
             </>
             )}
+            {/* §STEP-4D: View All — moved BELOW tab content */}
+            <div className="mt-3">
+              <button onClick={() => {
+                saveScrollPos('dashboard')
+                if (hubTab === 'transactions') {
+                  setHistoryRangeContext({ range: timeRange, customStart, customEnd })
+                  setActiveView('history')
+                } else if (hubTab === 'lowstock') {
+                  setInventoryFilter('low-stock')
+                  setActiveView('inventory')
+                } else if (hubTab === 'orders') {
+                  setActiveView('online-orders')
+                } else {
+                  setKhataFilter('all')
+                  setActiveView('khata')
+                }
+              }} className="text-xs text-primary font-medium flex items-center">
+                View All <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
           </Card>
         )
 
