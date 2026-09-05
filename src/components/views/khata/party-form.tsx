@@ -24,9 +24,12 @@ interface Props {
   // §ON-SUCCESS: Called when a party is created or updated. Passes the full
   // party object so callers (e.g. SalePadView) can auto-select the customer.
   onSuccess?: (party: Party) => void
+  // §STEP-4E-REVIEW: Optional initial party type for new-party creation.
+  // When set, the form opens with this type pre-selected.
+  initialType?: PartyType
 }
 
-export function PartyForm({ open, onOpenChange, partyId, onSuccess }: Props) {
+export function PartyForm({ open, onOpenChange, partyId, onSuccess, initialType }: Props) {
   const { triggerRefresh, setSelectedPartyId } = useAppStore()
   const { t } = useI18n()
   const { data: existing } = useFetch<Party>(partyId ? `/api/parties/${partyId}` : null, [partyId, open])
@@ -63,7 +66,7 @@ export function PartyForm({ open, onOpenChange, partyId, onSuccess }: Props) {
       setGstin(existing.gstin || '')
       setNotes(existing.notes || '')
     } else if (!partyId) {
-      setName(''); setPhone(''); setType('customer'); setGrade('B')
+      setName(''); setPhone(''); setType(initialType ?? 'customer'); setGrade('B')
       setOpeningBalance('0'); setBalanceType('receivable')
       setCreditLimit(''); setAddress(''); setGstin(''); setNotes('')
     }

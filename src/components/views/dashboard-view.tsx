@@ -1635,11 +1635,9 @@ export function DashboardView() {
                 return (
                   <button key={a.action} onClick={() => {
                     if (a.action === 'low-stock') { setInventoryFilter('low-stock'); }
-                    if (a.action === 'add-customer') { setKhataFilter('customer'); }
-                    if (a.action === 'add-supplier') { setKhataFilter('supplier'); }
                     setActiveView(a.view);
-                    // §STEP-4E: Only trigger quick action for actions that have a handler
-                    if (['add-party', 'add-product', 'new-invoice', 'add-transaction'].includes(a.action)) {
+                    // §STEP-4E-REVIEW: All party-creation actions trigger the form via quick action
+                    if (['add-party', 'add-product', 'new-invoice', 'add-transaction', 'add-customer', 'add-supplier'].includes(a.action)) {
                       triggerQuickAction({ id: crypto.randomUUID(), type: a.action as any });
                     }
                   }} className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-muted transition-colors min-h-[72px] justify-center">
@@ -1673,10 +1671,8 @@ export function DashboardView() {
                           <button key={a.action} onClick={() => {
                             setShowQuickActionsOverflow(false);
                             if (a.action === 'low-stock') { setInventoryFilter('low-stock'); }
-                            if (a.action === 'add-customer') { setKhataFilter('customer'); }
-                            if (a.action === 'add-supplier') { setKhataFilter('supplier'); }
                             setActiveView(a.view);
-                            if (['add-party', 'add-product', 'new-invoice', 'add-transaction'].includes(a.action)) {
+                            if (['add-party', 'add-product', 'new-invoice', 'add-transaction', 'add-customer', 'add-supplier'].includes(a.action)) {
                               triggerQuickAction({ id: crypto.randomUUID(), type: a.action as any });
                             }
                           }} className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-muted transition-colors min-h-[72px] justify-center">
