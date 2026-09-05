@@ -77,19 +77,13 @@ export function KhataView() {
     }
   }, [selectedPartyId, saveScrollPos, restoreScrollPos])
 
-  // §STEP-4E-REVIEW: Track the initial party type for add-customer/add-supplier
-  const [pendingPartyType, setPendingPartyType] = useState<'customer' | 'supplier' | 'both' | null>(null)
-
   // Handle quick action trigger
   useEffect(() => {
-    if (!pendingQuickAction) return
-    const actionType = pendingQuickAction.type
-    if (actionType === 'add-party' || actionType === 'add-customer' || actionType === 'add-supplier') {
-      const partyType = actionType === 'add-customer' ? 'customer' : actionType === 'add-supplier' ? 'supplier' : null
-      setPendingPartyType(partyType)
+    if (pendingQuickAction?.type === 'add-party') {
       setShowPartyForm(true)
       clearQuickAction()
-    } else if (actionType === 'add-transaction') {
+    } else if (pendingQuickAction?.type === 'add-transaction') {
+      // Transaction needs a party — prompt user to select one
       toast.info('Select a party to add a transaction')
       clearQuickAction()
     }
@@ -324,9 +318,8 @@ export function KhataView() {
 
       <PartyForm
         open={showPartyForm || !!editingPartyId}
-        onOpenChange={(o) => { setShowPartyForm(o); if (!o) { setEditingPartyId(null); setPendingPartyType(null) } }}
+        onOpenChange={(o) => { setShowPartyForm(o); if (!o) setEditingPartyId(null) }}
         partyId={editingPartyId}
-        initialType={pendingPartyType ?? undefined}
       />
     </div>
   )

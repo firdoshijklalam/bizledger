@@ -940,6 +940,7 @@ export function SalePadView() {
   useEffect(() => {
     let cancelled = false
     if (paymentMode !== 'upi' || upiQrAmount <= 0 || !upiId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setUpiQrDataUrl('')
       return
     }

@@ -658,27 +658,6 @@ export function SectionSettingsSheet({
                 </div>
               )}
 
-              {/* §STEP-4E-REVIEW: Quick Actions maxVisible selector */}
-              {sectionId === 'quickActions' && (
-                <div className="pt-2 border-t border-border space-y-3">
-                  <p className="text-xs font-semibold text-muted-foreground">Display</p>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground mb-1.5">Maximum Visible Actions</p>
-                    <div className="grid grid-cols-3 gap-1">
-                      {([4, 6, 8] as const).map((val) => (
-                        <button
-                          key={val}
-                          onClick={() => updateSection(prev => ({ ...prev, quickActions: { ...prev.quickActions, maxVisible: val } }))}
-                          className={`py-1.5 rounded-lg text-[11px] font-medium transition-colors min-h-[36px] ${qa.maxVisible === val ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
-                        >
-                          {val}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* §STEP-2C: Customer Quality advanced controls panel — now mutates the DRAFT */}
               {sectionId === 'customerQuality' && (
                 <div className="pt-2 border-t border-border space-y-3">
