@@ -7,6 +7,8 @@ import {
   LayoutGrid, BarChart3, Users, Package, ArrowLeftRight, Zap,
   RotateCcw, Check,
 } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import { SortableList, SortableListItem, DragHandle } from '@/components/shared/sortable-list'
 import {
   DEFAULT_DASHBOARD_CONFIG,
   parseDashboardSectionConfig,
@@ -148,61 +150,75 @@ export function DashboardCustomizationSheet({
 
             {/* Body */}
             <div className="overflow-y-auto overscroll-contain p-4 space-y-3 flex-1">
-              {/* Show/Hide + Reorder Sections */}
+              {/* Show/Hide + Reorder Sections — §STEP-4C: now with DnD via SortableList */}
               <div>
                 <p className="text-xs font-semibold text-muted-foreground mb-2">Dashboard Sections</p>
                 <p className="text-[10px] text-muted-foreground/70 mb-3">Toggle visibility and reorder sections. Changes apply on save.</p>
-                <div className="space-y-2">
-                  {sortedDraft.map((section, i) => {
-                    const meta = SECTION_LABELS[section.id] || { label: section.id, icon: LayoutGrid }
-                    const Icon = meta.icon
-                    return (
-                      <div key={section.id} className={`flex items-center gap-2 p-3 rounded-xl border ${section.visible ? 'border-border bg-card' : 'border-border/50 bg-muted/30'}`}>
-                        {/* Move controls */}
-                        <div className="flex flex-col gap-0.5 shrink-0">
-                          <button
-                            onClick={() => handleMove(section.id, 'up')}
-                            disabled={i === 0}
-                            className="w-7 h-5 rounded hover:bg-muted flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
-                            aria-label="Move up"
-                          >
-                            <ChevronUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleMove(section.id, 'down')}
-                            disabled={i === sortedDraft.length - 1}
-                            className="w-7 h-5 rounded hover:bg-muted flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
-                            aria-label="Move down"
-                          >
-                            <ChevronDown className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        {/* Icon */}
-                        <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${section.visible ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
-                          <Icon className="w-4 h-4" />
-                        </span>
-                        {/* Label */}
-                        <div className="min-w-0 flex-1">
-                          <p className={`text-xs font-medium truncate ${section.visible ? '' : 'text-muted-foreground'}`}>
-                            {meta.label}
-                          </p>
-                        </div>
-                        {/* Visibility toggle */}
-                        <button
-                          onClick={() => handleToggle(section.id)}
-                          className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 hover:bg-muted transition-colors min-h-[44px]"
-                          aria-label={section.visible ? 'Hide section' : 'Show section'}
-                        >
-                          {section.visible ? (
-                            <Eye className="w-4 h-4 text-primary" />
-                          ) : (
-                            <EyeOff className="w-4 h-4 text-muted-foreground" />
+                <SortableList
+                  items={sortedDraft.map(s => s.id)}
+                  onReorder={(newOrder) => {
+                    // §STEP-4C: DnD produced a new section order. Re-index the sections.
+                    setDraft(prev => {
+                      const newSections = newOrder.map((id, idx) => {
+                        const existing = prev.sections.find(s => s.id === id)
+                        return existing ? { ...existing, order: idx } : { id: id as any, visible: true, order: idx }
+                      })
+                      return { ...prev, sections: newSections }
+                    })
+                  }}
+                >
+                  <div className="space-y-2">
+                    {sortedDraft.map((section, i) => {
+                      const meta = SECTION_LABELS[section.id] || { label: section.id, icon: LayoutGrid }
+                      const Icon = meta.icon
+                      return (
+                        <SortableListItem key={section.id} id={section.id}>
+                          {({ dragHandleProps }) => (
+                            <div className={`flex items-center gap-2 p-3 rounded-xl border ${section.visible ? 'border-border bg-card' : 'border-border/50 bg-muted/30'}`}>
+                              {/* §STEP-4C: Drag handle */}
+                              <DragHandle {...dragHandleProps} />
+                              {/* §STEP-4C: Keep ↑/↓ as accessibility fallback */}
+                              <div className="flex flex-col gap-0.5 shrink-0">
+                                <button
+                                  onClick={() => handleMove(section.id, 'up')}
+                                  disabled={i === 0}
+                                  className="w-7 h-5 rounded hover:bg-muted flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
+                                  aria-label="Move up"
+                                >
+                                  <ChevronUp className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleMove(section.id, 'down')}
+                                  disabled={i === sortedDraft.length - 1}
+                                  className="w-7 h-5 rounded hover:bg-muted flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
+                                  aria-label="Move down"
+                                >
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              {/* Icon */}
+                              <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${section.visible ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                                <Icon className="w-4 h-4" />
+                              </span>
+                              {/* Label */}
+                              <div className="min-w-0 flex-1">
+                                <p className={`text-xs font-medium truncate ${section.visible ? '' : 'text-muted-foreground'}`}>
+                                  {meta.label}
+                                </p>
+                              </div>
+                              {/* §STEP-4C: Standardized Switch for visibility */}
+                              <Switch
+                                checked={section.visible}
+                                onCheckedChange={(checked) => handleToggle(section.id)}
+                                aria-label={section.visible ? 'Hide section' : 'Show section'}
+                              />
+                            </div>
                           )}
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
+                        </SortableListItem>
+                      )
+                    })}
+                  </div>
+                </SortableList>
               </div>
 
               {/* Manage Summary Cards link */}
@@ -496,19 +512,17 @@ export function SectionSettingsSheet({
 
             {/* Body */}
             <div className="overflow-y-auto overscroll-contain p-4 space-y-4 flex-1">
-              {/* Section visibility */}
+              {/* §STEP-4C: Section visibility — using standardized shadcn Switch */}
               <div className="flex items-center justify-between p-3 rounded-xl bg-muted/50">
                 <div>
                   <p className="text-xs font-medium">Show {title}</p>
                   <p className="text-[10px] text-muted-foreground">Toggle this section on the dashboard</p>
                 </div>
-                <button
-                  onClick={() => toggleSection(!sectionVisible)}
-                  className={`w-12 h-7 rounded-full transition-colors relative ${sectionVisible ? 'bg-primary' : 'bg-muted'}`}
+                <Switch
+                  checked={sectionVisible}
+                  onCheckedChange={(checked) => toggleSection(checked)}
                   aria-label={sectionVisible ? 'Hide section' : 'Show section'}
-                >
-                  <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${sectionVisible ? 'translate-x-6' : 'translate-x-1'}`} />
-                </button>
+                />
               </div>
 
               {/* Items (tabs/actions) */}
@@ -517,66 +531,118 @@ export function SectionSettingsSheet({
                   <p className="text-xs font-semibold text-muted-foreground mb-2">
                     {supportsReorder ? 'Actions' : 'Visible Items'}
                   </p>
-                  <div className="space-y-1">
-                    {sortedItems.map((item) => {
-                      const isVisible = visibleItems.includes(item.id)
-                      const isDefault = defaultItemId === item.id
-                      // For reorder, determine if move up/down is possible
-                      const visibleSorted = supportsReorder && itemOrder
-                        ? sortedItems.filter(i => visibleItems.includes(i.id))
-                        : []
-                      const visibleIndex = visibleSorted.findIndex(i => i.id === item.id)
-                      const canMoveUp = !!onMoveItem && isVisible && visibleIndex > 0
-                      const canMoveDown = !!onMoveItem && isVisible && visibleIndex >= 0 && visibleIndex < visibleSorted.length - 1
-                      return (
-                        <div key={item.id} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50">
-                          <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <button
-                              onClick={() => onToggleItem(item.id)}
-                              className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isVisible ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}
-                              aria-label={isVisible ? 'Hide' : 'Show'}
-                            >
-                              {isVisible && <Check className="w-3 h-3 text-primary-foreground" />}
-                            </button>
-                            <span className={`text-xs font-medium truncate ${isVisible ? '' : 'text-muted-foreground line-through'}`}>
-                              {item.label}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            {/* Move Up / Move Down controls for reordering */}
-                            {onMoveItem && isVisible && (
-                              <div className="flex items-center gap-0.5">
-                                <button
-                                  onClick={() => onMoveItem(item.id, 'up')}
-                                  disabled={!canMoveUp}
-                                  className="w-7 h-7 rounded hover:bg-muted flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                  aria-label={`Move ${item.label} up`}
-                                >
-                                  <ChevronUp className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => onMoveItem(item.id, 'down')}
-                                  disabled={!canMoveDown}
-                                  className="w-7 h-7 rounded hover:bg-muted flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                  aria-label={`Move ${item.label} down`}
-                                >
-                                  <ChevronDown className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            )}
-                            {onSetDefault && isVisible && (
+                  {/* §STEP-4C: Wrap reorderable items in SortableList for DnD */}
+                  {supportsReorder && itemOrder ? (
+                    <SortableList
+                      items={sortedItems.map(i => i.id)}
+                      onReorder={(newOrder) => {
+                        // §STEP-4C: DnD produced a new order of ALL item IDs.
+                        // Reconstruct the draft's order field from this new order.
+                        // This preserves disabled items' positions because the
+                        // SortableList includes ALL items (visible + hidden), and
+                        // disabled items can't be dragged (no drag handle).
+                        updateSection(prev => {
+                          if (sectionId === 'topInsights') {
+                            return { ...prev, topInsights: { ...prev.topInsights, order: newOrder } }
+                          }
+                          if (sectionId === 'businessActivity') {
+                            return { ...prev, businessActivity: { ...prev.businessActivity, order: newOrder } }
+                          }
+                          if (sectionId === 'quickActions') {
+                            return { ...prev, quickActions: { ...prev.quickActions, order: newOrder } }
+                          }
+                          return prev
+                        })
+                      }}
+                    >
+                      <div className="space-y-1">
+                        {sortedItems.map((item) => {
+                          const isVisible = visibleItems.includes(item.id)
+                          const isDefault = defaultItemId === item.id
+                          const visibleSorted = sortedItems.filter(i => visibleItems.includes(i.id))
+                          const visibleIndex = visibleSorted.findIndex(i => i.id === item.id)
+                          const canMoveUp = isVisible && visibleIndex > 0
+                          const canMoveDown = isVisible && visibleIndex >= 0 && visibleIndex < visibleSorted.length - 1
+                          return (
+                            <SortableListItem key={item.id} id={item.id}>
+                              {({ dragHandleProps }) => (
+                                <div className="flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50">
+                                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    {/* §STEP-4C: Drag handle — only for visible items */}
+                                    {isVisible && <DragHandle {...dragHandleProps} />}
+                                    <button
+                                      onClick={() => onToggleItem(item.id)}
+                                      className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isVisible ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}
+                                      aria-label={isVisible ? 'Hide' : 'Show'}
+                                    >
+                                      {isVisible && <Check className="w-3 h-3 text-primary-foreground" />}
+                                    </button>
+                                    <span className={`text-xs font-medium truncate ${isVisible ? '' : 'text-muted-foreground line-through'}`}>
+                                      {item.label}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    {/* §STEP-4C: Keep ↑/↓ as accessibility fallback */}
+                                    {isVisible && (
+                                      <div className="flex items-center gap-0.5">
+                                        <button
+                                          onClick={() => onMoveItem?.(item.id, 'up')}
+                                          disabled={!canMoveUp}
+                                          className="w-7 h-7 rounded hover:bg-muted flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                          aria-label={`Move ${item.label} up`}
+                                        >
+                                          <ChevronUp className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          onClick={() => onMoveItem?.(item.id, 'down')}
+                                          disabled={!canMoveDown}
+                                          className="w-7 h-7 rounded hover:bg-muted flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                          aria-label={`Move ${item.label} down`}
+                                        >
+                                          <ChevronDown className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    )}
+                                    {onSetDefault && isVisible && (
+                                      <button
+                                        onClick={() => onSetDefault(item.id)}
+                                        className={`text-[10px] px-2 py-1 rounded-md shrink-0 ${isDefault ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'}`}
+                                      >
+                                        {isDefault ? '✓ Default' : 'Set Default'}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </SortableListItem>
+                          )
+                        })}
+                      </div>
+                    </SortableList>
+                  ) : (
+                    /* Non-reorderable items (Customer Quality grades) — simple list */
+                    <div className="space-y-1">
+                      {sortedItems.map((item) => {
+                        const isVisible = visibleItems.includes(item.id)
+                        return (
+                          <div key={item.id} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
                               <button
-                                onClick={() => onSetDefault(item.id)}
-                                className={`text-[10px] px-2 py-1 rounded-md shrink-0 ${isDefault ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'}`}
+                                onClick={() => onToggleItem(item.id)}
+                                className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isVisible ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}
+                                aria-label={isVisible ? 'Hide' : 'Show'}
                               >
-                                {isDefault ? '✓ Default' : 'Set Default'}
+                                {isVisible && <Check className="w-3 h-3 text-primary-foreground" />}
                               </button>
-                            )}
+                              <span className={`text-xs font-medium truncate ${isVisible ? '' : 'text-muted-foreground line-through'}`}>
+                                {item.label}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      )
-                    })}
-                  </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
