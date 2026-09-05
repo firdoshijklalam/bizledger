@@ -246,7 +246,8 @@ function validateDashboardSections(input: unknown): string | null {
   const GRADES = new Set(['A', 'B', 'C', 'D', 'E'])
   const TOP_TABS = new Set(['debtors', 'buyers', 'payments', 'products', 'defaulters'])
   const HUB_TABS = new Set(['transactions', 'lowstock', 'orders'])
-  const QUICK_ACTIONS = new Set(['add-party', 'add-product', 'new-invoice', 'add-transaction'])
+  const QUICK_ACTIONS = new Set(['add-party', 'add-product', 'new-invoice', 'add-transaction', 'view-invoices', 'low-stock', 'add-customer', 'add-supplier'])
+  const MAX_VISIBLE = new Set([4, 6, 8])
 
   const result: Record<string, unknown> = { sections }
 
@@ -308,6 +309,8 @@ function validateDashboardSections(input: unknown): string | null {
       visibleActions: validateStringArray(parsed.quickActions.visibleActions, QUICK_ACTIONS),
       // §STEP-1D-CORRECTION: Use validateOrderArray for order fields (null-safe)
       order: validateOrderArray(parsed.quickActions.order, QUICK_ACTIONS),
+      // §STEP-4E: maxVisible validation
+      maxVisible: typeof parsed.quickActions.maxVisible === 'number' && MAX_VISIBLE.has(parsed.quickActions.maxVisible) ? parsed.quickActions.maxVisible : 4,
     }
   }
 

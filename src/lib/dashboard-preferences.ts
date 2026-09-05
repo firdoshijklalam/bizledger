@@ -50,6 +50,8 @@ export interface DashboardSectionConfig {
   quickActions: {
     visibleActions: string[]
     order: string[]
+    // §STEP-4E: Maximum visible actions on the dashboard (4, 6, or 8)
+    maxVisible: 4 | 6 | 8
   }
   defaults: {
     chartType: string
@@ -94,6 +96,8 @@ export const DEFAULT_DASHBOARD_CONFIG: DashboardSectionConfig = {
   quickActions: {
     visibleActions: ['add-party', 'add-product', 'new-invoice', 'add-transaction'],
     order: ['add-party', 'add-product', 'new-invoice', 'add-transaction'],
+    // §STEP-4E: Default max visible actions
+    maxVisible: 4,
   },
   defaults: {
     chartType: 'revenue',
@@ -115,7 +119,8 @@ const VALID_CQ_SORT_ORDERS = new Set<CustomerQualitySortOrder>(['grade', 'count-
 // (the filter/navigation behavior is NOT retained — see parseDashboardSectionConfig).
 const VALID_TOP_TABS = new Set(['debtors', 'buyers', 'payments', 'products', 'defaulters'])
 const VALID_HUB_TABS = new Set(['transactions', 'lowstock', 'orders'])
-const VALID_QUICK_ACTIONS = new Set(['add-party', 'add-product', 'new-invoice', 'add-transaction'])
+const VALID_QUICK_ACTIONS = new Set(['add-party', 'add-product', 'new-invoice', 'add-transaction', 'view-invoices', 'low-stock', 'add-customer', 'add-supplier'])
+const VALID_MAX_VISIBLE = new Set([4, 6, 8])
 const VALID_CHART_TYPES = new Set(['revenue', 'profit', 'profitLoss', 'cashflow', 'collections', 'categories'])
 const VALID_RANGES = new Set(['1d', 'yesterday', '2d', '3d', '5d', '7d', '1m', '3m', '6m', '1y', 'custom'])
 
@@ -238,9 +243,11 @@ export function parseDashboardSectionConfig(raw: any): DashboardSectionConfig {
   const qa = parsed.quickActions && typeof parsed.quickActions === 'object' ? parsed.quickActions : {}
   const qaVisible = filterStringArray(qa.visibleActions, VALID_QUICK_ACTIONS)
   const qaOrder = filterStringArray(qa.order, VALID_QUICK_ACTIONS)
+  const qaMaxVisible = typeof qa.maxVisible === 'number' && VALID_MAX_VISIBLE.has(qa.maxVisible) ? qa.maxVisible : DEFAULT_DASHBOARD_CONFIG.quickActions.maxVisible
   const quickActions = {
     visibleActions: resolveArray(qaVisible, DEFAULT_DASHBOARD_CONFIG.quickActions.visibleActions),
     order: resolveArray(qaOrder, DEFAULT_DASHBOARD_CONFIG.quickActions.order),
+    maxVisible: qaMaxVisible,
   }
 
   // §DEFAULTS

@@ -115,17 +115,17 @@ function SortableCardItem({ card, visible, onToggle }: {
 
   const Icon = card.icon
   return (
-    <div ref={setNodeRef} style={style} className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 hover:bg-muted transition-colors min-h-[52px]">
+    <div ref={setNodeRef} style={style} className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 hover:bg-muted transition-colors h-[52px]">
       <button {...attributes} {...listeners} className="touch-none cursor-grab active:cursor-grabbing text-muted-foreground shrink-0 p-1" aria-label="Drag to reorder">
         <GripVertical className="w-4 h-4" />
       </button>
       <span className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
         <Icon className="w-4 h-4 text-primary" />
       </span>
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 overflow-hidden">
         <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium">{card.label}</span>
-          {card.recommended && <span className="text-[8px] px-1 py-0.5 rounded bg-primary/10 text-primary font-bold">REC</span>}
+          <span className="text-xs font-medium truncate">{card.label}</span>
+          {card.recommended && <span className="text-[8px] px-1 py-0.5 rounded bg-primary/10 text-primary font-bold shrink-0">REC</span>}
         </div>
         <p className="text-[10px] text-muted-foreground truncate">{card.description}</p>
       </div>

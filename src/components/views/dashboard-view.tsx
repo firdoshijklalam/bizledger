@@ -10,7 +10,7 @@ import {
   ArrowUpRight, ArrowDownRight, ArrowLeftRight, Users, Receipt, ChevronRight,
   BarChart3, LineChart, X, Loader2, Calendar,
   MapPin, Phone, Building2, ShieldCheck, Store, Settings, Camera, Eye, EyeOff,
-  FileText, Boxes, LayoutGrid, Check,
+  FileText, Boxes, LayoutGrid, Check, UserPlus, Truck,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -156,6 +156,8 @@ export function DashboardView() {
   const [topExpanded, setTopExpanded] = useState(false)
   const [hubTab, setHubTab] = useState<'transactions' | 'lowstock' | 'orders'>('transactions')
   const [hubExpanded, setHubExpanded] = useState(false)
+  // §STEP-4E: Overflow state for Quick Actions "More" button
+  const [showQuickActionsOverflow, setShowQuickActionsOverflow] = useState(false)
   // §DASHBOARD-CUSTOMIZATION: Dashboard section visibility/order + per-section prefs
   const [dashSectionConfig, setDashSectionConfig] = useState<DashboardSectionConfig>(DEFAULT_DASHBOARD_CONFIG)
   // §STEP-3D: Save serialization queue. Declared here (above early returns) so
@@ -771,11 +773,17 @@ export function DashboardView() {
     .map(id => hubTabMap[id])
     .filter(Boolean)
 
+  // §STEP-4E: Expanded Quick Actions catalog — only actions backed by real functionality
   const ALL_QUICK_ACTIONS = [
     { label: t('khata.addPartyShort'), icon: Users, view: 'khata' as const, action: 'add-party' as const, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
     { label: t('inv.addProductShort'), icon: Package, view: 'inventory' as const, action: 'add-product' as const, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
     { label: t('bill.newInvoiceShort'), icon: Receipt, view: 'sale-pad' as const, action: 'new-invoice' as const, color: 'text-orange-600 bg-orange-50 dark:bg-amber-950/30' },
     { label: t('qa.addTransaction'), icon: ArrowLeftRight, view: 'khata' as const, action: 'add-transaction' as const, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30' },
+    // §STEP-4E: New actions backed by existing routes/views
+    { label: 'View Invoices', icon: FileText, view: 'billing' as const, action: 'view-invoices' as const, color: 'text-purple-600 bg-purple-50 dark:bg-purple-950/30' },
+    { label: 'Low Stock', icon: AlertTriangle, view: 'inventory' as const, action: 'low-stock' as const, color: 'text-red-600 bg-red-50 dark:bg-red-950/30' },
+    { label: 'Add Customer', icon: UserPlus, view: 'khata' as const, action: 'add-customer' as const, color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/30' },
+    { label: 'Add Supplier', icon: Truck, view: 'khata' as const, action: 'add-supplier' as const, color: 'text-cyan-600 bg-cyan-50 dark:bg-cyan-950/30' },
   ]
   // §STEP-1B: Use getOrderedQuickActions to respect saved order.
   // Actions are ordered by config.quickActions.order, with enabled-but-unordered
@@ -785,6 +793,11 @@ export function DashboardView() {
   const visibleQuickActions = orderedActionIds
     .map(id => actionMap[id])
     .filter(Boolean) as typeof ALL_QUICK_ACTIONS
+
+  // §STEP-4E: Split into visible + overflow based on maxVisible
+  const maxVisible = dashSectionConfig.quickActions.maxVisible
+  const displayedQuickActions = visibleQuickActions.slice(0, maxVisible)
+  const overflowQuickActions = visibleQuickActions.slice(maxVisible)
 
   // §STEP-1A-ORDERING: Customer Quality grade distribution filtered by the
   // user's visibleGrades preference. Falls back to an empty array when all
@@ -1615,17 +1628,69 @@ export function DashboardView() {
                 </button>
               </div>
             ) : (
-            <div className="grid grid-cols-4 gap-2">
-              {visibleQuickActions.map((a) => {
+            <>
+            <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(displayedQuickActions.length, maxVisible)}, minmax(0, 1fr))` }}>
+              {displayedQuickActions.map((a) => {
                 const Icon = a.icon
                 return (
-                  <button key={a.label} onClick={() => { setActiveView(a.view); triggerQuickAction({ id: crypto.randomUUID(), type: a.action }) }} className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-muted transition-colors min-h-[72px] justify-center">
+                  <button key={a.action} onClick={() => {
+                    if (a.action === 'low-stock') { setInventoryFilter('low-stock'); }
+                    if (a.action === 'add-customer') { setKhataFilter('customer'); }
+                    if (a.action === 'add-supplier') { setKhataFilter('supplier'); }
+                    setActiveView(a.view);
+                    // §STEP-4E: Only trigger quick action for actions that have a handler
+                    if (['add-party', 'add-product', 'new-invoice', 'add-transaction'].includes(a.action)) {
+                      triggerQuickAction({ id: crypto.randomUUID(), type: a.action as any });
+                    }
+                  }} className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-muted transition-colors min-h-[72px] justify-center">
                     <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${a.color}`}><Icon className="w-5 h-5" /></span>
                     <span className="text-[10px] font-medium text-center leading-tight">{a.label}</span>
                   </button>
                 )
               })}
             </div>
+            {/* §STEP-4E: Overflow "More" button */}
+            {overflowQuickActions.length > 0 && (
+              <div className="relative mt-2">
+                <button
+                  onClick={() => setShowQuickActionsOverflow(!showQuickActionsOverflow)}
+                  className="w-full flex items-center justify-center gap-1 p-2 rounded-xl hover:bg-muted transition-colors text-xs text-muted-foreground"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  More ({overflowQuickActions.length})
+                </button>
+                <AnimatePresence>
+                  {showQuickActionsOverflow && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      className="absolute bottom-full left-0 right-0 mb-2 bg-card border border-border rounded-xl shadow-lg p-2 grid grid-cols-4 gap-2 z-50"
+                    >
+                      {overflowQuickActions.map((a) => {
+                        const Icon = a.icon
+                        return (
+                          <button key={a.action} onClick={() => {
+                            setShowQuickActionsOverflow(false);
+                            if (a.action === 'low-stock') { setInventoryFilter('low-stock'); }
+                            if (a.action === 'add-customer') { setKhataFilter('customer'); }
+                            if (a.action === 'add-supplier') { setKhataFilter('supplier'); }
+                            setActiveView(a.view);
+                            if (['add-party', 'add-product', 'new-invoice', 'add-transaction'].includes(a.action)) {
+                              triggerQuickAction({ id: crypto.randomUUID(), type: a.action as any });
+                            }
+                          }} className="flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-muted transition-colors min-h-[72px] justify-center">
+                            <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${a.color}`}><Icon className="w-5 h-5" /></span>
+                            <span className="text-[10px] font-medium text-center leading-tight">{a.label}</span>
+                          </button>
+                        )
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+            </>
             )}
           </Card>
         )
@@ -2169,7 +2234,16 @@ export function DashboardView() {
         sectionId="quickActions"
         savedConfig={dashSectionConfig}
         onSave={saveDashboardSections}
-        items={[{ id: 'add-party', label: 'Add Party' }, { id: 'add-product', label: 'Add Product' }, { id: 'new-invoice', label: 'New Invoice' }, { id: 'add-transaction', label: 'Add Transaction' }]}
+        items={[
+          { id: 'add-party', label: 'Add Party' },
+          { id: 'add-product', label: 'Add Product' },
+          { id: 'new-invoice', label: 'New Invoice' },
+          { id: 'add-transaction', label: 'Add Transaction' },
+          { id: 'view-invoices', label: 'View Invoices' },
+          { id: 'low-stock', label: 'Low Stock' },
+          { id: 'add-customer', label: 'Add Customer' },
+          { id: 'add-supplier', label: 'Add Supplier' },
+        ]}
         supportsReorder
         sectionDefaults={DEFAULT_DASHBOARD_CONFIG.quickActions}
       />

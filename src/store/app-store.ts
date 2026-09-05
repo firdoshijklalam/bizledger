@@ -2,12 +2,12 @@ import { create } from 'zustand'
 import type { ViewId, Business } from '@/lib/types'
 import type { RangeContext } from '@/lib/date-ranges'
 
-export type KhataFilter = 'all' | 'receivable' | 'payable'
+export type KhataFilter = 'all' | 'receivable' | 'payable' | 'customer' | 'supplier'
 export type InventoryFilter = 'all' | 'low-stock'
 
 interface QuickAction {
   id: string
-  type: 'add-party' | 'add-product' | 'new-invoice' | 'add-transaction' | 'quick-sale'
+  type: 'add-party' | 'add-product' | 'new-invoice' | 'add-transaction' | 'quick-sale' | 'view-invoices' | 'low-stock' | 'add-customer' | 'add-supplier'
 }
 
 interface AppState {
