@@ -8,7 +8,7 @@ import {
   RotateCcw, Check,
 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
-import { SortableList, SortableListItem, DragHandle } from '@/components/shared/sortable-list'
+import { SortableList, SortableListItem, DragHandle, reconstructOrderFromDrag } from '@/components/shared/sortable-list'
 import {
   DEFAULT_DASHBOARD_CONFIG,
   parseDashboardSectionConfig,
@@ -155,9 +155,10 @@ export function DashboardCustomizationSheet({
                 <p className="text-xs font-semibold text-muted-foreground mb-2">Dashboard Sections</p>
                 <p className="text-[10px] text-muted-foreground/70 mb-3">Toggle visibility and reorder sections. Changes apply on save.</p>
                 <SortableList
-                  items={sortedDraft.map(s => s.id)}
+                  sortableItems={sortedDraft.map(s => s.id)}
                   onReorder={(newOrder) => {
-                    // §STEP-4C: DnD produced a new section order. Re-index the sections.
+                    // §STEP-4C-FIX: All sections are always sortable (no hidden sections in this list).
+                    // Re-index the sections from the new order.
                     setDraft(prev => {
                       const newSections = newOrder.map((id, idx) => {
                         const existing = prev.sections.find(s => s.id === id)
@@ -531,25 +532,34 @@ export function SectionSettingsSheet({
                   <p className="text-xs font-semibold text-muted-foreground mb-2">
                     {supportsReorder ? 'Actions' : 'Visible Items'}
                   </p>
-                  {/* §STEP-4C: Wrap reorderable items in SortableList for DnD */}
+                  {/* §STEP-4C-FIX: Wrap reorderable items in SortableList for DnD.
+                      Only VISIBLE items are sortable (draggable + droppable).
+                      Hidden items are rendered but disabled in the SortableContext. */}
                   {supportsReorder && itemOrder ? (
+                    (() => {
+                      // §STEP-4C-FIX: Compute the visible-ordered list (only sortable items)
+                      const visibleSortedIds = sortedItems
+                        .filter(i => visibleItems.includes(i.id))
+                        .map(i => i.id)
+                      // The full current order (for reconstruction)
+                      const fullOrder = itemOrder
+
+                      return (
                     <SortableList
-                      items={sortedItems.map(i => i.id)}
-                      onReorder={(newOrder) => {
-                        // §STEP-4C: DnD produced a new order of ALL item IDs.
-                        // Reconstruct the draft's order field from this new order.
-                        // This preserves disabled items' positions because the
-                        // SortableList includes ALL items (visible + hidden), and
-                        // disabled items can't be dragged (no drag handle).
+                      sortableItems={visibleSortedIds}
+                      onReorder={(newVisibleOrder) => {
+                        // §STEP-4C-FIX: Reconstruct the full order from the DnD visible reorder.
+                        // Hidden items retain their relative positions; visible items adopt the new order.
+                        const reconstructed = reconstructOrderFromDrag(fullOrder, visibleItems, newVisibleOrder)
                         updateSection(prev => {
                           if (sectionId === 'topInsights') {
-                            return { ...prev, topInsights: { ...prev.topInsights, order: newOrder } }
+                            return { ...prev, topInsights: { ...prev.topInsights, order: reconstructed } }
                           }
                           if (sectionId === 'businessActivity') {
-                            return { ...prev, businessActivity: { ...prev.businessActivity, order: newOrder } }
+                            return { ...prev, businessActivity: { ...prev.businessActivity, order: reconstructed } }
                           }
                           if (sectionId === 'quickActions') {
-                            return { ...prev, quickActions: { ...prev.quickActions, order: newOrder } }
+                            return { ...prev, quickActions: { ...prev.quickActions, order: reconstructed } }
                           }
                           return prev
                         })
@@ -564,12 +574,12 @@ export function SectionSettingsSheet({
                           const canMoveUp = isVisible && visibleIndex > 0
                           const canMoveDown = isVisible && visibleIndex >= 0 && visibleIndex < visibleSorted.length - 1
                           return (
-                            <SortableListItem key={item.id} id={item.id}>
+                            <SortableListItem key={item.id} id={item.id} sortable={isVisible}>
                               {({ dragHandleProps }) => (
                                 <div className="flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50">
                                   <div className="flex items-center gap-2 min-w-0 flex-1">
-                                    {/* §STEP-4C: Drag handle — only for visible items */}
-                                    {isVisible && <DragHandle {...dragHandleProps} />}
+                                    {/* §STEP-4C-FIX: Drag handle — only for visible (sortable) items */}
+                                    {isVisible && dragHandleProps && <DragHandle {...dragHandleProps} />}
                                     <button
                                       onClick={() => onToggleItem(item.id)}
                                       className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isVisible ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}
@@ -619,6 +629,8 @@ export function SectionSettingsSheet({
                         })}
                       </div>
                     </SortableList>
+                      )
+                    })()
                   ) : (
                     /* Non-reorderable items (Customer Quality grades) — simple list */
                     <div className="space-y-1">
