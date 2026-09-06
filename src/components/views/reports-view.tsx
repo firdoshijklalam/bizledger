@@ -166,16 +166,33 @@ export function ReportsView() {
   // dashboard Expense/Revenue card click — {range, customStart, customEnd}.
   // This preserves custom range dates which were previously lost (Phase 4 D1).
   // Applies on mount, then clears the param.
+  // §STEP-4B-VIEW-ALL: When `reportsTab` is ALSO set (e.g. Top Buyers View-All
+  // sets both reportsTab='party' + reportsRangeContext), `reportsTab` takes
+  // precedence for the activeReport — the range context still flows into
+  // plRange so when the user manually opens P&L, it uses the right window.
+  // We capture `reportsTab` at effect-run time (NOT in deps) so the closure
+  // sees the original non-null value even after `reportsTab` is cleared.
   useEffect(() => {
     if (!reportsRangeContext) return
     const ctx = reportsRangeContext
+    // §CAPTURE: Snapshot reportsTab at this moment. If a Dashboard View-All
+    // set both reportsTab + reportsRangeContext simultaneously, this captures
+    // the non-null reportsTab. We intentionally do NOT add reportsTab to the
+    // deps array — otherwise clearing reportsTab (in the other effect) would
+    // re-trigger this effect and override the activeReport set by reportsTab.
+    const hasReportsTab = !!reportsTab
     const t = setTimeout(() => {
       setPlRange(ctx.range)
       setPlCustomStart(ctx.customStart || '')
       setPlCustomEnd(ctx.customEnd || '')
       // §PHASE-5-D4: Health card click sets 'pl' tab AND shows breakdown.
       // For other cards (Expense/Revenue), just navigate to P&L.
-      setActiveReport('pl')
+      // §STEP-4B-VIEW-ALL: Skip the activeReport override if `reportsTab` was
+      // also set — the reportsTab effect handles the activeReport switch
+      // (e.g. Top Buyers lands on Party Ledger, not P&L).
+      if (!hasReportsTab) {
+        setActiveReport('pl')
+      }
       setReportsRangeContext(null)
     }, 0)
     return () => clearTimeout(t)

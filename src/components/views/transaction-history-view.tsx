@@ -186,7 +186,10 @@ export function TransactionHistoryView() {
   // (Khata, Dashboard recentTransactions, etc.) — no second data model.
   // Fetched only when viewMode is NOT 'invoices' to avoid an extra request
   // for the default invoice feed.
-  const { data: transactionsData } = useFetch<{ items: Transaction[]; total: number; hasMore: boolean }>(
+  // §USEFETCH-AUTO-EXTRACT: useFetch auto-extracts `.items` from paginated
+  // responses ({ items, total, hasMore }) → returns the array directly.
+  // So the type is `Transaction[]`, not `{ items: Transaction[]; ... }`.
+  const { data: transactionsData } = useFetch<Transaction[]>(
     viewMode === 'invoices' ? null : '/api/transactions?limit=200',
     [viewMode],
   )
@@ -214,7 +217,9 @@ export function TransactionHistoryView() {
   const feed: FeedItem[] = useMemo(() => {
     if (viewMode !== 'invoices') {
       // §TRANSACTION-FEED: Build from /api/transactions items.
-      const txns = transactionsData?.items ?? []
+      // §USEFETCH-AUTO-EXTRACT: transactionsData is the items array directly
+      // (useFetch auto-extracts .items from { items, total, hasMore }).
+      const txns = transactionsData ?? []
       const filtered = viewMode === 'payments'
         ? txns.filter((t) => t.type === 'credit')
         : txns // 'transactions' → all
