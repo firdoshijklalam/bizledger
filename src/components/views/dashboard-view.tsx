@@ -152,7 +152,7 @@ export function DashboardView() {
   // with the dashboard's current range + the tapped bucket's index.
   const [drilldownBucket, setDrilldownBucket] = useState<{ index: number; fullDate: string } | null>(null)
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null)
-  const [topTab, setTopTab] = useState<'debtors' | 'buyers' | 'payments' | 'products' | 'defaulters'>('debtors')
+  const [topTab, setTopTab] = useState<'debtors' | 'buyers' | 'payments' | 'products' | 'defaulters' | 'top-revenue-products'>('debtors')
   const [topExpanded, setTopExpanded] = useState(false)
   const [hubTab, setHubTab] = useState<'transactions' | 'lowstock' | 'orders'>('transactions')
   const [hubExpanded, setHubExpanded] = useState(false)
@@ -753,6 +753,8 @@ export function DashboardView() {
     { id: 'payments', label: 'Top Payments' },
     { id: 'products', label: 'Top Products' },
     { id: 'defaulters', label: 'Defaulters' },
+    // §STEP-4F: New real-backed tab — data.topProductsBySales already exists in /api/dashboard
+    { id: 'top-revenue-products', label: 'Top Revenue Products' },
   ] as const
   // §STEP-1D: Use getOrderedTopInsightsTabs to respect saved tab order
   const orderedTopTabIds = getOrderedTopInsightsTabs(dashSectionConfig)
@@ -760,6 +762,9 @@ export function DashboardView() {
   const visibleTopTabs: typeof ALL_TOP_TABS[number][] = orderedTopTabIds
     .map(id => topTabMap[id])
     .filter(Boolean)
+
+  // §STEP-4F: Top Insights advanced settings shortcut
+  const ti = dashSectionConfig.topInsights
 
   const ALL_HUB_TABS = [
     { id: 'transactions', label: 'Transactions' },
@@ -1352,17 +1357,19 @@ export function DashboardView() {
             </div>
 
             {/* Tab content */}
+            {/* §STEP-4F: Respect itemCount + display flags (showRank, showAvatar, showAmount) */}
             {topTab === 'debtors' && (
               <div className="space-y-2">
                 {data.topDebtors.length === 0 ? <p className="text-sm text-muted-foreground py-4 text-center">No outstanding receivables 🎉</p> : (
                   <>
-                    {data.topDebtors.slice(0, 5).map((d) => {
+                    {data.topDebtors.slice(0, ti.itemCount).map((d, i) => {
                       const meta = GRADE_META[d.grade]
                       return (
                         <button key={d.id} onClick={() => { saveScrollAndOpenParty(d.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
-                          <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-xs font-bold">{d.name.charAt(0)}</div>
+                          {ti.showRank && <span className="w-5 text-[10px] font-bold text-muted-foreground shrink-0">#{i + 1}</span>}
+                          {ti.showAvatar && <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center text-xs font-bold">{d.name.charAt(0)}</div>}
                           <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
-                          <div className="text-right"><p className="text-sm font-semibold tabular text-emerald-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>
+                          {ti.showAmount && <div className="text-right"><p className="text-sm font-semibold tabular text-emerald-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>}
                         </button>
                       )
                     })}
@@ -1375,11 +1382,12 @@ export function DashboardView() {
               <div className="space-y-2">
                 {data.topBuyers && data.topBuyers.length > 0 ? (
                   <>
-                    {data.topBuyers.slice(0, 5).map((b, i) => (
+                    {data.topBuyers.slice(0, ti.itemCount).map((b, i) => (
                       <button key={b.id} onClick={() => { saveScrollPos('dashboard'); setOverlayPartyId(b.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted transition-colors text-left">
-                        <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-xs font-bold text-emerald-600">#{i + 1}</div>
+                        {ti.showRank && <span className="w-5 text-[10px] font-bold text-muted-foreground shrink-0">#{i + 1}</span>}
+                        {ti.showAvatar && <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-xs font-bold text-emerald-600">{b.name.charAt(0)}</div>}
                         <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{b.name}</p><p className="text-[11px] text-muted-foreground">Top buyer</p></div>
-                        <p className="text-sm font-semibold tabular">{formatCurrency(b.value, currency)}</p>
+                        {ti.showAmount && <p className="text-sm font-semibold tabular">{formatCurrency(b.value, currency)}</p>}
                       </button>
                     ))}
                   </>
@@ -1389,11 +1397,12 @@ export function DashboardView() {
 
             {topTab === 'payments' && (
               <div className="space-y-2">
-                {data.recentTransactions.filter(t => t.type === 'credit').slice(0, 5).map((tx) => (
+                {data.recentTransactions.filter(t => t.type === 'credit').slice(0, ti.itemCount).map((tx, i) => (
                   <div key={tx.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
-                    <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center"><ArrowDownRight className="w-4 h-4 text-emerald-600" /></div>
+                    {ti.showRank && <span className="w-5 text-[10px] font-bold text-muted-foreground shrink-0">#{i + 1}</span>}
+                    {ti.showAvatar && <div className="w-9 h-9 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center"><ArrowDownRight className="w-4 h-4 text-emerald-600" /></div>}
                     <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{tx.description || 'Payment'}</p><p className="text-[11px] text-muted-foreground">{timeAgo(tx.createdAt)}</p></div>
-                    <p className="text-sm font-semibold tabular text-emerald-600">+{formatCurrency(tx.amount, currency)}</p>
+                    {ti.showAmount && <p className="text-sm font-semibold tabular text-emerald-600">+{formatCurrency(tx.amount, currency)}</p>}
                   </div>
                 ))}
                 {data.recentTransactions.filter(t => t.type === 'credit').length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">No payments yet</p>}
@@ -1404,11 +1413,12 @@ export function DashboardView() {
               <div className="space-y-2">
                 {data.topProductsByUnits && data.topProductsByUnits.length > 0 ? (
                   <>
-                    {data.topProductsByUnits.slice(0, 5).map((p, i) => (
+                    {data.topProductsByUnits.slice(0, ti.itemCount).map((p, i) => (
                       <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
-                        <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: PIE_COLORS[i % PIE_COLORS.length] + '20', color: PIE_COLORS[i % PIE_COLORS.length] }}>#{i + 1}</div>
+                        {ti.showRank && <span className="w-5 text-[10px] font-bold text-muted-foreground shrink-0">#{i + 1}</span>}
+                        {ti.showAvatar && <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: PIE_COLORS[i % PIE_COLORS.length] + '20', color: PIE_COLORS[i % PIE_COLORS.length] }}>{p.name.charAt(0)}</div>}
                         <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.name}</p><p className="text-[11px] text-muted-foreground">{p.value} units sold · {formatCurrency(p.revenue, currency)}</p></div>
-                        <p className="text-sm font-semibold tabular">{p.value}</p>
+                        {ti.showAmount && <p className="text-sm font-semibold tabular">{p.value}</p>}
                       </div>
                     ))}
                   </>
@@ -1420,18 +1430,37 @@ export function DashboardView() {
               <div className="space-y-2">
                 {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').length > 0 ? (
                   <>
-                    {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').slice(0, 5).map((d) => {
+                    {data.topDebtors.filter(d => d.grade === 'E' || d.grade === 'D').slice(0, ti.itemCount).map((d, i) => {
                       const meta = GRADE_META[d.grade]
                       return (
                         <button key={d.id} onClick={() => { saveScrollAndOpenParty(d.id) }} className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted text-left">
-                          <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-xs font-bold text-red-600">!</div>
+                          {ti.showRank && <span className="w-5 text-[10px] font-bold text-muted-foreground shrink-0">#{i + 1}</span>}
+                          {ti.showAvatar && <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-xs font-bold text-red-600">!</div>}
                           <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{d.name}</p><p className="text-[11px] text-muted-foreground">{meta.desc}</p></div>
-                          <div className="text-right"><p className="text-sm font-semibold tabular text-red-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>
+                          {ti.showAmount && <div className="text-right"><p className="text-sm font-semibold tabular text-red-600">{formatCurrency(d.balance, currency)}</p><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{d.grade}</span></div>}
                         </button>
                       )
                     })}
                   </>
                 ) : <p className="text-sm text-muted-foreground py-4 text-center">No defaulters 🎉</p>}
+              </div>
+            )}
+
+            {/* §STEP-4F: New tab — Top Revenue Products (data.topProductsBySales) */}
+            {topTab === 'top-revenue-products' && (
+              <div className="space-y-2">
+                {data.topProductsBySales && data.topProductsBySales.length > 0 ? (
+                  <>
+                    {data.topProductsBySales.slice(0, ti.itemCount).map((p, i) => (
+                      <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-muted">
+                        {ti.showRank && <span className="w-5 text-[10px] font-bold text-muted-foreground shrink-0">#{i + 1}</span>}
+                        {ti.showAvatar && <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold" style={{ background: PIE_COLORS[i % PIE_COLORS.length] + '20', color: PIE_COLORS[i % PIE_COLORS.length] }}>{p.name.charAt(0)}</div>}
+                        <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{p.name}</p><p className="text-[11px] text-muted-foreground">By revenue</p></div>
+                        {ti.showAmount && <p className="text-sm font-semibold tabular">{formatCurrency(p.value, currency)}</p>}
+                      </div>
+                    ))}
+                  </>
+                ) : <p className="text-sm text-muted-foreground py-4 text-center">No product revenue data yet</p>}
               </div>
             )}
             </>
@@ -2204,7 +2233,7 @@ export function DashboardView() {
         sectionId="topInsights"
         savedConfig={dashSectionConfig}
         onSave={saveDashboardSections}
-        items={[{ id: 'debtors', label: 'Top Debtors' }, { id: 'buyers', label: 'Top Buyers' }, { id: 'payments', label: 'Top Payments' }, { id: 'products', label: 'Top Products' }, { id: 'defaulters', label: 'Defaulters' }]}
+        items={[{ id: 'debtors', label: 'Top Debtors' }, { id: 'buyers', label: 'Top Buyers' }, { id: 'payments', label: 'Top Payments' }, { id: 'products', label: 'Top Products' }, { id: 'defaulters', label: 'Defaulters' }, { id: 'top-revenue-products', label: 'Top Revenue Products' }]}
         supportsDefault
         supportsReorder
         sectionDefaults={DEFAULT_DASHBOARD_CONFIG.topInsights}

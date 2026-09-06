@@ -41,6 +41,11 @@ export interface DashboardSectionConfig {
     visibleTabs: string[]
     order: string[]
     defaultTab: string
+    // §STEP-4F: Advanced Top Insights settings
+    itemCount: 3 | 5 | 10
+    showRank: boolean
+    showAvatar: boolean
+    showAmount: boolean
   }
   businessActivity: {
     visibleTabs: string[]
@@ -85,8 +90,13 @@ export const DEFAULT_DASHBOARD_CONFIG: DashboardSectionConfig = {
   },
   topInsights: {
     visibleTabs: ['debtors', 'buyers', 'payments', 'products', 'defaulters'],
-    order: ['debtors', 'buyers', 'payments', 'products', 'defaulters'],
+    order: ['debtors', 'buyers', 'payments', 'products', 'defaulters', 'top-revenue-products'],
     defaultTab: 'debtors',
+    // §STEP-4F: Advanced defaults
+    itemCount: 5,
+    showRank: true,
+    showAvatar: true,
+    showAmount: true,
   },
   businessActivity: {
     visibleTabs: ['transactions', 'lowstock', 'orders'],
@@ -117,7 +127,8 @@ const VALID_CQ_SORT_ORDERS = new Set<CustomerQualitySortOrder>(['grade', 'count-
 // Old saved configs with tapBehavior='modal' are migrated to tapEnabled=true.
 // Old saved configs with tapBehavior='filter' are migrated to tapEnabled=true
 // (the filter/navigation behavior is NOT retained — see parseDashboardSectionConfig).
-const VALID_TOP_TABS = new Set(['debtors', 'buyers', 'payments', 'products', 'defaulters'])
+const VALID_TOP_TABS = new Set(['debtors', 'buyers', 'payments', 'products', 'defaulters', 'top-revenue-products'])
+const VALID_ITEM_COUNTS = new Set([3, 5, 10])
 const VALID_HUB_TABS = new Set(['transactions', 'lowstock', 'orders'])
 const VALID_QUICK_ACTIONS = new Set(['add-party', 'add-product', 'new-invoice', 'add-transaction', 'view-invoices', 'low-stock', 'add-customer', 'add-supplier'])
 const VALID_MAX_VISIBLE = new Set([4, 6, 8])
@@ -219,6 +230,7 @@ export function parseDashboardSectionConfig(raw: any): DashboardSectionConfig {
 
   // §TOP-INSIGHTS
   // §STEP-1D: Added order field for tab reordering
+  // §STEP-4F: Added itemCount, showRank, showAvatar, showAmount
   const ti = parsed.topInsights && typeof parsed.topInsights === 'object' ? parsed.topInsights : {}
   const topTabs = filterStringArray(ti.visibleTabs, VALID_TOP_TABS)
   const topOrder = filterStringArray(ti.order, VALID_TOP_TABS)
@@ -226,6 +238,11 @@ export function parseDashboardSectionConfig(raw: any): DashboardSectionConfig {
     visibleTabs: resolveArray(topTabs, DEFAULT_DASHBOARD_CONFIG.topInsights.visibleTabs),
     order: resolveArray(topOrder, DEFAULT_DASHBOARD_CONFIG.topInsights.order),
     defaultTab: typeof ti.defaultTab === 'string' && VALID_TOP_TABS.has(ti.defaultTab) ? ti.defaultTab : 'debtors',
+    // §STEP-4F: Advanced settings with safe defaults
+    itemCount: typeof ti.itemCount === 'number' && VALID_ITEM_COUNTS.has(ti.itemCount) ? ti.itemCount as 3 | 5 | 10 : DEFAULT_DASHBOARD_CONFIG.topInsights.itemCount,
+    showRank: typeof ti.showRank === 'boolean' ? ti.showRank : DEFAULT_DASHBOARD_CONFIG.topInsights.showRank,
+    showAvatar: typeof ti.showAvatar === 'boolean' ? ti.showAvatar : DEFAULT_DASHBOARD_CONFIG.topInsights.showAvatar,
+    showAmount: typeof ti.showAmount === 'boolean' ? ti.showAmount : DEFAULT_DASHBOARD_CONFIG.topInsights.showAmount,
   }
 
   // §BUSINESS-ACTIVITY

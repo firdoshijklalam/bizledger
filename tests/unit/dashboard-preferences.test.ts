@@ -996,14 +996,14 @@ async function main() {
       topInsights: { visibleTabs: [T1, T2, T3, T4, T5], defaultTab: T1 }
       // no order field
     }))
-    assert(JSON.stringify(cfg5.topInsights.order) === JSON.stringify([T1, T2, T3, T4, T5]),
+    assert(JSON.stringify(cfg5.topInsights.order) === JSON.stringify([T1, T2, T3, T4, T5, 'top-revenue-products']),
       `R5: missing order → default (got ${JSON.stringify(cfg5.topInsights.order)})`)
 
     // R6: invalid/non-array order → default order
     const cfg6 = parseDashboardSectionConfig(JSON.stringify({
       topInsights: { visibleTabs: [T1, T2], order: 'invalid', defaultTab: T1 }
     }))
-    assert(JSON.stringify(cfg6.topInsights.order) === JSON.stringify([T1, T2, T3, T4, T5]),
+    assert(JSON.stringify(cfg6.topInsights.order) === JSON.stringify([T1, T2, T3, T4, T5, 'top-revenue-products']),
       `R6: invalid order → default (got ${JSON.stringify(cfg6.topInsights.order)})`)
 
     // R7: explicit [] order remains []

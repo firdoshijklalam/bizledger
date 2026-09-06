@@ -244,7 +244,8 @@ function validateDashboardSections(input: unknown): string | null {
   }
 
   const GRADES = new Set(['A', 'B', 'C', 'D', 'E'])
-  const TOP_TABS = new Set(['debtors', 'buyers', 'payments', 'products', 'defaulters'])
+  const TOP_TABS = new Set(['debtors', 'buyers', 'payments', 'products', 'defaulters', 'top-revenue-products'])
+  const ITEM_COUNTS = new Set([3, 5, 10])
   const HUB_TABS = new Set(['transactions', 'lowstock', 'orders'])
   const QUICK_ACTIONS = new Set(['add-party', 'add-product', 'new-invoice', 'add-transaction', 'view-invoices', 'low-stock', 'add-customer', 'add-supplier'])
   const MAX_VISIBLE = new Set([4, 6, 8])
@@ -284,12 +285,18 @@ function validateDashboardSections(input: unknown): string | null {
   }
 
   // topInsights
+  // §STEP-4F: Added itemCount, showRank, showAvatar, showAmount
   if (parsed.topInsights && typeof parsed.topInsights === 'object') {
     result.topInsights = {
       visibleTabs: validateStringArray(parsed.topInsights.visibleTabs, TOP_TABS),
       // §STEP-1D-CORRECTION: Use validateOrderArray for order fields (null-safe)
       order: validateOrderArray(parsed.topInsights.order, TOP_TABS),
       defaultTab: typeof parsed.topInsights.defaultTab === 'string' && TOP_TABS.has(parsed.topInsights.defaultTab) ? parsed.topInsights.defaultTab : 'debtors',
+      // §STEP-4F: Advanced settings validation
+      itemCount: typeof parsed.topInsights.itemCount === 'number' && ITEM_COUNTS.has(parsed.topInsights.itemCount) ? parsed.topInsights.itemCount : 5,
+      showRank: typeof parsed.topInsights.showRank === 'boolean' ? parsed.topInsights.showRank : true,
+      showAvatar: typeof parsed.topInsights.showAvatar === 'boolean' ? parsed.topInsights.showAvatar : true,
+      showAmount: typeof parsed.topInsights.showAmount === 'boolean' ? parsed.topInsights.showAmount : true,
     }
   }
 

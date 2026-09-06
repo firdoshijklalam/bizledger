@@ -679,6 +679,53 @@ export function SectionSettingsSheet({
                 </div>
               )}
 
+              {/* §STEP-4F: Top Insights advanced controls panel */}
+              {sectionId === 'topInsights' && (
+                <div className="pt-2 border-t border-border space-y-3">
+                  <p className="text-xs font-semibold text-muted-foreground">Display</p>
+
+                  {/* Item count selector */}
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-1.5">Item Count</p>
+                    <div className="grid grid-cols-3 gap-1">
+                      {([3, 5, 10] as const).map((val) => (
+                        <button
+                          key={val}
+                          onClick={() => updateSection(prev => ({ ...prev, topInsights: { ...prev.topInsights, itemCount: val } }))}
+                          className={`py-1.5 rounded-lg text-[11px] font-medium transition-colors min-h-[36px] ${ti.itemCount === val ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}
+                        >
+                          {val}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Display toggles */}
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-muted-foreground mb-1">Show</p>
+                    {([
+                      ['showRank', 'Show Rank'],
+                      ['showAvatar', 'Show Avatar'],
+                      ['showAmount', 'Show Amount'],
+                    ] as const).map(([field, label]) => {
+                      const isEnabled = ti[field]
+                      return (
+                        <button
+                          key={field}
+                          onClick={() => updateSection(prev => ({ ...prev, topInsights: { ...prev.topInsights, [field]: !isEnabled } }))}
+                          className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-muted/50"
+                        >
+                          <span className="text-xs font-medium">{label}</span>
+                          <span className={`w-9 h-5 rounded-full transition-colors relative ${isEnabled ? 'bg-primary' : 'bg-muted'}`}>
+                            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* §STEP-2C: Customer Quality advanced controls panel — now mutates the DRAFT */}
               {sectionId === 'customerQuality' && (
                 <div className="pt-2 border-t border-border space-y-3">
