@@ -446,8 +446,23 @@ export function SectionSettingsSheet({
       }
       // quickActions
       const actions = prev.quickActions.visibleActions
-      const newActions = actions.includes(id) ? actions.filter(a => a !== id) : [...actions, id]
-      return { ...prev, quickActions: { ...prev.quickActions, visibleActions: newActions } }
+      // §EMPTY-STATE-PROTECTION: Prevent hiding the last visible action.
+      // The FAB menu must always have at least 1 action available. If the
+      // user is trying to hide an action AND it's the last visible one,
+      // show a toast + return the prev state unchanged (no-op).
+      if (actions.includes(id)) {
+        if (actions.length <= 1) {
+          // §MIN-1-PROTECTION: Can't hide the last action. Show a toast.
+          // Importing toast here would create a circular dep (toast is from
+          // sonner, which is already used elsewhere). Instead, we set a
+          // local error state that the sheet renders inline.
+          setSaveError('At least one Quick Action must remain visible.')
+          setTimeout(() => setSaveError(null), 3000)
+          return prev
+        }
+        return { ...prev, quickActions: { ...prev.quickActions, visibleActions: actions.filter(a => a !== id) } }
+      }
+      return { ...prev, quickActions: { ...prev.quickActions, visibleActions: [...actions, id] } }
     })
   }
 

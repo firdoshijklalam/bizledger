@@ -250,16 +250,16 @@ async function main() {
     assertEqual(parsed.businessActivity.defaultTab, 'lowstock', 'B5: explicit defaultTab preserved')
   }
 
-  // ─── 10. quickActions.visibleActions defaults to all 4 actions ────────
-  console.log('\n  10. quickActions.visibleActions defaults to all 4 actions:')
+  // ─── 10. quickActions.visibleActions defaults to all 5 actions ────────
+  console.log('\n  10. quickActions.visibleActions defaults to all 5 actions:')
   {
     const cfg = DEFAULT_DASHBOARD_CONFIG
     assertEqual(
       cfg.quickActions.visibleActions,
-      ['add-party', 'add-product', 'new-invoice', 'add-transaction'],
-      'Q1: default quickActions.visibleActions = [add-party,add-product,new-invoice,add-transaction]'
+      ['quick-sale', 'add-party', 'add-product', 'new-invoice', 'add-transaction'],
+      'Q1: default quickActions.visibleActions = [quick-sale,add-party,add-product,new-invoice,add-transaction]'
     )
-    assertEqual(cfg.quickActions.visibleActions.length, 4, 'Q2: 4 actions by default')
+    assertEqual(cfg.quickActions.visibleActions.length, 5, 'Q2: 5 actions by default')
 
     // Parse with explicit subset — preserved.
     const raw = { quickActions: { visibleActions: ['new-invoice'] } }
@@ -412,7 +412,7 @@ async function main() {
     assert(config5.quickActions.visibleActions.length === 0, 'D7: quickActions.visibleActions=[] stays empty')
 
     // D8: quickActions missing → defaults
-    assert(config2.quickActions.visibleActions.length === 4, 'D8: quickActions.visibleActions missing → defaults (4)')
+    assert(config2.quickActions.visibleActions.length === 5, 'D8: quickActions.visibleActions missing → defaults (5)')
 
     // D9: quickActions.order=[] → stays empty
     assert(config5.quickActions.order.length === 0, 'D9: quickActions.order=[] stays empty')
@@ -433,13 +433,14 @@ async function main() {
   // ─── §STEP-1B: getOrderedQuickActions ─────────────────────────────────
   console.log('\n  §STEP-1B: getOrderedQuickActions:')
   {
-    // E1: Default config → all 4 in default order
+    // E1: Default config → all 5 in default order
     const ids1 = getOrderedQuickActions(DEFAULT_DASHBOARD_CONFIG)
-    assert(ids1.length === 4, 'E1: default config → 4 actions')
-    assert(ids1[0] === 'add-party', 'E1: default order[0]=add-party')
-    assert(ids1[1] === 'add-product', 'E1: default order[1]=add-product')
-    assert(ids1[2] === 'new-invoice', 'E1: default order[2]=new-invoice')
-    assert(ids1[3] === 'add-transaction', 'E1: default order[3]=add-transaction')
+    assert(ids1.length === 5, 'E1: default config → 5 actions')
+    assert(ids1[0] === 'quick-sale', 'E1: default order[0]=quick-sale')
+    assert(ids1[1] === 'add-party', 'E1: default order[1]=add-party')
+    assert(ids1[2] === 'add-product', 'E1: default order[2]=add-product')
+    assert(ids1[3] === 'new-invoice', 'E1: default order[3]=new-invoice')
+    assert(ids1[4] === 'add-transaction', 'E1: default order[4]=add-transaction')
 
     // E2: Custom order
     const config2 = parseDashboardSectionConfig(JSON.stringify({

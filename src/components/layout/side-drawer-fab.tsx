@@ -2,16 +2,45 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { AnimatePresence, motion, useAnimationControls } from 'framer-motion'
-import { Plus, UserPlus, PackagePlus, ArrowLeftRight, Zap, X } from 'lucide-react'
+import { Plus, UserPlus, PackagePlus, ArrowLeftRight, Zap, X, Settings, FileText, AlertTriangle, Truck } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { useQuickActionsConfig } from '@/hooks/use-quick-actions-config'
+import { getOrderedQuickActions, DEFAULT_DASHBOARD_CONFIG } from '@/lib/dashboard-preferences'
+import { SectionSettingsSheet } from '@/components/shared/dashboard-customization-sheet'
 
-const ACTIONS = [
-  { id: 'quick-sale', icon: Zap, labelKey: 'qa.quickSale', color: 'text-emerald-600', primary: true },
-  { id: 'add-transaction', icon: ArrowLeftRight, labelKey: 'qa.addTransaction', color: 'text-teal-600', primary: false },
-  { id: 'add-party', icon: UserPlus, labelKey: 'qa.addParty', color: 'text-emerald-600', primary: false },
-  { id: 'add-product', icon: PackagePlus, labelKey: 'qa.addProduct', color: 'text-amber-600', primary: false },
-] as const
+// §QUICK-ACTIONS-CATALOG: All available Quick Actions. The FAB menu renders
+// only the VISIBLE ones (from dashSectionConfig.quickActions.visibleActions)
+// in the saved order. This catalog mirrors the dashboard's ALL_QUICK_ACTIONS
+// so both surfaces show the same actions.
+interface QuickActionDef {
+  id: string
+  icon: typeof Zap
+  label: string
+  labelKey?: string
+  color: string
+  primary: boolean
+}
+const QUICK_ACTION_CATALOG: readonly QuickActionDef[] = [
+  { id: 'quick-sale', icon: Zap, label: 'Quick Sale', labelKey: 'qa.quickSale', color: 'text-emerald-600', primary: true },
+  { id: 'add-transaction', icon: ArrowLeftRight, label: 'Add Transaction', labelKey: 'qa.addTransaction', color: 'text-teal-600', primary: false },
+  { id: 'add-party', icon: UserPlus, label: 'খাতাদার যোগ', labelKey: 'qa.addParty', color: 'text-emerald-600', primary: false },
+  { id: 'add-product', icon: PackagePlus, label: 'পণ্য যোগ', labelKey: 'qa.addProduct', color: 'text-amber-600', primary: false },
+  { id: 'new-invoice', icon: FileText, label: 'New Invoice', labelKey: 'qa.newInvoice', color: 'text-orange-600', primary: false },
+  { id: 'view-invoices', icon: FileText, label: 'View Invoices', color: 'text-purple-600', primary: false },
+  { id: 'low-stock', icon: AlertTriangle, label: 'Low Stock', color: 'text-red-600', primary: false },
+  { id: 'add-customer', icon: UserPlus, label: 'Add Customer', color: 'text-blue-600', primary: false },
+  { id: 'add-supplier', icon: Truck, label: 'Add Supplier', color: 'text-cyan-600', primary: false },
+]
+
+// §LABEL-HELPER: Returns the label for an action ID. Uses i18n if a labelKey
+// exists, otherwise falls back to the English label from the catalog.
+function getActionLabel(actionId: string, t: (key: string) => string): string {
+  const item = QUICK_ACTION_CATALOG.find(a => a.id === actionId)
+  if (!item) return actionId
+  if (item.labelKey) return t(item.labelKey)
+  return item.label
+}
 
 const FAB_SIZE = 64
 const EDGE_MARGIN = 16
@@ -70,6 +99,13 @@ function snapToEdge(p: FabPos, vv: VVState): FabPos {
 export function SideDrawerFab() {
   const { fabOpen, setFabOpen, triggerQuickAction, navigateTo, activeView } = useAppStore()
   const { t } = useI18n()
+  // §QUICK-ACTIONS-CONFIG: Read the dashboard section config (shared with
+  // DashboardView via the same /api/app-settings cache). The FAB renders
+  // only the visible Quick Actions in the saved order. Settings gear opens
+  // a SectionSettingsSheet that saves via the existing /api/card-customization
+  // endpoint — no parallel persistence mechanism.
+  const { config: dashConfig, saveConfig } = useQuickActionsConfig()
+  const [showSettings, setShowSettings] = useState(false)
   // §KEYBOARD-VIEWPORT-FIX: pos is in VISUAL-VIEWPORT coords (relative to
   // top-left of the visible screen, NOT the layout viewport).
   const [vv, setVV] = useState<VVState>(getInitialVV)
@@ -212,11 +248,22 @@ export function SideDrawerFab() {
 
   const handleAction = (id: string) => {
     if (id === 'quick-sale') { navigateTo('sale-pad'); setFabOpen(false); return }
-    const vm: Record<string, string> = { 'add-party': 'khata', 'add-product': 'inventory', 'add-transaction': 'khata' }
+    if (id === 'view-invoices') { navigateTo('billing'); setFabOpen(false); return }
+    if (id === 'low-stock') { navigateTo('inventory'); setFabOpen(false); return }
+    const vm: Record<string, string> = { 'add-party': 'khata', 'add-product': 'inventory', 'add-transaction': 'khata', 'add-customer': 'khata', 'add-supplier': 'khata' }
     if (vm[id]) navigateTo(vm[id] as any)
     triggerQuickAction({ id: crypto.randomUUID(), type: id as any })
     setFabOpen(false)
   }
+
+  // §VISIBLE-ACTIONS: Compute the ordered list of visible Quick Actions.
+  // getOrderedQuickActions returns ALL valid action IDs in saved order;
+  // we filter to those in the catalog so unknown IDs are dropped.
+  const orderedActionIds = getOrderedQuickActions(dashConfig)
+  const actionMap = Object.fromEntries(QUICK_ACTION_CATALOG.map(a => [a.id, a]))
+  const visibleActions = orderedActionIds
+    .map(id => actionMap[id])
+    .filter(Boolean) as typeof QUICK_ACTION_CATALOG[number][]
 
   // §KEYBOARD-VIEWPORT-FIX: Drag stores position in VISUAL-VIEWPORT coords.
   // clientX/Y are in layout-viewport coords; delta is the same in both
@@ -344,13 +391,24 @@ export function SideDrawerFab() {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' }}>
+            {/* §TITLE-CENTERED: The title is truly centered using a 3-column
+                relative layout: [spacer-for-close-btn] [title-centered] [close-btn].
+                The close button is absolute-positioned so it doesn't affect
+                the title's centering. This guarantees the title is centered
+                regardless of the close button's width. */}
+            <div className="relative flex items-center justify-center py-2 px-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('qa.title')}</p>
-              <button onClick={() => setFabOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-4 h-4" /></button>
+              <button onClick={() => setFabOpen(false)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-4 h-4" /></button>
             </div>
             <div style={{ width: '100%', alignItems: 'flex-start', display: 'flex', flexDirection: 'column' }}>
-              {ACTIONS.map((a) => {
+              {visibleActions.length === 0 ? (
+                /* §EMPTY-STATE: Should never happen due to min-1 protection in
+                   Settings, but handle gracefully if config is corrupted. */
+                <p className="text-xs text-muted-foreground text-center py-4">No actions available</p>
+              ) : (
+                visibleActions.map((a) => {
                 const Icon = a.icon
+                const label = a.labelKey ? t(a.labelKey) : a.label
                 return (
                   <button
                     key={a.id}
@@ -359,13 +417,25 @@ export function SideDrawerFab() {
                     style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', width: '100%', paddingTop: '8px', paddingBottom: '8px' }}
                   >
                     <span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
-                    <span className={`text-sm flex-1 ${a.primary ? 'font-bold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}>{t(a.labelKey)}</span>
+                    <span className={`text-sm flex-1 ${a.primary ? 'font-bold text-emerald-700 dark:text-emerald-300' : 'font-medium'}`}>{label}</span>
                   </button>
                 )
-              })}
+              })
+              )}
             </div>
-            <div style={{ width: '100%', alignItems: 'center', marginTop: '10px', display: 'flex', justifyContent: 'center' }}>
-              <p className="text-[9px] text-muted-foreground/60" style={{ textAlign: 'center' }}>হোল্ড করে টেনে বাটন সরানো যায়</p>
+            {/* §SETTINGS-GEAR: The bottom helper area is replaced with a
+                dedicated Settings gear button. It opens the Quick Actions
+                Settings sheet (SectionSettingsSheet) which handles
+                visibility + reorder + reset via the existing persistence. */}
+            <div className="flex items-center justify-center mt-2 pb-1">
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowSettings(true) }}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors min-h-[36px]"
+                aria-label="Quick Actions Settings"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span className="text-[10px] font-medium">Settings</span>
+              </button>
             </div>
           </motion.div>
         )}
@@ -429,6 +499,35 @@ export function SideDrawerFab() {
           </motion.div>
         </motion.button>
       </div>
+
+      {/* §QUICK-ACTIONS-SETTINGS-SHEET: Opens when the user taps the Settings
+          gear in the FAB menu. Uses the existing SectionSettingsSheet —
+          same component the Dashboard uses for Quick Actions configuration.
+          Handles visibility + reorder + reset. Saves via the existing
+          /api/card-customization endpoint (shared with DashboardView).
+          §EMPTY-STATE-PROTECTION: SectionSettingsSheet prevents hiding the
+          last visible action (min 1 action always remains). */}
+      <SectionSettingsSheet
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        title="Quick Actions"
+        sectionId="quickActions"
+        savedConfig={dashConfig}
+        onSave={saveConfig}
+        items={[
+          { id: 'quick-sale', label: 'Quick Sale' },
+          { id: 'add-transaction', label: 'Add Transaction' },
+          { id: 'add-party', label: 'Add Party' },
+          { id: 'add-product', label: 'Add Product' },
+          { id: 'new-invoice', label: 'New Invoice' },
+          { id: 'view-invoices', label: 'View Invoices' },
+          { id: 'low-stock', label: 'Low Stock' },
+          { id: 'add-customer', label: 'Add Customer' },
+          { id: 'add-supplier', label: 'Add Supplier' },
+        ]}
+        supportsReorder
+        sectionDefaults={DEFAULT_DASHBOARD_CONFIG.quickActions}
+      />
     </>,
     document.body
   )

@@ -247,7 +247,7 @@ function validateDashboardSections(input: unknown): string | null {
   const TOP_TABS = new Set(['debtors', 'buyers', 'payments', 'products', 'defaulters', 'top-revenue-products'])
   const ITEM_COUNTS = new Set([3, 5, 10])
   const HUB_TABS = new Set(['transactions', 'lowstock', 'orders'])
-  const QUICK_ACTIONS = new Set(['add-party', 'add-product', 'new-invoice', 'add-transaction', 'view-invoices', 'low-stock', 'add-customer', 'add-supplier'])
+  const QUICK_ACTIONS = new Set(['quick-sale', 'add-party', 'add-product', 'new-invoice', 'add-transaction', 'view-invoices', 'low-stock', 'add-customer', 'add-supplier'])
   const MAX_VISIBLE = new Set([4, 6, 8])
 
   const result: Record<string, unknown> = { sections }
