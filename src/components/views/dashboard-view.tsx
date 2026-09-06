@@ -9,7 +9,7 @@ import {
   TrendingUp, TrendingDown, Wallet, Heart, AlertTriangle, Package,
   ArrowUpRight, ArrowDownRight, ArrowLeftRight, Users, Receipt, ChevronRight,
   BarChart3, LineChart, X, Loader2, Calendar,
-  MapPin, Phone, Building2, ShieldCheck, Store, Settings, Camera, Eye, EyeOff,
+  MapPin, Phone, Building2, ShieldCheck, Store, Settings, Camera,
   FileText, Boxes, LayoutGrid, Check, UserPlus, Truck,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -33,6 +33,7 @@ import {
   type TopInsightId,
   type HubInsightId,
 } from '@/lib/dashboard-view-all'
+import { DashboardVisibilityToggle } from '@/components/shared/dashboard-visibility-toggle'
 import { Fragment, useMemo, useState, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -2032,14 +2033,15 @@ export function DashboardView() {
                       { key: 'showPhone' as const, label: 'Phone' },
                       { key: 'showGstin' as const, label: 'GSTIN' },
                     ]).map(({ key, label }) => (
-                      <button key={key} onClick={() => setDraft({ ...draft, [key]: !draft[key] })} className="w-full flex items-center justify-between py-2 min-h-[40px]">
+                      <div key={key} className="w-full flex items-center justify-between py-2 min-h-[40px]">
                         <span className="text-xs font-medium">{label}</span>
-                        <span className={`w-9 h-5 rounded-full flex items-center transition-colors ${draft[key] ? 'bg-primary justify-end' : 'bg-muted justify-start'}`}>
-                          <span className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5 flex items-center justify-center">
-                            {draft[key] ? <Eye className="w-2.5 h-2.5 text-primary" /> : <EyeOff className="w-2.5 h-2.5 text-muted-foreground" />}
-                          </span>
-                        </span>
-                      </button>
+                        {/* §STEP-4B-UI-CONSISTENCY: Use standardized DashboardVisibilityToggle */}
+                        <DashboardVisibilityToggle
+                          visible={draft[key]}
+                          onChange={() => setDraft({ ...draft, [key]: !draft[key] })}
+                          ariaLabel={draft[key] ? `Hide ${label}` : `Show ${label}`}
+                        />
+                      </div>
                     ))}
                   </div>
                 </div>

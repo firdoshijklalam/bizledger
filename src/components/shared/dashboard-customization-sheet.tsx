@@ -3,12 +3,12 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  X, Loader2, Settings, ChevronUp, ChevronDown, Eye, EyeOff,
+  X, Loader2, Settings, ChevronUp, ChevronDown,
   LayoutGrid, BarChart3, Users, Package, ArrowLeftRight, Zap,
   RotateCcw, Check,
 } from 'lucide-react'
-import { Switch } from '@/components/ui/switch'
 import { SortableList, SortableListItem, DragHandle, reconstructOrderFromDrag } from '@/components/shared/sortable-list'
+import { DashboardVisibilityToggle } from '@/components/shared/dashboard-visibility-toggle'
 import {
   DEFAULT_DASHBOARD_CONFIG,
   parseDashboardSectionConfig,
@@ -208,11 +208,11 @@ export function DashboardCustomizationSheet({
                                   {meta.label}
                                 </p>
                               </div>
-                              {/* §STEP-4C: Standardized Switch for visibility */}
-                              <Switch
-                                checked={section.visible}
-                                onCheckedChange={(checked) => handleToggle(section.id)}
-                                aria-label={section.visible ? 'Hide section' : 'Show section'}
+                              {/* §STEP-4B-UI-CONSISTENCY: Standardized DashboardVisibilityToggle */}
+                              <DashboardVisibilityToggle
+                                visible={section.visible}
+                                onChange={() => handleToggle(section.id)}
+                                ariaLabel={section.visible ? 'Hide section' : 'Show section'}
                               />
                             </div>
                           )}
@@ -517,16 +517,16 @@ export function SectionSettingsSheet({
 
             {/* Body */}
             <div className="overflow-y-auto overscroll-contain p-4 space-y-4 flex-1">
-              {/* §STEP-4C: Section visibility — using standardized shadcn Switch */}
+              {/* §STEP-4B-UI-CONSISTENCY: Section visibility — standardized DashboardVisibilityToggle */}
               <div className="flex items-center justify-between p-3 rounded-xl bg-muted/50">
                 <div>
                   <p className="text-xs font-medium">Show {title}</p>
                   <p className="text-[10px] text-muted-foreground">Toggle this section on the dashboard</p>
                 </div>
-                <Switch
-                  checked={sectionVisible}
-                  onCheckedChange={(checked) => toggleSection(checked)}
-                  aria-label={sectionVisible ? 'Hide section' : 'Show section'}
+                <DashboardVisibilityToggle
+                  visible={sectionVisible}
+                  onChange={() => toggleSection(!sectionVisible)}
+                  ariaLabel={sectionVisible ? 'Hide section' : 'Show section'}
                 />
               </div>
 
@@ -584,13 +584,11 @@ export function SectionSettingsSheet({
                                   <div className="flex items-center gap-2 min-w-0 flex-1">
                                     {/* §STEP-4C-FIX: Drag handle — only for visible (sortable) items */}
                                     {isVisible && dragHandleProps && <DragHandle {...dragHandleProps} />}
-                                    <button
-                                      onClick={() => onToggleItem(item.id)}
-                                      className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isVisible ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}
-                                      aria-label={isVisible ? 'Hide' : 'Show'}
-                                    >
-                                      {isVisible && <Check className="w-3 h-3 text-primary-foreground" />}
-                                    </button>
+                                    <DashboardVisibilityToggle
+                                      visible={isVisible}
+                                      onChange={() => onToggleItem(item.id)}
+                                      ariaLabel={isVisible ? `Hide ${item.label}` : `Show ${item.label}`}
+                                    />
                                     <span className={`text-xs font-medium truncate ${isVisible ? '' : 'text-muted-foreground line-through'}`}>
                                       {item.label}
                                     </span>
@@ -641,20 +639,16 @@ export function SectionSettingsSheet({
                       {sortedItems.map((item) => {
                         const isVisible = visibleItems.includes(item.id)
                         return (
-                          <div key={item.id} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50">
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                              <button
-                                onClick={() => onToggleItem(item.id)}
-                                className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isVisible ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}
-                                aria-label={isVisible ? 'Hide' : 'Show'}
-                              >
-                                {isVisible && <Check className="w-3 h-3 text-primary-foreground" />}
-                              </button>
+                            <div key={item.id} className="flex items-center gap-2 p-2.5 rounded-lg hover:bg-muted/50">
+                              <DashboardVisibilityToggle
+                                visible={isVisible}
+                                onChange={() => onToggleItem(item.id)}
+                                ariaLabel={isVisible ? `Hide ${item.label}` : `Show ${item.label}`}
+                              />
                               <span className={`text-xs font-medium truncate ${isVisible ? '' : 'text-muted-foreground line-through'}`}>
                                 {item.label}
                               </span>
                             </div>
-                          </div>
                         )
                       })}
                     </div>
@@ -714,16 +708,18 @@ export function SectionSettingsSheet({
                     ] as const).map(([field, label]) => {
                       const isEnabled = ti[field]
                       return (
-                        <button
+                        <div
                           key={field}
-                          onClick={() => updateSection(prev => ({ ...prev, topInsights: { ...prev.topInsights, [field]: !isEnabled } }))}
-                          className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-muted/50"
+                          className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 min-h-[40px]"
                         >
                           <span className="text-xs font-medium">{label}</span>
-                          <span className={`w-9 h-5 rounded-full transition-colors relative ${isEnabled ? 'bg-primary' : 'bg-muted'}`}>
-                            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                          </span>
-                        </button>
+                          {/* §STEP-4B-UI-CONSISTENCY: Use standardized DashboardVisibilityToggle */}
+                          <DashboardVisibilityToggle
+                            visible={isEnabled}
+                            onChange={() => updateSection(prev => ({ ...prev, topInsights: { ...prev.topInsights, [field]: !isEnabled } }))}
+                            ariaLabel={isEnabled ? `Hide ${label}` : `Show ${label}`}
+                          />
+                        </div>
                       )
                     })}
                   </div>

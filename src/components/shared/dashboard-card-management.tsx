@@ -5,12 +5,13 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   TrendingUp, TrendingDown, Heart, AlertTriangle, Wallet,
   ArrowUpRight, ArrowDownRight, Receipt, Users, Package, FileText, Boxes,
-  X, Loader2, Settings, Eye, EyeOff, GripVertical, ChevronUp, ChevronDown,
+  X, Loader2, Settings, GripVertical, ChevronUp, ChevronDown,
 } from 'lucide-react'
 import { useAppStore } from '@/store/app-store'
 import { useFetch } from '@/hooks/use-fetch'
 import { formatCurrency } from '@/lib/utils'
 import type { RangeContext } from '@/lib/date-ranges'
+import { DashboardVisibilityToggle } from '@/components/shared/dashboard-visibility-toggle'
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
   useSensor, useSensors, DragEndEvent,
@@ -100,11 +101,28 @@ export function parseCardConfig(raw: any): CardConfig {
 }
 
 // ─── Sortable Card Item ─────────────────────────────────────────────────
+// §PART-B-ROW-ALIGNMENT: The card surface is now a SINGLE full-width track.
+// Previously the move up/down controls were OUTSIDE the card surface (in a
+// separate flex column), causing uneven horizontal alignment — the card
+// surface width varied per row because it was flex-1 while the move controls
+// had their own width outside. Now ALL controls (drag handle, content, move
+// up/down, visibility toggle) live INSIDE the single card surface as fixed
+// internal columns. This guarantees:
+//   - identical left edge (drag handle always at x=0)
+//   - identical right edge (visibility toggle always at the far right)
+//   - identical width (card surface is always full-width of the row)
+//   - identical height (h-[52px] on the surface)
+//   - no clipping / no horizontal overflow on mobile
+//   - 44px+ touch targets preserved (drag handle 32px + content + move 24px×2 + toggle 36px)
 
-function SortableCardItem({ card, visible, onToggle }: {
+function SortableCardItem({ card, visible, onToggle, onMoveUp, onMoveDown, canMoveUp, canMoveDown }: {
   card: { id: string; label: string; icon: typeof Wallet; description: string; recommended?: boolean }
   visible: boolean
   onToggle: () => void
+  onMoveUp: () => void
+  onMoveDown: () => void
+  canMoveUp: boolean
+  canMoveDown: boolean
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id })
   const style = {
@@ -115,13 +133,25 @@ function SortableCardItem({ card, visible, onToggle }: {
 
   const Icon = card.icon
   return (
-    <div ref={setNodeRef} style={style} className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 hover:bg-muted transition-colors h-[52px]">
-      <button {...attributes} {...listeners} className="touch-none cursor-grab active:cursor-grabbing text-muted-foreground shrink-0 p-1" aria-label="Drag to reorder">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 hover:bg-muted transition-colors h-[52px]"
+    >
+      {/* §COLUMN-1: Drag handle (fixed width, left edge) */}
+      <button
+        {...attributes}
+        {...listeners}
+        className="touch-none cursor-grab active:cursor-grabbing text-muted-foreground shrink-0 p-1 min-w-[36px] min-h-[36px] flex items-center justify-center"
+        aria-label="Drag to reorder"
+      >
         <GripVertical className="w-4 h-4" />
       </button>
+      {/* §COLUMN-2: Icon (fixed width) */}
       <span className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
         <Icon className="w-4 h-4 text-primary" />
       </span>
+      {/* §COLUMN-3: Content (flex-1, truncates) */}
       <div className="flex-1 min-w-0 overflow-hidden">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-medium truncate">{card.label}</span>
@@ -129,11 +159,31 @@ function SortableCardItem({ card, visible, onToggle }: {
         </div>
         <p className="text-[10px] text-muted-foreground truncate">{card.description}</p>
       </div>
-      <button onClick={onToggle} className={`w-9 h-5 rounded-full flex items-center transition-colors shrink-0 ${visible ? 'bg-primary justify-end' : 'bg-muted justify-start'}`} aria-label={visible ? 'Hide card' : 'Show card'}>
-        <span className="w-4 h-4 rounded-full bg-white shadow-sm mx-0.5 flex items-center justify-center">
-          {visible ? <Eye className="w-2.5 h-2.5 text-primary" /> : <EyeOff className="w-2.5 h-2.5 text-muted-foreground" />}
-        </span>
-      </button>
+      {/* §COLUMN-4: Move up/down controls (fixed width, INSIDE the card surface) */}
+      <div className="flex flex-col gap-0.5 shrink-0">
+        <button
+          onClick={onMoveUp}
+          disabled={!canMoveUp}
+          className="w-6 h-6 rounded hover:bg-muted flex items-center justify-center text-muted-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          aria-label="Move up"
+        >
+          <ChevronUp className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={onMoveDown}
+          disabled={!canMoveDown}
+          className="w-6 h-6 rounded hover:bg-muted flex items-center justify-center text-muted-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          aria-label="Move down"
+        >
+          <ChevronDown className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {/* §COLUMN-5: Visibility toggle (fixed width, right edge — standardized) */}
+      <DashboardVisibilityToggle
+        visible={visible}
+        onChange={onToggle}
+        ariaLabel={visible ? 'Hide card' : 'Show card'}
+      />
     </div>
   )
 }
@@ -285,32 +335,24 @@ export function DashboardCardManagementSheet({
                   {sortedDraft.map((cardConfig) => {
                     const def = cardDefs.find(d => d.id === cardConfig.id)
                     if (!def) return null
+                    const visibleIndex = sortedDraft.filter(c => c.visible).findIndex(c => c.id === cardConfig.id)
+                    const visibleCount = sortedDraft.filter(c => c.visible).length
+                    const canMoveUp = cardConfig.visible && visibleIndex > 0
+                    const canMoveDown = cardConfig.visible && visibleIndex >= 0 && visibleIndex < visibleCount - 1
                     return (
-                      <div key={cardConfig.id} className="flex items-center gap-1">
-                        <div className="flex-1">
-                          <SortableCardItem
-                            card={def}
-                            visible={cardConfig.visible}
-                            onToggle={() => handleToggle(cardConfig.id)}
-                          />
-                        </div>
-                        <div className="flex flex-col gap-0.5">
-                          <button
-                            onClick={() => handleMoveUp(cardConfig.id)}
-                            className="w-6 h-6 rounded hover:bg-muted flex items-center justify-center text-muted-foreground"
-                            aria-label="Move up"
-                          >
-                            <ChevronUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleMoveDown(cardConfig.id)}
-                            className="w-6 h-6 rounded hover:bg-muted flex items-center justify-center text-muted-foreground"
-                            aria-label="Move down"
-                          >
-                            <ChevronDown className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
+                      // §PART-B-ROW-ALIGNMENT: Single full-width track — no outer
+                      // flex wrapper with separate move-controls column. The
+                      // SortableCardItem itself IS the full row.
+                      <SortableCardItem
+                        key={cardConfig.id}
+                        card={def}
+                        visible={cardConfig.visible}
+                        onToggle={() => handleToggle(cardConfig.id)}
+                        onMoveUp={() => handleMoveUp(cardConfig.id)}
+                        onMoveDown={() => handleMoveDown(cardConfig.id)}
+                        canMoveUp={canMoveUp}
+                        canMoveDown={canMoveDown}
+                      />
                     )
                   })}
                 </SortableContext>
