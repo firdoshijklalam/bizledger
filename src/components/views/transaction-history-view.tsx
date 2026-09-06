@@ -3,7 +3,7 @@
 import { useAppStore } from '@/store/app-store'
 import { useFetch, apiPut, apiDelete } from '@/hooks/use-fetch'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
-import type { Invoice } from '@/lib/types'
+import type { Invoice, Transaction } from '@/lib/types'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   History as HistoryIcon, Search, X, ChevronLeft, ChevronRight,
@@ -22,6 +22,7 @@ import {
   type DashboardRange,
   type RangeContext,
 } from '@/lib/date-ranges'
+import { toNumber } from '@/lib/numeric'
 
 // ============================================================================
 // §HISTORY: Transaction History & Reports Module
@@ -66,7 +67,22 @@ interface DailySummary {
   byCategory: Record<string, number>
 }
 
-// Unified feed item — either an invoice or a due-collection transaction
+// §STEP-4B-VIEW-ALL: Transaction feed item for the 'payments' /
+// 'transactions' viewMode. Built from /api/transactions (the authoritative
+// transactions list). Same shape as FeedItem but with a `txnType` field so
+// the renderer can show credit/debit semantics (color, icon, sign).
+interface TxnFeedItem {
+  kind: 'transaction'
+  id: string
+  date: string
+  txnType: 'credit' | 'debit' | 'sale' | 'purchase' | 'expense'
+  partyName: string | null
+  amount: number
+  description: string | null
+  category: string | null
+  invoiceId: string | null
+  partyId: string | null
+}
 interface FeedItem {
   kind: 'invoice' | 'due-collection'
   id: string
@@ -90,8 +106,26 @@ const STATUS_BADGE: Record<string, { label: string; cls: string; dot: string }> 
 }
 
 export function TransactionHistoryView() {
-  const { business, triggerRefresh, overlayInvoiceId, setOverlayInvoiceId, historyDateRange, setHistoryDateRange, historyRangeContext, setHistoryRangeContext } = useAppStore()
+  // §STEP-4B-VIEW-ALL: `historyViewMode` is set by Dashboard Top Payments /
+  // Business Activity Transactions View-All. 'payments' shows only credit
+  // transactions; 'transactions' shows all credit+debit; 'invoices' (default)
+  // shows the existing invoice feed. Cleared after consumption.
+  const { business, triggerRefresh, overlayInvoiceId, setOverlayInvoiceId, historyDateRange, setHistoryDateRange, historyRangeContext, setHistoryRangeContext, historyViewMode, setHistoryViewMode } = useAppStore()
   const currency = business?.currency || 'INR'
+
+  // §STEP-4B-VIEW-ALL: Local viewMode state. Initialized to 'invoices' (the
+  // existing default). When `historyViewMode` is set from the store (via
+  // Dashboard View-All), it overrides this on mount, then clears the store.
+  const [viewMode, setViewMode] = useState<'invoices' | 'payments' | 'transactions'>('invoices')
+
+  useEffect(() => {
+    if (!historyViewMode) return
+    const t = setTimeout(() => {
+      setViewMode(historyViewMode)
+      setHistoryViewMode(null)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [historyViewMode, setHistoryViewMode])
 
   // ---- Filters ----
   // §PHASE-5-D1: Default range is now '1d' (Today) using the shared DashboardRange
@@ -146,6 +180,16 @@ export function TransactionHistoryView() {
 
   const { data: summary, loading: summaryLoading } = useFetch<DailySummary>(summaryQuery, [summaryQuery])
   const { data: invoices } = useFetch<Invoice[]>('/api/invoices?limit=200', [])
+  // §STEP-4B-VIEW-ALL: Fetch the authoritative transactions list when the user
+  // entered via Dashboard Top Payments or Business Activity Transactions
+  // View-All. Reuses the SAME /api/transactions endpoint used everywhere else
+  // (Khata, Dashboard recentTransactions, etc.) — no second data model.
+  // Fetched only when viewMode is NOT 'invoices' to avoid an extra request
+  // for the default invoice feed.
+  const { data: transactionsData } = useFetch<{ items: Transaction[]; total: number; hasMore: boolean }>(
+    viewMode === 'invoices' ? null : '/api/transactions?limit=200',
+    [viewMode],
+  )
 
   // ---- Build unified feed (invoices + due-collection transactions) ----
   // We pull due collections from /api/transactions (type=credit). To keep it
@@ -155,7 +199,39 @@ export function TransactionHistoryView() {
   // For a true merged feed, the invoices list already contains linked
   // transactions; we display invoices as the primary feed.
 
+  // ---- Build feed ----
+  // §STEP-4B-VIEW-ALL: When viewMode is 'payments' or 'transactions', build
+  // a transaction-based feed (NOT invoices). This is the authoritative source
+  // for Top Payments / Business Activity Transactions — same /api/transactions
+  // endpoint used by Khata, Dashboard recentTransactions, etc. NO second data
+  // model, NO duplicated accounting logic.
+  //
+  // 'payments' → only type='credit' transactions (matches Dashboard Top
+  //   Payments: data.recentTransactions.filter(t => t.type === 'credit'))
+  // 'transactions' → all credit + debit transactions (matches Dashboard
+  //   Business Activity Transactions: data.recentTransactions)
+  // 'invoices' → existing invoice feed (unchanged)
   const feed: FeedItem[] = useMemo(() => {
+    if (viewMode !== 'invoices') {
+      // §TRANSACTION-FEED: Build from /api/transactions items.
+      const txns = transactionsData?.items ?? []
+      const filtered = viewMode === 'payments'
+        ? txns.filter((t) => t.type === 'credit')
+        : txns // 'transactions' → all
+      return filtered.map((t) => ({
+        kind: 'transaction' as const,
+        id: t.id,
+        date: t.createdAt,
+        txnType: t.type,
+        partyName: (t as any).party?.name || null,
+        amount: toNumber(t.amount),
+        description: t.description || null,
+        category: t.category || null,
+        invoiceId: t.invoiceId || null,
+        partyId: t.partyId || null,
+      })) as any
+    }
+    // §INVOICE-FEED: Existing invoice-based feed (default).
     if (!invoices) return []
     const items: FeedItem[] = invoices.map((inv) => ({
       kind: 'invoice' as const,
@@ -173,12 +249,15 @@ export function TransactionHistoryView() {
     // Sort newest first
     items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     return items
-  }, [invoices])
+  }, [invoices, viewMode, transactionsData])
 
   // ---- Apply filters ----
   // §PHASE-5-D1: Use shared computeRangeBounds — same utility the Dashboard
   // and Reports APIs use. This GUARANTEES the client-side feed filter uses
   // the EXACT same date window as the server-side summary API call.
+  // §STEP-4B-VIEW-ALL: Status filter is hidden for 'payments'/'transactions'
+  // modes (transactions don't have invoice statuses). Search + date range
+  // filter still apply.
   const filtered = useMemo(() => {
     let out = feed
     // Date range filter (client-side on createdAt)
@@ -188,31 +267,53 @@ export function TransactionHistoryView() {
         const startMs = bounds.start.getTime()
         const endMs = bounds.end.getTime()
         out = out.filter((i) => {
-          // §DATA-FIX: Compare using Date.getTime() which is timezone-agnostic.
-          // computeRangeBounds returns IST-aligned boundaries; this comparison
-          // correctly handles IST "today" against invoice timestamps stored as
-          // UTC (the previous code's local-date-component conversion is no
-          // longer needed — the boundaries are already IST-correct).
           const t = new Date(i.date).getTime()
           return t >= startMs && t <= endMs
         })
       }
     }
-    // Status filter
-    if (statusFilter === 'dues') out = out.filter((i) => i.status && i.status !== 'paid' && i.status !== 'void' && (i.amountDue || 0) > 0)
-    else if (statusFilter === 'pickup') out = out.filter((i) => i.deliveryStatus === 'pickup')
-    else if (statusFilter === 'paid') out = out.filter((i) => i.status === 'paid')
+    // Status filter — invoice-only (no-op for transaction feed)
+    if (viewMode === 'invoices') {
+      if (statusFilter === 'dues') out = out.filter((i) => i.status && i.status !== 'paid' && i.status !== 'void' && (i.amountDue || 0) > 0)
+      else if (statusFilter === 'pickup') out = out.filter((i) => i.deliveryStatus === 'pickup')
+      else if (statusFilter === 'paid') out = out.filter((i) => i.status === 'paid')
+    }
     // Search
     if (search.trim()) {
       const q = search.trim().toLowerCase()
-      out = out.filter((i) =>
-        (i.invoiceNumber || '').toLowerCase().includes(q) ||
-        (i.partyName || '').toLowerCase().includes(q) ||
-        (i.partyPhone || '').toLowerCase().includes(q)
-      )
+      out = out.filter((i) => {
+        if (i.kind === 'transaction') {
+          const ti = i as any as TxnFeedItem
+          return (ti.description || '').toLowerCase().includes(q) ||
+                 (ti.partyName || '').toLowerCase().includes(q) ||
+                 (ti.category || '').toLowerCase().includes(q)
+        }
+        return (i.invoiceNumber || '').toLowerCase().includes(q) ||
+               (i.partyName || '').toLowerCase().includes(q) ||
+               (i.partyPhone || '').toLowerCase().includes(q)
+      })
     }
     return out
-  }, [feed, range, customStart, customEnd, statusFilter, search])
+  }, [feed, range, customStart, customEnd, statusFilter, search, viewMode])
+
+  // §STEP-4B-VIEW-ALL: Transaction-mode summary stats. Computed from the
+  // filtered transaction feed (NOT from the invoice-based DailySummary).
+  // Mirrors Dashboard Top Payments (Total In = sum of credit amounts) and
+  // Business Activity Transactions (Total In + Total Out).
+  const txnSummary = useMemo(() => {
+    if (viewMode === 'invoices') return null
+    let totalIn = 0
+    let totalOut = 0
+    let count = 0
+    for (const item of filtered) {
+      const ti = item as any as TxnFeedItem
+      if (ti.kind !== 'transaction') continue
+      if (ti.txnType === 'credit') totalIn += ti.amount
+      else if (ti.txnType === 'debit' || ti.txnType === 'expense') totalOut += ti.amount
+      count++
+    }
+    return { totalIn, totalOut, count }
+  }, [filtered, viewMode])
 
   // ---- Actions ----
   const handleMarkHanded = async (id: string, e: React.MouseEvent) => {
@@ -305,58 +406,125 @@ export function TransactionHistoryView() {
           )}
         </div>
 
+        {/* §STEP-4B-VIEW-ALL: Context banner for transaction-mode views. */}
+        {viewMode === 'payments' && (
+          <div className="mb-2 flex items-center justify-between gap-2 p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+            <p className="text-xs font-medium text-emerald-800 dark:text-emerald-200">
+              Showing payment transactions (credit only) for {dashboardRangeLabel(range)}
+            </p>
+            <button
+              onClick={() => setViewMode('invoices')}
+              className="text-[10px] px-2 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/70 transition-colors"
+            >
+              ← Back to invoices
+            </button>
+          </div>
+        )}
+        {viewMode === 'transactions' && (
+          <div className="mb-2 flex items-center justify-between gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
+            <p className="text-xs font-medium text-blue-800 dark:text-blue-200">
+              Showing all transactions (credit + debit) for {dashboardRangeLabel(range)}
+            </p>
+            <button
+              onClick={() => setViewMode('invoices')}
+              className="text-[10px] px-2 py-1 rounded-lg bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/70 transition-colors"
+            >
+              ← Back to invoices
+            </button>
+          </div>
+        )}
+
         {/* Stats cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          <StatCard
-            label="Gross Sales"
-            value={summary?.grossSales || 0}
-            sub={`Net ₹${formatCurrency(summary?.netSales || 0, currency).replace('₹','')}`}
-            icon={<TrendingUp className="w-3.5 h-3.5" />}
-            color="emerald"
-            loading={summaryLoading}
-          />
-          <StatCard
-            label="Cash Received"
-            value={summary?.cashReceived || 0}
-            sub={`UPI ₹${formatCurrency(summary?.upiReceived || 0, currency).replace('₹','')}`}
-            icon={<Wallet className="w-3.5 h-3.5" />}
-            color="blue"
-            loading={summaryLoading}
-          />
-          <StatCard
-            label="Due Collected"
-            value={summary?.dueCollected || 0}
-            sub={`${summary?.transactionCount || 0} txns`}
-            icon={<ArrowDownToLine className="w-3.5 h-3.5" />}
-            color="teal"
-            loading={summaryLoading}
-          />
-          <StatCard
-            label="Credit Given"
-            value={summary?.creditGiven || 0}
-            sub="New dues today"
-            icon={<ArrowUpFromLine className="w-3.5 h-3.5" />}
-            color="amber"
-            loading={summaryLoading}
-          />
-          <StatCard
-            label="Invoices"
-            value={summary?.invoiceCount || 0}
-            sub="count"
-            icon={<Receipt className="w-3.5 h-3.5" />}
-            color="violet"
-            loading={summaryLoading}
-            isCount
-          />
-          <StatCard
-            label="Net Cash"
-            value={(summary?.cashReceived || 0) + (summary?.upiReceived || 0) - (summary?.creditGiven || 0)}
-            sub="Cash+UPI−Credit"
-            icon={<IndianRupee className="w-3.5 h-3.5" />}
-            color="rose"
-            loading={summaryLoading}
-          />
-        </div>
+        {viewMode === 'invoices' ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <StatCard
+              label="Gross Sales"
+              value={summary?.grossSales || 0}
+              sub={`Net ₹${formatCurrency(summary?.netSales || 0, currency).replace('₹','')}`}
+              icon={<TrendingUp className="w-3.5 h-3.5" />}
+              color="emerald"
+              loading={summaryLoading}
+            />
+            <StatCard
+              label="Cash Received"
+              value={summary?.cashReceived || 0}
+              sub={`UPI ₹${formatCurrency(summary?.upiReceived || 0, currency).replace('₹','')}`}
+              icon={<Wallet className="w-3.5 h-3.5" />}
+              color="blue"
+              loading={summaryLoading}
+            />
+            <StatCard
+              label="Due Collected"
+              value={summary?.dueCollected || 0}
+              sub={`${summary?.transactionCount || 0} txns`}
+              icon={<ArrowDownToLine className="w-3.5 h-3.5" />}
+              color="teal"
+              loading={summaryLoading}
+            />
+            <StatCard
+              label="Credit Given"
+              value={summary?.creditGiven || 0}
+              sub="New dues today"
+              icon={<ArrowUpFromLine className="w-3.5 h-3.5" />}
+              color="amber"
+              loading={summaryLoading}
+            />
+            <StatCard
+              label="Invoices"
+              value={summary?.invoiceCount || 0}
+              sub="count"
+              icon={<Receipt className="w-3.5 h-3.5" />}
+              color="violet"
+              loading={summaryLoading}
+              isCount
+            />
+            <StatCard
+              label="Net Cash"
+              value={(summary?.cashReceived || 0) + (summary?.upiReceived || 0) - (summary?.creditGiven || 0)}
+              sub="Cash+UPI−Credit"
+              icon={<IndianRupee className="w-3.5 h-3.5" />}
+              color="rose"
+              loading={summaryLoading}
+            />
+          </div>
+        ) : (
+          // §STEP-4B-VIEW-ALL: Transaction-mode summary — mirrors Dashboard
+          // Top Payments (Total In) + Business Activity Transactions (In+Out).
+          // Computed from the filtered transaction feed (txnSummary).
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <StatCard
+              label="Total In"
+              value={txnSummary?.totalIn ?? 0}
+              sub={`${txnSummary?.count ?? 0} txns`}
+              icon={<ArrowDownToLine className="w-3.5 h-3.5" />}
+              color="emerald"
+            />
+            {viewMode === 'transactions' && (
+              <StatCard
+                label="Total Out"
+                value={txnSummary?.totalOut ?? 0}
+                sub="debit + expense"
+                icon={<ArrowUpFromLine className="w-3.5 h-3.5" />}
+                color="rose"
+              />
+            )}
+            <StatCard
+              label="Net Cash"
+              value={(txnSummary?.totalIn ?? 0) - (txnSummary?.totalOut ?? 0)}
+              sub="In − Out"
+              icon={<IndianRupee className="w-3.5 h-3.5" />}
+              color="violet"
+            />
+            <StatCard
+              label="Transactions"
+              value={txnSummary?.count ?? 0}
+              sub="records"
+              icon={<Receipt className="w-3.5 h-3.5" />}
+              color="blue"
+              isCount
+            />
+          </div>
+        )}
       </div>
 
       {/* ---- §3: SEARCH & STATUS FILTERS ---- */}
@@ -366,7 +534,7 @@ export function TransactionHistoryView() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search invoice, customer, phone…"
+            placeholder={viewMode === 'invoices' ? 'Search invoice, customer, phone…' : 'Search party, description, category…'}
             className="pl-9 h-11"
           />
           {search && (
@@ -378,29 +546,38 @@ export function TransactionHistoryView() {
             </button>
           )}
         </div>
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-          {([
-            { id: 'all', label: 'All' },
-            { id: 'dues', label: 'Only Dues' },
-            { id: 'pickup', label: 'Pick Up Later' },
-            { id: 'paid', label: 'Paid' },
-          ] as { id: StatusFilter; label: string }[]).map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setStatusFilter(f.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
-                statusFilter === f.id
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-          <div className="ml-auto text-[11px] text-muted-foreground whitespace-nowrap pr-1">
+        {/* §STEP-4B-VIEW-ALL: Status filter is invoice-only. Hidden for
+            'payments'/'transactions' modes (transactions don't have statuses). */}
+        {viewMode === 'invoices' && (
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            {([
+              { id: 'all', label: 'All' },
+              { id: 'dues', label: 'Only Dues' },
+              { id: 'pickup', label: 'Pick Up Later' },
+              { id: 'paid', label: 'Paid' },
+            ] as { id: StatusFilter; label: string }[]).map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setStatusFilter(f.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                  statusFilter === f.id
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+            <div className="ml-auto text-[11px] text-muted-foreground whitespace-nowrap pr-1">
+              {filtered.length} {filtered.length === 1 ? 'record' : 'records'}
+            </div>
+          </div>
+        )}
+        {viewMode !== 'invoices' && (
+          <div className="flex items-center justify-end text-[11px] text-muted-foreground whitespace-nowrap pr-1">
             {filtered.length} {filtered.length === 1 ? 'record' : 'records'}
           </div>
-        </div>
+        )}
       </div>
 
       {/* ---- §2: SMART TRANSACTION LIST ---- */}
@@ -415,6 +592,79 @@ export function TransactionHistoryView() {
           </div>
         ) : (
           filtered.map((item, idx) => {
+            // §STEP-4B-VIEW-ALL: Transaction-mode feed item — render with
+            // credit/debit semantics (color, icon, sign) instead of invoice
+            // status badges. Clicking opens the linked invoice (if any) or
+            // the linked party (otherwise no-op).
+            if (item.kind === 'transaction') {
+              const ti = item as any as TxnFeedItem
+              const isCredit = ti.txnType === 'credit'
+              const date = new Date(ti.date)
+              const handleClick = () => {
+                if (ti.invoiceId) {
+                  setOverlayInvoiceId(ti.invoiceId)
+                } else if (ti.partyId) {
+                  useAppStore.getState().setOverlayPartyId(ti.partyId)
+                }
+              }
+              return (
+                <motion.div
+                  key={ti.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: Math.min(idx * 0.02, 0.3) }}
+                  onClick={handleClick}
+                  className="relative rounded-xl border bg-card p-3 shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-[0.99] border-border"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
+                      isCredit
+                        ? 'bg-emerald-100 dark:bg-emerald-900/30'
+                        : 'bg-rose-100 dark:bg-rose-900/30'
+                    }`}>
+                      {isCredit
+                        ? <ArrowDownToLine className="w-5 h-5 text-emerald-600" />
+                        : <ArrowUpFromLine className="w-5 h-5 text-rose-600" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate">
+                            {ti.partyName || (ti.description || (isCredit ? 'Payment In' : 'Payment Out'))}
+                          </p>
+                          {ti.description && ti.partyName && (
+                            <p className="text-xs text-muted-foreground truncate">{ti.description}</p>
+                          )}
+                          {ti.category && (
+                            <p className="text-[10px] text-muted-foreground capitalize">{ti.category}</p>
+                          )}
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className={`text-sm font-bold tabular ${isCredit ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {isCredit ? '+' : '−'}{formatCurrency(ti.amount, currency)}
+                          </p>
+                          {ti.invoiceId && (
+                            <p className="text-[10px] text-muted-foreground">linked invoice</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                          isCredit
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                            : 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isCredit ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                          {isCredit ? 'CREDIT' : ti.txnType.toUpperCase()}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">{formatDateTime(date)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )
+            }
+            // §INVOICE-FEED-ITEM: Existing invoice rendering (unchanged)
             const isPickup = item.deliveryStatus === 'pickup'
             const isVoided = item.status === 'void'
             const badge = STATUS_BADGE[item.status || 'unpaid'] || STATUS_BADGE.unpaid

@@ -24,15 +24,23 @@ import { formatCurrency, timeAgo } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShoppingBag, Phone, MapPin, Package, Clock, CheckCircle2, Truck,
-  XCircle, Loader2, Zap, Play, AlertCircle,
+  XCircle, Loader2, Zap, Play, AlertCircle, LayoutGrid,
 } from 'lucide-react'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { LoadingState, EmptyState } from '@/components/shared/states'
 
+// §STEP-4B-VIEW-ALL: Added 'all' pseudo-tab. When active, it shows orders
+// across ALL statuses (matching the Dashboard Online Orders list which
+// displays all statuses). The 'all' tab is always available so users can
+// see the complete order list regardless of status — but the default tab
+// remains 'pending' (existing behavior) when the page is opened directly.
+// When the Dashboard "View All" sets `onlineOrdersInitialTab='all'`, this
+// view consumes it on mount and switches to the 'all' tab.
 const TABS = [
+  { id: 'all', label: 'All', icon: LayoutGrid, color: 'text-primary bg-primary/10' },
   { id: 'pending', label: 'New', icon: Clock, color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30' },
   { id: 'processing', label: 'Processing', icon: Package, color: 'text-blue-600 bg-blue-100 dark:bg-blue-900/30' },
   { id: 'out_for_delivery', label: 'Out for Delivery', icon: Truck, color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/30' },
@@ -41,18 +49,35 @@ const TABS = [
 ] as const
 
 export function OnlineOrdersView() {
-  const { business } = useAppStore()
+  // §STEP-4B-VIEW-ALL: `onlineOrdersInitialTab` is set by Dashboard Online
+  // Orders View-All. 'all' opens the new pseudo-tab showing orders across
+  // all statuses (matching the dashboard's all-status list). Default remains
+  // 'pending' when the page is opened directly elsewhere.
+  const { business, onlineOrdersInitialTab, setOnlineOrdersInitialTab } = useAppStore()
   const { orders, isConnected, updateOrderStatus, refetch } = useRealtimeOrders(business?.id)
   const [activeTab, setActiveTab] = useState<string>('pending')
   const [updatingId, setUpdatingId] = useState<string | null>(null)
 
+  // §STEP-4B-VIEW-ALL: Consume one-shot navigation context from Dashboard.
+  useEffect(() => {
+    if (!onlineOrdersInitialTab) return
+    const t = setTimeout(() => {
+      setActiveTab(onlineOrdersInitialTab)
+      setOnlineOrdersInitialTab(null)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [onlineOrdersInitialTab, setOnlineOrdersInitialTab])
+
   const currency = business?.currency || 'INR'
 
-  const filteredOrders = orders.filter((o: any) => o.status === activeTab)
+  // §STEP-4B-VIEW-ALL: When activeTab === 'all', show orders across ALL
+  // statuses (no filter). Otherwise filter by the specific status.
+  const filteredOrders = activeTab === 'all' ? orders : orders.filter((o: any) => o.status === activeTab)
 
-  // §COUNTS: Count orders per tab for badge display
+  // §COUNTS: Count orders per tab for badge display. 'all' shows the total
+  // order count (across all statuses).
   const counts = TABS.reduce((acc, tab) => {
-    acc[tab.id] = orders.filter((o: any) => o.status === tab.id).length
+    acc[tab.id] = tab.id === 'all' ? orders.length : orders.filter((o: any) => o.status === tab.id).length
     return acc
   }, {} as Record<string, number>)
 

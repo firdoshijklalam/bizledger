@@ -80,6 +80,13 @@ export async function GET(req: NextRequest) {
 
   // §PARALLEL-QUERIES: Run all independent queries in parallel. Each query is
   // optimized to use `select` (not `include`) and fetch only the fields needed.
+  // §STEP-4B-VIEW-ALL: Added `buyerVolumeGroups` — a single GROUP BY query
+  // that aggregates SUM(grandTotal) per partyId for sales/retail non-void
+  // invoices in the requested range. Used to populate `purchaseVolume` per
+  // partyLedger entry so the Dashboard Top Buyers View-All can sort the
+  // COMPLETE party list by purchase volume (matching the dashboard's ranking).
+  // This reuses the SAME date filter (createdAtFilter) as P&L — no second
+  // accounting system, no duplicated data model.
   const [
     parties,
     products,
@@ -90,6 +97,7 @@ export async function GET(req: NextRequest) {
     authoritativeOpExAgg,  // §P16-VERIFY-3: only subtype='operating_expense'
     legacyOpExAgg,          // §P16-VERIFY-3: NULL-subtype + type IN (expense/debit) + invoiceId IS NULL
     recentInvoices,
+    buyerVolumeGroups,
   ] = await Promise.all([
     // 1. Parties — for partyLedger, outstanding, gradeDist (not date-filtered)
     db.party.findMany({
@@ -245,6 +253,23 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
       take: 10,
     }),
+    // §STEP-4B-VIEW-ALL: Per-party purchase volume for the requested range.
+    // Aggregates SUM(grandTotal) grouped by partyId — single SQL GROUP BY.
+    // Used by partyLedger.purchaseVolume so Dashboard Top Buyers View-All can
+    // sort the COMPLETE party list by purchase volume (matching dashboard).
+    // Mirrors the Dashboard's `topBuyers` computation (sales/retail non-void,
+    // date-range-aware). When no date filter is requested, this is all-time.
+    db.invoice.groupBy({
+      by: ['partyId'],
+      where: {
+        businessId: business.id,
+        status: { not: 'void' },
+        type: { in: ['sales', 'retail'] },
+        partyId: { not: null },
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      _sum: { grandTotal: true },
+    }),
   ])
 
   // ─── Calculate financial totals from aggregate results ───────────────────
@@ -337,6 +362,16 @@ export async function GET(req: NextRequest) {
   }))
 
   // §PARTY-LEDGER: Summary of all parties.
+  // §STEP-4B-VIEW-ALL: `purchaseVolume` is the per-party SUM(grandTotal) for
+  // sales/retail non-void invoices in the requested range. Defaults to 0 for
+  // parties with no sales in the range. Mirrors Dashboard's `topBuyers`
+  // computation — same authoritative source, NOT a second sales data model.
+  const buyerVolumeMap = new Map<string, number>()
+  for (const g of buyerVolumeGroups) {
+    if (g.partyId) {
+      buyerVolumeMap.set(g.partyId, g._sum.grandTotal?.toNumber() ?? 0)
+    }
+  }
   const partyLedger = parties.map((p) => ({
     id: p.id,
     name: p.name,
@@ -344,6 +379,7 @@ export async function GET(req: NextRequest) {
     grade: p.qualityGrade,
     balance: p.balance,
     phone: p.phone,
+    purchaseVolume: buyerVolumeMap.get(p.id) ?? 0,
   }))
 
   return NextResponse.json({

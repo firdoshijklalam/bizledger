@@ -7,7 +7,7 @@ import type { Product } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
 import { toNumber } from '@/lib/numeric'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Package, Plus, AlertTriangle, Search, Trash2, Tag } from 'lucide-react'
+import { Package, Plus, AlertTriangle, Search, Trash2, Tag, TrendingUp, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState, LoadingState } from '@/components/shared/states'
@@ -22,6 +22,8 @@ import { Input } from '@/components/ui/input'
 import { ProductProfile } from './inventory/product-profile'
 import { useVoiceInput } from '@/hooks/use-voice-input'
 import { usePhoneticSearch } from '@/hooks/use-phonetic-search'
+import type { DashboardRange, RangeContext } from '@/lib/date-ranges'
+import { dashboardRangeLabel } from '@/lib/date-ranges'
 
 // PRD Part 26 §4: Simple Levenshtein distance for phonetic matching
 function levenshtein(a: string, b: string): number {
@@ -44,14 +46,64 @@ export function InventoryView() {
     selectedProductId, setSelectedProductId,
     pendingQuickAction, clearQuickAction,
     business,
+    // §STEP-4B-VIEW-ALL: sortBy + statsRange carried from Dashboard Top Products /
+    // Top Revenue Products View-All.
+    inventorySortBy, setInventorySortBy,
+    inventoryStatsRange, setInventoryStatsRange,
   } = useAppStore()
   const { t } = useI18n()
   const [search, setSearch] = useState('')
   const voiceProps = useVoiceInput<HTMLInputElement>((text) => setSearch(text))
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [activeCategory, setActiveCategory] = useState<string>('All')
+  // §STEP-4B-VIEW-ALL: Local sort state. Initialized to 'default'. When
+  // `inventorySortBy` is set from the store (via Dashboard View-All), it
+  // overrides this on mount, then clears the store. The user can dismiss the
+  // sort context with the "Clear sort" button (returns to 'default').
+  const [sortBy, setSortBy] = useState<'default' | 'unitsSold' | 'revenue'>('default')
+  // §STEP-4B-VIEW-ALL: Local stats range. Used to fetch allProductStats from
+  // /api/dashboard?range=X&includeAllProductStats=true. Default to '1y' when
+  // not set (preserves existing behavior for direct Inventory visits).
+  const [statsRange, setStatsRange] = useState<RangeContext>({ range: '1y' })
+
+  useEffect(() => {
+    if (inventorySortBy && inventorySortBy !== 'default') {
+      const t = setTimeout(() => {
+        setSortBy(inventorySortBy)
+        setInventorySortBy(null)
+      }, 0)
+      return () => clearTimeout(t)
+    }
+  }, [inventorySortBy, setInventorySortBy, setSortBy])
+
+  useEffect(() => {
+    if (inventoryStatsRange) {
+      const t = setTimeout(() => {
+        setStatsRange(inventoryStatsRange)
+        setInventoryStatsRange(null)
+      }, 0)
+      return () => clearTimeout(t)
+    }
+  }, [inventoryStatsRange, setInventoryStatsRange, setStatsRange])
 
   const { data: rawProducts, loading, refetch } = useFetch<Product[]>('/api/products', [])
+  // §STEP-4B-VIEW-ALL: Fetch authoritative per-product sales stats when the
+  // user entered via Dashboard Top Products / Top Revenue Products View-All.
+  // Reuses /api/dashboard with ?includeAllProductStats=true — same source as
+  // the dashboard's topProductsByUnits, just un-sliced. NOT a second data
+  // model; NOT a duplicated sales calculation. Fetched only when sortBy is
+  // not 'default' to avoid an extra request for normal Inventory visits.
+  const statsUrl = useMemo(() => {
+    if (sortBy === 'default') return null
+    const p = new URLSearchParams({
+      range: statsRange.range,
+      includeAllProductStats: 'true',
+    })
+    if (statsRange.range === 'custom' && statsRange.customStart) p.set('startDate', statsRange.customStart)
+    if (statsRange.range === 'custom' && statsRange.customEnd) p.set('endDate', statsRange.customEnd)
+    return `/api/dashboard?${p.toString()}`
+  }, [sortBy, statsRange])
+  const { data: statsData } = useFetch<{ allProductStats?: Array<{ name: string; units: number; revenue: number }> }>(statsUrl, [statsUrl])
 
   // §SEARCH-CONSISTENCY: Parse searchTags JSON string → array, same as the
   // Global Search overlay does. Ensures usePhoneticSearch hook works consistently.
@@ -96,8 +148,21 @@ export function InventoryView() {
     if (activeCategory !== 'All') {
       list = list.filter((p) => p.category === activeCategory)
     }
+    // §STEP-4B-VIEW-ALL: Sort by unitsSold or revenue using authoritative
+    // stats from /api/dashboard?includeAllProductStats. Products not in the
+    // stats map get 0 (they had no sales in the range) — appended at the
+    // bottom. This gives the COMPLETE product dataset sorted by the dashboard's
+    // ranking metric (preserving the insight context).
+    if (sortBy !== 'default' && statsData?.allProductStats) {
+      const statsMap = new Map(statsData.allProductStats.map((s) => [s.name, s]))
+      list = [...list].sort((a, b) => {
+        const av = sortBy === 'unitsSold' ? (statsMap.get(a.name)?.units ?? 0) : (statsMap.get(a.name)?.revenue ?? 0)
+        const bv = sortBy === 'unitsSold' ? (statsMap.get(b.name)?.units ?? 0) : (statsMap.get(b.name)?.revenue ?? 0)
+        return bv - av
+      })
+    }
     return list
-  }, [phoneticFiltered, inventoryFilter, activeCategory])
+  }, [phoneticFiltered, inventoryFilter, activeCategory, sortBy, statsData])
 
   const stats = useMemo(() => {
     if (!products) return { total: 0, lowStock: 0, value: 0 }
@@ -182,6 +247,25 @@ export function InventoryView() {
           </button>
         ))}
       </div>
+
+      {/* §STEP-4B-VIEW-ALL: Sort context banner. Shown when the user arrived
+          from Dashboard Top Products / Top Revenue Products View-All. Indicates
+          the sort metric + the date range the stats are computed for. The
+          "Clear sort" button returns to the default product ordering. */}
+      {sortBy !== 'default' && (
+        <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+          <p className="text-xs font-medium text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
+            <TrendingUp className="w-3.5 h-3.5" />
+            Sorted by {sortBy === 'unitsSold' ? 'Units Sold' : 'Revenue'} · {dashboardRangeLabel(statsRange.range)}
+          </p>
+          <button
+            onClick={() => setSortBy('default')}
+            className="text-[10px] px-2 py-1 rounded-lg bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/70 transition-colors flex items-center gap-1"
+          >
+            <X className="w-3 h-3" /> Clear sort
+          </button>
+        </div>
+      )}
 
       {/* Category filter chips (PRD Part 18 §1) */}
       {categories.length > 1 && (
@@ -272,6 +356,20 @@ export function InventoryView() {
                               {p.mrp && toNumber(p.mrp) > toNumber(p.salePrice) && (
                                 <span className="text-[10px] text-muted-foreground line-through">{formatCurrency(p.mrp, currency)}</span>
                               )}
+                              {/* §STEP-4B-VIEW-ALL: When sorted by unitsSold/revenue,
+                                  show the ranking metric so the sort context is visible. */}
+                              {sortBy !== 'default' && statsData?.allProductStats && (() => {
+                                const s = statsData.allProductStats.find((x) => x.name === p.name)
+                                if (!s) return null
+                                return (
+                                  <>
+                                    <span className="text-muted-foreground">·</span>
+                                    <span className="text-emerald-600 font-medium">
+                                      {sortBy === 'unitsSold' ? `${s.units} sold` : `${formatCurrency(s.revenue, currency)} rev`}
+                                    </span>
+                                  </>
+                                )
+                              })()}
                             </div>
                             {isLow && (
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300">

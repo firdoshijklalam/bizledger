@@ -1,6 +1,6 @@
 'use client'
 
-import { useAppStore } from '@/store/app-store'
+import { useAppStore, type OutstandingTab, type OutstandingGradeFilter, type PartySegment, type PartySortBy } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
 import { formatCurrency, formatDate, GRADE_META } from '@/lib/utils'
@@ -44,7 +44,7 @@ interface ReportData {
     cogsAccuracy?: { snapshotItems: number; legacyFallbackItems: number; isApproximate: boolean }
   }
   gst: { totalGst: number; breakdown: Array<{ rate: number; taxable: number; gst: number }> }
-  partyLedger: Array<{ id: string; name: string; type: string; grade: string; balance: number; phone?: string | null }>
+  partyLedger: Array<{ id: string; name: string; type: string; grade: string; balance: number; phone?: string | null; purchaseVolume?: number }>
   outstanding: {
     totalReceivable: number
     totalPayable: number
@@ -60,14 +60,17 @@ interface ReportData {
 // across Dashboard, History, and Reports. Reports P&L accepts ALL 9 dashboard
 // ranges (1d/yesterday/2d/3d/5d/7d/1m/3m/6m/1y/custom) so a dashboard card
 // click carrying any of these ranges is faithfully displayed.
+// §STEP-4B-VIEW-ALL: PartySegment + OutstandingTab + OutstandingGradeFilter are
+// now imported from app-store (single source of truth — shared with the
+// Dashboard View-All resolver in src/lib/dashboard-view-all.ts).
 type PLRange = DashboardRange
 type GSTRange = 'month' | 'last_month' | 'quarter' | 'custom'
-type PartySegment = 'all' | 'customers' | 'suppliers'
-type OutstandingTab = 'receivables' | 'payables'
 type StockMovement = 'all' | 'fast' | 'slow' | 'non-moving'
 
 export function ReportsView() {
-  const { business, setActiveView, reportsDateRange, setReportsDateRange, reportsRangeContext, setReportsRangeContext, reportsTab, setReportsTab } = useAppStore()
+  // §STEP-4B-VIEW-ALL: Pull new context fields set by Dashboard View-All actions.
+  // Each is one-shot — consumed on mount, then cleared.
+  const { business, setActiveView, reportsDateRange, setReportsDateRange, reportsRangeContext, setReportsRangeContext, reportsTab, setReportsTab, reportsOutstandingTab, setReportsOutstandingTab, reportsOutstandingGradeFilter, setReportsOutstandingGradeFilter, reportsPartySortBy, setReportsPartySortBy, reportsPartySegment, setReportsPartySegment } = useAppStore()
   const { t } = useI18n()
 
   // Active report tab — declared FIRST because the reportsUrl useMemo below
@@ -195,18 +198,70 @@ export function ReportsView() {
   }, [reportsDateRange, setReportsDateRange, setPlRange])
 
   // Party Ledger (PRD Part 19 §3)
+  // §STEP-4B-VIEW-ALL: `partySortMode` replaces the boolean `sortByDue` toggle.
+  // Supports 'name' (default), 'due' (legacy sortByDue=true), and
+  // 'purchaseVolume' (entered from Dashboard Top Buyers View-All).
   const [partySeg, setPartySeg] = useState<PartySegment>('all')
   const [partySearch, setPartySearch] = useState('')
-  const [sortByDue, setSortByDue] = useState(false)
+  const [partySortMode, setPartySortMode] = useState<'name' | 'due' | 'purchaseVolume'>('name')
 
   // Outstanding (PRD Part 19 §4)
+  // §STEP-4B-VIEW-ALL: `outstandingGradeFilter` filters the receivables list by
+  // quality grade. 'all' = no filter (default); 'D+E' = show D and E only
+  // (entered from Dashboard Defaulters View-All).
   const [outstandingTab, setOutstandingTab] = useState<OutstandingTab>('receivables')
+  const [outstandingGradeFilter, setOutstandingGradeFilterState] = useState<OutstandingGradeFilter>('all')
 
   // Stock Ageing (PRD Part 19 §5)
   const [stockMovement, setStockMovement] = useState<StockMovement>('all')
 
   // Customer Quality (PRD Part 19 §6)
   const [expandedGrade, setExpandedGrade] = useState<string | null>(null)
+
+  // §STEP-4B-VIEW-ALL: Consume one-shot navigation context from Dashboard
+  // Top Debtors / Defaulters / Top Buyers View-All. Each field is applied on
+  // mount, then cleared so it doesn't persist into the next visit. These MUST
+  // be declared AFTER the local state setters they reference (React Hooks
+  // immutability rule — can't access a variable before it's declared).
+  useEffect(() => {
+    if (reportsOutstandingTab) {
+      const t = setTimeout(() => {
+        setOutstandingTab(reportsOutstandingTab)
+        setReportsOutstandingTab(null)
+      }, 0)
+      return () => clearTimeout(t)
+    }
+  }, [reportsOutstandingTab, setReportsOutstandingTab, setOutstandingTab])
+
+  useEffect(() => {
+    if (reportsOutstandingGradeFilter) {
+      const t = setTimeout(() => {
+        setOutstandingGradeFilterState(reportsOutstandingGradeFilter)
+        setReportsOutstandingGradeFilter(null)
+      }, 0)
+      return () => clearTimeout(t)
+    }
+  }, [reportsOutstandingGradeFilter, setReportsOutstandingGradeFilter, setOutstandingGradeFilterState])
+
+  useEffect(() => {
+    if (reportsPartySegment) {
+      const t = setTimeout(() => {
+        setPartySeg(reportsPartySegment)
+        setReportsPartySegment(null)
+      }, 0)
+      return () => clearTimeout(t)
+    }
+  }, [reportsPartySegment, setReportsPartySegment, setPartySeg])
+
+  useEffect(() => {
+    if (reportsPartySortBy) {
+      const t = setTimeout(() => {
+        setPartySortMode(reportsPartySortBy)
+        setReportsPartySortBy(null)
+      }, 0)
+      return () => clearTimeout(t)
+    }
+  }, [reportsPartySortBy, setReportsPartySortBy, setPartySortMode])
 
   // P&L: top category leaderboard (PRD Part 19 §1) — computed before early return to satisfy rules of hooks
   const categoryLeaderboard = useMemo(() => {
@@ -225,6 +280,11 @@ export function ReportsView() {
   }, [allProducts])
 
   // Party Ledger filtered + sorted (PRD Part 19 §3)
+  // §STEP-4B-VIEW-ALL: `partySortMode` supports 'name' (default), 'due'
+  // (sort by |balance| desc), and 'purchaseVolume' (sort by purchaseVolume
+  // desc — entered from Dashboard Top Buyers View-All). 'purchaseVolume' uses
+  // the `purchaseVolume` field returned by /api/reports (computed from
+  // sales/retail non-void invoices in the requested range).
   const filteredPartyLedger = useMemo(() => {
     if (!data) return []
     let list = data.partyLedger
@@ -234,11 +294,26 @@ export function ReportsView() {
       const q = partySearch.toLowerCase()
       list = list.filter((p) => p.name.toLowerCase().includes(q) || (p.phone || '').includes(partySearch))
     }
-    if (sortByDue) {
+    if (partySortMode === 'due') {
       list = [...list].sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance))
+    } else if (partySortMode === 'purchaseVolume') {
+      list = [...list].sort((a, b) => (b.purchaseVolume ?? 0) - (a.purchaseVolume ?? 0))
     }
     return list
-  }, [data, partySeg, partySearch, sortByDue])
+  }, [data, partySeg, partySearch, partySortMode])
+
+  // §STEP-4B-VIEW-ALL: Filter receivables by grade when outstandingGradeFilter
+  // is set. 'all' = no filter; 'D' = Grade D only; 'E' = Grade E only;
+  // 'D+E' = Grade D OR E (entered from Dashboard Defaulters View-All).
+  // The Dashboard "Defaulters" insight represents D+E (not just D).
+  const filteredReceivables = useMemo(() => {
+    if (!data) return []
+    if (outstandingGradeFilter === 'all') return data.outstanding.receivables
+    if (outstandingGradeFilter === 'D+E') {
+      return data.outstanding.receivables.filter((r) => r.grade === 'D' || r.grade === 'E')
+    }
+    return data.outstanding.receivables.filter((r) => r.grade === outstandingGradeFilter)
+  }, [data, outstandingGradeFilter])
 
   // Stock Ageing movement filter (PRD Part 19 §5)
   const stockAgeing = data?.stockAgeing
@@ -744,12 +819,18 @@ export function ReportsView() {
 
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold">{t('rep.partyLedger')} ({filteredPartyLedger.length})</h3>
-              <button
-                onClick={() => setSortByDue(!sortByDue)}
-                className={`text-[10px] px-2 py-1 rounded-lg ${sortByDue ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}
-              >
-                Sort by Due
-              </button>
+              {/* §STEP-4B-VIEW-ALL: Sort selector — cycle through 'name' → 'due' →
+                  'purchaseVolume'. When entered from Dashboard Top Buyers View-All,
+                  `partySortMode` starts as 'purchaseVolume' so the buyer ranking
+                  is preserved. The button is highlighted when not 'name'. */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPartySortMode(partySortMode === 'name' ? 'due' : partySortMode === 'due' ? 'purchaseVolume' : 'name')}
+                  className={`text-[10px] px-2 py-1 rounded-lg ${partySortMode !== 'name' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}
+                >
+                  Sort: {partySortMode === 'name' ? 'Name' : partySortMode === 'due' ? 'By Due' : 'By Purchase Vol.'}
+                </button>
+              </div>
             </div>
             <div className="space-y-2 max-h-[60vh] overflow-y-auto scroll-area">
               {filteredPartyLedger.length === 0 && (
@@ -779,7 +860,15 @@ export function ReportsView() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{p.name}</p>
-                      <p className="text-[11px] text-muted-foreground capitalize">{p.type}</p>
+                      <p className="text-[11px] text-muted-foreground capitalize">
+                        {p.type}
+                        {/* §STEP-4B-VIEW-ALL: When sorted by purchaseVolume,
+                            show the purchase volume as a subtitle so the ranking
+                            metric is visible (matches Dashboard Top Buyers). */}
+                        {partySortMode === 'purchaseVolume' && (p.purchaseVolume ?? 0) > 0 && (
+                          <span className="ml-1 text-emerald-600">· {formatCurrency(p.purchaseVolume ?? 0, currency)} bought</span>
+                        )}
+                      </p>
                     </div>
                     <div className="text-right shrink-0">
                       <p className={`text-sm font-semibold tabular ${p.balance > 0 ? 'text-emerald-600' : p.balance < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
@@ -829,17 +918,46 @@ export function ReportsView() {
               </button>
             </div>
 
+            {/* §STEP-4B-VIEW-ALL: Grade filter banner. Shown when the user
+                arrived from Dashboard Defaulters View-All (grade='D+E') or
+                selected a grade filter manually. Dismissible — clears the
+                filter so all receivables are shown again. */}
+            {outstandingTab === 'receivables' && outstandingGradeFilter !== 'all' && (
+              <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+                <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                  Filtered to Grade {outstandingGradeFilter} · {filteredReceivables.length} {filteredReceivables.length === 1 ? 'party' : 'parties'}
+                </p>
+                <button
+                  onClick={() => setOutstandingGradeFilterState('all')}
+                  className="text-[10px] px-2 py-1 rounded-lg bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/70 transition-colors"
+                >
+                  Clear filter
+                </button>
+              </div>
+            )}
+
             <Card className="p-5">
               {outstandingTab === 'receivables' ? (
                 <>
-                  <h3 className="text-sm font-semibold mb-3">Receivables</h3>
+                  <h3 className="text-sm font-semibold mb-3">
+                    Receivables
+                    {/* §STEP-4B-VIEW-ALL: Show the filtered count alongside the
+                        total when a grade filter is active. */}
+                    {outstandingGradeFilter !== 'all' && (
+                      <span className="ml-1 text-[11px] text-muted-foreground font-normal">
+                        ({filteredReceivables.length} of {data.outstanding.receivables.length})
+                      </span>
+                    )}
+                  </h3>
                   <div className="space-y-2 max-h-72 overflow-y-auto scroll-area">
-                    {data.outstanding.receivables.length === 0 && (
+                    {filteredReceivables.length === 0 && (
                       <div className="text-center py-6 text-sm text-muted-foreground">
-                        ✓ No outstanding receivables — all customers have paid their dues.
+                        {outstandingGradeFilter !== 'all'
+                          ? `✓ No receivables in Grade ${outstandingGradeFilter}.`
+                          : '✓ No outstanding receivables — all customers have paid their dues.'}
                       </div>
                     )}
-                    {data.outstanding.receivables.map((r, i) => {
+                    {filteredReceivables.map((r, i) => {
                       const party = data.partyLedger.find((p) => p.name === r.name)
                       return (
                         <div

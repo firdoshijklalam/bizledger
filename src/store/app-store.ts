@@ -5,6 +5,23 @@ import type { RangeContext } from '@/lib/date-ranges'
 export type KhataFilter = 'all' | 'receivable' | 'payable' | 'customer' | 'supplier'
 export type InventoryFilter = 'all' | 'low-stock'
 
+// §STEP-4B-VIEW-ALL-CONTEXT: Navigation context fields consumed by destination
+// views when arriving from a Dashboard "View All" action. Each field is set by
+// the dashboard View-All handler and CLEARED by the destination view after
+// applying it (one-shot pattern, same as `reportsTab` / `historyRangeContext`).
+//
+// These fields preserve the SEMANTIC MEANING of the insight the user clicked —
+// e.g. Top Debtors lands on Reports → Outstanding → Receivables (not Payables);
+// Defaulters lands on Outstanding → Receivables filtered to Grade D+E; Top
+// Payments lands on History with viewMode='payments' (not invoices).
+export type OutstandingTab = 'receivables' | 'payables'
+export type OutstandingGradeFilter = 'all' | 'D' | 'E' | 'D+E'
+export type PartySortBy = 'name' | 'due' | 'purchaseVolume'
+export type PartySegment = 'all' | 'customers' | 'suppliers'
+export type HistoryViewMode = 'invoices' | 'payments' | 'transactions'
+export type InventorySortBy = 'default' | 'unitsSold' | 'revenue'
+export type OnlineOrdersInitialTab = 'pending' | 'processing' | 'out_for_delivery' | 'completed' | 'cancelled' | 'all'
+
 interface QuickAction {
   id: string
   type: 'add-party' | 'add-product' | 'new-invoice' | 'add-transaction' | 'quick-sale' | 'view-invoices' | 'low-stock' | 'add-customer' | 'add-supplier'
@@ -124,6 +141,40 @@ interface AppState {
   // from Top Debtors, 'party' from Top Buyers). Cleared after consumption.
   reportsTab: string | null
   setReportsTab: (t: string | null) => void
+  // §STEP-4B: Outstanding sub-tab + grade filter carried from Dashboard Top
+  // Debtors / Defaulters View-All. Consumed by Reports view on mount.
+  reportsOutstandingTab: OutstandingTab | null
+  setReportsOutstandingTab: (t: OutstandingTab | null) => void
+  reportsOutstandingGradeFilter: OutstandingGradeFilter | null
+  setReportsOutstandingGradeFilter: (g: OutstandingGradeFilter | null) => void
+  // §STEP-4B: Party Ledger sort + segment carried from Dashboard Top Buyers
+  // View-All. Consumed by Reports view on mount.
+  reportsPartySortBy: PartySortBy | null
+  setReportsPartySortBy: (s: PartySortBy | null) => void
+  reportsPartySegment: PartySegment | null
+  setReportsPartySegment: (s: PartySegment | null) => void
+  // §STEP-4B: History view mode carried from Dashboard Top Payments /
+  // Business Activity Transactions View-All. 'payments' shows only credit
+  // transactions; 'transactions' shows all credit+debit; 'invoices' is the
+  // default invoice feed (existing behavior).
+  historyViewMode: HistoryViewMode | null
+  setHistoryViewMode: (m: HistoryViewMode | null) => void
+  // §STEP-4B: Inventory sort carried from Dashboard Top Products /
+  // Top Revenue Products View-All. 'unitsSold' / 'revenue' sort the product
+  // list using authoritative stats from /api/dashboard?includeAllProductStats.
+  inventorySortBy: InventorySortBy | null
+  setInventorySortBy: (s: InventorySortBy | null) => void
+  // §STEP-4B: Range context for the Inventory sort. Carries the dashboard's
+  // selected date window so allProductStats is fetched for the SAME range as
+  // the dashboard's Top Products / Top Revenue Products insight. Cleared
+  // after consumption.
+  inventoryStatsRange: RangeContext | null
+  setInventoryStatsRange: (ctx: RangeContext | null) => void
+  // §STEP-4B: Online Orders initial tab carried from Dashboard Online Orders
+  // View-All. 'all' shows a new pseudo-tab displaying orders across all statuses
+  // (matching the Dashboard's all-status list). Cleared after consumption.
+  onlineOrdersInitialTab: OnlineOrdersInitialTab | null
+  setOnlineOrdersInitialTab: (t: OnlineOrdersInitialTab | null) => void
 
   // §2: Global overlay — party detail / invoice preview can open as overlay
   // above the current view without switching tabs. Preserves scroll state.
@@ -251,6 +302,24 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setReportsRangeContext: (ctx) => set({ reportsRangeContext: ctx }),
   reportsTab: null,
   setReportsTab: (t) => set({ reportsTab: t }),
+  // §STEP-4B-VIEW-ALL-CONTEXT: One-shot navigation context fields. Default to
+  // null; destination views consume + clear on mount.
+  reportsOutstandingTab: null,
+  setReportsOutstandingTab: (t) => set({ reportsOutstandingTab: t }),
+  reportsOutstandingGradeFilter: null,
+  setReportsOutstandingGradeFilter: (g) => set({ reportsOutstandingGradeFilter: g }),
+  reportsPartySortBy: null,
+  setReportsPartySortBy: (s) => set({ reportsPartySortBy: s }),
+  reportsPartySegment: null,
+  setReportsPartySegment: (s) => set({ reportsPartySegment: s }),
+  historyViewMode: null,
+  setHistoryViewMode: (m) => set({ historyViewMode: m }),
+  inventorySortBy: null,
+  setInventorySortBy: (s) => set({ inventorySortBy: s }),
+  inventoryStatsRange: null,
+  setInventoryStatsRange: (ctx) => set({ inventoryStatsRange: ctx }),
+  onlineOrdersInitialTab: null,
+  setOnlineOrdersInitialTab: (t) => set({ onlineOrdersInitialTab: t }),
 
   overlayPartyId: null,
   setOverlayPartyId: (id) => set({ overlayPartyId: id }),

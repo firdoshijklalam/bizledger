@@ -26,6 +26,13 @@ import { useScrollRetention } from '@/hooks/use-scroll-retention'
 import { useScrollStore } from '@/store/scroll-store'
 import { useRealtimeOrders } from '@/hooks/use-realtime-orders'
 import { toNumber } from '@/lib/numeric'
+import {
+  resolveTopInsightViewAll,
+  resolveHubViewAll,
+  applyViewAllDestination,
+  type TopInsightId,
+  type HubInsightId,
+} from '@/lib/dashboard-view-all'
 import { Fragment, useMemo, useState, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -135,7 +142,10 @@ const PIE_COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b
 // (RangeContext = { range, customStart, customEnd }).
 
 export function DashboardView() {
-  const { business, setActiveView, setKhataFilter, setKhataGradeFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setHistoryRangeContext, setReportsDateRange, setReportsRangeContext, setReportsTab } = useAppStore()
+  // §STEP-4B-VIEW-ALL: Pull all store setters needed by applyViewAllDestination.
+  // The resolver + applier live in src/lib/dashboard-view-all.ts so each
+  // insight's destination is obvious from one place (not an ad-hoc if/else).
+  const { business, setActiveView, setKhataFilter, setKhataGradeFilter, setInventoryFilter, setSelectedPartyId, setSelectedInvoiceId, triggerQuickAction, setReturnToView, setOverlayPartyId, setOverlayInvoiceId, setHistoryDateRange, setHistoryRangeContext, setReportsDateRange, setReportsRangeContext, setReportsTab, setReportsOutstandingTab, setReportsOutstandingGradeFilter, setReportsPartySortBy, setReportsPartySegment, setHistoryViewMode, setInventorySortBy, setInventoryStatsRange, setOnlineOrdersInitialTab } = useAppStore()
   const { t } = useI18n()
   // §STEP-3D: queryClient for cache reconciliation after dashboardSections save.
   // The /api/app-settings query key is built by useFetch as [url, refreshKey, timeoutMs, ...deps].
@@ -1466,29 +1476,27 @@ export function DashboardView() {
             </>
             )}
             {/* §STEP-4D: View All — moved BELOW tab content */}
+            {/* §STEP-4B-VIEW-ALL: Routing delegated to resolveTopInsightViewAll +
+                applyViewAllDestination in src/lib/dashboard-view-all.ts so each
+                insight's destination + context is obvious from one place. */}
             <div className="mt-3">
               <button onClick={() => {
                 saveScrollPos('dashboard')
-                if (topTab === 'debtors') {
-                  setActiveView('reports')
-                  setReportsTab('outstanding')
-                } else if (topTab === 'buyers') {
-                  setActiveView('reports')
-                  setReportsTab('party')
-                } else if (topTab === 'payments') {
-                  setHistoryRangeContext({ range: '7d' })
-                  setActiveView('history')
-                } else if (topTab === 'products') {
-                  setInventoryFilter('all')
-                  setActiveView('inventory')
-                } else if (topTab === 'defaulters') {
-                  setKhataGradeFilter('D')
-                  setActiveView('reports')
-                  setReportsTab('outstanding')
-                } else {
-                  setKhataFilter('all')
-                  setActiveView('khata')
-                }
+                const dest = resolveTopInsightViewAll(
+                  topTab as TopInsightId,
+                  { range: timeRange, customStart, customEnd },
+                )
+                applyViewAllDestination(
+                  {
+                    setActiveView, setReportsTab, setReportsOutstandingTab,
+                    setReportsOutstandingGradeFilter, setReportsPartySortBy,
+                    setReportsPartySegment, setReportsRangeContext,
+                    setHistoryViewMode, setHistoryRangeContext,
+                    setInventoryFilter, setInventorySortBy, setInventoryStatsRange,
+                    setOnlineOrdersInitialTab,
+                  },
+                  dest,
+                )
               }} className="text-xs text-primary font-medium flex items-center">{t('common.viewAll')} <ChevronRight className="w-3 h-3" /></button>
             </div>
           </Card>
@@ -1609,21 +1617,28 @@ export function DashboardView() {
             </>
             )}
             {/* §STEP-4D: View All — moved BELOW tab content */}
+            {/* §STEP-4B-VIEW-ALL: Routing delegated to resolveHubViewAll +
+                applyViewAllDestination. Transactions preserves the dashboard's
+                selected date window (incl. custom range); Online Orders opens
+                to the 'all' tab matching the dashboard's all-status list. */}
             <div className="mt-3">
               <button onClick={() => {
                 saveScrollPos('dashboard')
-                if (hubTab === 'transactions') {
-                  setHistoryRangeContext({ range: timeRange, customStart, customEnd })
-                  setActiveView('history')
-                } else if (hubTab === 'lowstock') {
-                  setInventoryFilter('low-stock')
-                  setActiveView('inventory')
-                } else if (hubTab === 'orders') {
-                  setActiveView('online-orders')
-                } else {
-                  setKhataFilter('all')
-                  setActiveView('khata')
-                }
+                const dest = resolveHubViewAll(
+                  hubTab as HubInsightId,
+                  { range: timeRange, customStart, customEnd },
+                )
+                applyViewAllDestination(
+                  {
+                    setActiveView, setReportsTab, setReportsOutstandingTab,
+                    setReportsOutstandingGradeFilter, setReportsPartySortBy,
+                    setReportsPartySegment, setReportsRangeContext,
+                    setHistoryViewMode, setHistoryRangeContext,
+                    setInventoryFilter, setInventorySortBy, setInventoryStatsRange,
+                    setOnlineOrdersInitialTab,
+                  },
+                  dest,
+                )
               }} className="text-xs text-primary font-medium flex items-center">
                 View All <ChevronRight className="w-3 h-3" />
               </button>

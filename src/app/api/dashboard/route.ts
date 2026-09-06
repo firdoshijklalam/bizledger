@@ -36,6 +36,14 @@ export async function GET(req: NextRequest) {
     const rangeParam = (searchParams.get('range') || '7d') as DashboardRange
     const startDate = searchParams.get('startDate')
     const endDate = searchParams.get('endDate')
+    // §STEP-4B-VIEW-ALL: When true, the response includes `allProductStats` —
+    // an UN-SLICED array of { name, units, revenue } for EVERY product that
+    // had sales in the requested range. Used by the Inventory view's
+    // "Sort by Units Sold / Revenue" context (entered from Dashboard Top
+    // Products / Top Revenue Products View-All). When false/absent, the
+    // response omits `allProductStats` (backward compatible — existing
+    // callers are unaffected).
+    const includeAllProductStats = searchParams.get('includeAllProductStats') === 'true'
 
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -464,6 +472,17 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.units - a.units)
       .slice(0, 10)
       .map((p) => ({ name: p.name, value: p.units, revenue: p.revenue }))
+    // §STEP-4B-VIEW-ALL: allProductStats is the UN-SLICED version of
+    // topProductsByUnits. Same authoritative source (rangeInvoicesForTrend →
+    // productUnits map), just NOT sliced to 10. Used by Inventory view's
+    // "Sort by Units Sold / Revenue" context. Only computed when the caller
+    // explicitly requests it via ?includeAllProductStats=true (avoids
+    // bloating the default dashboard response for callers that don't need it).
+    const allProductStats = includeAllProductStats
+      ? Object.values(productUnits)
+          .sort((a, b) => b.units - a.units)
+          .map((p) => ({ name: p.name, units: p.units, revenue: p.revenue }))
+      : undefined
 
     // Top buyers
     const buyerSales: Record<string, { id: string; name: string; total: number }> = {}
@@ -544,6 +563,9 @@ export async function GET(req: NextRequest) {
       topProductsBySales,
       topBuyers,
       topProductsByUnits,
+      // §STEP-4B-VIEW-ALL: Only present when ?includeAllProductStats=true.
+      // Same authoritative source as topProductsByUnits, but un-sliced.
+      ...(allProductStats ? { allProductStats } : {}),
       inventoryValue,
       inventoryTrend,
       // §P16-STEP3.8.1-DASHBOARD-CARDS: Additive range-level P&L fields.
