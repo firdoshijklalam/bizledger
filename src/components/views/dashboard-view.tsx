@@ -10,7 +10,7 @@ import {
   ArrowUpRight, ArrowDownRight, ArrowLeftRight, Users, Receipt, ChevronRight,
   BarChart3, LineChart, X, Loader2, Calendar,
   MapPin, Phone, Building2, ShieldCheck, Store, Settings, Camera,
-  FileText, Boxes, LayoutGrid, Check, UserPlus, Truck,
+  FileText, Boxes, LayoutGrid, Check, UserPlus, Truck, Zap,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -791,6 +791,7 @@ export function DashboardView() {
 
   // §STEP-4E: Expanded Quick Actions catalog — only actions backed by real functionality
   const ALL_QUICK_ACTIONS = [
+    { label: 'Quick Sale', icon: Zap, view: 'sale-pad' as const, action: 'quick-sale' as const, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
     { label: t('khata.addPartyShort'), icon: Users, view: 'khata' as const, action: 'add-party' as const, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
     { label: t('inv.addProductShort'), icon: Package, view: 'inventory' as const, action: 'add-product' as const, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
     { label: t('bill.newInvoiceShort'), icon: Receipt, view: 'sale-pad' as const, action: 'new-invoice' as const, color: 'text-orange-600 bg-orange-50 dark:bg-amber-950/30' },
@@ -2277,6 +2278,7 @@ export function DashboardView() {
         savedConfig={dashSectionConfig}
         onSave={saveDashboardSections}
         items={[
+          { id: 'quick-sale', label: 'Quick Sale' },
           { id: 'add-party', label: 'Add Party' },
           { id: 'add-product', label: 'Add Product' },
           { id: 'new-invoice', label: 'New Invoice' },
