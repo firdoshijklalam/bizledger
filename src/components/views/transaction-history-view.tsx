@@ -67,24 +67,12 @@ interface DailySummary {
   byCategory: Record<string, number>
 }
 
-// §STEP-4B-VIEW-ALL: Transaction feed item for the 'payments' /
-// 'transactions' viewMode. Built from /api/transactions (the authoritative
-// transactions list). Same shape as FeedItem but with a `txnType` field so
-// the renderer can show credit/debit semantics (color, icon, sign).
-interface TxnFeedItem {
-  kind: 'transaction'
-  id: string
-  date: string
-  txnType: 'credit' | 'debit' | 'sale' | 'purchase' | 'expense'
-  partyName: string | null
-  amount: number
-  description: string | null
-  category: string | null
-  invoiceId: string | null
-  partyId: string | null
-}
+// §STEP-4B-VIEW-ALL: FeedItem now includes the 'transaction' kind (entered
+// from Dashboard Top Payments / Business Activity Transactions View-All).
+// Transaction-mode feed items carry txnType + description + category + invoiceId
+// instead of invoiceNumber + status + deliveryStatus.
 interface FeedItem {
-  kind: 'invoice' | 'due-collection'
+  kind: 'invoice' | 'due-collection' | 'transaction'
   id: string
   date: string
   // invoice fields
@@ -96,6 +84,12 @@ interface FeedItem {
   status?: string
   deliveryStatus?: string | null
   paymentMode?: string | null
+  // transaction-mode fields (only present when kind === 'transaction')
+  txnType?: 'credit' | 'debit' | 'sale' | 'purchase' | 'expense'
+  description?: string | null
+  category?: string | null
+  invoiceId?: string | null
+  partyId?: string | null
 }
 
 const STATUS_BADGE: Record<string, { label: string; cls: string; dot: string }> = {
@@ -223,8 +217,8 @@ export function TransactionHistoryView() {
       const filtered = viewMode === 'payments'
         ? txns.filter((t) => t.type === 'credit')
         : txns // 'transactions' → all
-      return filtered.map((t) => ({
-        kind: 'transaction' as const,
+      return filtered.map((t): FeedItem => ({
+        kind: 'transaction',
         id: t.id,
         date: t.createdAt,
         txnType: t.type,
@@ -234,7 +228,7 @@ export function TransactionHistoryView() {
         category: t.category || null,
         invoiceId: t.invoiceId || null,
         partyId: t.partyId || null,
-      })) as any
+      }))
     }
     // §INVOICE-FEED: Existing invoice-based feed (default).
     if (!invoices) return []
@@ -288,10 +282,9 @@ export function TransactionHistoryView() {
       const q = search.trim().toLowerCase()
       out = out.filter((i) => {
         if (i.kind === 'transaction') {
-          const ti = i as any as TxnFeedItem
-          return (ti.description || '').toLowerCase().includes(q) ||
-                 (ti.partyName || '').toLowerCase().includes(q) ||
-                 (ti.category || '').toLowerCase().includes(q)
+          return (i.description || '').toLowerCase().includes(q) ||
+                 (i.partyName || '').toLowerCase().includes(q) ||
+                 (i.category || '').toLowerCase().includes(q)
         }
         return (i.invoiceNumber || '').toLowerCase().includes(q) ||
                (i.partyName || '').toLowerCase().includes(q) ||
@@ -311,10 +304,9 @@ export function TransactionHistoryView() {
     let totalOut = 0
     let count = 0
     for (const item of filtered) {
-      const ti = item as any as TxnFeedItem
-      if (ti.kind !== 'transaction') continue
-      if (ti.txnType === 'credit') totalIn += ti.amount
-      else if (ti.txnType === 'debit' || ti.txnType === 'expense') totalOut += ti.amount
+      if (item.kind !== 'transaction') continue
+      if (item.txnType === 'credit') totalIn += item.amount
+      else if (item.txnType === 'debit' || item.txnType === 'expense') totalOut += item.amount
       count++
     }
     return { totalIn, totalOut, count }
@@ -602,19 +594,18 @@ export function TransactionHistoryView() {
             // status badges. Clicking opens the linked invoice (if any) or
             // the linked party (otherwise no-op).
             if (item.kind === 'transaction') {
-              const ti = item as any as TxnFeedItem
-              const isCredit = ti.txnType === 'credit'
-              const date = new Date(ti.date)
+              const isCredit = item.txnType === 'credit'
+              const date = new Date(item.date)
               const handleClick = () => {
-                if (ti.invoiceId) {
-                  setOverlayInvoiceId(ti.invoiceId)
-                } else if (ti.partyId) {
-                  useAppStore.getState().setOverlayPartyId(ti.partyId)
+                if (item.invoiceId) {
+                  setOverlayInvoiceId(item.invoiceId)
+                } else if (item.partyId) {
+                  useAppStore.getState().setOverlayPartyId(item.partyId)
                 }
               }
               return (
                 <motion.div
-                  key={ti.id}
+                  key={item.id}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: Math.min(idx * 0.02, 0.3) }}
@@ -635,20 +626,20 @@ export function TransactionHistoryView() {
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold truncate">
-                            {ti.partyName || (ti.description || (isCredit ? 'Payment In' : 'Payment Out'))}
+                            {item.partyName || (item.description || (isCredit ? 'Payment In' : 'Payment Out'))}
                           </p>
-                          {ti.description && ti.partyName && (
-                            <p className="text-xs text-muted-foreground truncate">{ti.description}</p>
+                          {item.description && item.partyName && (
+                            <p className="text-xs text-muted-foreground truncate">{item.description}</p>
                           )}
-                          {ti.category && (
-                            <p className="text-[10px] text-muted-foreground capitalize">{ti.category}</p>
+                          {item.category && (
+                            <p className="text-[10px] text-muted-foreground capitalize">{item.category}</p>
                           )}
                         </div>
                         <div className="text-right shrink-0">
                           <p className={`text-sm font-bold tabular ${isCredit ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {isCredit ? '+' : '−'}{formatCurrency(ti.amount, currency)}
+                            {isCredit ? '+' : '−'}{formatCurrency(item.amount, currency)}
                           </p>
-                          {ti.invoiceId && (
+                          {item.invoiceId && (
                             <p className="text-[10px] text-muted-foreground">linked invoice</p>
                           )}
                         </div>
@@ -660,7 +651,7 @@ export function TransactionHistoryView() {
                             : 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300'
                         }`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${isCredit ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                          {isCredit ? 'CREDIT' : ti.txnType.toUpperCase()}
+                          {isCredit ? 'CREDIT' : (item.txnType || '').toUpperCase()}
                         </span>
                         <span className="text-[10px] text-muted-foreground">{formatDateTime(date)}</span>
                       </div>
