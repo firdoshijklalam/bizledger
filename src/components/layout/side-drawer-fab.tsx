@@ -355,7 +355,7 @@ export function SideDrawerFab() {
                   <button
                     key={a.id}
                     onClick={() => handleAction(a.id)}
-                    className={`w-full flex items-center gap-3 px-3 rounded-xl hover:bg-accent transition-colors text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}
+                    className={`w-full flex items-center gap-3 pl-3 pr-2 rounded-xl hover:bg-accent transition-colors text-left ${a.primary ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40' : ''}`}
                     style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', width: '100%', paddingTop: '8px', paddingBottom: '8px' }}
                   >
                     <span className={`shrink-0 ${a.color}`}><Icon className={`w-5 h-5 ${a.primary ? 'stroke-[2.5]' : ''}`} /></span>
