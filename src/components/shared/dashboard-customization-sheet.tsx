@@ -766,17 +766,17 @@ export function SectionSettingsSheet({
                   {/* §STEP-2C-REVIEW: Tap enabled ON/OFF toggle */}
                   <div>
                     <p className="text-[10px] text-muted-foreground mb-1.5">Tap to open customers</p>
-                    <button
-                      onClick={() => updateSection(prev => ({ ...prev, customerQuality: { ...prev.customerQuality, tapEnabled: !prev.customerQuality.tapEnabled } }))}
-                      className="w-full flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50"
-                    >
+                    <div className="w-full flex items-center justify-between p-2.5 rounded-lg hover:bg-muted/50 min-h-[40px]">
                       <span className="text-xs font-medium">
                         {cq.tapEnabled ? 'Enabled' : 'Disabled'}
                       </span>
-                      <span className={`w-9 h-5 rounded-full transition-colors relative ${cq.tapEnabled ? 'bg-primary' : 'bg-muted'}`}>
-                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${cq.tapEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                      </span>
-                    </button>
+                      {/* §STEP-4B-UI-CONSISTENCY: Use standardized DashboardVisibilityToggle */}
+                      <DashboardVisibilityToggle
+                        visible={cq.tapEnabled}
+                        onChange={() => updateSection(prev => ({ ...prev, customerQuality: { ...prev.customerQuality, tapEnabled: !prev.customerQuality.tapEnabled } }))}
+                        ariaLabel={cq.tapEnabled ? 'Disable tap to open customers' : 'Enable tap to open customers'}
+                      />
+                    </div>
                   </div>
 
                   {/* Display toggles */}
@@ -789,16 +789,18 @@ export function SectionSettingsSheet({
                     ] as const).map(([field, label]) => {
                       const isEnabled = cq[field]
                       return (
-                        <button
+                        <div
                           key={field}
-                          onClick={() => updateSection(prev => ({ ...prev, customerQuality: { ...prev.customerQuality, [field]: !isEnabled } }))}
-                          className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-muted/50"
+                          className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 min-h-[40px]"
                         >
                           <span className="text-xs font-medium">{label}</span>
-                          <span className={`w-9 h-5 rounded-full transition-colors relative ${isEnabled ? 'bg-primary' : 'bg-muted'}`}>
-                            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${isEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                          </span>
-                        </button>
+                          {/* §STEP-4B-UI-CONSISTENCY: Use standardized DashboardVisibilityToggle */}
+                          <DashboardVisibilityToggle
+                            visible={isEnabled}
+                            onChange={() => updateSection(prev => ({ ...prev, customerQuality: { ...prev.customerQuality, [field]: !isEnabled } }))}
+                            ariaLabel={isEnabled ? `Hide ${label}` : `Show ${label}`}
+                          />
+                        </div>
                       )
                     })}
                   </div>
