@@ -441,6 +441,49 @@ export function resolveDefaultTab(
 }
 
 /**
+ * §STEP-4F-CORRECTION: Normalize the defaultTab BEFORE persistence.
+ *
+ * This function is called by the SectionSettingsSheet's handleSave to ensure
+ * the saved config never contains a defaultTab that references a hidden tab.
+ *
+ * If the draft's defaultTab is visible (in the ordered visible list), preserve it.
+ * If it is hidden/invalid, set defaultTab to the FIRST ordered visible tab.
+ * If no tabs are visible, keep the original defaultTab (the parser/UI will
+ * handle the empty state — resolveDefaultTab returns null when there are no
+ * visible tabs, and the UI shows an empty state).
+ *
+ * @param config - The draft DashboardSectionConfig (about to be saved)
+ * @returns A NEW config with a normalized topInsights.defaultTab (if applicable)
+ */
+export function normalizeDefaultTabBeforeSave(config: DashboardSectionConfig): DashboardSectionConfig {
+  let result = config
+
+  // §TOP-INSIGHTS normalization
+  const orderedTopVisible = getOrderedTopInsightsTabs(result)
+  if (orderedTopVisible.length > 0) {
+    if (!orderedTopVisible.includes(result.topInsights.defaultTab)) {
+      result = {
+        ...result,
+        topInsights: { ...result.topInsights, defaultTab: orderedTopVisible[0] },
+      }
+    }
+  }
+
+  // §BUSINESS-ACTIVITY normalization (same logic, for consistency)
+  const orderedBaVisible = getOrderedBusinessActivityTabs(result)
+  if (orderedBaVisible.length > 0) {
+    if (!orderedBaVisible.includes(result.businessActivity.defaultTab)) {
+      result = {
+        ...result,
+        businessActivity: { ...result.businessActivity, defaultTab: orderedBaVisible[0] },
+      }
+    }
+  }
+
+  return result
+}
+
+/**
  * §STEP-2C: Pure helper — sort grade distribution data per the user's sortOrder preference.
  *
  * Input: gradeData = [{ grade: 'A', count: 5 }, { grade: 'B', count: 10 }, ...]

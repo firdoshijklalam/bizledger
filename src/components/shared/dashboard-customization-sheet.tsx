@@ -15,6 +15,7 @@ import {
   isSectionVisible,
   moveItemInOrder,
   resolveConfirmMode,
+  normalizeDefaultTabBeforeSave,
   type DashboardSectionConfig,
   type DashboardSection,
 } from '@/lib/dashboard-preferences'
@@ -369,7 +370,10 @@ export function SectionSettingsSheet({
     setSaving(true)
     setSaveError(null)
     try {
-      await onSave(draft)
+      // §STEP-4F-CORRECTION: Normalize defaultTab before saving so the persisted
+      // config never contains a defaultTab that references a hidden tab.
+      const normalizedDraft = normalizeDefaultTabBeforeSave(draft)
+      await onSave(normalizedDraft)
       // §STEP-3C: parent's onSave updates dashSectionConfig on success.
       // Close after a short delay to let the success state show (matches DashboardCustomizationSheet).
       setTimeout(() => onClose(), 300)
