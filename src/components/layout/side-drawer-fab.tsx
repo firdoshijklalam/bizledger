@@ -391,11 +391,12 @@ export function SideDrawerFab() {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* §TITLE-CENTERED: The title is truly centered using a 3-column
-                relative layout: [spacer-for-close-btn] [title-centered] [close-btn].
-                The close button is absolute-positioned so it doesn't affect
-                the title's centering. This guarantees the title is centered
-                regardless of the close button's width. */}
+            {/* §TITLE-CENTERED: The title is truly centered using a relative
+                layout: the title is flex-centered in the full-width header,
+                and the close button is absolute-positioned to the right.
+                This guarantees the title is mathematically centered regardless
+                of the close button's width — the close button doesn't affect
+                the title's centering because it's taken out of flow. */}
             <div className="relative flex items-center justify-center py-2 px-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('qa.title')}</p>
               <button onClick={() => setFabOpen(false)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-4 h-4" /></button>
@@ -423,18 +424,19 @@ export function SideDrawerFab() {
               })
               )}
             </div>
-            {/* §SETTINGS-GEAR: The bottom helper area is replaced with a
-                dedicated Settings gear button. It opens the Quick Actions
-                Settings sheet (SectionSettingsSheet) which handles
-                visibility + reorder + reset via the existing persistence. */}
-            <div className="flex items-center justify-center mt-2 pb-1">
+            {/* §FOOTER: Helper text (left/center) + Settings gear icon (right).
+                The helper text is restored to its original position at the
+                bottom. The Settings gear is an icon-only button (no text label)
+                positioned at the bottom-right. Both coexist without overlap
+                using a flex row: text takes flex-1, gear is shrink-0. */}
+            <div className="flex items-center justify-between mt-2 pb-1 px-1">
+              <p className="text-[9px] text-muted-foreground/60 text-center flex-1" style={{ textAlign: 'center' }}>হোল্ড করে টেনে বাটন সরানো যায়</p>
               <button
                 onClick={(e) => { e.stopPropagation(); setShowSettings(true) }}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors min-h-[36px]"
+                className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors ml-1"
                 aria-label="Quick Actions Settings"
               >
                 <Settings className="w-3.5 h-3.5" />
-                <span className="text-[10px] font-medium">Settings</span>
               </button>
             </div>
           </motion.div>
