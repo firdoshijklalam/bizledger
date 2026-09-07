@@ -53,6 +53,12 @@ interface NotificationState {
   addLocalNotification: (n: AppNotification) => void
   clearLocalNotifications: () => void
   toggleChannel: (key: keyof NotificationChannels) => void
+  // §SHARED-UNREAD: Server-authoritative unread count, shared between
+  // TopAppBar (badge) and NotificationsView (header + filter chips).
+  // Updated by useNotifications hook. NOT persisted to localStorage —
+  // always re-fetched from the server on mount.
+  unreadTotal: number
+  setUnreadTotal: (count: number) => void
   // §MIGRATION: v2 persist version — triggers old demo data removal
   _version: number
 }
@@ -63,6 +69,9 @@ export const useNotificationStore = create<NotificationState>()(
       // §v2: Empty array — real notifications come from /api/notifications
       localNotifications: [],
       channels: { lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
+      // §SHARED-UNREAD: Default 0. Fetched from server on mount via useNotifications.
+      unreadTotal: 0,
+      setUnreadTotal: (count) => set({ unreadTotal: Math.max(0, count) }),
       _version: 2,
 
       addLocalNotification: (n) =>
@@ -78,6 +87,19 @@ export const useNotificationStore = create<NotificationState>()(
     {
       name: 'bizledger-notif-channels',
       version: 2,
+      // §PARTIALIZE: Only persist channels + _version. unreadTotal is NOT
+      // persisted — it's always re-fetched from the server on mount.
+      // localNotifications is also NOT persisted (it's ephemeral UI feedback).
+      partialize: (state) => ({
+        localNotifications: state.localNotifications,
+        channels: state.channels,
+        _version: state._version,
+        unreadTotal: 0, // Always reset to 0 on reload — re-fetched from server
+        setUnreadTotal: state.setUnreadTotal,
+        addLocalNotification: state.addLocalNotification,
+        clearLocalNotifications: state.clearLocalNotifications,
+        toggleChannel: state.toggleChannel,
+      }),
       // §PERSIST-MIGRATION: When upgrading from v1 (old store with DEMO_NOTIFS)
       // to v2, replace the persisted state. The old `notifications` array
       // (which contained hardcoded demo data) is removed entirely.

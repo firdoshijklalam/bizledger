@@ -7,7 +7,7 @@ import { Search, Bell, Moon, Sun, Languages, BookOpen } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { useMounted } from '@/hooks/use-mounted'
-import { useNotifications } from '@/hooks/use-notifications'
+import { useNotificationStore } from '@/store/notification-store'
 // §1: GlobalVoiceInput removed — replaced by draggable FloatingKeyboardMic
 
 const VIEW_TITLES: Record<string, string> = {
@@ -31,10 +31,12 @@ export function TopAppBar() {
   const { t, language, setLanguage } = useI18n()
   const { theme, setTheme } = useTheme()
   const mounted = useMounted()
-  // §NOTIFICATION-FOUNDATION: Server-authoritative unread count from the API.
-  // The badge is hidden when count = 0, shows the number when small, and
-  // shows "99+" when large. This replaces the old hardcoded red dot.
-  const { unreadTotal } = useNotifications()
+  // §SHARED-UNREAD: Read unreadTotal directly from the shared Zustand store.
+  // This avoids a duplicate useFetch call in TopAppBar (items are only needed
+  // in NotificationsView). The store is updated by useNotifications() which
+  // is called from NotificationsView + the initial fetch on app mount.
+  // TopAppBar re-renders immediately when unreadTotal changes in the store.
+  const unreadTotal = useNotificationStore((s) => s.unreadTotal)
 
   const titleKey = VIEW_TITLES[activeView] || 'app.name'
 

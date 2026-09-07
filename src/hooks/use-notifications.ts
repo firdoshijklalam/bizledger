@@ -1,33 +1,35 @@
 'use client'
 
 /**
- * §NOTIFICATION-FOUNDATION: API-backed notification hook.
+ * §NOTIFICATION-FOUNDATION: API-backed notification hook (FIXED).
  *
- * This hook is the single entry point for notification data in the frontend.
- * It fetches from GET /api/notifications, manages the server-authoritative
- * unread count, and provides markRead / markAllRead mutations that POST
- * back to the server.
+ * Fixes applied:
+ *   1. Initial unreadTotal fetch uses useEffect (not render-time conditional)
+ *   2. unreadTotal is shared via Zustand store (not local useState)
+ *   3. Query keys match useFetch's actual key pattern
+ *   4. markRead only decrements if the notification is actually unread
  *
  * §DATA-FLOW:
- *   DB Notification → /api/notifications → this hook → NotificationsView + badge
+ *   DB Notification → /api/notifications → useNotifications hook
+ *     → items (via useFetch/TanStack Query cache)
+ *     → unreadTotal (via Zustand shared store — NOT local useState)
+ *     → TopAppBar badge + NotificationsView header
  *
- * §UNREAD-COUNT: The unreadTotal comes from the SERVER (not calculated locally).
- * This prevents the badge from showing a wrong count when pagination hasn't
- * loaded all items. The POST markRead/markAllRead response also includes the
- * updated unreadTotal so the badge updates immediately without a refetch.
+ * §SHARED-UNREAD: unreadTotal lives in useNotificationStore (Zustand), NOT
+ * local useState. This ensures TopAppBar and NotificationsView always see
+ * the same value. When markRead/markAllRead update the store, both consumers
+ * re-render immediately.
  *
- * §OPTIMISTIC-UPDATES: markRead/markAllRead update the local items array
- * optimistically. If the POST fails, the items are rolled back to their
- * previous state.
- *
- * §TENANT-ISOLATION: The API is scoped via getCurrentBusiness() on the server.
- * The frontend never passes a businessId — the server derives it from the
- * session. This prevents cross-tenant notification leakage.
+ * §QUERY-KEY: useFetch builds keys as [url, refreshKey, timeoutMs, ...deps].
+ * We match this pattern for setQueryData/getQueryData so optimistic updates
+ * target the correct cache entry.
  */
 
 import { useFetch } from '@/hooks/use-fetch'
 import { useQueryClient } from '@tanstack/react-query'
-import { useState, useCallback, useRef } from 'react'
+import { useNotificationStore } from '@/store/notification-store'
+import { useAppStore } from '@/store/app-store'
+import { useCallback, useRef } from 'react'
 
 // §DB-NOTIFICATION: The shape returned by the API (matches Prisma model).
 export interface DbNotification {
@@ -42,8 +44,6 @@ export interface DbNotification {
 }
 
 // §API-RESPONSE: Full response shape from GET /api/notifications.
-// useFetch auto-extracts .items, so we fetch the full response separately
-// to get unreadTotal.
 interface NotificationListResponse {
   items: DbNotification[]
   total: number
@@ -57,61 +57,65 @@ interface MarkReadResponse {
   unreadTotal: number
 }
 
+// §NOTIFICATION-ITEMS-URL: The canonical URL for fetching notification items.
+// This MUST match the URL passed to useFetch below so query keys align.
+const NOTIFICATIONS_URL = '/api/notifications?limit=50'
+
 export function useNotifications() {
   const queryClient = useQueryClient()
-  const queryKey = ['/api/notifications']
+  const { refreshKey } = useAppStore()
+
+  // §SHARED-UNREAD: Read/write the unread count from the SHARED Zustand store.
+  // This is the single source of truth for the badge — TopAppBar and
+  // NotificationsView both see the same value. The initial fetch is done
+  // in app-shell.tsx on mount, so the badge is populated before the user
+  // opens NotificationsView.
+  const unreadTotal = useNotificationStore((s) => s.unreadTotal)
+  const setUnreadTotal = useNotificationStore((s) => s.setUnreadTotal)
 
   // §ITEMS: useFetch auto-extracts .items from the paginated response.
-  const { data: items, loading, error, refetch } = useFetch<DbNotification[]>('/api/notifications?limit=50', [])
+  // The query key is [url, refreshKey, timeoutMs, ...deps] = [url, refreshKey, 10000].
+  const { data: items, loading, error, refetch } = useFetch<DbNotification[]>(NOTIFICATIONS_URL, [])
 
-  // §UNREAD-TOTAL: Fetched separately because useFetch strips the wrapper.
-  // We use a direct fetch + state to get the full response including unreadTotal.
-  const [unreadTotal, setUnreadTotal] = useState<number>(0)
-  const [unreadLoading, setUnreadLoading] = useState(true)
-  const [unreadError, setUnreadError] = useState<string | null>(null)
-  const fetchedUnreadRef = useRef(false)
+  // §QUERY-KEY: Match useFetch's key pattern so setQueryData targets the
+  // correct cache entry. useFetch builds: [url, refreshKey, timeoutMs, ...deps].
+  // deps = [] (our useFetch call passes []), timeoutMs = 10000 (default).
+  const itemsQueryKey = [NOTIFICATIONS_URL, refreshKey, 10000]
 
-  // §FETCH-UNREAD: Fetch the full API response to get unreadTotal.
-  // This runs once on mount. Subsequent updates come from POST responses.
+  // §FETCH-UNREAD: Re-fetch the full API response to get unreadTotal.
+  // Used after markRead/markAllRead failures to restore the correct count.
+  // The INITIAL fetch is done in app-shell.tsx — this is only for refetch.
   const fetchUnread = useCallback(async () => {
     try {
-      setUnreadLoading(true)
-      setUnreadError(null)
       const res = await fetch('/api/notifications?limit=1')
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) return
       const data: NotificationListResponse = await res.json()
       setUnreadTotal(data.unreadTotal ?? 0)
-    } catch (e: any) {
-      setUnreadError(e?.message || 'Failed to fetch unread count')
-      // Don't reset unreadTotal to 0 on error — keep the last known value
-    } finally {
-      setUnreadLoading(false)
-      fetchedUnreadRef.current = true
+    } catch {
+      // Non-fatal — keep the last known value
     }
-  }, [])
-
-  // §INITIAL-FETCH: Fetch unreadTotal on mount (once).
-  // We use a ref to prevent duplicate fetches in React Strict Mode.
-  if (!fetchedUnreadRef.current && !unreadLoading && !unreadError) {
-    fetchUnread()
-  }
+  }, [setUnreadTotal])
 
   // §MARK-READ: Optimistically mark a single notification as read.
   // POST { id } to /api/notifications. On success, update unreadTotal from
   // the server response. On failure, rollback the optimistic update.
   const markRead = useCallback(async (id: string): Promise<boolean> => {
-    // §OPTIMISTIC: Find the notification and mark it read locally.
-    // We use queryClient.setQueryData to update the cached items.
-    const queryKeyStr = JSON.stringify(queryKey)
-    const prevData = queryClient.getQueryData<DbNotification[]>(queryKey)
+    // §FIX-4: Only decrement if the notification is ACTUALLY unread.
+    // The old code always decremented, even for already-read notifications.
+    const prevData = queryClient.getQueryData<DbNotification[]>(itemsQueryKey)
+    const targetNotif = prevData?.find((n) => n.id === id)
+    const wasUnread = targetNotif ? !targetNotif.isRead : false
 
+    // §OPTIMISTIC: Update items cache
     if (prevData) {
       const updated = prevData.map((n) => (n.id === id ? { ...n, isRead: true } : n))
-      queryClient.setQueryData(queryKey, updated)
+      queryClient.setQueryData(itemsQueryKey, updated)
     }
 
-    // §OPTIMISTIC-UNREAD: Decrement locally (will be corrected by server response)
-    setUnreadTotal((prev) => Math.max(0, prev - 1))
+    // §OPTIMISTIC-UNREAD: Only decrement if the notification was actually unread
+    if (wasUnread) {
+      setUnreadTotal(unreadTotal - 1)
+    }
 
     try {
       const res = await fetch('/api/notifications', {
@@ -121,32 +125,34 @@ export function useNotifications() {
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: MarkReadResponse = await res.json()
-      // §SERVER-AUTHORITATIVE: Use the server's unreadTotal, not our optimistic decrement.
+      // §SERVER-AUTHORITATIVE: Use the server's unreadTotal, not our optimistic value.
       setUnreadTotal(data.unreadTotal ?? 0)
       return true
     } catch {
       // §ROLLBACK: Restore the previous items + unread count.
-      if (prevData) queryClient.setQueryData(queryKey, prevData)
-      // Refetch unread to get the correct count
-      fetchUnread()
+      if (prevData) queryClient.setQueryData(itemsQueryKey, prevData)
+      if (wasUnread) {
+        // Re-fetch to get the correct count (server is authoritative)
+        fetchUnread()
+      }
       return false
     }
-  }, [queryClient, fetchUnread])
+  }, [queryClient, itemsQueryKey, setUnreadTotal, unreadTotal, fetchUnread])
 
   // §MARK-ALL-READ: Optimistically mark all as read.
-  // POST { all: true } to /api/notifications. Double-click protection via
-  // a ref that prevents concurrent calls.
+  // POST { all: true } to /api/notifications. Double-click protection via ref.
   const markingAllRef = useRef(false)
   const markAllRead = useCallback(async (): Promise<boolean> => {
     if (markingAllRef.current) return false // §DOUBLE-CLICK-PROTECTION
     markingAllRef.current = true
 
-    const prevData = queryClient.getQueryData<DbNotification[]>(queryKey)
+    const prevData = queryClient.getQueryData<DbNotification[]>(itemsQueryKey)
     if (prevData) {
       const updated = prevData.map((n) => ({ ...n, isRead: true }))
-      queryClient.setQueryData(queryKey, updated)
+      queryClient.setQueryData(itemsQueryKey, updated)
     }
-    setUnreadTotal(0) // §OPTIMISTIC
+    // §OPTIMISTIC: Set shared unread to 0
+    setUnreadTotal(0)
 
     try {
       const res = await fetch('/api/notifications', {
@@ -156,19 +162,20 @@ export function useNotifications() {
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: MarkReadResponse = await res.json()
+      // §SERVER-AUTHORITATIVE: Use the server's unreadTotal (should be 0)
       setUnreadTotal(data.unreadTotal ?? 0)
-      // §CACHE-INVALIDATE: Invalidate so next mount refetches fresh data
-      queryClient.invalidateQueries({ queryKey })
+      // §CACHE-INVALIDATE: Invalidate items so next mount refetches fresh data
+      queryClient.invalidateQueries({ queryKey: itemsQueryKey })
       return true
     } catch {
       // §ROLLBACK
-      if (prevData) queryClient.setQueryData(queryKey, prevData)
+      if (prevData) queryClient.setQueryData(itemsQueryKey, prevData)
       fetchUnread()
       return false
     } finally {
       markingAllRef.current = false
     }
-  }, [queryClient, queryKey, fetchUnread])
+  }, [queryClient, itemsQueryKey, setUnreadTotal, fetchUnread])
 
   // §REFETCH: Refetch both items and unread count.
   const refetchAll = useCallback(async () => {
@@ -180,8 +187,6 @@ export function useNotifications() {
     loading,
     error,
     unreadTotal,
-    unreadLoading,
-    unreadError,
     markRead,
     markAllRead,
     refetch: refetchAll,

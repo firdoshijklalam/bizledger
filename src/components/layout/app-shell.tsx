@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/store/app-store'
+import { useNotificationStore } from '@/store/notification-store'
 import { useI18n } from '@/store/i18n-store'
 import { TopAppBar } from './top-app-bar'
 import { BottomTabNav } from './bottom-tab-nav'
@@ -188,6 +189,30 @@ export function AppShell() {
       mounted = false
     }
   }, [setBusiness, setBusinessLoaded])
+
+  // §SHARED-UNREAD-INIT: Fetch the server-authoritative unread count once on
+  // app mount. This populates the badge in TopAppBar before the user opens
+  // NotificationsView. The count lives in the shared Zustand store so both
+  // TopAppBar and NotificationsView see the same value. Subsequent updates
+  // come from markRead/markAllRead POST responses.
+  const setUnreadTotal = useNotificationStore((s) => s.setUnreadTotal)
+  useEffect(() => {
+    let mounted = true
+    const fetchUnread = async () => {
+      try {
+        const res = await fetch('/api/notifications?limit=1')
+        if (!res.ok) return
+        const data = await res.json()
+        if (mounted) {
+          setUnreadTotal(data.unreadTotal ?? 0)
+        }
+      } catch {
+        // Non-fatal — badge will show 0 until user opens NotificationsView
+      }
+    }
+    fetchUnread()
+    return () => { mounted = false }
+  }, [setUnreadTotal])
 
   // §LANGUAGE-APPLY: Subscribe to the app-settings cache and apply the
   // language preference when it arrives. This avoids a separate fetch in
