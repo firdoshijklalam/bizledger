@@ -7,6 +7,7 @@ import { Search, Bell, Moon, Sun, Languages, BookOpen } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { useMounted } from '@/hooks/use-mounted'
+import { useNotifications } from '@/hooks/use-notifications'
 // §1: GlobalVoiceInput removed — replaced by draggable FloatingKeyboardMic
 
 const VIEW_TITLES: Record<string, string> = {
@@ -26,10 +27,14 @@ const VIEW_TITLES: Record<string, string> = {
 }
 
 export function TopAppBar() {
-  const { activeView, setActiveView, setShowSearch, setShowNotifications, business } = useAppStore()
+  const { activeView, setActiveView, setShowSearch, business } = useAppStore()
   const { t, language, setLanguage } = useI18n()
   const { theme, setTheme } = useTheme()
   const mounted = useMounted()
+  // §NOTIFICATION-FOUNDATION: Server-authoritative unread count from the API.
+  // The badge is hidden when count = 0, shows the number when small, and
+  // shows "99+" when large. This replaces the old hardcoded red dot.
+  const { unreadTotal } = useNotifications()
 
   const titleKey = VIEW_TITLES[activeView] || 'app.name'
 
@@ -77,7 +82,14 @@ export function TopAppBar() {
             aria-label={t('header.notifications')}
           >
             <Bell className="w-5 h-5" />
-            <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-destructive ring-2 ring-background" />
+            {/* §NOTIFICATION-FOUNDATION: Dynamic badge bound to server-authoritative
+                unreadTotal. Hidden when 0. Shows count when ≤9, "99+" when ≥10.
+                Replaces the old hardcoded red dot that was always visible. */}
+            {unreadTotal > 0 && (
+              <span className="absolute top-1 right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-destructive text-destructive-foreground text-[9px] font-bold flex items-center justify-center ring-2 ring-background">
+                {unreadTotal > 99 ? '99+' : unreadTotal}
+              </span>
+            )}
           </Button>
 
           <Button

@@ -244,15 +244,17 @@ export function SettingsView() {
       toast.success('ডেমো ডেটা রিসেট সফল!')
       setShowResetModal(false)
       setResetPin('')
-      // PRD Part 30 §1.1: Push notification on restore/reset
-      useNotificationStore.getState().addNotification({
+      // PRD Part 30 §1.1: Push local notification on restore/reset
+      // §NOTIFICATION-FOUNDATION: This is a LOCAL-ONLY notification (not persisted
+      // to DB). It's a UI feedback mechanism. The page reloads 800ms later so
+      // it appears briefly. Real notifications come from /api/notifications.
+      useNotificationStore.getState().addLocalNotification({
         id: crypto.randomUUID(),
-        type: 'backup',
+        type: 'system',
         title: 'ডেটা রিসেট সম্পন্ন ✅',
         body: 'সমস্ত ডেটা ডিফল্ট স্টেটে রিসেট করা হয়েছে।',
         time: 'এইমাত্র',
         read: false,
-        action: { view: 'settings' },
       })
       setTimeout(() => window.location.reload(), 800)
     } catch (e) {

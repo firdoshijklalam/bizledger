@@ -1,17 +1,36 @@
-// Notification store with deep-link actions (PRD v2 §13) + PRD Part 27 enhancements
+// §NOTIFICATION-FOUNDATION: Notification store — now a thin cache/preferences layer.
+//
+// The CANONICAL source of truth is the DB → /api/notifications → useNotifications hook.
+// This store is retained ONLY for:
+//   - Channel preferences (lowStock, overduePayments, gradeChanges, backups)
+//   - Legacy compatibility (addNotification is used by settings-view for a one-shot
+//     local toast after data reset — this is NOT production notification data)
+//
+// §PERSIST-MIGRATION: v2 — removes the old DEMO_NOTIFS array. Existing users with
+// persisted v1 state (which contained demo notifications) will have their
+// notifications array replaced with an empty array. Real notifications come from
+// the API via useNotifications().
+//
+// §TENANT-ISOLATION: Channel preferences are global (not per-business) — they
+// represent the user's UI preference, not business data. If a user switches
+// businesses, the same channel preferences apply. This is safe because channels
+// don't contain business-scoped notification data.
+
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { ViewId } from '@/lib/types'
 
+// §LEGACY-TYPE: Retained for backward compatibility with settings-view.tsx
+// which calls addNotification after data reset. This is a LOCAL-ONLY notification
+// (not persisted to DB) — it's a UI feedback mechanism, not a real notification.
 export interface AppNotification {
   id: string
-  type: 'overdue' | 'low-stock' | 'promise' | 'backup' | 'defaulter' | 'grade'
+  type: 'overdue' | 'low-stock' | 'promise' | 'backup' | 'defaulter' | 'grade' | 'system'
   title: string
   body: string
   time: string
   read: boolean
   action?: {
-    view: ViewId
+    view: any
     partyId?: string
     productId?: string
     filter?: string
@@ -27,80 +46,56 @@ export interface NotificationChannels {
 }
 
 interface NotificationState {
-  notifications: AppNotification[]
+  // §LEGACY: Local-only notifications (not from API). Used by settings-view
+  // for one-shot UI feedback. NOT the production notification source.
+  localNotifications: AppNotification[]
   channels: NotificationChannels
-  markRead: (id: string) => void
-  markAllRead: () => void
-  dismiss: (id: string) => void
-  addNotification: (n: AppNotification) => void
+  addLocalNotification: (n: AppNotification) => void
+  clearLocalNotifications: () => void
   toggleChannel: (key: keyof NotificationChannels) => void
+  // §MIGRATION: v2 persist version — triggers old demo data removal
+  _version: number
 }
-
-const DEMO_NOTIFS: AppNotification[] = [
-  {
-    id: '1', type: 'overdue', title: 'Payment Overdue 🔴',
-    body: 'Maa Lakshmi Bhandar has ₹45,000 overdue beyond credit period.',
-    time: '2h ago', read: false,
-    action: { view: 'khata', partyId: 'demo-maa-lakshmi', filter: 'receivable' },
-  },
-  {
-    id: '2', type: 'low-stock', title: 'Low Stock Alert ⚠️',
-    body: 'Steel Glass is below threshold (8 units left).',
-    time: '5h ago', read: false,
-    action: { view: 'inventory', filter: 'low-stock' },
-  },
-  {
-    id: '3', type: 'defaulter', title: 'New Defaulter 🚨',
-    body: 'Defaulted Customer crossed credit limit (₹68,000 / ₹50,000).',
-    time: '1d ago', read: false,
-    action: { view: 'khata', partyId: 'demo-defaulted' },
-  },
-  {
-    id: '4', type: 'promise', title: 'Payment Promise 💬',
-    body: 'Amit Trading promised to pay ₹5,000 by Friday.',
-    time: '1d ago', read: true,
-    action: { view: 'khata', partyId: 'demo-amit' },
-  },
-  {
-    id: '5', type: 'backup', title: 'Backup Complete ✅',
-    body: 'Daily local backup saved successfully.',
-    time: '2d ago', read: true,
-    action: { view: 'settings' },
-  },
-  {
-    id: '6', type: 'grade', title: 'Grade Change 📊',
-    body: 'Sourav Stores upgraded from Grade C to B (improved payment speed).',
-    time: '3d ago', read: true,
-    action: { view: 'reports' },
-  },
-]
 
 export const useNotificationStore = create<NotificationState>()(
   persist(
     (set) => ({
-      notifications: DEMO_NOTIFS,
+      // §v2: Empty array — real notifications come from /api/notifications
+      localNotifications: [],
       channels: { lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
-      markRead: (id) =>
-        set((s) => ({
-          notifications: s.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
-        })),
-      markAllRead: () =>
-        set((s) => ({
-          notifications: s.notifications.map((n) => ({ ...n, read: true })),
-        })),
-      // PRD Part 27 §1: Swipe to dismiss
-      dismiss: (id) =>
-        set((s) => ({
-          notifications: s.notifications.filter((n) => n.id !== id),
-        })),
-      addNotification: (n) =>
-        set((s) => ({ notifications: [n, ...s.notifications] })),
-      // PRD Part 27 §3: Toggle channel
+      _version: 2,
+
+      addLocalNotification: (n) =>
+        set((s) => ({ localNotifications: [n, ...s.localNotifications].slice(0, 5) })),
+
+      clearLocalNotifications: () => set({ localNotifications: [] }),
+
       toggleChannel: (key) =>
         set((s) => ({
           channels: { ...s.channels, [key]: !s.channels[key] },
         })),
     }),
-    { name: 'bizledger-notif-channels' }
+    {
+      name: 'bizledger-notif-channels',
+      version: 2,
+      // §PERSIST-MIGRATION: When upgrading from v1 (old store with DEMO_NOTIFS)
+      // to v2, replace the persisted state. The old `notifications` array
+      // (which contained hardcoded demo data) is removed entirely.
+      // Real notifications come from the API via useNotifications().
+      migrate: (persistedState: any, version: number) => {
+        if (version < 2) {
+          // §v1 → v2: Remove old demo notifications array. Keep channel preferences.
+          const oldChannels = persistedState?.channels || {
+            lowStock: true, overduePayments: true, gradeChanges: true, backups: true,
+          }
+          return {
+            localNotifications: [], // §EMPTY: No demo data in production
+            channels: oldChannels,
+            _version: 2,
+          }
+        }
+        return persistedState as NotificationState
+      },
+    }
   )
 )
