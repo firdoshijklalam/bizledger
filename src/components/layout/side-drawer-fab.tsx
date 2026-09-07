@@ -392,12 +392,14 @@ export function SideDrawerFab() {
             onClick={(e) => e.stopPropagation()}
           >
             {/* §TITLE-CENTERED: The title is truly centered relative to the
-                FULL modal width. The header container has NO horizontal padding
-                (the modal's own p-2 provides the outer padding). The title is
-                flex-centered via justify-center. The close button is
-                absolute-positioned to the right — it's taken out of flow so
-                it does NOT affect the title's centering. */}
-            <div className="relative flex items-center justify-center py-2">
+                FULL modal width. The header div has w-full so it always takes
+                the full modal content width REGARDLESS of the modal's
+                alignItems (which is flex-start or flex-end depending on FAB
+                position). Without w-full, alignItems:flex-end would shrink
+                the header to content width and push it right — causing the
+                title to appear off-center. The close button is
+                absolute-positioned so it does NOT affect centering. */}
+            <div className="relative w-full flex items-center justify-center py-2">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{t('qa.title')}</p>
               <button onClick={() => setFabOpen(false)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="Close"><X className="w-4 h-4" /></button>
             </div>
@@ -425,12 +427,17 @@ export function SideDrawerFab() {
               )}
             </div>
             {/* §FOOTER: Helper text (left-aligned with icon column) + Settings
-                gear icon (right). The helper text left edge aligns with the
-                action icons' left edge: action buttons have pl-3 (12px) left
-                padding, so the footer uses pl-3 (12px) to match. The helper
-                text is left-aligned (NOT centered) so it starts on the same
-                vertical line as the icons. The gear is shrink-0 at the right. */}
-            <div className="flex items-center justify-between mt-2 pb-1 pl-3 pr-1">
+                gear icon (right). The footer div has w-full so it always takes
+                the full modal content width REGARDLESS of the modal's
+                alignItems (which could be flex-end, pushing a non-w-full
+                footer right). The helper text left edge aligns with the action
+                icons' left edge: action buttons have pl-3 (12px) left padding,
+                so the footer uses pl-3 (12px) to match. Both are inside the
+                modal's p-2 (8px) padding, so:
+                  icon left edge = 8px (modal p-2) + 12px (button pl-3) = 20px
+                  helper text left edge = 8px (modal p-2) + 12px (footer pl-3) = 20px
+                → ALIGNED. */}
+            <div className="flex w-full items-center justify-between mt-2 pb-1 pl-3 pr-1">
               <p className="text-[9px] text-muted-foreground/60 flex-1" style={{ textAlign: 'left' }}>হোল্ড করে টেনে বাটন সরানো যায়</p>
               <button
                 onClick={(e) => { e.stopPropagation(); setShowSettings(true) }}
