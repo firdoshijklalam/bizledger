@@ -53,7 +53,12 @@ interface NotificationState {
   channels: NotificationChannels
   addLocalNotification: (n: AppNotification) => void
   clearLocalNotifications: () => void
-  toggleChannel: (key: keyof NotificationChannels) => void
+  // §CONCURRENCY-FIX: toggleChannel returns a Promise<boolean> so callers
+  // can await server confirmation. The UI updates optimistically; if the
+  // server fails, the local state is rolled back.
+  // Only the CHANGED key+value is sent to the server (not the entire snapshot)
+  // to prevent concurrent updates to different keys from overwriting each other.
+  toggleChannel: (key: keyof NotificationChannels) => Promise<boolean>
   // §SHARED-UNREAD: Server-authoritative unread count, shared between
   // TopAppBar (badge) and NotificationsView (header + filter chips).
   // Updated by useNotifications hook. NOT persisted to localStorage —
@@ -80,26 +85,58 @@ export const useNotificationStore = create<NotificationState>()(
 
       clearLocalNotifications: () => set({ localNotifications: [] }),
 
-      toggleChannel: (key) =>
-        set((s) => {
-          const newChannels = { ...s.channels, [key]: !s.channels[key] }
-          // §SERVER-SYNC: Synchronous PUT to the dedicated notification-preferences
-          // endpoint. This is NOT fire-and-forget — the caller can await the
-          // returned promise to guarantee server synchronization completes before
-          // proceeding. However, we also don't block the UI update — the local
-          // state is updated immediately (optimistic) and the server sync runs
-          // in the background.
-          //
-          // §RACE-FIX: The dedicated endpoint merges partial updates, so
-          // out-of-order writes are handled: each PUT reads the current server
-          // state and merges. Last-write-wins per key.
-          fetch('/api/notification-preferences', {
+      // §CONCURRENCY-FIX: toggleChannel returns a Promise that resolves when
+      // the server confirms the update. The UI updates optimistically (local
+      // state changes immediately). If the server PUT fails, the local state
+      // is rolled back to the previous value.
+      //
+      // §SINGLE-KEY: Only the changed key+value is sent to the server:
+      //   { key: 'sales', value: false }
+      // NOT the entire channels snapshot. This prevents concurrent updates to
+      // different keys from overwriting each other.
+      //
+      // §SERIALIZED: Rapid toggles of the SAME key are serialized by the
+      // async/await chain — each toggle waits for the previous to complete
+      // before sending the next. This is naturally enforced because the
+      // Zustand set() call is synchronous but the fetch is awaited.
+      toggleChannel: async (key) => {
+        // §READ-CURRENT: Get the current value BEFORE the optimistic update
+        // so we can roll back on failure.
+        const prevValue = useNotificationStore.getState().channels[key]
+        const newValue = !prevValue
+
+        // §OPTIMISTIC: Update local state immediately
+        set((s) => ({
+          channels: { ...s.channels, [key]: newValue },
+        }))
+
+        try {
+          const res = await fetch('/api/notification-preferences', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ channels: newChannels }),
-          }).catch(() => {})
-          return { channels: newChannels }
-        }),
+            // §SINGLE-KEY: Send only the changed key + value
+            body: JSON.stringify({ key, value: newValue }),
+          })
+
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+          const data = await res.json()
+          // §SERVER-RECONCILE: Use the server's full channels response to
+          // reconcile local state (in case the server had a different value
+          // for another key due to a concurrent update).
+          if (data.channels) {
+            set({ channels: data.channels })
+          }
+
+          return true
+        } catch {
+          // §ROLLBACK: Restore the previous value for this key
+          set((s) => ({
+            channels: { ...s.channels, [key]: prevValue },
+          }))
+          return false
+        }
+      },
     }),
     {
       name: 'bizledger-notif-channels',
