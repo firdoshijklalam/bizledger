@@ -81,9 +81,23 @@ export const useNotificationStore = create<NotificationState>()(
       clearLocalNotifications: () => set({ localNotifications: [] }),
 
       toggleChannel: (key) =>
-        set((s) => ({
-          channels: { ...s.channels, [key]: !s.channels[key] },
-        })),
+        set((s) => {
+          const newChannels = { ...s.channels, [key]: !s.channels[key] }
+          // §SERVER-SYNC: Fire-and-forget POST to sync channel preferences to
+          // AppSettings.notificationChannels. The server reads this to decide
+          // whether to generate specific notification types (e.g., sale
+          // notifications are skipped when channels.sales === false).
+          // Non-fatal — if the sync fails, the local state is still updated
+          // and the next app-settings fetch will reconcile.
+          try {
+            fetch('/api/app-settings', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ notificationChannels: JSON.stringify(newChannels) }),
+            }).catch(() => {})
+          } catch {}
+          return { channels: newChannels }
+        }),
     }),
     {
       name: 'bizledger-notif-channels',

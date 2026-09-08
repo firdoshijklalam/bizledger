@@ -467,6 +467,8 @@ model AppSettings {
   dashboardCards       String?  // JSON: [{id,visible,order}] — user's dashboard card configuration
   // §DASHBOARD-CUSTOMIZATION: JSON for dashboard section visibility/order + per-section prefs
   dashboardSections    String?  // JSON: DashboardSectionConfig
+  // §NOTIFICATION-CHANNELS: JSON storing per-channel notification preferences
+  notificationChannels String?  // JSON: {sales, lowStock, overduePayments, gradeChanges, backups}
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

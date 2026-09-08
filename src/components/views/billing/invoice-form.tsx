@@ -18,6 +18,7 @@ import { FullScreenPicker } from '@/components/shared/full-screen-picker'
 import { useBillingStore } from '@/store/billing-store'
 import { useGateTrigger } from '@/store/biometric-gate-store'
 import { useFetch as useFetchHook } from '@/hooks/use-fetch'
+import { useNotificationStore } from '@/store/notification-store'
 import { toNumber } from '@/lib/numeric'
 
 interface LineItem {
@@ -169,6 +170,17 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
         } catch {}
       }
       triggerRefresh()
+      // §NOTIFICATION-REFRESH: After a successful sale, fetch the updated
+      // unread count from the server so the bell badge updates immediately.
+      // This uses the shared Zustand store (same as TopAppBar) so the badge
+      // updates without navigation or page reload.
+      try {
+        const res = await fetch('/api/notifications?limit=1')
+        if (res.ok) {
+          const data = await res.json()
+          useNotificationStore.getState().setUnreadTotal(data.unreadTotal ?? 0)
+        }
+      } catch {}
       onOpenChange(false)
       setSelectedInvoiceId(invoice.id)
       // Clear the active billing tab on successful save

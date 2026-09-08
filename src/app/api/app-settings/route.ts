@@ -36,6 +36,12 @@ export async function PUT(req: NextRequest) {
       where: { businessId: business.id },
       update: {
         notificationsEnabled: body.notificationsEnabled,
+        // §NOTIFICATION-CHANNELS: Per-channel notification preferences (JSON string).
+        // Synced from the client Zustand store. The server reads this to
+        // decide whether to generate specific notification types.
+        notificationChannels: body.notificationChannels !== undefined
+          ? validateNotificationChannels(body.notificationChannels)
+          : undefined,
         autoBackupEnabled: body.autoBackupEnabled,
         language: body.language,
         dateFormat: body.dateFormat,
@@ -63,6 +69,9 @@ export async function PUT(req: NextRequest) {
       create: {
         businessId: business.id,
         notificationsEnabled: body.notificationsEnabled ?? true,
+        notificationChannels: body.notificationChannels !== undefined
+          ? validateNotificationChannels(body.notificationChannels)
+          : null,
         autoBackupEnabled: body.autoBackupEnabled ?? false,
         language: body.language ?? 'en',
         dateFormat: body.dateFormat ?? 'DD/MM/YYYY',
@@ -132,6 +141,34 @@ function validateCardPreferences(input: unknown): string | null {
   // §COVER-OVERLAY: number 0–0.9, default 0.35
   if ('coverOverlay' in prefs && typeof prefs.coverOverlay === 'number' && !isNaN(prefs.coverOverlay)) {
     clean.coverOverlay = Math.max(0, Math.min(0.9, Math.round(prefs.coverOverlay * 100) / 100))
+  }
+
+  return Object.keys(clean).length > 0 ? JSON.stringify(clean) : null
+}
+
+// §NOTIFICATION-CHANNELS-VALIDATION: Validates the notificationChannels JSON.
+// Accepts a JSON string or object. Only known boolean keys are persisted.
+// Returns a JSON string safe for Prisma storage, or null if empty.
+function validateNotificationChannels(input: unknown): string | null {
+  let prefs: Record<string, unknown> = {}
+  if (typeof input === 'string') {
+    try {
+      prefs = JSON.parse(input)
+    } catch {
+      return null
+    }
+  } else if (typeof input === 'object' && input !== null) {
+    prefs = input as Record<string, unknown>
+  } else {
+    return null
+  }
+
+  const clean: Record<string, boolean> = {}
+  const VALID_KEYS = ['sales', 'lowStock', 'overduePayments', 'gradeChanges', 'backups'] as const
+  for (const key of VALID_KEYS) {
+    if (key in prefs && typeof prefs[key] === 'boolean') {
+      clean[key] = prefs[key]
+    }
   }
 
   return Object.keys(clean).length > 0 ? JSON.stringify(clean) : null

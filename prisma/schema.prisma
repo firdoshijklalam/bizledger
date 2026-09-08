@@ -539,6 +539,10 @@ model AppSettings {
   dashboardCards            String?   // JSON: [{id,visible,order}] — user's dashboard card configuration
   // §DASHBOARD-CUSTOMIZATION: JSON for dashboard section visibility/order + per-section prefs
   dashboardSections         String?   // JSON: DashboardSectionConfig (sections, customerQuality, topInsights, businessActivity, quickActions, defaults)
+  // §NOTIFICATION-CHANNELS: JSON storing per-channel notification preferences
+  // synced from the client Zustand store. Format: {sales:true, lowStock:true, ...}
+  // The server reads this to decide whether to generate notifications.
+  notificationChannels      String?   // JSON: {sales, lowStock, overduePayments, gradeChanges, backups}
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
