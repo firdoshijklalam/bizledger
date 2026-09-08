@@ -39,6 +39,7 @@ export interface AppNotification {
 
 // PRD Part 27 §3: Notification channel preferences
 export interface NotificationChannels {
+  sales: boolean
   lowStock: boolean
   overduePayments: boolean
   gradeChanges: boolean
@@ -68,7 +69,7 @@ export const useNotificationStore = create<NotificationState>()(
     (set) => ({
       // §v2: Empty array — real notifications come from /api/notifications
       localNotifications: [],
-      channels: { lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
+      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
       // §SHARED-UNREAD: Default 0. Fetched from server on mount via useNotifications.
       unreadTotal: 0,
       setUnreadTotal: (count) => set({ unreadTotal: Math.max(0, count) }),
@@ -108,7 +109,7 @@ export const useNotificationStore = create<NotificationState>()(
         if (version < 2) {
           // §v1 → v2: Remove old demo notifications array. Keep channel preferences.
           const oldChannels = persistedState?.channels || {
-            lowStock: true, overduePayments: true, gradeChanges: true, backups: true,
+            sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true,
           }
           return {
             localNotifications: [], // §EMPTY: No demo data in production

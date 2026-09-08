@@ -25,7 +25,6 @@ export async function GET(req: NextRequest) {
     if (!business) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     const where = { businessId: business.id, ...(onlyUnread ? { isRead: false } : {}) }
     // §UNREAD-TOTAL: Count ALL unread for this business (NOT just the current page).
-    // This is the server-authoritative count used by the bell badge.
     const unreadWhere = { businessId: business.id, isRead: false }
     const [items, total, unreadTotal] = await Promise.all([
       db.notification.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: limit }),
@@ -39,8 +38,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/notifications — mark a notification read (body: { id?, all?: true })
-// §NOTIFICATION-FOUNDATION: Returns the updated unreadTotal so the frontend
-// can update the badge without a separate refetch.
+// Returns the updated unreadTotal so the frontend can update the badge.
 export async function POST(req: NextRequest) {
   try {
     const business = await getCurrentBusiness()
@@ -59,5 +57,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Need id or all' }, { status: 400 })
   } catch (e) {
     return apiError(e, 'Failed to update notification')
+  }
+}
+
+// DELETE /api/notifications — dismiss/delete a notification
+// §SWIPE-TO-DISMISS: Permanently removes a notification from the DB.
+// Body: { id: string } — the notification ID to delete.
+// §TENANT-ISOLATION: The notification MUST belong to the current business.
+// The query filters by both id AND businessId — a crafted request from
+// business A cannot delete business B's notification.
+// Returns { ok: true, unreadTotal } so the badge updates immediately.
+export async function DELETE(req: NextRequest) {
+  try {
+    const business = await getCurrentBusiness()
+    if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
+    const body = await req.json()
+    if (!body.id) return NextResponse.json({ error: 'Need id' }, { status: 400 })
+
+    // §TENANT-ISOLATION: Delete only if BOTH id AND businessId match.
+    // This prevents cross-tenant deletion — a request from business A with
+    // business B's notification ID will affect 0 rows.
+    await db.notification.deleteMany({
+      where: { id: body.id, businessId: business.id },
+    })
+
+    const unreadTotal = await db.notification.count({ where: { businessId: business.id, isRead: false } })
+    return NextResponse.json({ ok: true, unreadTotal })
+  } catch (e) {
+    return apiError(e, 'Failed to delete notification')
   }
 }

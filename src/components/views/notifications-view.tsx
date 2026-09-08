@@ -9,7 +9,7 @@ import type { Party } from '@/lib/types'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Bell, AlertTriangle, AlertCircle, MessageSquare, CheckCircle2, TrendingUp,
-  X, Settings, Megaphone, Store, FolderOpen, CheckCheck, Loader2,
+  X, Settings, Megaphone, Store, FolderOpen, CheckCheck, Loader2, ShoppingBag,
 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { ShareSheet } from '@/components/shared/share-sheet'
@@ -22,6 +22,7 @@ import { timeAgo } from '@/lib/utils'
 // The DB type field is a free-form string (default "system"). This map covers
 // known types; unknown types fall back to a generic Bell icon.
 const TYPE_META: Record<string, { icon: any; color: string; bg: string }> = {
+  sale: { icon: ShoppingBag, color: 'text-emerald-600', bg: 'bg-emerald-100 dark:bg-emerald-900/30' },
   overdue: { icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-100 dark:bg-red-900/30' },
   'low-stock': { icon: AlertTriangle, color: 'text-orange-600', bg: 'bg-orange-100 dark:bg-orange-900/30' },
   low_stock: { icon: AlertTriangle, color: 'text-orange-600', bg: 'bg-orange-100 dark:bg-orange-900/30' },
@@ -37,6 +38,7 @@ const FALLBACK_META = { icon: Bell, color: 'text-muted-foreground', bg: 'bg-mute
 
 // PRD Part 27 §3: Channel toggle labels
 const CHANNEL_LABELS = [
+  { key: 'sales' as const, label: 'Sale Notifications', labelBn: 'বিক্রয় বিজ্ঞপ্তি' },
   { key: 'lowStock' as const, label: 'Low Stock Alerts', labelBn: 'লো স্টক অ্যালার্ট' },
   { key: 'overduePayments' as const, label: 'Overdue Payment Warnings', labelBn: 'বকেয়া পেমেন্ট সতর্কতা' },
   { key: 'gradeChanges' as const, label: 'Customer Grade Changes', labelBn: 'গ্রেড পরিবর্তন' },
@@ -49,8 +51,8 @@ export function NotificationsView() {
   const { channels, toggleChannel } = useNotificationStore()
 
   // §NOTIFICATION-FOUNDATION: Fetch real notifications from the API.
-  // The hook manages items, unreadTotal, loading, error, and markRead/markAllRead.
-  const { items, loading, error, unreadTotal, markRead, markAllRead, refetch } = useNotifications()
+  // The hook manages items, unreadTotal, loading, error, markRead/markAllRead/dismiss.
+  const { items, loading, error, unreadTotal, markRead, markAllRead, dismiss, refetch } = useNotifications()
 
   // §PARTIES: Still needed for the legacy "Remind Now" action which resolves
   // a party by name. Real DB notifications use the `link` field for navigation.
@@ -131,7 +133,10 @@ export function NotificationsView() {
     a.click()
   }
 
-  // PRD Part 27 §1: Swipe handlers (still local-only — no server DELETE yet)
+  // §SWIPE-TO-DISMISS: Uses the dismiss() function from useNotifications hook
+  // which calls DELETE /api/notifications. The notification is permanently
+  // removed from the DB (not just marked read). Optimistic removal + rollback
+  // on failure is handled inside the hook.
   const handleTouchStart = (e: React.TouchEvent, id: string) => {
     startXRef.current = e.touches[0].clientX
     setSwipingId(id)
@@ -146,10 +151,17 @@ export function NotificationsView() {
 
   const handleTouchEnd = (id: string) => {
     if (swipingId !== id) return
-    if (Math.abs(swipeX) > 100) {
-      // §DEFERRED: Server DELETE not implemented yet. Swipe just marks as read.
-      markRead(id)
-      toast.success('Marked as read')
+    const threshold = 100
+    if (Math.abs(swipeX) > threshold) {
+      // §DISMISS: Permanently delete via DELETE /api/notifications
+      // The hook handles optimistic removal, server persistence, and rollback.
+      dismiss(id).then((success) => {
+        if (success) {
+          toast.success('Notification dismissed')
+        } else {
+          toast.error('Failed to dismiss — try again')
+        }
+      })
     }
     setSwipingId(null)
     setSwipeX(0)

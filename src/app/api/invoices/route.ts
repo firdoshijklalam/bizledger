@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCurrentBusiness } from '@/lib/db'
+import { db, getCurrentBusiness } from '@/lib/db'
 import { serializeDecimals } from '@/lib/decimal-serializer'
 import { createInvoice, InvoiceValidationError } from '@/lib/invoice-service'
 
@@ -53,16 +53,52 @@ export async function POST(req: NextRequest) {
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
     const invoice = await createInvoice(body, business)
-    return NextResponse.json(serializeDecimals(invoice))
+
+    // §NOTIFICATION-SALE: Create ONE sale notification per invoice (NOT per item).
+    // This is fire-and-forget — notification creation failure must NOT affect
+    // the invoice creation response. The notification is created AFTER the
+    // invoice transaction commits, so if it fails, the sale still succeeded.
+    // §AGGREGATION: One invoice = one notification, regardless of how many
+    // InvoiceItems it contains. The body summarizes: "Party • N items • ₹Total"
+    let saleNotificationCreated = false
+    try {
+      const itemCount = invoice.items?.length ?? 0
+      const partyName = invoice.party?.name || 'Walk-in Customer'
+      const total = Number(invoice.grandTotal) || 0
+      const title = 'New Sale'
+      const body_text = `${partyName} • ${itemCount} ${itemCount === 1 ? 'item' : 'items'} • ₹${total.toLocaleString('en-IN')}`
+
+      await db.notification.create({
+        data: {
+          businessId: business.id,
+          type: 'sale',
+          title,
+          body: body_text,
+          link: 'history',
+          isRead: false,
+        },
+      })
+      saleNotificationCreated = true
+    } catch (notifErr) {
+      // Non-fatal — log but don't fail the invoice creation
+      console.error('Sale notification creation failed (non-fatal):', notifErr)
+    }
+
+    // §REALTIME-BADGE: Include a response header so the frontend can detect
+    // that a new notification was created and invalidate its notification cache.
+    // The frontend's useFetch for invoices will refetch on navigation, and
+    // the invoice form's submit handler can check this header to trigger
+    // a notification refetch.
+    const response = NextResponse.json(serializeDecimals(invoice))
+    if (saleNotificationCreated) {
+      response.headers.set('X-Notification-Created', 'sale')
+    }
+    return response
   } catch (e: any) {
-    // §P16-STEP3.8.1: InvoiceValidationError → HTTP 400 (client error).
-    // Never exposed to client as P2002 or Prisma stack trace — the service
-    // catches P2002 internally and returns the existing invoice.
     if (e instanceof InvoiceValidationError) {
       return NextResponse.json({ error: e.message }, { status: 400 })
     }
     console.error('Invoice create error:', e)
-    // §SECURITY: Don't expose internal DB error details in production
     const message = process.env.NODE_ENV === 'production'
       ? 'Failed to create invoice'
       : String(e)

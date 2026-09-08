@@ -177,6 +177,54 @@ export function useNotifications() {
     }
   }, [queryClient, itemsQueryKey, setUnreadTotal, fetchUnread])
 
+  // §DISMISS: Permanently delete a notification via DELETE /api/notifications.
+  // §SWIPE-TO-DISMISS: Used by the swipe-to-dismiss UX.
+  // Optimistically removes the notification from the items cache + decrements
+  // unreadTotal if the notification was unread. On failure, restores.
+  // Double-click protection via ref.
+  const dismissingRef = useRef<Set<string>>(new Set())
+  const dismiss = useCallback(async (id: string): Promise<boolean> => {
+    if (dismissingRef.current.has(id)) return false // §DOUBLE-CLICK-PROTECTION
+    dismissingRef.current.add(id)
+
+    const prevData = queryClient.getQueryData<DbNotification[]>(itemsQueryKey)
+    const targetNotif = prevData?.find((n) => n.id === id)
+    const wasUnread = targetNotif ? !targetNotif.isRead : false
+
+    // §OPTIMISTIC: Remove from items cache
+    if (prevData) {
+      const updated = prevData.filter((n) => n.id !== id)
+      queryClient.setQueryData(itemsQueryKey, updated)
+    }
+
+    // §OPTIMISTIC-UNREAD: Only decrement if the notification was actually unread
+    if (wasUnread) {
+      setUnreadTotal(unreadTotal - 1)
+    }
+
+    try {
+      const res = await fetch('/api/notifications', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data: MarkReadResponse = await res.json()
+      // §SERVER-AUTHORITATIVE: Use the server's unreadTotal
+      setUnreadTotal(data.unreadTotal ?? 0)
+      return true
+    } catch {
+      // §ROLLBACK: Restore the previous items + unread count.
+      if (prevData) queryClient.setQueryData(itemsQueryKey, prevData)
+      if (wasUnread) {
+        fetchUnread()
+      }
+      return false
+    } finally {
+      dismissingRef.current.delete(id)
+    }
+  }, [queryClient, itemsQueryKey, setUnreadTotal, unreadTotal, fetchUnread])
+
   // §REFETCH: Refetch both items and unread count.
   const refetchAll = useCallback(async () => {
     await Promise.all([refetch(), fetchUnread()])
@@ -189,6 +237,7 @@ export function useNotifications() {
     unreadTotal,
     markRead,
     markAllRead,
+    dismiss,
     refetch: refetchAll,
   }
 }

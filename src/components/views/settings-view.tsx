@@ -599,6 +599,7 @@ export function SettingsView() {
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="ml-12 mt-2 space-y-2 overflow-hidden">
                   <p className="text-[10px] text-muted-foreground uppercase mb-1">চ্যানেল প্রেফারেন্স</p>
                   {([
+                    { key: 'sales' as const, label: 'Sale Notifications', labelBn: 'বিক্রয় বিজ্ঞপ্তি' },
                     { key: 'lowStock' as const, label: 'Low Stock Alerts', labelBn: 'লো স্টক অ্যালার্ট' },
                     { key: 'overduePayments' as const, label: 'Payment Overdue Warnings', labelBn: 'বকেয়া পেমেন্ট তাগাদা' },
                     { key: 'gradeChanges' as const, label: 'Customer Grade Changes', labelBn: 'গ্রাহক গ্রেড পরিবর্তন' },
