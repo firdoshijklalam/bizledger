@@ -455,9 +455,15 @@ async function main() {
     assert(migrationSql.includes('FOREIGN KEY'), 'M3: FK to Business')
     const sqlCode = migrationSql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n')
     assert(!sqlCode.includes('gen_random_uuid'), 'M4: no gen_random_uuid in SQL code')
-    assert(!migrationSql.includes('typeof('), 'M5: no typeof() (no SQLite-only function)')
+    // §PRECISE-TYPEOF-CHECK: 'typeof(' is a SQLite-only function. The substring
+    // check must NOT false-positive on PostgreSQL's 'jsonb_typeof('. We strip
+    // SQL comments first, then match 'typeof(' only when NOT preceded by
+    // 'jsonb_'. (jsonb_typeof() is a VALID PostgreSQL function used here.)
+    const typeofMatches = sqlCode.match(/(?<!jsonb_)typeof\(/g)
+    assert(typeofMatches === null, `M5: no standalone typeof() (SQLite-only) — found ${typeofMatches?.length ?? 0} matches`)
+    assert(migrationSql.includes('jsonb_typeof'), 'M5b: uses jsonb_typeof() (valid PostgreSQL function)')
     assert(migrationSql.includes('jsonb_each_text'), 'M6: uses jsonb_each_text (PostgreSQL JSON)')
-    assert(migrationSql.includes('ON CONFLICT'), 'M7: uses ON CONFLICT (idempotent)')
+    assert(migrationSql.includes('ON CONFLICT'), 'M7: uses ON CONFLICT (idempotent DML)')
 
     // §PROVIDER-LOCK: migration_lock.toml declares PostgreSQL ONLY. This is
     // a STATIC file read — we are NOT executing the migration against a
