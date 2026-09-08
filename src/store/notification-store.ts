@@ -11,10 +11,14 @@
 // notifications array replaced with an empty array. Real notifications come from
 // the API via useNotifications().
 //
-// §TENANT-ISOLATION: Channel preferences are global (not per-business) — they
-// represent the user's UI preference, not business data. If a user switches
-// businesses, the same channel preferences apply. This is safe because channels
-// don't contain business-scoped notification data.
+// §TENANT-ISOLATION: Channel preferences are BUSINESS-scoped — the server
+// stores them in NotificationChannelPreference keyed by businessId (derived
+// from the session via getCurrentBusiness). The Zustand store is a local
+// optimistic cache of the server's authoritative state. When a user switches
+// businesses, the store's cached channels may be stale — the app-shell
+// should refetch preferences from GET /api/notification-preferences on
+// business switch. (This is a known limitation — not a security issue, since
+// the server always enforces businessId scoping.)
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
