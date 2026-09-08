@@ -61,19 +61,11 @@ export async function PUT(req: NextRequest) {
       },
     })
 
-    // §RETURN-FULL-MAP: Read all preferences for this business and return
-    // the effective channel map. Missing rows default to true.
-    const allPrefs = await db.notificationChannelPreference.findMany({
-      where: { businessId: business.id },
-      select: { key: true, enabled: true },
-    })
-
-    const channels: Record<string, boolean> = { ...DEFAULT_CHANNELS }
-    for (const pref of allPrefs) {
-      channels[pref.key] = pref.enabled
-    }
-
-    return NextResponse.json({ ok: true, channels })
+    // §RETURN-SINGLE-KEY: Return only the updated key+value, NOT the full
+    // channel map. This prevents a stale-response race where a concurrent
+    // update to a different key could be overwritten in the client.
+    // The client merges only the mutated key into its local state.
+    return NextResponse.json({ ok: true, key, value })
   } catch (e) {
     return apiError(e, 'Failed to update notification preferences')
   }

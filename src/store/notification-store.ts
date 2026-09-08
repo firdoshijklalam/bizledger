@@ -147,11 +147,15 @@ export const useNotificationStore = create<NotificationState>()(
                 return true // Still return true — the mutation succeeded on the server
               }
 
-              // §SERVER-RECONCILE: Use the server's full channels response to
-              // reconcile local state. This is safe because we've verified
-              // this is the latest mutation for this key.
-              if (data.channels) {
-                set({ channels: data.channels })
+              // §SERVER-RECONCILE: Merge ONLY the mutated key into local state.
+              // Do NOT replace the entire channels object — a concurrent update
+              // to a different key could have changed on the server, and
+              // replacing the full map would overwrite that change locally.
+              // The server returns only { key, value } — we merge just that.
+              if (data.key && typeof data.value === 'boolean') {
+                set((s) => ({
+                  channels: { ...s.channels, [data.key]: data.value },
+                }))
               }
 
               return true
