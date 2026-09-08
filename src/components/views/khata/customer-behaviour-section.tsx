@@ -10,10 +10,10 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
-  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  Drawer, DrawerContent, DrawerHeader, DrawerTitle,
+  Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription,
 } from '@/components/ui/drawer'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -441,6 +441,11 @@ function EditBehaviourDialog({
         <DrawerContent className="max-h-[85vh]">
           <DrawerHeader>
             <DrawerTitle>{existing ? 'Edit Behaviour' : 'Rate Customer Behaviour'}</DrawerTitle>
+            {/* §A11Y: DrawerDescription satisfies Radix's aria-describedby requirement,
+                eliminating the "Missing Description or aria-describedby" warning. */}
+            <DrawerDescription>
+              Rate this customer&apos;s interaction style — separate from their payment trust score.
+            </DrawerDescription>
           </DrawerHeader>
           <div className="px-4 pb-4 overflow-y-auto">
             {formContent}
@@ -454,6 +459,11 @@ function EditBehaviourDialog({
         <FormDialogContent className="max-w-md hidden sm:block">
           <DialogHeader>
             <DialogTitle>{existing ? 'Edit Behaviour' : 'Rate Customer Behaviour'}</DialogTitle>
+            {/* §A11Y: DialogDescription satisfies Radix's aria-describedby requirement,
+                eliminating the "Missing Description or aria-describedby" warning. */}
+            <DialogDescription>
+              Rate this customer&apos;s interaction style — separate from their payment trust score.
+            </DialogDescription>
           </DialogHeader>
           {formContent}
           <DialogFooter>{footer}</DialogFooter>
