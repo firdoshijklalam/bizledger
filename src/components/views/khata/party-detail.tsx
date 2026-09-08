@@ -23,6 +23,10 @@ import { DefaulterAlertBanner } from '@/components/shared/defaulter-alert-banner
 // §PARTY-NOTES-ACTIVATION: Dormant PartyNote feature now has a CRUD API +
 // dedicated UI. Render the section on the party detail page.
 import { PartyNotesSection } from './party-notes-section'
+// §CUSTOMER-BEHAVIOUR: Staff-rated interaction/service behaviour. Distinct
+// from the financial AI Credit Trust Score (TrustScoreCard). Rendered after
+// the trust score card so users see both signals together but clearly labeled.
+import { CustomerBehaviourSection } from './customer-behaviour-section'
 import {
   Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -358,6 +362,15 @@ export function PartyDetail({ partyId }: { partyId: string }) {
       {/* PRD Part 32 §3.2: AI Credit Trust Score (customers only) */}
       {isCustomer && (
         <TrustScoreCard partyId={partyId} partyName={data.name} />
+      )}
+
+      {/* §CUSTOMER-BEHAVIOUR: Staff-rated interaction/service behaviour.
+          Intentionally rendered right after the TrustScoreCard so users
+          see both signals together. Visually distinct (Heart icon +
+          violet palette) from the financial TrustScoreCard (Star icon +
+          emerald/amber/red). Customers only — same gating as trust score. */}
+      {isCustomer && (
+        <CustomerBehaviourSection partyId={partyId} />
       )}
 
       {/* Transactions — multi-select + share (PRD Part 6 §2 + Part 7 §4) */}

@@ -75,6 +75,9 @@ model Business {
   users                User[]
   // §INVOICE-SEQUENCE: Atomic counter for race-safe invoice numbering
   invoiceSequence      InvoiceSequence?
+  // §CUSTOMER-BEHAVIOUR: interaction/service behaviour for parties in this business
+  customerBehaviours   CustomerBehaviour[]
+  customerBehaviourHistory CustomerBehaviourHistory[]
 }
 
 // §INVOICE-SEQUENCE: Dedicated sequence table for concurrency-safe invoice numbering.
@@ -257,6 +260,11 @@ model Party {
   fingerprints         FingerprintRecord[]
   // §DYNAMIC-PRICING: custom prices targeted at this buyer (as the buyer Party)
   customPricesAsBuyer  CustomPrice[]         @relation("CustomPriceBuyer")
+  // §CUSTOMER-BEHAVIOUR: interaction/service behaviour (separate from
+  // financial creditTrustScore). One current row per (businessId, partyId).
+  // History is append-only via CustomerBehaviourHistory (FK to CustomerBehaviour).
+  customerBehaviours   CustomerBehaviour[]
+  customerBehaviourHistory CustomerBehaviourHistory[]
 
   @@index([businessId])
 }
@@ -983,4 +991,78 @@ model UserProfile {
   updatedAt        DateTime  @updatedAt
 
   @@index([phone])
+}
+
+// §CUSTOMER-BEHAVIOUR: Manually-rated interaction/service behaviour for a
+// customer (Party). This is SEPARATE from the financial `creditTrustScore`
+// (which is auto-computed from payment history). Customer Behaviour captures
+// staff-assessed interaction qualities — e.g. "Respectful", "Aggressive",
+// "Pays on time", "Frequently complains".
+//
+// §UNIQUENESS: One current behaviour row per (businessId, partyId). The
+// upsert API enforces this; the @@unique constraint guarantees it at the DB
+// level (defence in depth against races).
+//
+// §HISTORY: Every create/update appends an immutable snapshot to
+// CustomerBehaviourHistory. History is append-only (no edits/deletes from
+// the API surface in this step).
+//
+// §FIELDS:
+//   - rating: enum string VERY_BAD | BAD | GOOD | BETTER | BEST
+//   - tags:   JSON array string of lightweight tag labels (e.g.
+//             ["Respectful","Regular customer"]). NOT a separate Tag/M2M
+//             subsystem — kept simple by design.
+//   - notes:  free-form staff note (optional)
+//   - ratedBy: staff userId or "system" (free-form string, consistent with
+//             existing PartyNote.author pattern)
+model CustomerBehaviour {
+  id        String   @id @default(cuid())
+  businessId String
+  partyId    String
+  rating     String   // VERY_BAD | BAD | GOOD | BETTER | BEST
+  tags       String?  // JSON array string: ["Respectful","Regular customer"]
+  notes      String?
+  ratedBy    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party      Party     @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  history    CustomerBehaviourHistory[]
+
+  @@unique([businessId, partyId]) // one current behaviour per party per business
+  @@index([businessId])
+  @@index([partyId])
+  @@index([businessId, partyId])
+}
+
+// §CUSTOMER-BEHAVIOUR-HISTORY: Append-only audit trail of every behaviour
+// state. Each row is an immutable snapshot of what the rating/tags/notes
+// were at a point in time. The API never edits or deletes history rows.
+//
+// §BEHAVIOUR-FK: behaviourId references CustomerBehaviour. When the
+// behaviour row is deleted (party cascade), its history cascades too.
+//
+// §PARTY-DENORMALIZED: partyId is stored on the history row (denormalized
+// from CustomerBehaviour.partyId) so history queries can be efficiently
+// scoped by party without a join. The redundant FK relation to Party
+// ensures cascade-delete consistency.
+model CustomerBehaviourHistory {
+  id           String   @id @default(cuid())
+  businessId   String
+  partyId      String
+  behaviourId  String
+  rating       String   // snapshot of CustomerBehaviour.rating at this time
+  tags         String?  // snapshot
+  notes        String?  // snapshot
+  ratedBy      String?
+  createdAt    DateTime @default(now())
+
+  behaviour    CustomerBehaviour @relation(fields: [behaviourId], references: [id], onDelete: Cascade)
+  business     Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party        Party             @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, partyId, createdAt])
+  @@index([behaviourId, createdAt])
+  @@index([partyId, createdAt])
 }
