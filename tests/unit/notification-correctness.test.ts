@@ -397,43 +397,94 @@ async function main() {
     }
   }
 
-  // ─── O. STORE: Stale response protection ───────────────────────────
-  console.log('\nO. STORE: Stale response protection (mocked fetch)')
+  // ─── O. STORE: Stale-response protection under the per-key queue ───
+  //
+  // §ACTUAL-SCENARIO: The per-key promise queue GUARANTEES that two same-key
+  // toggles are SERIALIZED — request 2's fetch cannot start until request 1's
+  // fetch resolves. So the OLD claim that "toggle 2's response arrives first"
+  // is FALSE and has been removed.
+  //
+  // The stale-version scenario that CAN occur WITH the queue:
+  //   1. v1 mutation is queued (toggle 1). version=1 recorded synchronously.
+  //   2. v2 mutation is fired synchronously right after (toggle 2). version=2
+  //      recorded synchronously — BEFORE v1's fetch response is reconciled.
+  //   3. The queue runs v1's fetch first. When v1's response arrives, the
+  //      version check finds version(1) ≠ currentVersion(2) → DISCARDED
+  //      (no set() call, no state transition).
+  //   4. The queue then runs v2's fetch. When v2's response arrives, the
+  //      version check finds version(2) = currentVersion(2) → APPLIED.
+  //
+  // §OBSERVABLE-PROOF: We subscribe to store transitions. With stale
+  // protection, the transitions are exactly:
+  //     [false (v1 opt), true (v2 opt), true (v2 applied)]
+  // — only 3 transitions, because v1's response is discarded (no set() call).
+  // WITHOUT stale protection, v1's response would set sales=false (reverting
+  // v2's optimistic true), producing 4 transitions:
+  //     [false (v1 opt), true (v2 opt), false (v1 applied), true (v2 applied)]
+  // The 3-vs-4 transition count is the proof that v1 was discarded.
+  console.log('\nO. STORE: Stale-response protection — v1 discarded, v2 authoritative (mocked fetch)')
   {
     useNotificationStore.setState({
       channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
     })
 
-    const originalFetch = global.fetch
-    let callCount = 0
-    global.fetch = ((url: string, opts: any) => {
-      callCount++
-      const currentCall = callCount
-      const body = JSON.parse(opts.body)
-      const delay = currentCall === 1 ? 200 : 0
+    // Track every channels.sales transition. Zustand fires subscribe on every
+    // set() call, even when the value is unchanged (the channels object ref
+    // changes). This lets us observe whether v1's response handler ran set().
+    const salesTransitions: boolean[] = []
+    const unsub = useNotificationStore.subscribe((s) => {
+      salesTransitions.push(s.channels.sales)
+    })
 
-      return new Promise((resolve) => {
-        setTimeout(() => {
-          resolve({
-            ok: true,
-            json: async () => ({ ok: true, key: body.key, value: body.value }),
-          } as any)
-        }, delay)
-      })
+    const originalFetch = global.fetch
+    const fetchStartOrder: string[] = []
+    global.fetch = ((url: string, opts: any) => {
+      const body = JSON.parse(opts.body)
+      fetchStartOrder.push(`value=${body.value}`)
+      // §ECHO: Server returns the value that was set (matches production
+      // updateChannelPreference which returns { key, value }).
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ ok: true, key: body.key, value: body.value }),
+      } as any)
     }) as any
 
     try {
-      // Toggle 1: sales=true→false (delayed 200ms)
-      // Toggle 2: sales=false→true (fast 0ms, completes first)
+      // Two same-key toggles, fired synchronously. The per-key queue
+      // serializes their fetches, BUT version is incremented synchronously
+      // when toggleChannel is called — so v2's version (2) is recorded
+      // BEFORE v1's fetch resolves.
+      //
+      // v1: sales true→false. version=1.
+      // v2: sales false→true. version=2.
       const p1 = useNotificationStore.getState().toggleChannel('sales')
       const p2 = useNotificationStore.getState().toggleChannel('sales')
-      await Promise.all([p1, p2])
+      const [r1, r2] = await Promise.all([p1, p2])
 
-      // Toggle 2's response arrives first → sales=true applied
-      // Toggle 1's response arrives later (stale) → sales=false DISCARDED
+      assert(r1 === true, 'O1: v1 returned true (server accepted; response discarded locally)')
+      assert(r2 === true, 'O2: v2 returned true (authoritative)')
+
+      // §QUEUE-SERIALIZES: The per-key queue guarantees v1's fetch STARTS
+      // before v2's fetch STARTS (request 2 waits for request 1).
+      assert(fetchStartOrder.length === 2, `O3: exactly 2 fetches observed (got ${fetchStartOrder.length})`)
+      assert(fetchStartOrder[0] === 'value=false', `O4: v1 fetch (value=false) started first (queue serializes) — got ${fetchStartOrder[0]}`)
+      assert(fetchStartOrder[1] === 'value=true', `O5: v2 fetch (value=true) started AFTER v1 (queue serializes) — got ${fetchStartOrder[1]}`)
+
+      // §DISCARD-PROOF: With stale protection, v1's response handler does NOT
+      // call set() (version mismatch → return early). So only 3 transitions:
+      //   v1 optimistic (false) → v2 optimistic (true) → v2 applied (true).
+      // If v1's response WERE applied, we would see a 4th transition (false)
+      // reverting v2's optimistic, then a 5th (true) from v2's response.
+      assert(salesTransitions.length === 3, `O6: exactly 3 state transitions (got ${salesTransitions.length}: [${salesTransitions.join(', ')}]) — v1 response discarded, no revert`)
+      assert(salesTransitions[0] === false, 'O7: transition 1 = false (v1 optimistic)')
+      assert(salesTransitions[1] === true, 'O8: transition 2 = true (v2 optimistic)')
+      assert(salesTransitions[2] === true, 'O9: transition 3 = true (v2 applied — v1 discarded, no revert to false)')
+
+      // §V2-AUTHORITATIVE: Final state matches v2's response value (true).
       const finalSales = useNotificationStore.getState().channels.sales
-      assert(finalSales === true, `O1: final sales=true (stale response discarded — got ${finalSales})`)
+      assert(finalSales === true, `O10: final sales=true (v2 authoritative — got ${finalSales})`)
     } finally {
+      unsub()
       global.fetch = originalFetch
     }
   }
