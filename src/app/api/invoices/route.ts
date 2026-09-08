@@ -79,17 +79,16 @@ export async function POST(req: NextRequest) {
       })
 
       if (!existingNotif) {
-        // §CHANNEL-CHECK: Read the sales notification preference from AppSettings.
-        const settings = await db.appSettings.findUnique({
-          where: { businessId: business.id },
-          select: { notificationChannels: true },
+        // §CHANNEL-CHECK: Read the sales notification preference from the
+        // normalized NotificationChannelPreference table. Missing row →
+        // default enabled (true).
+        const salesPref = await db.notificationChannelPreference.findUnique({
+          where: {
+            businessId_key: { businessId: business.id, key: 'sales' },
+          },
+          select: { enabled: true },
         })
-        const channels = settings?.notificationChannels
-          ? (typeof settings.notificationChannels === 'string'
-            ? JSON.parse(settings.notificationChannels)
-            : settings.notificationChannels)
-          : null
-        const salesEnabled = channels ? channels.sales !== false : true
+        const salesEnabled = salesPref ? salesPref.enabled : true
 
         if (salesEnabled) {
           const itemCount = invoice.items?.length ?? 0

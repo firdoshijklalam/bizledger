@@ -70,6 +70,7 @@ model Business {
   // §DYNAMIC-PRICING + §NOTIFICATIONS
   customPrices         CustomPrice[]
   notifications        Notification[]
+  notificationChannelPreferences NotificationChannelPreference[]
   // §AUTH: Users and sessions for this business
   users                User[]
   // §INVOICE-SEQUENCE: Atomic counter for race-safe invoice numbering
@@ -195,6 +196,24 @@ model Notification {
   // constraint ensures only one succeeds. NULL values are allowed
   // (non-sale notifications have no invoiceId).
   @@unique([businessId, invoiceId])
+}
+
+// §NOTIFICATION-CHANNEL-PREF: Normalized per-channel notification preference.
+// Each channel is a separate row — updates to one channel are truly atomic
+// (no read-modify-write of a JSON blob). The unique constraint on
+// (businessId, key) ensures at most one row per channel per business.
+model NotificationChannelPreference {
+  id         String   @id @default(cuid())
+  businessId String
+  key        String   // sales | lowStock | overduePayments | gradeChanges | backups
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, key])
+  @@index([businessId])
 }
 
 model Party {

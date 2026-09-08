@@ -59,6 +59,7 @@ model Business {
   // §DYNAMIC-PRICING + §NOTIFICATIONS
   customPrices  CustomPrice[]
   notifications Notification[]
+  notificationChannelPreferences NotificationChannelPreference[]
   // §AUTH: Users and sessions for this business
   users    User[]
   invoiceSequence InvoiceSequence?
@@ -151,6 +152,20 @@ model Notification {
   @@index([businessId])
   @@index([isRead])
   @@unique([businessId, invoiceId])
+}
+
+model NotificationChannelPreference {
+  id         String   @id @default(cuid())
+  businessId String
+  key        String
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, key])
+  @@index([businessId])
 }
 
 model Party {

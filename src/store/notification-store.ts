@@ -56,8 +56,15 @@ interface NotificationState {
   // §CONCURRENCY-FIX: toggleChannel returns a Promise<boolean> so callers
   // can await server confirmation. The UI updates optimistically; if the
   // server fails, the local state is rolled back.
-  // Only the CHANGED key+value is sent to the server (not the entire snapshot)
-  // to prevent concurrent updates to different keys from overwriting each other.
+  //
+  // §PER-KEY-QUEUE: Each key has its own promise chain — rapid toggles
+  // of the SAME key are serialized (request 2 waits for request 1 to
+  // complete). Different keys can proceed concurrently.
+  //
+  // §STALE-PROTECTION: Each mutation has a monotonic version counter.
+  // When a server response arrives, it's only applied if its version
+  // matches the latest mutation version for that key. Stale responses
+  // from older requests are discarded.
   toggleChannel: (key: keyof NotificationChannels) => Promise<boolean>
   // §SHARED-UNREAD: Server-authoritative unread count, shared between
   // TopAppBar (badge) and NotificationsView (header + filter chips).
@@ -85,58 +92,93 @@ export const useNotificationStore = create<NotificationState>()(
 
       clearLocalNotifications: () => set({ localNotifications: [] }),
 
-      // §CONCURRENCY-FIX: toggleChannel returns a Promise that resolves when
-      // the server confirms the update. The UI updates optimistically (local
-      // state changes immediately). If the server PUT fails, the local state
-      // is rolled back to the previous value.
+      // §CONCURRENCY-FIX: Per-key promise queue + stale-response protection.
       //
-      // §SINGLE-KEY: Only the changed key+value is sent to the server:
-      //   { key: 'sales', value: false }
-      // NOT the entire channels snapshot. This prevents concurrent updates to
-      // different keys from overwriting each other.
+      // §PER-KEY-QUEUE: Each key has its own promise chain stored in
+      // `mutationQueue`. When toggleChannel('sales') is called, it chains
+      // onto the previous 'sales' mutation. This serializes same-key toggles:
+      // toggle 2 waits for toggle 1 to complete before sending.
+      // Different keys use different chains → they proceed concurrently.
       //
-      // §SERIALIZED: Rapid toggles of the SAME key are serialized by the
-      // async/await chain — each toggle waits for the previous to complete
-      // before sending the next. This is naturally enforced because the
-      // Zustand set() call is synchronous but the fetch is awaited.
-      toggleChannel: async (key) => {
-        // §READ-CURRENT: Get the current value BEFORE the optimistic update
-        // so we can roll back on failure.
-        const prevValue = useNotificationStore.getState().channels[key]
-        const newValue = !prevValue
+      // §STALE-PROTECTION: Each mutation increments a per-key version counter.
+      // When the server response arrives, we check if the mutation version
+      // matches the latest version for that key. If a newer mutation has
+      // been queued since this one started, the response is discarded.
+      toggleChannel: (() => {
+        // §PER-KEY-QUEUE: Map from key → Promise chain (last pending mutation)
+        const mutationQueue = new Map<string, Promise<boolean>>()
+        // §STALE-PROTECTION: Map from key → latest mutation version
+        const mutationVersion = new Map<string, number>()
 
-        // §OPTIMISTIC: Update local state immediately
-        set((s) => ({
-          channels: { ...s.channels, [key]: newValue },
-        }))
+        return async (key: keyof NotificationChannels): Promise<boolean> => {
+          // §VERSION: Increment version for this key
+          const version = (mutationVersion.get(key) || 0) + 1
+          mutationVersion.set(key, version)
 
-        try {
-          const res = await fetch('/api/notification-preferences', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            // §SINGLE-KEY: Send only the changed key + value
-            body: JSON.stringify({ key, value: newValue }),
-          })
+          // §READ-CURRENT: Get the current value BEFORE the optimistic update
+          const prevValue = useNotificationStore.getState().channels[key]
+          const newValue = !prevValue
 
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          // §OPTIMISTIC: Update local state immediately
+          set((s) => ({
+            channels: { ...s.channels, [key]: newValue },
+          }))
 
-          const data = await res.json()
-          // §SERVER-RECONCILE: Use the server's full channels response to
-          // reconcile local state (in case the server had a different value
-          // for another key due to a concurrent update).
-          if (data.channels) {
-            set({ channels: data.channels })
+          // §BUILD-MUTATION: The actual server request
+          const doMutation = async (): Promise<boolean> => {
+            try {
+              const res = await fetch('/api/notification-preferences', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key, value: newValue }),
+              })
+
+              if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+              const data = await res.json()
+
+              // §STALE-CHECK: Only apply server response if this mutation is
+              // still the latest for this key. If a newer mutation has been
+              // queued since this one started, discard this response.
+              const currentVersion = mutationVersion.get(key)
+              if (version !== currentVersion) {
+                // Stale response — a newer mutation has superseded this one.
+                // Don't apply the server's channels (could revert newer changes).
+                return true // Still return true — the mutation succeeded on the server
+              }
+
+              // §SERVER-RECONCILE: Use the server's full channels response to
+              // reconcile local state. This is safe because we've verified
+              // this is the latest mutation for this key.
+              if (data.channels) {
+                set({ channels: data.channels })
+              }
+
+              return true
+            } catch {
+              // §STALE-CHECK on failure: Only roll back if this is still the latest
+              const currentVersion = mutationVersion.get(key)
+              if (version === currentVersion) {
+                // §ROLLBACK: Restore the previous value for this key
+                set((s) => ({
+                  channels: { ...s.channels, [key]: prevValue },
+                }))
+              }
+              return false
+            }
           }
 
-          return true
-        } catch {
-          // §ROLLBACK: Restore the previous value for this key
-          set((s) => ({
-            channels: { ...s.channels, [key]: prevValue },
-          }))
-          return false
+          // §CHAIN: Wait for the previous mutation for this key to complete,
+          // then run this one. This serializes same-key mutations.
+          const prevPromise = mutationQueue.get(key) || Promise.resolve(true)
+          const currentPromise = prevPromise.then(() => doMutation())
+
+          // §STORE: Update the chain so the next toggle waits for this one
+          mutationQueue.set(key, currentPromise)
+
+          return currentPromise
         }
-      },
+      })(),
     }),
     {
       name: 'bizledger-notif-channels',

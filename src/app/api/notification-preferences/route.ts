@@ -3,38 +3,33 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 
 // §NOTIFICATION-PREFERENCES: Dedicated endpoint for notification channel
-// preferences. Uses SINGLE-KEY atomic updates to prevent concurrent
-// write races.
+// preferences using NORMALIZED per-channel rows.
 //
 // §CONCURRENCY-MODEL:
-// Each PUT updates exactly ONE channel key atomically. The server uses
-// Prisma's raw SQL `jsonb_set` (PostgreSQL) or a transaction-wrapped
-// read-modify-write (SQLite) to update a single key inside the JSON
-// column without overwriting unrelated keys.
-//
-// This means:
-// - Request A: { key: 'sales', value: false }
-// - Request B: { key: 'lowStock', value: false }
-// Even if B arrives first, A only touches `sales`, B only touches `lowStock`.
-// Neither overwrites the other.
+// Each channel is a separate row in NotificationChannelPreference.
+// Updates use Prisma's `upsert` which is a single SQL statement
+// (INSERT ... ON CONFLICT UPDATE) — no read-modify-write, no race.
+// Two concurrent updates to DIFFERENT keys touch different rows and
+// cannot overwrite each other.
+// Two concurrent updates to the SAME key: last-write-wins (the
+// INSERT ... ON CONFLICT UPDATE atomically sets the value).
 //
 // §TENANT-ISOLATION: businessId is derived from getCurrentBusiness().
 //
-// §SCOPE: Preferences are BUSINESS-scoped (stored in AppSettings by businessId).
-// Any authenticated user of the business can modify them — this is a UI
-// preference, not a security-sensitive setting.
+// §SCOPE: Preferences are BUSINESS-scoped. Any authenticated user of the
+// business can modify them — this is a UI preference, not security-sensitive.
 
 const VALID_KEYS = ['sales', 'lowStock', 'overduePayments', 'gradeChanges', 'backups'] as const
 type ChannelKey = typeof VALID_KEYS[number]
 
-const DEFAULT_CHANNELS = {
+const DEFAULT_CHANNELS: Record<string, boolean> = {
   sales: true, lowStock: true, overduePayments: true,
   gradeChanges: true, backups: true,
 }
 
 // PUT /api/notification-preferences
 // Body: { key: 'sales', value: false }
-// Returns: { ok: true, channels: {...} } (full state after update)
+// Returns: { ok: true, channels: {...} } (full effective channel map after update)
 export async function PUT(req: NextRequest) {
   try {
     const business = await getCurrentBusiness()
@@ -51,56 +46,34 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'value must be a boolean' }, { status: 400 })
     }
 
-    // §ATOMIC-UPDATE: Use a Prisma transaction to read-modify-write a SINGLE key.
-    // This is atomic within the transaction — concurrent requests for DIFFERENT
-    // keys each run their own transaction and merge cleanly because each only
-    // touches one key.
-    //
-    // For PostgreSQL (production), this could be optimized with jsonb_set,
-    // but the transaction approach works correctly for both SQLite and PostgreSQL.
-    const result = await db.$transaction(async (tx) => {
-      // Read current state
-      const existing = await tx.appSettings.findUnique({
-        where: { businessId: business.id },
-        select: { notificationChannels: true },
-      })
-
-      // Parse or default
-      let channels: Record<string, boolean>
-      if (existing?.notificationChannels) {
-        try {
-          const parsed = typeof existing.notificationChannels === 'string'
-            ? JSON.parse(existing.notificationChannels)
-            : existing.notificationChannels
-          channels = typeof parsed === 'object' && parsed !== null
-            ? { ...parsed }
-            : { ...DEFAULT_CHANNELS }
-        } catch {
-          channels = { ...DEFAULT_CHANNELS }
-        }
-      } else {
-        channels = { ...DEFAULT_CHANNELS }
-      }
-
-      // Update ONLY the requested key
-      channels[key] = value
-
-      const channelsJson = JSON.stringify(channels)
-
-      // Write back
-      await tx.appSettings.upsert({
-        where: { businessId: business.id },
-        update: { notificationChannels: channelsJson },
-        create: {
-          businessId: business.id,
-          notificationChannels: channelsJson,
-        },
-      })
-
-      return channels
+    // §ATOMIC-UPSERT: Single SQL statement — INSERT ... ON CONFLICT UPDATE.
+    // No read-modify-write. No race condition. The `enabled` column is set
+    // atomically for this specific (businessId, key) row.
+    await db.notificationChannelPreference.upsert({
+      where: {
+        businessId_key: { businessId: business.id, key: key as string },
+      },
+      update: { enabled: value },
+      create: {
+        businessId: business.id,
+        key: key as string,
+        enabled: value,
+      },
     })
 
-    return NextResponse.json({ ok: true, channels: result })
+    // §RETURN-FULL-MAP: Read all preferences for this business and return
+    // the effective channel map. Missing rows default to true.
+    const allPrefs = await db.notificationChannelPreference.findMany({
+      where: { businessId: business.id },
+      select: { key: true, enabled: true },
+    })
+
+    const channels: Record<string, boolean> = { ...DEFAULT_CHANNELS }
+    for (const pref of allPrefs) {
+      channels[pref.key] = pref.enabled
+    }
+
+    return NextResponse.json({ ok: true, channels })
   } catch (e) {
     return apiError(e, 'Failed to update notification preferences')
   }
@@ -113,25 +86,18 @@ export async function GET() {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
-    const settings = await db.appSettings.findUnique({
+    const prefs = await db.notificationChannelPreference.findMany({
       where: { businessId: business.id },
-      select: { notificationChannels: true },
+      select: { key: true, enabled: true },
     })
 
-    if (!settings?.notificationChannels) {
-      return NextResponse.json({ channels: { ...DEFAULT_CHANNELS } })
+    // §DEFAULTS: Missing rows mean the channel is enabled by default.
+    const channels: Record<string, boolean> = { ...DEFAULT_CHANNELS }
+    for (const pref of prefs) {
+      channels[pref.key] = pref.enabled
     }
 
-    try {
-      const parsed = typeof settings.notificationChannels === 'string'
-        ? JSON.parse(settings.notificationChannels)
-        : settings.notificationChannels
-      return NextResponse.json({
-        channels: { ...DEFAULT_CHANNELS, ...parsed },
-      })
-    } catch {
-      return NextResponse.json({ channels: { ...DEFAULT_CHANNELS } })
-    }
+    return NextResponse.json({ channels })
   } catch (e) {
     return apiError(e, 'Failed to fetch notification preferences')
   }
