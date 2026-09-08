@@ -465,6 +465,61 @@ async function main() {
     assert(r4.status === 400, `Q4: array of non-strings → 400 (got ${r4.status})`)
   }
 
+  // ─── R. History survives current-behaviour deletion (SetNull invariant) ──
+  // §INVARIANT: CustomerBehaviourHistory.behaviourId is nullable + onDelete:
+  // SetNull. Deleting the current CustomerBehaviour row must NOT delete the
+  // history snapshots — they are the audit trail. This is the key data-model
+  // invariant corrected in this step.
+  console.log('\nR. History survives current-behaviour deletion (SetNull invariant)')
+  {
+    // §SETUP: create a fresh party + behaviour + 2 history rows
+    const rParty = (await db.party.create({ data: { businessId: TEST_BIZ_A, name: 'Reset Party', type: 'customer' } })).id
+    await callPut(behaviourRoute.PUT, rParty, { rating: 'GOOD', notes: 'first' })
+    await callPut(behaviourRoute.PUT, rParty, { rating: 'BEST', notes: 'second' })
+
+    // Verify precondition: 1 behaviour row + 2 history rows
+    const behBefore = await db.customerBehaviour.findUnique({
+      where: { businessId_partyId: { businessId: TEST_BIZ_A, partyId: rParty } },
+    })
+    const histBefore = await db.customerBehaviourHistory.findMany({
+      where: { businessId: TEST_BIZ_A, partyId: rParty },
+    })
+    assert(behBefore !== null, 'R1: precondition — behaviour row exists')
+    assert(histBefore.length === 2, `R2: precondition — 2 history rows exist (got ${histBefore.length})`)
+    assert(histBefore.every((h) => h.behaviourId === behBefore!.id), 'R3: all history rows reference the behaviour row')
+
+    // §DELETE the current behaviour row directly via DB (simulating a future
+    // "reset behaviour" feature, or a party cascade). With onDelete: SetNull,
+    // the history rows must survive with behaviourId = NULL.
+    await db.customerBehaviour.delete({ where: { id: behBefore!.id } })
+
+    // §VERIFY: behaviour row is gone, but history rows SURVIVE
+    const behAfter = await db.customerBehaviour.findUnique({
+      where: { businessId_partyId: { businessId: TEST_BIZ_A, partyId: rParty } },
+    })
+    assert(behAfter === null, 'R4: behaviour row deleted (current state reset)')
+
+    const histAfter = await db.customerBehaviourHistory.findMany({
+      where: { businessId: TEST_BIZ_A, partyId: rParty },
+      orderBy: { createdAt: 'asc' },
+    })
+    assert(histAfter.length === 2, `R5: history rows SURVIVED deletion (got ${histAfter.length}) — append-only invariant preserved`)
+    assert(histAfter.every((h) => h.behaviourId === null), 'R6: all surviving history rows have behaviourId=NULL (SetNull applied)')
+    // Snapshot data fully retained
+    assert(histAfter[0].rating === 'GOOD', `R7: history[0].rating=GOOD preserved (got ${histAfter[0].rating})`)
+    assert(histAfter[0].notes === 'first', 'R8: history[0].notes preserved')
+    assert(histAfter[1].rating === 'BEST', `R9: history[1].rating=BEST preserved (got ${histAfter[1].rating})`)
+    assert(histAfter[1].notes === 'second', 'R10: history[1].notes preserved')
+
+    // §PARTY-DELETE-CONSEQUENCE: deleting the Party still cascades to history
+    // (documented in schema §PARTY-DELETE comment). Verify this known behavior.
+    await db.party.delete({ where: { id: rParty } })
+    const histAfterPartyDelete = await db.customerBehaviourHistory.findMany({
+      where: { businessId: TEST_BIZ_A, partyId: rParty },
+    })
+    assert(histAfterPartyDelete.length === 0, 'R11: party deletion cascades to history (known consequence — see §PARTY-DELETE comment in schema)')
+  }
+
   await cleanup()
 
   console.log(`\n${'='.repeat(60)}`)
