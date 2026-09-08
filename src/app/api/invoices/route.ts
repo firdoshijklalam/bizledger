@@ -46,6 +46,68 @@ export async function GET(req: NextRequest) {
 // recovery) lives in `src/lib/invoice-service.ts` so it can be tested with
 // REAL DB + REAL CODE PATH (same function the route calls) without requiring
 // a running Next.js dev server. This handler is a thin HTTP wrapper.
+// §EXTRACTED-CORE: Sale notification creation logic, extracted into a
+// testable function. This is the SAME logic the POST handler runs after
+// createInvoice() succeeds. Tests can call this directly with a test
+// businessId + mock invoice, bypassing getCurrentBusiness() + createInvoice().
+//
+// §DEDUP-DESIGN: Uses invoiceId as the durable dedup key. The Notification
+// table has @@unique([businessId, invoiceId]). If a notification already
+// exists for this invoice, skip creation (idempotent retry).
+//
+// §CHANNEL-PREF: Reads from NotificationChannelPreference (normalized table).
+// Missing row → default enabled (true).
+export async function createSaleNotification(
+  businessId: string,
+  invoice: { id: string; items?: any[]; party?: { name?: string }; grandTotal: any },
+): Promise<boolean> {
+  let saleNotificationCreated = false
+  try {
+    // §DEDUP-CHECK
+    const existingNotif = await db.notification.findFirst({
+      where: { businessId, invoiceId: invoice.id },
+      select: { id: true },
+    })
+
+    if (!existingNotif) {
+      // §CHANNEL-CHECK
+      const salesPref = await db.notificationChannelPreference.findUnique({
+        where: { businessId_key: { businessId, key: 'sales' } },
+        select: { enabled: true },
+      })
+      const salesEnabled = salesPref ? salesPref.enabled : true
+
+      if (salesEnabled) {
+        const itemCount = invoice.items?.length ?? 0
+        const partyName = invoice.party?.name || 'Walk-in Customer'
+        const total = Number(invoice.grandTotal) || 0
+        const title = 'New Sale'
+        const body_text = `${partyName} • ${itemCount} ${itemCount === 1 ? 'item' : 'items'} • ₹${total.toLocaleString('en-IN')}`
+
+        try {
+          await db.notification.create({
+            data: {
+              businessId,
+              type: 'sale',
+              title,
+              body: body_text,
+              link: 'history',
+              isRead: false,
+              invoiceId: invoice.id,
+            },
+          })
+          saleNotificationCreated = true
+        } catch (createErr: any) {
+          if (createErr?.code !== 'P2002') throw createErr
+        }
+      }
+    }
+  } catch (notifErr) {
+    console.error('Sale notification creation failed (non-fatal):', notifErr)
+  }
+  return saleNotificationCreated
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -54,82 +116,8 @@ export async function POST(req: NextRequest) {
 
     const invoice = await createInvoice(body, business)
 
-    // §NOTIFICATION-SALE: Create ONE sale notification per invoice, deterministically.
-    //
-    // §DEDUP-DESIGN: We use the invoice's ID as the durable dedup key. The
-    // Notification table has a unique constraint on (businessId, invoiceId).
-    // createInvoice() may return an EXISTING invoice on retry (saleOperationId
-    // idempotency recovery). We check if a notification with this invoiceId
-    // already exists — if so, skip (idempotent retry). If not, create one.
-    // Two racing requests for the same saleOperationId will both try to
-    // create with the same invoiceId — the unique constraint ensures only
-    // one succeeds (the other gets P2002, which we catch and ignore).
-    //
-    // §CHANNEL-PREF: Read from AppSettings.notificationChannels (server-authoritative).
-    // The client Zustand store syncs via /api/app-settings PUT.
-    let saleNotificationCreated = false
-    try {
-      // §DEDUP-CHECK: Does a notification already exist for this invoice?
-      const existingNotif = await db.notification.findFirst({
-        where: {
-          businessId: business.id,
-          invoiceId: invoice.id,
-        },
-        select: { id: true },
-      })
-
-      if (!existingNotif) {
-        // §CHANNEL-CHECK: Read the sales notification preference from the
-        // normalized NotificationChannelPreference table. Missing row →
-        // default enabled (true).
-        const salesPref = await db.notificationChannelPreference.findUnique({
-          where: {
-            businessId_key: { businessId: business.id, key: 'sales' },
-          },
-          select: { enabled: true },
-        })
-        const salesEnabled = salesPref ? salesPref.enabled : true
-
-        if (salesEnabled) {
-          const itemCount = invoice.items?.length ?? 0
-          const partyName = invoice.party?.name || 'Walk-in Customer'
-          const total = Number(invoice.grandTotal) || 0
-          const title = 'New Sale'
-          const body_text = `${partyName} • ${itemCount} ${itemCount === 1 ? 'item' : 'items'} • ₹${total.toLocaleString('en-IN')}`
-
-          // §UNIQUE-CONSTRAINT: The (businessId, invoiceId) unique constraint
-          // ensures at most one notification per invoice. If two racing requests
-          // both pass the findFirst check, the second create() throws P2002 —
-          // we catch it and treat as success (the notification was already
-          // created by the winner).
-          try {
-            await db.notification.create({
-              data: {
-                businessId: business.id,
-                type: 'sale',
-                title,
-                body: body_text,
-                link: 'history',
-                isRead: false,
-                invoiceId: invoice.id,
-              },
-            })
-            saleNotificationCreated = true
-          } catch (createErr: any) {
-            // §P2002-HANDLING: Unique constraint violation = another request
-            // already created the notification for this invoice. Not an error.
-            if (createErr?.code === 'P2002') {
-              // Idempotent — notification already exists. This is fine.
-            } else {
-              throw createErr // Re-throw non-P2002 errors
-            }
-          }
-        }
-      }
-    } catch (notifErr) {
-      // Non-fatal — log but don't fail the invoice creation
-      console.error('Sale notification creation failed (non-fatal):', notifErr)
-    }
+    // §NOTIFICATION-SALE: Call the extracted core function (same logic, testable)
+    const saleNotificationCreated = await createSaleNotification(business.id, invoice)
 
     const response = NextResponse.json(serializeDecimals(invoice))
     if (saleNotificationCreated) {

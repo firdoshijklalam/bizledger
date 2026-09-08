@@ -27,9 +27,63 @@ const DEFAULT_CHANNELS: Record<string, boolean> = {
   gradeChanges: true, backups: true,
 }
 
+// §EXTRACTED-CORE: The core logic of the PUT handler, extracted into a
+// testable function that takes businessId as a parameter. This is the same
+// pattern used by /api/data-import (performImport takes targetBusinessId).
+// The PUT route handler is a thin wrapper that calls this function.
+//
+// §TESTABILITY: Tests can call this function directly with a test businessId,
+// bypassing getCurrentBusiness() (which requires cookies/next-headers).
+// The route handler calls getCurrentBusiness() and passes the result.
+export async function updateChannelPreference(
+  businessId: string,
+  key: string,
+  value: boolean,
+): Promise<{ ok: boolean; key?: string; value?: boolean; error?: string; status: number }> {
+  // §VALIDATE: key must be a known channel, value must be boolean
+  if (!key || !VALID_KEYS.includes(key as ChannelKey)) {
+    return { ok: false, error: `Invalid key. Must be one of: ${VALID_KEYS.join(', ')}`, status: 400 }
+  }
+  if (typeof value !== 'boolean') {
+    return { ok: false, error: 'value must be a boolean', status: 400 }
+  }
+
+  // §ATOMIC-UPSERT: Single SQL statement — INSERT ... ON CONFLICT UPDATE.
+  await db.notificationChannelPreference.upsert({
+    where: {
+      businessId_key: { businessId, key },
+    },
+    update: { enabled: value },
+    create: {
+      businessId,
+      key,
+      enabled: value,
+    },
+  })
+
+  return { ok: true, key, value, status: 200 }
+}
+
+// §EXTRACTED-CORE: The core logic of the GET handler.
+export async function getChannelPreferences(
+  businessId: string,
+): Promise<{ channels: Record<string, boolean> }> {
+  const prefs = await db.notificationChannelPreference.findMany({
+    where: { businessId },
+    select: { key: true, enabled: true },
+  })
+
+  const channels: Record<string, boolean> = { ...DEFAULT_CHANNELS }
+  for (const pref of prefs) {
+    channels[pref.key] = pref.enabled
+  }
+
+  return { channels }
+}
+
 // PUT /api/notification-preferences
 // Body: { key: 'sales', value: false }
-// Returns: { ok: true, channels: {...} } (full effective channel map after update)
+// Returns: { ok: true, key, value }
 export async function PUT(req: NextRequest) {
   try {
     const business = await getCurrentBusiness()
@@ -38,34 +92,13 @@ export async function PUT(req: NextRequest) {
     const body = await req.json()
     const { key, value } = body
 
-    // §VALIDATE: key must be a known channel, value must be boolean
-    if (!key || !VALID_KEYS.includes(key)) {
-      return NextResponse.json({ error: `Invalid key. Must be one of: ${VALID_KEYS.join(', ')}` }, { status: 400 })
-    }
-    if (typeof value !== 'boolean') {
-      return NextResponse.json({ error: 'value must be a boolean' }, { status: 400 })
-    }
+    const result = await updateChannelPreference(business.id, key, value)
 
-    // §ATOMIC-UPSERT: Single SQL statement — INSERT ... ON CONFLICT UPDATE.
-    // No read-modify-write. No race condition. The `enabled` column is set
-    // atomically for this specific (businessId, key) row.
-    await db.notificationChannelPreference.upsert({
-      where: {
-        businessId_key: { businessId: business.id, key: key as string },
-      },
-      update: { enabled: value },
-      create: {
-        businessId: business.id,
-        key: key as string,
-        enabled: value,
-      },
-    })
-
-    // §RETURN-SINGLE-KEY: Return only the updated key+value, NOT the full
-    // channel map. This prevents a stale-response race where a concurrent
-    // update to a different key could be overwritten in the client.
-    // The client merges only the mutated key into its local state.
-    return NextResponse.json({ ok: true, key, value })
+    if (result.ok) {
+      return NextResponse.json({ ok: true, key: result.key, value: result.value })
+    } else {
+      return NextResponse.json({ error: result.error }, { status: result.status })
+    }
   } catch (e) {
     return apiError(e, 'Failed to update notification preferences')
   }
@@ -78,16 +111,7 @@ export async function GET() {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
-    const prefs = await db.notificationChannelPreference.findMany({
-      where: { businessId: business.id },
-      select: { key: true, enabled: true },
-    })
-
-    // §DEFAULTS: Missing rows mean the channel is enabled by default.
-    const channels: Record<string, boolean> = { ...DEFAULT_CHANNELS }
-    for (const pref of prefs) {
-      channels[pref.key] = pref.enabled
-    }
+    const { channels } = await getChannelPreferences(business.id)
 
     return NextResponse.json({ channels })
   } catch (e) {

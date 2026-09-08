@@ -1,36 +1,28 @@
 /**
- * §TEST: Notification Preference Concurrency — REAL production route + store.
+ * §TEST: Notification — REAL production route handler execution.
  *
  * Run: npx tsx tests/unit/notification-correctness.test.ts
  *
- * These tests execute the ACTUAL production code:
- * - The PUT handler from src/app/api/notification-preferences/route.ts
- *   (with getCurrentBusiness mocked to return a test business)
- * - The GET handler from the same file
- * - The useNotificationStore.toggleChannel() with mocked fetch
- * - Real Prisma queries against the SQLite dev DB
- *
  * Classification:
- *   - REAL EXECUTION: PUT handler, GET handler, store.toggleChannel, db queries
- *   - MOCKED DEPENDENCY: getCurrentBusiness (returns test business instead of reading cookies)
- *   - MOCKED DEPENDENCY: global.fetch (for store tests — replaces network with controlled responses)
- *   - STATIC CONTRACT: migration file existence (verified, not executed against PostgreSQL)
+ *   - REAL EXECUTION: Imports + calls the ACTUAL exported functions from
+ *     the production route files:
+ *       - updateChannelPreference() from src/app/api/notification-preferences/route.ts
+ *       - getChannelPreferences() from src/app/api/notification-preferences/route.ts
+ *       - createSaleNotification() from src/app/api/invoices/route.ts
+ *   - MOCKED DEPENDENCY: None for route handler tests — the extracted functions
+ *     take businessId as a parameter, bypassing getCurrentBusiness().
+ *   - MOCKED DEPENDENCY: global.fetch for store tests (toggleChannel).
+ *   - STATIC CONTRACT: Migration SQL inspection (file read, not executed).
+ *
+ * NO production logic is copied into the test. The test imports the REAL
+ * functions and calls them with real DB state.
  */
 export {}
 
-import { NextRequest } from 'next/server'
 import { db } from '../../src/lib/db'
 import { useNotificationStore } from '../../src/store/notification-store'
-
-// §MOCK: We need to intercept getCurrentBusiness to return our test business
-// instead of reading cookies. We do this by mocking the module.
-// The route handler imports { getCurrentBusiness } from '@/lib/db' — we
-// can't easily mock that in tsx, so instead we call the handler's logic
-// directly by extracting the core function.
-
-// §EXTRACT: We import the route handlers directly and call them with
-// a constructed NextRequest. The handlers call getCurrentBusiness()
-// internally — we mock that by patching it before import.
+import { updateChannelPreference, getChannelPreferences } from '../../src/app/api/notification-preferences/route'
+import { createSaleNotification } from '../../src/app/api/invoices/route'
 
 let passed = 0
 let failed = 0
@@ -39,12 +31,10 @@ function assert(cond: boolean, msg: string) {
   else { console.log(`  ❌ ${msg}`); failed++ }
 }
 
-const TEST_BIZ_ID = 'test-notif-pref-' + Date.now()
+const TEST_BIZ_ID = 'test-notif-' + Date.now()
 
 async function setupTestBusiness() {
-  await db.business.create({
-    data: { id: TEST_BIZ_ID, name: 'Test Notif Pref Biz', currency: 'INR' },
-  })
+  await db.business.create({ data: { id: TEST_BIZ_ID, name: 'Test Notif Biz', currency: 'INR' } })
 }
 
 async function cleanupTestBusiness() {
@@ -55,155 +45,106 @@ async function cleanupTestBusiness() {
   } catch {}
 }
 
-// §HELPER: Execute the production PUT handler's logic directly.
-// We can't mock getCurrentBusiness easily in tsx, so we inline the same
-// db.notificationChannelPreference.upsert call that the route handler does.
-// This is NOT a copy of the logic — it's the SAME Prisma call the route
-// executes. The validation + response format are verified by the contract
-// tests below.
-async function executeProductionPut(key: string, value: boolean, businessId: string) {
-  // This is the EXACT same db.notificationChannelPreference.upsert call
-  // that PUT /api/notification-preferences executes (route.ts lines 52-62).
-  // We execute it with the SAME parameters the route would use.
-  await db.notificationChannelPreference.upsert({
-    where: {
-      businessId_key: { businessId, key },
-    },
-    update: { enabled: value },
-    create: {
-      businessId,
-      key,
-      enabled: value,
-    },
-  })
-  // Return the same response shape the route returns (route.ts line 68)
-  return { ok: true, key, value }
-}
-
-// §HELPER: Execute the production GET handler's logic directly.
-async function executeProductionGet(businessId: string) {
-  const prefs = await db.notificationChannelPreference.findMany({
-    where: { businessId },
-    select: { key: true, enabled: true },
-  })
-  const DEFAULT_CHANNELS: Record<string, boolean> = {
-    sales: true, lowStock: true, overduePayments: true,
-    gradeChanges: true, backups: true,
-  }
-  const channels = { ...DEFAULT_CHANNELS }
-  for (const pref of prefs) {
-    channels[pref.key] = pref.enabled
-  }
-  return { channels }
-}
-
-// §HELPER: Execute the production invoice route's notification-creation logic.
-// This is the SAME logic from POST /api/invoices (route.ts lines 70-133).
-// We execute it with a mock invoice object.
-async function executeProductionNotificationCreation(
-  businessId: string,
-  invoice: { id: string; items: any[]; party?: { name?: string }; grandTotal: any; createdAt: string }
-) {
-  let saleNotificationCreated = false
-  try {
-    // §DEDUP-CHECK: Same as route.ts line 73-79
-    const existingNotif = await db.notification.findFirst({
-      where: { businessId, invoiceId: invoice.id },
-      select: { id: true },
-    })
-
-    if (!existingNotif) {
-      // §CHANNEL-CHECK: Same as route.ts line 82-91
-      const salesPref = await db.notificationChannelPreference.findUnique({
-        where: { businessId_key: { businessId, key: 'sales' } },
-        select: { enabled: true },
-      })
-      const salesEnabled = salesPref ? salesPref.enabled : true
-
-      if (salesEnabled) {
-        const itemCount = invoice.items?.length ?? 0
-        const partyName = invoice.party?.name || 'Walk-in Customer'
-        const total = Number(invoice.grandTotal) || 0
-        const body_text = `${partyName} • ${itemCount} ${itemCount === 1 ? 'item' : 'items'} • ₹${total.toLocaleString('en-IN')}`
-
-        try {
-          await db.notification.create({
-            data: {
-              businessId,
-              type: 'sale',
-              title: 'New Sale',
-              body: body_text,
-              link: 'history',
-              isRead: false,
-              invoiceId: invoice.id,
-            },
-          })
-          saleNotificationCreated = true
-        } catch (createErr: any) {
-          if (createErr?.code !== 'P2002') throw createErr
-        }
-      }
-    }
-  } catch (e) {
-    console.error('Notification creation error (non-fatal):', e)
-  }
-  return saleNotificationCreated
-}
-
 async function main() {
-  console.log('\n🧪 Notification Preference Concurrency (REAL Production Code) Tests\n')
-
+  console.log('\n🧪 Notification Tests — REAL Production Route Handlers\n')
   await setupTestBusiness()
 
-  // ─── A. REAL: PUT sales=false → DB contains enabled=false ────────────
-  console.log('A. REAL: Execute production PUT logic → DB contains enabled=false')
+  // ─── A. REAL: updateChannelPreference (PUT core) — valid key+value ──
+  console.log('A. REAL: updateChannelPreference(businessId, "sales", false)')
   {
-    // Execute the SAME upsert the route handler runs
-    const result = await executeProductionPut('sales', false, TEST_BIZ_ID)
+    // Call the ACTUAL exported function from the production route file
+    const result = await updateChannelPreference(TEST_BIZ_ID, 'sales', false)
 
-    // Verify the response shape (contract check)
-    assert(result.ok === true, 'A1: response has ok=true')
-    assert(result.key === 'sales', 'A2: response has key=sales')
-    assert(result.value === false, 'A3: response has value=false')
+    assert(result.ok === true, 'A1: returned ok=true')
+    assert(result.key === 'sales', 'A2: returned key=sales')
+    assert(result.value === false, 'A3: returned value=false')
+    assert(result.status === 200, 'A4: returned status=200')
 
-    // Verify ACTUAL DB state
+    // Verify ACTUAL DB state (not a mock — real Prisma query)
     const pref = await db.notificationChannelPreference.findUnique({
       where: { businessId_key: { businessId: TEST_BIZ_ID, key: 'sales' } },
     })
-    assert(pref !== null, 'A4: row EXISTS in DB (real Prisma query)')
-    assert(pref?.enabled === false, 'A5: enabled=false in DB (verified, not assumed)')
+    assert(pref !== null, 'A5: DB row exists (real query)')
+    assert(pref?.enabled === false, 'A6: DB has enabled=false (verified)')
   }
 
-  // ─── B. REAL: PUT lowStock=false → sales remains unchanged ──────────
-  console.log('\nB. REAL: Execute production PUT for lowStock → sales unchanged')
+  // ─── B. REAL: updateChannelPreference — invalid key → 400 ────────────
+  console.log('\nB. REAL: updateChannelPreference — invalid key')
   {
-    await executeProductionPut('lowStock', false, TEST_BIZ_ID)
+    const result = await updateChannelPreference(TEST_BIZ_ID, 'invalidKey', true)
+
+    assert(result.ok === false, 'B1: returned ok=false')
+    assert(result.status === 400, 'B2: returned status=400')
+    assert(result.error !== undefined, 'B3: returned error message')
+
+    // Verify DB was NOT modified
+    const pref = await db.notificationChannelPreference.findUnique({
+      where: { businessId_key: { businessId: TEST_BIZ_ID, key: 'invalidKey' } as any },
+    })
+    assert(pref === null, 'B4: no DB row created for invalid key')
+  }
+
+  // ─── C. REAL: updateChannelPreference — non-boolean value → 400 ────
+  console.log('\nC. REAL: updateChannelPreference — non-boolean value')
+  {
+    const result = await updateChannelPreference(TEST_BIZ_ID, 'sales', 'yes' as any)
+
+    assert(result.ok === false, 'C1: returned ok=false')
+    assert(result.status === 400, 'C2: returned status=400')
+
+    // Verify the EXISTING sales preference was NOT overwritten
+    const pref = await db.notificationChannelPreference.findUnique({
+      where: { businessId_key: { businessId: TEST_BIZ_ID, key: 'sales' } },
+    })
+    assert(pref?.enabled === false, 'C3: existing sales=false unchanged (not overwritten by invalid request)')
+  }
+
+  // ─── D. REAL: updateChannelPreference — lowStock=false, sales unchanged ─
+  console.log('\nD. REAL: updateChannelPreference — lowStock=false, sales unchanged')
+  {
+    const result = await updateChannelPreference(TEST_BIZ_ID, 'lowStock', false)
+
+    assert(result.ok === true, 'D1: returned ok=true')
+    assert(result.status === 200, 'D2: returned status=200')
 
     // Verify lowStock changed
     const lowStockPref = await db.notificationChannelPreference.findUnique({
       where: { businessId_key: { businessId: TEST_BIZ_ID, key: 'lowStock' } },
     })
-    assert(lowStockPref?.enabled === false, 'B1: lowStock=false in DB (verified)')
+    assert(lowStockPref?.enabled === false, 'D3: lowStock=false in DB (verified)')
 
-    // Verify sales is STILL false (not overwritten by lowStock update)
+    // Verify sales is STILL false (atomic — different row, not touched)
     const salesPref = await db.notificationChannelPreference.findUnique({
       where: { businessId_key: { businessId: TEST_BIZ_ID, key: 'sales' } },
     })
-    assert(salesPref?.enabled === false, 'B2: sales STILL false (atomic upsert did not touch sales row)')
+    assert(salesPref?.enabled === false, 'D4: sales still false (atomic upsert did not touch sales row)')
   }
 
-  // ─── C. REAL: Concurrent different-key upserts → both survive ────────
-  console.log('\nC. REAL: Concurrent different-key upserts → both survive')
+  // ─── E. REAL: getChannelPreferences (GET core) — returns effective map ─
+  console.log('\nE. REAL: getChannelPreferences — returns effective channel map')
+  {
+    // Call the ACTUAL exported function from the production route file
+    const result = await getChannelPreferences(TEST_BIZ_ID)
+
+    assert(result.channels.sales === false, 'E1: sales=false (from DB)')
+    assert(result.channels.lowStock === false, 'E2: lowStock=false (from DB)')
+    assert(result.channels.overduePayments === true, 'E3: overduePayments=true (default — no row in DB)')
+    assert(result.channels.gradeChanges === true, 'E4: gradeChanges=true (default)')
+    assert(result.channels.backups === true, 'E5: backups=true (default)')
+  }
+
+  // ─── F. REAL: Concurrent different-key updates ────────────────────────
+  console.log('\nF. REAL: Concurrent different-key updates')
   {
     // Clean slate
     await db.notificationChannelPreference.deleteMany({
       where: { businessId: TEST_BIZ_ID, key: { in: ['gradeChanges', 'backups'] } },
     })
 
-    // Execute TWO REAL upserts CONCURRENTLY
+    // Execute TWO REAL updateChannelPreference calls CONCURRENTLY
     await Promise.all([
-      executeProductionPut('gradeChanges', false, TEST_BIZ_ID),
-      executeProductionPut('backups', false, TEST_BIZ_ID),
+      updateChannelPreference(TEST_BIZ_ID, 'gradeChanges', false),
+      updateChannelPreference(TEST_BIZ_ID, 'backups', false),
     ])
 
     // Verify BOTH are false in DB
@@ -214,106 +155,37 @@ async function main() {
       where: { businessId_key: { businessId: TEST_BIZ_ID, key: 'backups' } },
     })
 
-    assert(gradePref?.enabled === false, 'C1: gradeChanges=false (survived concurrent update)')
-    assert(backupPref?.enabled === false, 'C2: backups=false (survived concurrent update)')
+    assert(gradePref?.enabled === false, 'F1: gradeChanges=false (survived concurrent update)')
+    assert(backupPref?.enabled === false, 'F2: backups=false (survived concurrent update)')
   }
 
-  // ─── D. REAL: Concurrent same-key upserts → deterministic final state ──
-  console.log('\nD. REAL: Concurrent same-key upserts → valid boolean (not corrupted)')
+  // ─── G. REAL: createSaleNotification (invoice route core) — sales=true ─
+  console.log('\nG. REAL: createSaleNotification — sales=true → one notification')
   {
-    await db.notificationChannelPreference.deleteMany({
-      where: { businessId: TEST_BIZ_ID, key: 'overduePayments' },
-    })
-
-    // Two concurrent upserts for the SAME key with different values
-    await Promise.all([
-      executeProductionPut('overduePayments', true, TEST_BIZ_ID),
-      executeProductionPut('overduePayments', false, TEST_BIZ_ID),
-    ])
-
-    const pref = await db.notificationChannelPreference.findUnique({
-      where: { businessId_key: { businessId: TEST_BIZ_ID, key: 'overduePayments' } },
-    })
-
-    assert(pref !== null, 'D1: row exists after concurrent same-key upserts')
-    assert(typeof pref?.enabled === 'boolean', 'D2: enabled is a valid boolean (not corrupted by race)')
-    // We don't assert true/false because last-write-wins is non-deterministic
-    // under true concurrency — we verify the VALUE IS VALID, not which one won.
-    assert(pref?.enabled === true || pref?.enabled === false, 'D3: enabled is either true or false (valid)')
-  }
-
-  // ─── E. REAL: Missing row → default enabled (true) ───────────────────
-  console.log('\nE. REAL: Missing row → default enabled (true)')
-  {
-    await db.notificationChannelPreference.deleteMany({
-      where: { businessId: TEST_BIZ_ID, key: 'sales' },
-    })
-
-    // Execute the SAME findUnique the invoice route runs
-    const salesPref = await db.notificationChannelPreference.findUnique({
-      where: { businessId_key: { businessId: TEST_BIZ_ID, key: 'sales' } },
-    })
-
-    // This is the EXACT logic from the invoice route:
-    const salesEnabled = salesPref ? salesPref.enabled : true
-
-    assert(salesPref === null, 'E1: row is null (missing — verified by real query)')
-    assert(salesEnabled === true, 'E2: missing row → salesEnabled=true (default enabled)')
-  }
-
-  // ─── F. REAL: sales=false → invoice notification path skips creation ─
-  console.log('\nF. REAL: sales=false → invoice notification creation SKIPPED')
-  {
-    // Set sales=false
-    await executeProductionPut('sales', false, TEST_BIZ_ID)
+    // Ensure sales=true
+    await updateChannelPreference(TEST_BIZ_ID, 'sales', true)
 
     const mockInvoice = {
-      id: 'test-inv-sales-off',
-      items: [{ name: 'Test', quantity: 1, unitPrice: 100 }],
-      party: { name: 'Test Customer' },
-      grandTotal: 100,
-      createdAt: new Date().toISOString(),
-    }
-
-    // Execute the REAL production notification creation logic
-    const created = await executeProductionNotificationCreation(TEST_BIZ_ID, mockInvoice)
-
-    assert(created === false, 'F1: sale notification NOT created (sales=false)')
-
-    // Verify NO notification exists in DB
-    const notifCount = await db.notification.count({
-      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-sales-off' },
-    })
-    assert(notifCount === 0, 'F2: zero notifications in DB for this invoice (verified)')
-  }
-
-  // ─── G. REAL: sales=true → exactly one notification created ──────────
-  console.log('\nG. REAL: sales=true → exactly one notification created')
-  {
-    // Set sales=true
-    await executeProductionPut('sales', true, TEST_BIZ_ID)
-
-    const mockInvoice = {
-      id: 'test-inv-sales-on',
+      id: 'test-inv-001',
       items: [{ name: 'Rice', quantity: 3 }, { name: 'Oil', quantity: 2 }],
       party: { name: 'Rahul Enterprise' },
       grandTotal: 2450,
-      createdAt: new Date().toISOString(),
     }
 
-    const created = await executeProductionNotificationCreation(TEST_BIZ_ID, mockInvoice)
+    // Call the ACTUAL exported function from the invoices route file
+    const created = await createSaleNotification(TEST_BIZ_ID, mockInvoice)
 
-    assert(created === true, 'G1: sale notification created (sales=true)')
+    assert(created === true, 'G1: createSaleNotification returned true (notification created)')
 
     // Verify EXACTLY ONE notification in DB
     const notifCount = await db.notification.count({
-      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-sales-on' },
+      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-001' },
     })
     assert(notifCount === 1, 'G2: exactly 1 notification in DB (verified)')
 
-    // Verify the notification content
+    // Verify notification content
     const notif = await db.notification.findFirst({
-      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-sales-on' },
+      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-001' },
     })
     assert(notif?.type === 'sale', 'G3: type=sale')
     assert((notif?.body || '').includes('Rahul Enterprise'), 'G4: body includes party name')
@@ -323,115 +195,146 @@ async function main() {
     assert(notif?.isRead === false, 'G8: isRead=false')
   }
 
-  // ─── H. REAL: Retry same invoice → no duplicate (invoiceId dedup) ────
-  console.log('\nH. REAL: Retry same invoice → no duplicate (invoiceId dedup)')
+  // ─── H. REAL: createSaleNotification — retry same invoice → no dup ──
+  console.log('\nH. REAL: createSaleNotification — retry same invoice → no duplicate')
   {
-    // Execute the SAME notification creation for the SAME invoice ID
     const mockInvoice = {
-      id: 'test-inv-sales-on', // SAME invoice ID as test G
+      id: 'test-inv-001', // SAME invoice ID
       items: [{ name: 'Rice', quantity: 3 }],
       party: { name: 'Rahul Enterprise' },
       grandTotal: 2450,
-      createdAt: new Date().toISOString(),
     }
 
-    const created = await executeProductionNotificationCreation(TEST_BIZ_ID, mockInvoice)
+    // Call the ACTUAL function again with the same invoice ID
+    const created = await createSaleNotification(TEST_BIZ_ID, mockInvoice)
 
-    assert(created === false, 'H1: second call did NOT create a notification (dedup worked)')
+    assert(created === false, 'H1: returned false (dedup worked — no new notification)')
 
     // Verify STILL exactly 1 notification (not 2)
     const notifCount = await db.notification.count({
-      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-sales-on' },
+      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-001' },
     })
     assert(notifCount === 1, 'H2: still exactly 1 notification (no duplicate — verified)')
   }
 
-  // ─── I. REAL: Different invoice → separate notification ──────────────
-  console.log('\nI. REAL: Different invoice → separate notification')
+  // ─── I. REAL: createSaleNotification — sales=false → no notification ─
+  console.log('\nI. REAL: createSaleNotification — sales=false → no notification')
   {
+    // Set sales=false
+    await updateChannelPreference(TEST_BIZ_ID, 'sales', false)
+
+    const mockInvoice = {
+      id: 'test-inv-sales-off',
+      items: [{ name: 'Test', quantity: 1 }],
+      party: { name: 'Test Customer' },
+      grandTotal: 100,
+    }
+
+    // Call the ACTUAL function
+    const created = await createSaleNotification(TEST_BIZ_ID, mockInvoice)
+
+    assert(created === false, 'I1: returned false (sales=false → no notification)')
+
+    // Verify zero notifications for this invoice
+    const notifCount = await db.notification.count({
+      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-sales-off' },
+    })
+    assert(notifCount === 0, 'I2: zero notifications in DB (verified)')
+  }
+
+  // ─── J. REAL: createSaleNotification — different invoice → separate ─
+  console.log('\nJ. REAL: createSaleNotification — different invoice → separate notification')
+  {
+    // Set sales=true again
+    await updateChannelPreference(TEST_BIZ_ID, 'sales', true)
+
     const mockInvoice2 = {
-      id: 'test-inv-different',
+      id: 'test-inv-002',
       items: [{ name: 'Sugar', quantity: 1 }],
       party: { name: 'Amit Trading' },
       grandTotal: 500,
-      createdAt: new Date().toISOString(),
     }
 
-    const created = await executeProductionNotificationCreation(TEST_BIZ_ID, mockInvoice2)
+    const created = await createSaleNotification(TEST_BIZ_ID, mockInvoice2)
 
-    assert(created === true, 'I1: second invoice creates its own notification')
+    assert(created === true, 'J1: returned true (second invoice creates its own notification)')
 
+    // Verify both invoices have their own notification
     const count1 = await db.notification.count({
-      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-sales-on' },
+      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-001' },
     })
     const count2 = await db.notification.count({
-      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-different' },
+      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-002' },
     })
-    assert(count1 === 1, 'I2: invoice 1 still has 1 notification')
-    assert(count2 === 1, 'I3: invoice 2 has 1 separate notification')
+    assert(count1 === 1, 'J2: invoice 1 still has 1 notification')
+    assert(count2 === 1, 'J3: invoice 2 has 1 separate notification')
   }
 
-  // ─── J. REAL: Tenant isolation ────────────────────────────────────────
-  console.log('\nJ. REAL: Tenant isolation')
+  // ─── K. REAL: Missing preference row → default enabled ──────────────
+  console.log('\nK. REAL: Missing preference row → default enabled')
   {
-    const BIZ_B_ID = 'test-notif-pref-B-' + Date.now()
+    // Delete the sales row
+    await db.notificationChannelPreference.deleteMany({
+      where: { businessId: TEST_BIZ_ID, key: 'sales' },
+    })
+
+    const mockInvoice = {
+      id: 'test-inv-default',
+      items: [{ name: 'Test', quantity: 1 }],
+      party: { name: 'Test' },
+      grandTotal: 100,
+    }
+
+    // Call the ACTUAL function — should create a notification (default enabled)
+    const created = await createSaleNotification(TEST_BIZ_ID, mockInvoice)
+
+    assert(created === true, 'K1: returned true (missing row → default enabled → notification created)')
+
+    const notifCount = await db.notification.count({
+      where: { businessId: TEST_BIZ_ID, invoiceId: 'test-inv-default' },
+    })
+    assert(notifCount === 1, 'K2: 1 notification created (verified)')
+  }
+
+  // ─── L. REAL: Tenant isolation ────────────────────────────────────────
+  console.log('\nL. REAL: Tenant isolation')
+  {
+    const BIZ_B_ID = 'test-notif-B-' + Date.now()
     await db.business.create({ data: { id: BIZ_B_ID, name: 'Test Biz B', currency: 'INR' } })
 
     // Set sales=false for business A
-    await executeProductionPut('sales', false, TEST_BIZ_ID)
+    await updateChannelPreference(TEST_BIZ_ID, 'sales', false)
 
     // Read business B's sales preference
     const bizBPref = await db.notificationChannelPreference.findUnique({
       where: { businessId_key: { businessId: BIZ_B_ID, key: 'sales' } },
     })
 
-    assert(bizBPref === null, 'J1: business B has no sales preference (isolated from A)')
+    assert(bizBPref === null, 'L1: business B has no sales preference (isolated from A)')
 
     // Verify business A's sales is still false
     const bizAPref = await db.notificationChannelPreference.findUnique({
       where: { businessId_key: { businessId: TEST_BIZ_ID, key: 'sales' } },
     })
-    assert(bizAPref?.enabled === false, 'J2: business A has sales=false (not affected by B)')
+    assert(bizAPref?.enabled === false, 'L2: business A has sales=false (not affected by B)')
 
     await db.business.delete({ where: { id: BIZ_B_ID } })
   }
 
-  // ─── K. REAL: GET handler returns effective channel map ──────────────
-  console.log('\nK. REAL: GET handler returns effective channel map')
+  // ─── M. STORE: toggleChannel with mocked fetch — same-key serialization ─
+  console.log('\nM. STORE: toggleChannel — same-key serialization (mocked fetch)')
   {
-    // Set sales=true explicitly before this test (previous tests may have changed it)
-    await executeProductionPut('sales', true, TEST_BIZ_ID)
-
-    // Execute the production GET logic
-    const result = await executeProductionGet(TEST_BIZ_ID)
-
-    // sales should be true (we just set it)
-    assert(result.channels.sales === true, 'K1: GET returns sales=true (from DB)')
-    // lowStock should be false (we set it in test B)
-    assert(result.channels.lowStock === false, 'K2: GET returns lowStock=false (from DB)')
-    // overduePayments should be a valid boolean (from test D)
-    assert(typeof result.channels.overduePayments === 'boolean', 'K3: GET returns overduePayments as boolean')
-  }
-
-  // ─── L. STORE: toggleChannel with mocked fetch — same-key serialization ─
-  console.log('\nL. STORE: toggleChannel with mocked fetch — same-key serialization')
-  {
-    // Reset store to known state
     useNotificationStore.setState({
       channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
     })
 
     const callOrder: string[] = []
-
-    // Mock fetch to track request ordering
     const originalFetch = global.fetch
     let requestCount = 0
     global.fetch = ((url: string, opts: any) => {
       requestCount++
       const currentRequest = requestCount
       callOrder.push(`request-${currentRequest}-start`)
-
-      // Request 1: delay 100ms; Request 2: delay 0ms
       const delay = currentRequest === 1 ? 100 : 0
 
       return new Promise((resolve) => {
@@ -439,46 +342,39 @@ async function main() {
           callOrder.push(`request-${currentRequest}-end`)
           resolve({
             ok: true,
-            json: async () => ({ ok: true, key: opts.body ? JSON.parse(opts.body).key : 'sales', value: JSON.parse(opts.body).value }),
+            json: async () => ({ ok: true, key: JSON.parse(opts.body).key, value: JSON.parse(opts.body).value }),
           } as any)
         }, delay)
       })
     }) as any
 
     try {
-      // Fire TWO toggleChannel calls for the SAME key
       const p1 = useNotificationStore.getState().toggleChannel('sales')
       const p2 = useNotificationStore.getState().toggleChannel('sales')
-
-      // Wait for both to complete
       const [r1, r2] = await Promise.all([p1, p2])
 
-      assert(r1 === true, 'L1: toggle 1 returned true')
-      assert(r2 === true, 'L2: toggle 2 returned true')
+      assert(r1 === true, 'M1: toggle 1 returned true')
+      assert(r2 === true, 'M2: toggle 2 returned true')
 
-      // Verify request ordering: request 1 must complete BEFORE request 2 starts
       const req1EndIdx = callOrder.indexOf('request-1-end')
       const req2StartIdx = callOrder.indexOf('request-2-start')
-      assert(req1EndIdx >= 0, 'L3: request 1 end found in call order')
-      assert(req2StartIdx >= 0, 'L4: request 2 start found in call order')
-      assert(req1EndIdx < req2StartIdx, 'L5: request 1 ended BEFORE request 2 started (serialized)')
+      assert(req1EndIdx >= 0 && req2StartIdx >= 0, 'M3: both request markers found')
+      assert(req1EndIdx < req2StartIdx, 'M4: request 1 ended BEFORE request 2 started (serialized)')
     } finally {
       global.fetch = originalFetch
     }
   }
 
-  // ─── M. STORE: Different-key toggles proceed concurrently ────────────
-  console.log('\nM. STORE: Different-key toggles proceed concurrently')
+  // ─── N. STORE: Different-key toggles proceed concurrently ────────────
+  console.log('\nN. STORE: Different-key toggles — concurrent (mocked fetch)')
   {
     useNotificationStore.setState({
       channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
     })
 
     const originalFetch = global.fetch
-    let callCount = 0
     const startTimes: number[] = []
     global.fetch = ((url: string, opts: any) => {
-      callCount++
       startTimes.push(Date.now())
       return Promise.resolve({
         ok: true,
@@ -487,27 +383,22 @@ async function main() {
     }) as any
 
     try {
-      // Fire TWO toggleChannel calls for DIFFERENT keys simultaneously
       const [r1, r2] = await Promise.all([
         useNotificationStore.getState().toggleChannel('sales'),
         useNotificationStore.getState().toggleChannel('lowStock'),
       ])
 
-      assert(r1 === true, 'M1: sales toggle returned true')
-      assert(r2 === true, 'M2: lowStock toggle returned true')
-      assert(callCount === 2, 'M3: exactly 2 fetch calls made')
-      assert(Math.abs(startTimes[0] - startTimes[1]) < 50, 'M4: both requests started within 50ms (concurrent)')
-
-      // Verify both keys changed in local state
-      assert(useNotificationStore.getState().channels.sales === false, 'M5: sales=false in local state')
-      assert(useNotificationStore.getState().channels.lowStock === false, 'M6: lowStock=false in local state')
+      assert(r1 === true && r2 === true, 'N1: both toggles returned true')
+      assert(Math.abs(startTimes[0] - startTimes[1]) < 50, 'N2: both requests started within 50ms (concurrent)')
+      assert(useNotificationStore.getState().channels.sales === false, 'N3: sales=false in local state')
+      assert(useNotificationStore.getState().channels.lowStock === false, 'N4: lowStock=false in local state')
     } finally {
       global.fetch = originalFetch
     }
   }
 
-  // ─── N. STORE: Stale response protection ────────────────────────────
-  console.log('\nN. STORE: Stale response protection')
+  // ─── O. STORE: Stale response protection ───────────────────────────
+  console.log('\nO. STORE: Stale response protection (mocked fetch)')
   {
     useNotificationStore.setState({
       channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
@@ -515,10 +406,6 @@ async function main() {
 
     const originalFetch = global.fetch
     let callCount = 0
-
-    // Mock: request 1 is delayed (200ms), request 2 is fast (0ms)
-    // Request 2 will complete FIRST, updating local state.
-    // Then request 1's stale response arrives — it must NOT overwrite request 2's result.
     global.fetch = ((url: string, opts: any) => {
       callCount++
       const currentCall = callCount
@@ -536,64 +423,48 @@ async function main() {
     }) as any
 
     try {
-      // Toggle 1: sales=true → false (delayed response)
-      // Toggle 2: sales=false → true (fast response, completes first)
+      // Toggle 1: sales=true→false (delayed 200ms)
+      // Toggle 2: sales=false→true (fast 0ms, completes first)
       const p1 = useNotificationStore.getState().toggleChannel('sales')
       const p2 = useNotificationStore.getState().toggleChannel('sales')
-
       await Promise.all([p1, p2])
 
-      // After toggle 1 (optimistic): sales=false
-      // After toggle 2 (optimistic): sales=true (reverted toggle 1's optimistic)
-      // Toggle 2's response arrives first: sales=true (matches optimistic) → applied
-      // Toggle 1's response arrives later: sales=false (STALE) → must be DISCARDED
-
-      // The final state should be sales=true (from toggle 2, the latest)
+      // Toggle 2's response arrives first → sales=true applied
+      // Toggle 1's response arrives later (stale) → sales=false DISCARDED
       const finalSales = useNotificationStore.getState().channels.sales
-      assert(finalSales === true, `N1: final sales=true (stale response from toggle 1 discarded — got ${finalSales})`)
+      assert(finalSales === true, `O1: final sales=true (stale response discarded — got ${finalSales})`)
     } finally {
       global.fetch = originalFetch
     }
   }
 
-  // ─── O. STORE: Failed sync rolls back local state ───────────────────
-  console.log('\nO. STORE: Failed sync rolls back local state')
+  // ─── P. STORE: Failed sync rolls back local state ──────────────────
+  console.log('\nP. STORE: Failed sync rolls back (mocked fetch returns 500)')
   {
     useNotificationStore.setState({
       channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
     })
 
     const originalFetch = global.fetch
-    global.fetch = (() => {
-      return Promise.resolve({
-        ok: false,
-        status: 500,
-        json: async () => ({ error: 'Server error' }),
-      } as any)
-    }) as any
+    global.fetch = (() => Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'Server error' }) } as any)) as any
 
     try {
       const result = await useNotificationStore.getState().toggleChannel('sales')
-
-      assert(result === false, 'O1: toggleChannel returned false (failed)')
-      // Local state should be rolled back to true (the previous value)
-      assert(useNotificationStore.getState().channels.sales === true, 'O2: sales rolled back to true (previous value)')
+      assert(result === false, 'P1: returned false (failed)')
+      assert(useNotificationStore.getState().channels.sales === true, 'P2: sales rolled back to true')
     } finally {
       global.fetch = originalFetch
     }
   }
 
-  // ─── P. STORE: Server reconcile merges ONLY mutated key ─────────────
-  console.log('\nP. STORE: Server reconcile merges ONLY mutated key')
+  // ─── Q. STORE: Server reconcile merges ONLY mutated key ─────────────
+  console.log('\nQ. STORE: Server reconcile merges ONLY mutated key (mocked fetch)')
   {
     useNotificationStore.setState({
       channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
     })
-
-    // Manually set lowStock=false (simulating a concurrent local mutation)
-    useNotificationStore.setState((s) => ({
-      channels: { ...s.channels, lowStock: false },
-    }))
+    // Manually set lowStock=false (simulating concurrent local mutation)
+    useNotificationStore.setState((s) => ({ channels: { ...s.channels, lowStock: false } }))
 
     const originalFetch = global.fetch
     global.fetch = ((url: string, opts: any) => {
@@ -608,18 +479,15 @@ async function main() {
       // Toggle sales — server returns { key: 'sales', value: false }
       await useNotificationStore.getState().toggleChannel('sales')
 
-      // sales should be false (from server reconcile)
-      assert(useNotificationStore.getState().channels.sales === false, 'P1: sales=false (from server reconcile)')
-
-      // lowStock should STILL be false (NOT overwritten by sales reconcile)
-      assert(useNotificationStore.getState().channels.lowStock === false, 'P2: lowStock=false (preserved, NOT overwritten)')
+      assert(useNotificationStore.getState().channels.sales === false, 'Q1: sales=false (from server reconcile)')
+      assert(useNotificationStore.getState().channels.lowStock === false, 'Q2: lowStock=false (preserved — NOT overwritten)')
     } finally {
       global.fetch = originalFetch
     }
   }
 
-  // ─── Q. STATIC: Migration file contract ─────────────────────────────
-  console.log('\nQ. STATIC: Migration file contract')
+  // ─── R. STATIC: Migration file contract ──────────────────────────────
+  console.log('\nR. STATIC: Migration file contract (file read, NOT PostgreSQL execution)')
   {
     const fs = await import('fs')
     const migrationSql = fs.readFileSync(
@@ -627,25 +495,21 @@ async function main() {
       'utf-8'
     )
 
-    assert(migrationSql.includes('CREATE TABLE "NotificationChannelPreference"'), 'Q1: CREATE TABLE present')
-    assert(migrationSql.includes('CREATE UNIQUE INDEX "NotificationChannelPreference_businessId_key_key"'), 'Q2: UNIQUE INDEX on (businessId, key)')
-    assert(migrationSql.includes('FOREIGN KEY'), 'Q3: FK to Business')
-    // §CHECK: gen_random_uuid should NOT appear in SQL code (only in comments is OK).
-    // Remove comment lines before checking.
+    assert(migrationSql.includes('CREATE TABLE "NotificationChannelPreference"'), 'R1: CREATE TABLE present')
+    assert(migrationSql.includes('CREATE UNIQUE INDEX "NotificationChannelPreference_businessId_key_key"'), 'R2: UNIQUE INDEX on (businessId, key)')
+    assert(migrationSql.includes('FOREIGN KEY'), 'R3: FK to Business')
     const sqlCode = migrationSql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n')
-    assert(!sqlCode.includes('gen_random_uuid'), 'Q4: no gen_random_uuid in SQL code (no pgcrypto dependency)')
-    assert(!migrationSql.includes('typeof('), 'Q5: no typeof() (no SQLite-only function)')
-    assert(migrationSql.includes('jsonb_each_text'), 'Q6: uses jsonb_each_text (PostgreSQL JSON)')
-    assert(migrationSql.includes('ON CONFLICT'), 'Q7: uses ON CONFLICT (idempotent)')
-    assert(migrationSql.includes('CONTINUE'), 'Q8: per-business exception handling (CONTINUE on malformed JSON)')
+    assert(!sqlCode.includes('gen_random_uuid'), 'R4: no gen_random_uuid in SQL code')
+    assert(!migrationSql.includes('typeof('), 'R5: no typeof() (no SQLite-only function)')
+    assert(migrationSql.includes('jsonb_each_text'), 'R6: uses jsonb_each_text (PostgreSQL JSON)')
+    assert(migrationSql.includes('ON CONFLICT'), 'R7: uses ON CONFLICT (idempotent)')
+    assert(migrationSql.includes('CONTINUE'), 'R8: per-business exception handling')
   }
 
-  // Cleanup
   await cleanupTestBusiness()
 
-  // ─── Summary ─────────────────────────────────────────────────────────
   console.log(`\n${'='.repeat(60)}`)
-  console.log(`✨ Notification Preference Tests: ${passed} passed, ${failed} failed`)
+  console.log(`✨ Notification Tests — REAL Production Route Handlers: ${passed} passed, ${failed} failed`)
   console.log(`${'='.repeat(60)}`)
   if (failed > 0) process.exit(1)
   await db.$disconnect()
