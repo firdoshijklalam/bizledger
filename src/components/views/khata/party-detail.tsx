@@ -8,7 +8,7 @@ import { formatCurrency, formatDate, GRADE_META } from '@/lib/utils'
 import { motion } from 'framer-motion'
 import {
   ArrowLeft, Phone, Plus, Receipt, FileEdit, ArrowDownLeft, ArrowUpRight,
-  CheckCircle2, MessageSquare, X, Zap, Share2, FileText, Award, Package,
+  CheckCircle2, X, Zap, Share2, FileText, Award, Package,
   Users, Briefcase, Fingerprint, ShieldAlert, Loader2, AlertTriangle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,9 @@ import { ShareSheet } from '@/components/shared/share-sheet'
 import { CompareSuppliersModal } from '@/components/shared/compare-suppliers-modal'
 import { TrustScoreCard } from '@/components/shared/trust-score-card'
 import { DefaulterAlertBanner } from '@/components/shared/defaulter-alert-banner'
+// §PARTY-NOTES-ACTIVATION: Dormant PartyNote feature now has a CRUD API +
+// dedicated UI. Render the section on the party detail page.
+import { PartyNotesSection } from './party-notes-section'
 import {
   Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -48,7 +51,6 @@ export function PartyDetail({ partyId }: { partyId: string }) {
   const { data, loading, error, refetch } = useFetch<PartyDetailData>(`/api/parties/${partyId}`, [partyId])
   const [showTxn, setShowTxn] = useState(false)
   const [showSettle, setShowSettle] = useState(false)
-  const [showNote, setShowNote] = useState(false)
   const [showCompare, setShowCompare] = useState(false)
   const [compareProduct, setCompareProduct] = useState<string>('')
 
@@ -502,6 +504,13 @@ export function PartyDetail({ partyId }: { partyId: string }) {
           </div>
         </div>
       )}
+
+      {/* §PARTY-NOTES-ACTIVATION: Dormant PartyNote feature now has a CRUD
+          API + dedicated UI. The old `showNote` state + `MessageSquare`
+          import were stubs that never rendered; they have been removed and
+          replaced with the self-contained PartyNotesSection, which fetches
+          and edits notes via /api/parties/[partyId]/notes. */}
+      <PartyNotesSection partyId={partyId} />
 
       <TransactionForm open={showTxn} onOpenChange={setShowTxn} party={data} />
       <SettleUpDialog open={showSettle} onOpenChange={setShowSettle} party={data} onConfirm={handleSettle} />
