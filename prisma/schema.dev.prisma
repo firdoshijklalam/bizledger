@@ -144,11 +144,13 @@ model Notification {
   link         String?
   isRead       Boolean  @default(false)
   createdAt    DateTime @default(now())
+  invoiceId    String?
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId])
   @@index([isRead])
+  @@unique([businessId, invoiceId])
 }
 
 model Party {

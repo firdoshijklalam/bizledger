@@ -19,6 +19,7 @@ import { useBillingStore } from '@/store/billing-store'
 import { useGateTrigger } from '@/store/biometric-gate-store'
 import { useFetch as useFetchHook } from '@/hooks/use-fetch'
 import { useNotificationStore } from '@/store/notification-store'
+import { useQueryClient } from '@tanstack/react-query'
 import { toNumber } from '@/lib/numeric'
 
 interface LineItem {
@@ -42,6 +43,7 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
   const { data: parties } = useFetch<Party[]>('/api/parties?type=customer', [open])
   const { data: products } = useFetch<Product[]>('/api/products', [open])
   const { tabs, activeTabId, updateTab, addTab } = useBillingStore()
+  const queryClient = useQueryClient()
 
   const [customer, setCustomer] = useState<Party | null>(null)
   const [showCustSearch, setShowCustSearch] = useState(false)
@@ -170,17 +172,22 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
         } catch {}
       }
       triggerRefresh()
-      // §NOTIFICATION-REFRESH: After a successful sale, fetch the updated
-      // unread count from the server so the bell badge updates immediately.
-      // This uses the shared Zustand store (same as TopAppBar) so the badge
-      // updates without navigation or page reload.
+      // §NOTIFICATION-REFRESH: After a successful sale, refresh both the
+      // unread count AND the notification list cache so the badge updates
+      // immediately and NotificationsView shows the new notification without
+      // requiring manual navigation.
       try {
+        // §UNREAD-COUNT: Fetch updated unreadTotal from server → shared Zustand store
         const res = await fetch('/api/notifications?limit=1')
         if (res.ok) {
           const data = await res.json()
           useNotificationStore.getState().setUnreadTotal(data.unreadTotal ?? 0)
         }
       } catch {}
+      // §NOTIFICATION-LIST-CACHE: Invalidate the TanStack Query cache for
+      // /api/notifications so the next time NotificationsView mounts, it
+      // fetches fresh data (including the new sale notification).
+      queryClient.invalidateQueries({ queryKey: ['/api/notifications'] })
       onOpenChange(false)
       setSelectedInvoiceId(invoice.id)
       // Clear the active billing tab on successful save

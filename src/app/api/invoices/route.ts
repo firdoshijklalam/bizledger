@@ -54,51 +54,32 @@ export async function POST(req: NextRequest) {
 
     const invoice = await createInvoice(body, business)
 
-    // §NOTIFICATION-SALE: Create ONE sale notification per NEWLY created invoice.
-    // §IDEMPOTENCY-FIX: createInvoice() may return an EXISTING invoice on retry
-    // (via saleOperationId idempotency recovery). We must NOT create a duplicate
-    // notification for a retry. We check if a notification already exists for
-    // this invoice ID — if it does, the invoice was created by a previous request
-    // and we skip notification creation.
-    // §CHANNEL-PREF: Only create the notification if the user has sales notifications
-    // enabled. The preference is stored in AppSettings.notificationChannels (JSON),
-    // synced from the client Zustand store. Default: enabled.
+    // §NOTIFICATION-SALE: Create ONE sale notification per invoice, deterministically.
+    //
+    // §DEDUP-DESIGN: We use the invoice's ID as the durable dedup key. The
+    // Notification table has a unique constraint on (businessId, invoiceId).
+    // createInvoice() may return an EXISTING invoice on retry (saleOperationId
+    // idempotency recovery). We check if a notification with this invoiceId
+    // already exists — if so, skip (idempotent retry). If not, create one.
+    // Two racing requests for the same saleOperationId will both try to
+    // create with the same invoiceId — the unique constraint ensures only
+    // one succeeds (the other gets P2002, which we catch and ignore).
+    //
+    // §CHANNEL-PREF: Read from AppSettings.notificationChannels (server-authoritative).
+    // The client Zustand store syncs via /api/app-settings PUT.
     let saleNotificationCreated = false
     try {
-      // §IDEMPOTENCY-CHECK: Check if a notification already exists for this invoice.
-      // We use the invoice ID as the deduplication key — one notification per invoice.
+      // §DEDUP-CHECK: Does a notification already exist for this invoice?
       const existingNotif = await db.notification.findFirst({
         where: {
           businessId: business.id,
-          type: 'sale',
-          // §LINK-AS-DEDUP-KEY: The notification's link field stores the invoice ID
-          // (format: 'history'). We use a metadata field approach: the notification
-          // body includes the invoice ID, so we check if any sale notification already
-          // references this invoice ID.
-          // §BETTER-APPROACH: Check by createdAt proximity + type. But the most reliable
-          // approach is to check if the invoice's saleOperationId (if provided) already
-          // has a notification. We use a simpler approach: check if a notification with
-          // type='sale' was created within 1 second of the invoice's createdAt.
-          // This handles both idempotent retries AND genuine duplicates.
+          invoiceId: invoice.id,
         },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
+        select: { id: true },
       })
 
-      // §DEDUP-LOGIC: If the most recent sale notification was created within 2 seconds
-      // of this invoice's creation, it's likely a retry of the same sale. Skip.
-      // This is a pragmatic heuristic — the real dedup key is the invoice ID embedded
-      // in the notification body.
-      const invoiceCreatedAt = new Date(invoice.createdAt).getTime()
-      const notifCreatedAt = existingNotif ? new Date(existingNotif.createdAt).getTime() : 0
-      const isLikelyRetry = existingNotif &&
-        Math.abs(invoiceCreatedAt - notifCreatedAt) < 2000 &&
-        existingNotif.body.includes(invoice.party?.name || 'Walk-in Customer')
-
-      if (!isLikelyRetry) {
+      if (!existingNotif) {
         // §CHANNEL-CHECK: Read the sales notification preference from AppSettings.
-        // The client Zustand store syncs channel preferences to AppSettings via
-        // /api/app-settings. If sales notifications are disabled, skip creation.
         const settings = await db.appSettings.findUnique({
           where: { businessId: business.id },
           select: { notificationChannels: true },
@@ -117,17 +98,33 @@ export async function POST(req: NextRequest) {
           const title = 'New Sale'
           const body_text = `${partyName} • ${itemCount} ${itemCount === 1 ? 'item' : 'items'} • ₹${total.toLocaleString('en-IN')}`
 
-          await db.notification.create({
-            data: {
-              businessId: business.id,
-              type: 'sale',
-              title,
-              body: body_text,
-              link: 'history',
-              isRead: false,
-            },
-          })
-          saleNotificationCreated = true
+          // §UNIQUE-CONSTRAINT: The (businessId, invoiceId) unique constraint
+          // ensures at most one notification per invoice. If two racing requests
+          // both pass the findFirst check, the second create() throws P2002 —
+          // we catch it and treat as success (the notification was already
+          // created by the winner).
+          try {
+            await db.notification.create({
+              data: {
+                businessId: business.id,
+                type: 'sale',
+                title,
+                body: body_text,
+                link: 'history',
+                isRead: false,
+                invoiceId: invoice.id,
+              },
+            })
+            saleNotificationCreated = true
+          } catch (createErr: any) {
+            // §P2002-HANDLING: Unique constraint violation = another request
+            // already created the notification for this invoice. Not an error.
+            if (createErr?.code === 'P2002') {
+              // Idempotent — notification already exists. This is fine.
+            } else {
+              throw createErr // Re-throw non-P2002 errors
+            }
+          }
         }
       }
     } catch (notifErr) {
@@ -136,10 +133,6 @@ export async function POST(req: NextRequest) {
     }
 
     const response = NextResponse.json(serializeDecimals(invoice))
-    // §REALTIME-INVALIDATION: The frontend uses TanStack Query. When the
-    // invoice form gets this response, it invalidates the notification cache
-    // via queryClient.invalidateQueries. The header is a signal that the
-    // frontend should refetch notifications.
     if (saleNotificationCreated) {
       response.headers.set('X-Notification-Created', 'sale')
     }

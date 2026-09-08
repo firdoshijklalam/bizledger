@@ -178,11 +178,23 @@ model Notification {
   link       String? // optional deep-link (e.g. "/?sourcing=1")
   isRead     Boolean  @default(false)
   createdAt  DateTime @default(now())
+  // §NOTIFICATION-DEDUP: Associates a sale notification with the specific
+  // invoice that triggered it. Used for deterministic idempotency: if the
+  // same invoice is returned by saleOperationId recovery, we check if a
+  // notification with this invoiceId already exists. NULL for non-sale
+  // notifications (system, custom-price, etc.).
+  invoiceId  String?
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId])
   @@index([isRead])
+  // §DEDUP-CONSTRAINT: Prevents duplicate sale notifications for the same
+  // invoice. Two racing requests for the same saleOperationId will both
+  // try to create a notification with the same invoiceId — the unique
+  // constraint ensures only one succeeds. NULL values are allowed
+  // (non-sale notifications have no invoiceId).
+  @@unique([businessId, invoiceId])
 }
 
 model Party {

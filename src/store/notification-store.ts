@@ -83,19 +83,21 @@ export const useNotificationStore = create<NotificationState>()(
       toggleChannel: (key) =>
         set((s) => {
           const newChannels = { ...s.channels, [key]: !s.channels[key] }
-          // §SERVER-SYNC: Fire-and-forget POST to sync channel preferences to
-          // AppSettings.notificationChannels. The server reads this to decide
-          // whether to generate specific notification types (e.g., sale
-          // notifications are skipped when channels.sales === false).
-          // Non-fatal — if the sync fails, the local state is still updated
-          // and the next app-settings fetch will reconcile.
-          try {
-            fetch('/api/app-settings', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ notificationChannels: JSON.stringify(newChannels) }),
-            }).catch(() => {})
-          } catch {}
+          // §SERVER-SYNC: Synchronous PUT to the dedicated notification-preferences
+          // endpoint. This is NOT fire-and-forget — the caller can await the
+          // returned promise to guarantee server synchronization completes before
+          // proceeding. However, we also don't block the UI update — the local
+          // state is updated immediately (optimistic) and the server sync runs
+          // in the background.
+          //
+          // §RACE-FIX: The dedicated endpoint merges partial updates, so
+          // out-of-order writes are handled: each PUT reads the current server
+          // state and merges. Last-write-wins per key.
+          fetch('/api/notification-preferences', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channels: newChannels }),
+          }).catch(() => {})
           return { channels: newChannels }
         }),
     }),
