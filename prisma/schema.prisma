@@ -1040,25 +1040,43 @@ model CustomerBehaviour {
 // state. Each row is an immutable snapshot of what the rating/tags/notes
 // were at a point in time. The API never edits or deletes history rows.
 //
-// §BEHAVIOUR-FK: behaviourId references CustomerBehaviour. When the
-// behaviour row is deleted (party cascade), its history cascades too.
+// §BEHAVIOUR-FK-NULLABLE: behaviourId is NULLABLE + onDelete: SetNull (NOT
+// Cascade). This preserves the APPEND-ONLY AUDIT invariant: if the current
+// CustomerBehaviour row is deleted (e.g. a future "reset behaviour" feature,
+// or party deletion cascading to CustomerBehaviour), the historical snapshot
+// rows MUST survive — they are the audit trail. Deleting the current row
+// sets history.behaviourId = NULL, but the snapshot data (rating, tags,
+// notes, ratedBy, partyId, businessId) is fully retained.
+// This follows the existing codebase convention: Transaction.party?
+// @relation(... onDelete: SetNull) and Transaction.invoice? @relation(...
+// onDelete: SetNull) both use SetNull for child rows that must survive
+// parent deletion.
 //
 // §PARTY-DENORMALIZED: partyId is stored on the history row (denormalized
 // from CustomerBehaviour.partyId) so history queries can be efficiently
 // scoped by party without a join. The redundant FK relation to Party
-// ensures cascade-delete consistency.
+// ensures cascade-delete consistency (see §PARTY-DELETE note below).
+//
+// §PARTY-DELETE: party Party @relation(... onDelete: Cascade) — deleting a
+// Party DOES cascade-delete their behaviour history. This is a KNOWN
+// consequence of the current minimal design (matching the CustomerBehaviour
+// row's own party cascade). If the product later requires history to
+// survive party deletion too (like AuditLog does), partyId should become
+// nullable + SetNull in a follow-up step. That change is intentionally NOT
+// made here to keep this correction minimal and focused on the behaviourId
+// cascade invariant.
 model CustomerBehaviourHistory {
   id           String   @id @default(cuid())
   businessId   String
   partyId      String
-  behaviourId  String
+  behaviourId  String?  // NULLABLE — see §BEHAVIOUR-FK-NULLABLE above
   rating       String   // snapshot of CustomerBehaviour.rating at this time
   tags         String?  // snapshot
   notes        String?  // snapshot
   ratedBy      String?
   createdAt    DateTime @default(now())
 
-  behaviour    CustomerBehaviour @relation(fields: [behaviourId], references: [id], onDelete: Cascade)
+  behaviour    CustomerBehaviour? @relation(fields: [behaviourId], references: [id], onDelete: SetNull)
   business     Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   party        Party             @relation(fields: [partyId], references: [id], onDelete: Cascade)
 
