@@ -29,6 +29,8 @@ import { PartyNotesSection } from './party-notes-section'
 import { CustomerBehaviourSection } from './customer-behaviour-section'
 // §COMPLAINTS: Compact complaints summary on the customer profile.
 import { PartyComplaintsSection } from './party-complaints-section'
+// §MESSAGING: Compact conversations summary on the customer profile.
+import { PartyMessagesSection } from './party-messages-section'
 import {
   Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -378,6 +380,10 @@ export function PartyDetail({ partyId }: { partyId: string }) {
       {/* §COMPLAINTS: Compact complaints summary. Customers + suppliers
           (any party with a relation) can have complaints. */}
       <PartyComplaintsSection partyId={partyId} partyName={data.name} />
+
+      {/* §MESSAGING: Compact conversations summary. Shows recent conversations
+          + last message + unread count. Clicking opens the Messages view. */}
+      <PartyMessagesSection partyId={partyId} partyName={data.name} />
 
       {/* Transactions — multi-select + share (PRD Part 6 §2 + Part 7 §4) */}
       <div className="rounded-2xl bg-card border border-border p-4 shadow-sm">

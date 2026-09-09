@@ -70,6 +70,10 @@ model Business {
   complaints           Complaint[]
   complaintEvents      ComplaintEvent[]
   complaintSequence    ComplaintSequence?
+  // §MESSAGING: unified conversation + message infrastructure
+  channelIdentities    CustomerChannelIdentity[]
+  conversations        Conversation[]
+  messages             Message[]
 }
 
 model InvoiceSequence {
@@ -223,6 +227,12 @@ model Party {
   // for anonymous/walk-in complaints; onDelete: SetNull preserves complaint
   // history when a party is deleted).
   complaints           Complaint[]
+  // §MESSAGING: channel identities (WhatsApp/Telegram/etc.) linked to this party
+  channelIdentities    CustomerChannelIdentity[]
+  // §MESSAGING: conversations for this party
+  conversations        Conversation[]
+  // §MESSAGING: messages sent to/from this party
+  messages             Message[]
 
   @@index([businessId])
 }
@@ -1092,4 +1102,129 @@ model ComplaintEvent {
 
   @@index([complaintId, createdAt])
   @@index([businessId, createdAt])
+}
+
+// §CUSTOMER-CHANNEL-IDENTITY: Maps a Party (customer) to an external channel
+// identity (WhatsApp phone number, Telegram user ID, Instagram user ID, etc.).
+//
+// §UNIQUENESS: (businessId, channel, externalUserId) is unique — the same
+// external identity cannot map to two different parties within the same
+// business. Cross-business, the same external ID can exist (tenant isolation).
+//
+// §DEDUPLICATION: When a future webhook receives an inbound message from
+// "whatsapp:919876543210", the system resolves the channel identity to the
+// correct Party. If no identity exists, a new Party can be auto-created (or
+// the message stored against an anonymous conversation until the customer is
+// identified).
+//
+// §PHONE-NUMBER: For WhatsApp/SMS channels, externalUserId IS the phone number
+// (E.164 format). For Telegram/Instagram, it's the platform's user ID.
+model CustomerChannelIdentity {
+  id              String   @id @default(cuid())
+  businessId      String
+  partyId         String
+  channel         String   // whatsapp | telegram | messenger | instagram | sms | email | in_app
+  externalUserId  String   // platform-specific user ID (phone for WhatsApp/SMS, user ID for others)
+  externalUsername String? // @handle (Telegram/Instagram) or display name
+  phoneNumber     String?  // E.164 phone (for whatsapp/sms channels — denormalized for convenience)
+  displayName     String?  // how the customer appears on this channel
+  metadata        String?  // JSON: platform-specific profile data
+  verifiedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, channel, externalUserId]) // one identity per channel per business
+  @@index([businessId, partyId])
+  @@index([businessId, channel])
+  @@index([businessId, phoneNumber])
+}
+
+// §CONVERSATION: A thread of messages between a customer and the business on a
+// specific channel. One customer can have multiple conversations (one per channel).
+//
+// §UNIQUENESS-STRATEGY:
+//   - For external channels (whatsapp, telegram, etc.): externalId is the
+//     provider's thread/chat ID. @@unique([businessId, channel, externalId])
+//     prevents duplicate conversations for the same external thread.
+//   - For in_app channel: externalId is NULL. A separate unique constraint
+//     @@unique([businessId, partyId, channel]) ensures one in_app conversation
+//     per customer per business. This works because partyId is NOT NULL for
+//     in_app conversations (you need a known customer to have an in_app chat).
+//
+// §POSTGRESQL-NULL-SEMANTICS: PostgreSQL treats NULL values as distinct in
+// unique indexes, so a NULL externalId does NOT conflict with another NULL.
+// This is why we use TWO separate unique constraints:
+//   1. (businessId, channel, externalId) — for external threads (externalId NOT NULL)
+//   2. (businessId, partyId, channel) — for in_app (where externalId is NULL)
+// This prevents the "multiple NULL externalId" problem that would allow
+// duplicate in_app conversations.
+//
+// §UNREAD-COUNT: Derived from Message.isRead=false count, NOT maintained as a
+// separate mutable counter. This avoids dual-source-of-truth issues. The
+// unreadCount field is a denormalized cache that's updated transactionally
+// when messages are created or marked read.
+model Conversation {
+  id              String    @id @default(cuid())
+  businessId      String
+  partyId         String    // the customer (NOT nullable — anonymous messages need a party first)
+  channel         String    // whatsapp | telegram | messenger | instagram | sms | email | in_app
+  externalId      String?   // provider's thread/chat ID (NULL for in_app)
+  lastMessageAt   DateTime?
+  lastMessagePreview String? // denormalized preview of last message body (first ~100 chars)
+  unreadCount     Int       @default(0) // denormalized cache; derived from Message.isRead=false
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party     @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  messages        Message[]
+
+  @@unique([businessId, channel, externalId]) // external thread uniqueness
+  @@unique([businessId, partyId, channel])     // in_app uniqueness (partyId always NOT NULL)
+  @@index([businessId, partyId])
+  @@index([businessId, lastMessageAt])
+  @@index([businessId, channel])
+}
+
+// §MESSAGE: Individual message in a conversation. Can be inbound (from customer),
+// outbound (from staff), or internal_note (staff-only, not visible to customer).
+//
+// §IDEMPOTENCY: externalMessageId is the provider's message ID. The partial
+// unique index @@unique([businessId, externalMessageId]) ensures that replaying
+// the same webhook event does NOT create duplicate messages. For in_app messages
+// (no externalMessageId), the field is NULL and PostgreSQL's NULL-distinctness
+// means no conflict.
+//
+// §DIRECTION: inbound (customer → business), outbound (business → customer),
+// internal_note (staff-only note, not sent to customer).
+//
+// §SENDER: senderType (customer | staff | system | bot) + senderId (free-form
+// staff name or system identifier, consistent with PartyNote.author pattern).
+model Message {
+  id                String    @id @default(cuid())
+  businessId        String
+  conversationId    String
+  partyId           String    // denormalized for efficient party-scoped queries
+  channel           String    // denormalized from conversation
+  direction         String    // inbound | outbound | internal_note
+  senderType        String    // customer | staff | system | bot
+  senderId          String?   // staff userId or external sender ID (free-form)
+  body              String?
+  attachments       String?   // JSON array of {name, type, dataUrl, size}
+  externalMessageId String?   // provider's message ID (for webhook replay idempotency)
+  isRead            Boolean   @default(false)
+  readAt            DateTime?
+  createdAt         DateTime  @default(now())
+
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  business          Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party             Party       @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, externalMessageId]) // idempotency for webhook replay
+  @@index([conversationId, createdAt])
+  @@index([businessId, partyId, createdAt])
+  @@index([businessId, isRead])
 }

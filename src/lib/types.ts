@@ -16,6 +16,7 @@ export type ViewId =
   | 'staff'
   | 'fulfillment'
   | 'complaints'
+  | 'messages'
 
 export type PartyType = 'customer' | 'supplier' | 'both'
 export type QualityGrade = 'A' | 'B' | 'C' | 'D' | 'E'
