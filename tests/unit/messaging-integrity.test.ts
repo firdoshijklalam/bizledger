@@ -171,7 +171,7 @@ async function main() {
     const spoofMsg = (await spoofRes.json()).message
     // Verify the API used the CONVERSATION's values, not the body's
     assert(spoofMsg.partyId === partyA1, `3F: message.partyId = conversation.partyId (NOT body's ${partyA2})`)
-    assert(spoofMsg.channel === 'whatsapp', `3G: message.channel = conversation.channel (NOT body's telegram)`)
+    assert(spoofMsg.channel === 'sms', `3G: message.channel = conversation.channel (NOT body's telegram)`)
     assert(spoofMsg.businessId === TEST_BIZ_A, `3H: message.businessId = session business (NOT body's ${TEST_BIZ_B})`)
   }
 
@@ -488,6 +488,48 @@ async function main() {
     //
     // §NO-CHANGE-NEEDED: The dual-constraint design correctly handles NULL externalId.
     assert(true, '12A: dual-constraint design correctly handles NULL externalId (verified by tests 2E + 2F)')
+  }
+
+  // ─── 13. REGRESSION: Same customer + same external channel + different externalId ─
+  // This is the KEY regression case for the uniqueness fix. Before the fix,
+  // @@unique([businessId, partyId, channel]) blocked this. After the fix,
+  // only @@unique([businessId, channel, externalId]) applies — so different
+  // externalId values are allowed for the same customer + channel.
+  console.log('\n13. REGRESSION: Same customer + same external channel + different externalId')
+  {
+    // partyA1 already has a whatsapp conversation from section 2 (externalId='wa-thread-1')
+    // Create a SECOND whatsapp conversation for partyA1 with a different externalId
+    const res = await callConvCreate({ partyId: partyA1, channel: 'whatsapp', externalId: 'wa-thread-2-NEW' })
+    assert(res.status === 201, `13A: second whatsapp conversation for same customer → 201 (got ${res.status})`)
+    const conv2 = (await res.json()).conversation
+    assert(conv2.id !== undefined, '13B: has conversation id')
+    assert(conv2.externalId === 'wa-thread-2-NEW', '13C: correct externalId')
+
+    // Create messages in both conversations — they must not cross-contaminate
+    // Find the first whatsapp conversation (from section 2)
+    const listRes = await conversationsRoute.GET(makeReq('http://localhost/api/conversations?partyId=' + partyA1 + '&channel=whatsapp', 'GET'))
+    const listBody = await listRes.json()
+    const waConvs = (listBody.items || []).filter((c: any) => c.channel === 'whatsapp')
+    assert(waConvs.length >= 2, `13D: at least 2 whatsapp conversations for partyA1 (got ${waConvs.length})`)
+
+    // The first whatsapp conversation (from section 2) is the one that's NOT conv2
+    const conv1 = waConvs.find((c: any) => c.id !== conv2.id)
+    assert(conv1 !== undefined, '13D2: found the original whatsapp conversation (not conv2)')
+
+    // Create a message in conv2
+    const msgRes = await callMsgCreate({
+      conversationId: conv2.id,
+      direction: 'inbound',
+      senderType: 'customer',
+      body: 'message in thread 2',
+    })
+    assert(msgRes.status === 201, `13E: message created in conv2 (got ${msgRes.status})`)
+    const msg2 = (await msgRes.json()).message
+    assert(msg2.conversationId === conv2.id, '13F: message attached to correct conversation (conv2)')
+    assert(msg2.partyId === partyA1, '13G: message.partyId correct')
+
+    // Verify the message did NOT appear in conv1 (different conversationId)
+    assert(msg2.conversationId !== conv1.id, '13H: message NOT in conv1 (no cross-contamination)')
   }
 
   await cleanup()

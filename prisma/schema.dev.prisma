@@ -1182,8 +1182,12 @@ model Conversation {
   party           Party     @relation(fields: [partyId], references: [id], onDelete: Cascade)
   messages        Message[]
 
-  @@unique([businessId, channel, externalId]) // external thread uniqueness
-  @@unique([businessId, partyId, channel])     // in_app uniqueness (partyId always NOT NULL)
+  @@unique([businessId, channel, externalId]) // external thread uniqueness (externalId NOT NULL)
+  // §IN_APP-UNIQUENESS: enforced via partial unique index in migration SQL
+  // (Prisma cannot express WHERE clause on @@unique). The migration creates:
+  //   CREATE UNIQUE INDEX "Conversation_businessId_partyId_in_app_key"
+  //   ON "Conversation"("businessId", "partyId") WHERE "channel" = 'in_app';
+  // Application-level dedup in POST /api/conversations also handles this.
   @@index([businessId, partyId])
   @@index([businessId, lastMessageAt])
   @@index([businessId, channel])
