@@ -31,6 +31,8 @@ import { CustomerBehaviourSection } from './customer-behaviour-section'
 import { PartyComplaintsSection } from './party-complaints-section'
 // §MESSAGING: Compact conversations summary on the customer profile.
 import { PartyMessagesSection } from './party-messages-section'
+// §LIFETIME-PROFIT: Read-only customer profit derived from authoritative accounting.
+import { PartyLifetimeProfitSection } from './party-lifetime-profit-section'
 import {
   Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -384,6 +386,12 @@ export function PartyDetail({ partyId }: { partyId: string }) {
       {/* §MESSAGING: Compact conversations summary. Shows recent conversations
           + last message + unread count. Clicking opens the Messages view. */}
       <PartyMessagesSection partyId={partyId} partyName={data.name} />
+
+      {/* §LIFETIME-PROFIT: Read-only profit derived from authoritative accounting.
+          Uses the same formula as Reports P&L (netRevenue - cogs = grossProfit). */}
+      {isCustomer && (
+        <PartyLifetimeProfitSection partyId={partyId} />
+      )}
 
       {/* Transactions — multi-select + share (PRD Part 6 §2 + Part 7 §4) */}
       <div className="rounded-2xl bg-card border border-border p-4 shadow-sm">
