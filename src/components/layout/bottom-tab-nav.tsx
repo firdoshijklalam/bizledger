@@ -3,7 +3,7 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
-import { Home, BookOpen, Package, Receipt, MoreHorizontal, BarChart3, Sparkles, Settings, Bell, Store, Users, History, ShoppingBag, ClipboardList } from 'lucide-react'
+import { Home, BookOpen, Package, Receipt, MoreHorizontal, BarChart3, Sparkles, Settings, Bell, Store, Users, History, ShoppingBag, ClipboardList, MessageSquare } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ViewId } from '@/lib/types'
 import { useState } from 'react'
@@ -26,6 +26,7 @@ const MORE_ITEMS = [
   { id: 'ai-tools' as ViewId, icon: Sparkles, labelKey: 'ai.tools', color: 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' },
   { id: 'notifications' as ViewId, icon: Bell, labelKey: 'header.notifications', color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30' },
   { id: 'staff' as ViewId, icon: Users, labelKey: 'Staff', color: 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' },
+  { id: 'complaints' as ViewId, icon: MessageSquare, labelKey: 'Complaints', color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30' },
   { id: 'settings' as ViewId, icon: Settings, labelKey: 'set.title', color: 'text-teal-600 bg-teal-100 dark:bg-teal-900/30' },
 ]
 

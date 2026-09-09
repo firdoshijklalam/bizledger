@@ -27,6 +27,8 @@ import { PartyNotesSection } from './party-notes-section'
 // from the financial AI Credit Trust Score (TrustScoreCard). Rendered after
 // the trust score card so users see both signals together but clearly labeled.
 import { CustomerBehaviourSection } from './customer-behaviour-section'
+// §COMPLAINTS: Compact complaints summary on the customer profile.
+import { PartyComplaintsSection } from './party-complaints-section'
 import {
   Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -372,6 +374,10 @@ export function PartyDetail({ partyId }: { partyId: string }) {
       {isCustomer && (
         <CustomerBehaviourSection partyId={partyId} />
       )}
+
+      {/* §COMPLAINTS: Compact complaints summary. Customers + suppliers
+          (any party with a relation) can have complaints. */}
+      <PartyComplaintsSection partyId={partyId} partyName={data.name} />
 
       {/* Transactions — multi-select + share (PRD Part 6 §2 + Part 7 §4) */}
       <div className="rounded-2xl bg-card border border-border p-4 shadow-sm">

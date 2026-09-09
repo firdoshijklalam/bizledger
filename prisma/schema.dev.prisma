@@ -66,6 +66,10 @@ model Business {
   // §CUSTOMER-BEHAVIOUR: interaction/service behaviour for parties in this business
   customerBehaviours   CustomerBehaviour[]
   customerBehaviourHistory CustomerBehaviourHistory[]
+  // §COMPLAINTS: customer complaint management
+  complaints           Complaint[]
+  complaintEvents      ComplaintEvent[]
+  complaintSequence    ComplaintSequence?
 }
 
 model InvoiceSequence {
@@ -215,6 +219,10 @@ model Party {
   // History is append-only via CustomerBehaviourHistory (FK to CustomerBehaviour).
   customerBehaviours   CustomerBehaviour[]
   customerBehaviourHistory CustomerBehaviourHistory[]
+  // §COMPLAINTS: complaints filed for/against this party (nullable partyId
+  // for anonymous/walk-in complaints; onDelete: SetNull preserves complaint
+  // history when a party is deleted).
+  complaints           Complaint[]
 
   @@index([businessId])
 }
@@ -260,6 +268,8 @@ model Product {
   // §DYNAMIC-PRICING: custom per-buyer/per-tier prices for this product
   customPrices CustomPrice[]
   stockMovements StockMovement[]
+  // §COMPLAINTS: complaints linked to this product (nullable FK on Complaint side)
+  complaints     Complaint[]
 
   @@index([businessId])
   @@index([supplierId])
@@ -408,6 +418,8 @@ model Invoice {
   party    Party?         @relation(fields: [partyId], references: [id], onDelete: SetNull)
   items    InvoiceItem[]
   transactions Transaction[]
+  // §COMPLAINTS: complaints linked to this invoice (nullable FK on Complaint side)
+  complaints   Complaint[]
 
   @@index([businessId])
   @@index([partyId])
@@ -981,4 +993,103 @@ model CustomerBehaviourHistory {
   @@index([businessId, partyId, createdAt])
   @@index([behaviourId, createdAt])
   @@index([partyId, createdAt])
+}
+
+// §COMPLAINT-SEQUENCE: Per-business atomic counter for concurrency-safe complaint
+// numbering (CMP-0001, CMP-0002, ...). Mirrors the InvoiceSequence pattern:
+// upsert + { increment: 1 } inside a $transaction guarantees unique sequential
+// numbers even under concurrent creation. One row per business.
+model ComplaintSequence {
+  id         String   @id @default(cuid())
+  businessId String   @unique
+  nextNumber Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// §COMPLAINT: Independent customer complaint entity. NOT copied message text —
+// a Complaint is a first-class record with its own lifecycle (status, priority,
+// assignment, resolution, event history).
+//
+// §SOURCE-REFERENCE: sourceType + sourceId form an APPLICATION-LEVEL reference
+// to the originating entity (MESSAGE, CALL, FEEDBACK, MANUAL, OTHER). There is
+// NO polymorphic database FK — sourceId is a free-form String that the API
+// validates at the application layer. This keeps the schema simple while allowing
+// future source entities to be linked without schema changes.
+//
+// §PARTY-NULLABLE: partyId is nullable to support anonymous/walk-in complaints.
+// onDelete: SetNull — deleting a Party does NOT delete their complaints (the
+// complaint history survives, with partyId = NULL).
+//
+// §RELATED-INVOICE/PRODUCT: relatedInvoiceId + relatedProductId are nullable
+// optional links. onDelete: SetNull on both — deleting an invoice/product does
+// NOT delete linked complaints.
+//
+// §COMPLAINT-NUMBER: complaintNumber is unique per business (CMP-0001, CMP-0002).
+// Generated atomically via ComplaintSequence inside a $transaction.
+model Complaint {
+  id               String    @id @default(cuid())
+  businessId       String
+  complaintNumber  String    // CMP-0001 (business-scoped sequence)
+  partyId          String?   // nullable for anonymous/walk-in complaints
+  sourceType       String    @default("MANUAL") // MESSAGE | CALL | FEEDBACK | MANUAL | OTHER
+  sourceId         String?   // application-level ref to source entity (no DB FK)
+  title            String
+  description      String?
+  status           String    @default("NEW") // NEW | IN_PROGRESS | WAITING | RESOLVED | CLOSED
+  priority         String    @default("MEDIUM") // LOW | MEDIUM | HIGH | URGENT
+  assignedTo       String?   // staff userId (free-form, like PartyNote.author)
+  relatedInvoiceId String?
+  relatedProductId String?
+  resolution       String?
+  internalNotes    String?   // JSON array of {note, author, createdAt}
+  attachments      String?   // JSON array of {name, type, dataUrl}
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  resolvedAt       DateTime?
+
+  business         Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party            Party?    @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  relatedInvoice   Invoice?  @relation(fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
+  relatedProduct   Product?  @relation(fields: [relatedProductId], references: [id], onDelete: SetNull)
+  events           ComplaintEvent[]
+
+  @@unique([businessId, complaintNumber]) // business-scoped uniqueness
+  @@index([businessId, status])
+  @@index([businessId, partyId])
+  @@index([businessId, assignedTo])
+  @@index([businessId, priority])
+  @@index([businessId, createdAt])
+}
+
+// §COMPLAINT-EVENT: Append-only audit trail of every complaint state change.
+// Each row is an immutable snapshot of a state transition (status change,
+// priority change, assignment, comment, resolve, close). The API never edits
+// or deletes history rows — only GET + POST (create) are exposed.
+//
+// §BEHAVIOUR-FK-NULLABLE: complaintId is NOT nullable + onDelete: Cascade
+// (different from CustomerBehaviourHistory). Rationale: a complaint's event
+// history is tightly coupled to the complaint's lifetime — if a complaint is
+// deleted, its event history is no longer meaningful. The DELETE API uses a
+// soft-archive approach (status=CLOSED) rather than hard-delete to preserve
+// history. If hard-delete is ever needed, complaintId should become nullable
+// + SetNull in a follow-up.
+model ComplaintEvent {
+  id           String   @id @default(cuid())
+  businessId   String
+  complaintId  String
+  eventType    String   // CREATED | STATUS_CHANGE | PRIORITY_CHANGE | ASSIGN | COMMENT | RESOLVE | CLOSE
+  fromValue    String?  // previous value (for STATUS_CHANGE, PRIORITY_CHANGE, ASSIGN)
+  toValue      String?  // new value
+  note         String?  // optional comment text (for COMMENT) or description
+  actor        String?  // staff userId or "system"
+  createdAt    DateTime @default(now())
+
+  complaint    Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([complaintId, createdAt])
+  @@index([businessId, createdAt])
 }

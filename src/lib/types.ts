@@ -15,6 +15,7 @@ export type ViewId =
   | 'online-orders'
   | 'staff'
   | 'fulfillment'
+  | 'complaints'
 
 export type PartyType = 'customer' | 'supplier' | 'both'
 export type QualityGrade = 'A' | 'B' | 'C' | 'D' | 'E'
