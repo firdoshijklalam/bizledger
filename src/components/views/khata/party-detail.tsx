@@ -33,6 +33,8 @@ import { PartyComplaintsSection } from './party-complaints-section'
 import { PartyMessagesSection } from './party-messages-section'
 // §LIFETIME-PROFIT: Read-only customer profit derived from authoritative accounting.
 import { PartyLifetimeProfitSection } from './party-lifetime-profit-section'
+// §TIMELINE: Read-only composed timeline from existing domain records.
+import { PartyTimelineSection } from './party-timeline-section'
 import {
   Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -391,6 +393,12 @@ export function PartyDetail({ partyId }: { partyId: string }) {
           Uses the same formula as Reports P&L (netRevenue - cogs = grossProfit). */}
       {isCustomer && (
         <PartyLifetimeProfitSection partyId={partyId} />
+      )}
+
+      {/* §TIMELINE: Read-only composed timeline from existing domain records
+          (Invoice, Transaction, Message, Complaint, BehaviourHistory, Note). */}
+      {isCustomer && (
+        <PartyTimelineSection partyId={partyId} />
       )}
 
       {/* Transactions — multi-select + share (PRD Part 6 §2 + Part 7 §4) */}
