@@ -23,6 +23,17 @@ import { serializeDecimals } from '@/lib/decimal-serializer'
 // (createdAt DESC, then id DESC as a stable tie-breaker). This prevents
 // duplicate/skipped events when multiple events share the same timestamp.
 //
+// §GLOBAL-PAGINATION: Pagination is applied AFTER all source events have been
+// merged and globally sorted. Each source query fetches ALL events for this
+// customer (no per-source take limit). This is intentional for correctness —
+// per-source pagination would cause global event skips/duplicates when sources
+// have uneven distributions (e.g. 40 invoices but 3 transactions).
+//
+// §PERFORMANCE: Each query is scoped to (businessId + partyId) and selects
+// only the fields needed for the timeline. For customers with very large
+// histories, a cursor-based approach could be added later, but for this
+// foundation step correctness is prioritized over premature optimization.
+//
 // §EVENT-TYPES: Only real domain events are included. No fake/invented events.
 
 interface TimelineEvent {
@@ -57,39 +68,34 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const limit = Math.min(Number(searchParams.get('limit')) || 20, 100)
     const offset = Math.max(Number(searchParams.get('offset')) || 0, 0)
 
-    // §PARALLEL-QUERIES: Fetch from all source tables in parallel.
-    // Each query fetches enough to cover the requested page + overlap for merging.
-    // We fetch `limit + offset + 1` rows from each source to ensure we have
-    // enough after merging + sorting.
-    const fetchLimit = limit + offset + 1
-
+    // §PARALLEL-QUERIES: Fetch ALL events from each source table in parallel.
+    // No per-source take limit — we fetch the complete event set for this
+    // customer so that global merge + sort + paginate is correct.
+    // Each query is scoped to (businessId + partyId) and selects only the
+    // fields needed for the timeline.
     const [invoices, transactions, messages, complaints, complaintEvents, behaviourHistory, partyNotes] = await Promise.all([
       // 1. Invoices (sales/retail, non-void)
       db.invoice.findMany({
         where: { businessId: business.id, partyId, status: { not: 'void' }, type: { in: ['sales', 'retail'] } },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: fetchLimit,
         select: { id: true, invoiceNumber: true, grandTotal: true, status: true, type: true, createdAt: true },
       }),
       // 2. Transactions
       db.transaction.findMany({
         where: { businessId: business.id, partyId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: fetchLimit,
         select: { id: true, type: true, amount: true, description: true, createdAt: true },
       }),
       // 3. Messages
       db.message.findMany({
         where: { businessId: business.id, partyId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: fetchLimit,
         select: { id: true, conversationId: true, channel: true, direction: true, body: true, senderType: true, createdAt: true },
       }),
       // 4. Complaints
       db.complaint.findMany({
         where: { businessId: business.id, partyId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: fetchLimit,
         select: { id: true, complaintNumber: true, title: true, status: true, priority: true, sourceType: true, createdAt: true },
       }),
       // 5. Complaint Events (via complaint → partyId linkage)
@@ -99,21 +105,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           complaint: { partyId },
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: fetchLimit,
         select: { id: true, complaintId: true, eventType: true, fromValue: true, toValue: true, note: true, actor: true, createdAt: true },
       }),
       // 6. Behaviour History
       db.customerBehaviourHistory.findMany({
         where: { businessId: business.id, partyId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: fetchLimit,
         select: { id: true, rating: true, tags: true, notes: true, ratedBy: true, createdAt: true },
       }),
       // 7. Party Notes
       db.partyNote.findMany({
         where: { partyId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        take: fetchLimit,
         select: { id: true, type: true, content: true, author: true, createdAt: true },
       }),
     ])
