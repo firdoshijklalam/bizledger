@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { serializeDecimals } from '@/lib/decimal-serializer'
 import { createInvoice, InvoiceValidationError } from '@/lib/invoice-service'
+import { accrueCustomerRewardFromInvoice } from '@/lib/rewards'
 
 // §VERCEL-LIMIT: Allow up to 20s for invoice creation (stock validation + transaction with many items)
 export const maxDuration = 20
@@ -118,6 +119,25 @@ export async function POST(req: NextRequest) {
 
     // §NOTIFICATION-SALE: Call the extracted core function (same logic, testable)
     const saleNotificationCreated = await createSaleNotification(business.id, invoice)
+
+    // §REWARD-ACCRUAL: post-commit, idempotent, non-fatal. Runs AFTER
+    // createInvoice() has committed — the invoice is already durable. If this
+    // fails, the sale remains committed (fire-and-forget with .catch).
+    //
+    // §IDEMPOTENCY: CustomerRewardEvent.@@unique([businessId, sourceInvoiceId])
+    // guarantees an invoice contributes to rewards at most once. Retries
+    // (SalePad, network, duplicate post-commit invocation) all collapse to a
+    // single PROFIT_ACCRUAL event — see src/lib/rewards.ts.
+    //
+    // §ELIGIBILITY: accrueCustomerRewardFromInvoice itself filters: only
+    // non-void sales/retail invoices with a partyId accrue. Purchase, void,
+    // walk-in (no partyId) invoices are no-ops.
+    //
+    // §NO-MUTATION: accrual never touches Invoice, Transaction, Party.balance,
+    // or Product — only CustomerRewardCycle + CustomerRewardEvent.
+    accrueCustomerRewardFromInvoice(business.id, invoice.id).catch((e) =>
+      console.error('Reward accrual failed (non-fatal) for invoice', invoice.id, e)
+    )
 
     const response = NextResponse.json(serializeDecimals(invoice))
     if (saleNotificationCreated) {
