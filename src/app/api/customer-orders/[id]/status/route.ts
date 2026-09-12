@@ -3,6 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
 import { apiError } from '@/lib/api-error'
 import { serializeDecimals } from '@/lib/decimal-serializer'
+import { accrueCustomerRewardFromInvoice } from '@/lib/rewards'
 
 /**
  * PATCH /api/customer-orders/[id]/status — update order status.
@@ -249,6 +250,33 @@ async function syncCompletedOrder(order: any, businessId: string) {
 
     return { order: updatedOrder, transaction, invoice, party }
   })
+
+  // §REWARD-ACCRUAL: post-commit, idempotent, non-fatal. Runs AFTER the
+  // syncCompletedOrder $transaction has committed — the invoice + transaction
+  // + party balance + order update are all already durable. If this fails,
+  // the completed online order remains committed (fire-and-forget .catch).
+  //
+  // §IDEMPOTENCY: dual-layered.
+  //   Layer 1 (order-level): syncedTransactionId guard at the PATCH entry
+  //     (line 61) ensures syncCompletedOrder runs AT MOST ONCE per order.
+  //     A repeat `completed` PATCH skips sync entirely → accrual is not
+  //     re-invoked from this path.
+  //   Layer 2 (reward-level): CustomerRewardEvent.@@unique([businessId,
+  //     sourceInvoiceId]) guarantees the committed invoice contributes profit
+  //     AT MOST ONCE, even if accrual is somehow called twice (e.g., a future
+  //     re-sync path, or concurrent retry).
+  //
+  // §ELIGIBILITY: accrueCustomerRewardFromInvoice itself filters — the
+  // invoice created here is `type: 'retail'` (eligible) with a non-null
+  // partyId (party is always find-or-created above), so it will accrue.
+  // Void/purchase/walk-in invoices are no-ops. The route does NOT duplicate
+  // eligibility logic.
+  //
+  // §NO-MUTATION: accrual never touches Invoice, Transaction, Party.balance,
+  // or Product — only CustomerRewardCycle + CustomerRewardEvent.
+  accrueCustomerRewardFromInvoice(businessId, result.invoice.id).catch((e) =>
+    console.error('Reward accrual failed (non-fatal) for online-order invoice', result.invoice.id, e)
+  )
 
   // §DECIMAL-FIX-C: result.order is a CustomerOrder with raw Decimal fields
   // (subtotal, deliveryCharge, grandTotal, commissionAmount).
