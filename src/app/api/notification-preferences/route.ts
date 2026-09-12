@@ -19,12 +19,12 @@ import { apiError } from '@/lib/api-error'
 // §SCOPE: Preferences are BUSINESS-scoped. Any authenticated user of the
 // business can modify them — this is a UI preference, not security-sensitive.
 
-const VALID_KEYS = ['sales', 'lowStock', 'overduePayments', 'gradeChanges', 'backups'] as const
+const VALID_KEYS = ['sales', 'lowStock', 'overduePayments', 'gradeChanges', 'backups', 'followUps'] as const
 type ChannelKey = typeof VALID_KEYS[number]
 
 const DEFAULT_CHANNELS: Record<string, boolean> = {
   sales: true, lowStock: true, overduePayments: true,
-  gradeChanges: true, backups: true,
+  gradeChanges: true, backups: true, followUps: true,
 }
 
 // §EXTRACTED-CORE: The core logic of the PUT handler, extracted into a

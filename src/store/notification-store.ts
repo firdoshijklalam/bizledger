@@ -48,6 +48,7 @@ export interface NotificationChannels {
   overduePayments: boolean
   gradeChanges: boolean
   backups: boolean
+  followUps: boolean
 }
 
 interface NotificationState {
@@ -85,7 +86,7 @@ export const useNotificationStore = create<NotificationState>()(
     (set) => ({
       // §v2: Empty array — real notifications come from /api/notifications
       localNotifications: [],
-      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
+      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true, followUps: true },
       // §SHARED-UNREAD: Default 0. Fetched from server on mount via useNotifications.
       unreadTotal: 0,
       setUnreadTotal: (count) => set({ unreadTotal: Math.max(0, count) }),

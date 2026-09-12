@@ -325,7 +325,7 @@ async function main() {
   console.log('\nM. STORE: toggleChannel — same-key serialization (mocked fetch)')
   {
     useNotificationStore.setState({
-      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
+      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true, followUps: true },
     })
 
     const callOrder: string[] = []
@@ -369,7 +369,7 @@ async function main() {
   console.log('\nN. STORE: Different-key toggles — concurrent (mocked fetch)')
   {
     useNotificationStore.setState({
-      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
+      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true, followUps: true },
     })
 
     const originalFetch = global.fetch
@@ -425,7 +425,7 @@ async function main() {
   console.log('\nO. STORE: Stale-response protection — v1 discarded, v2 authoritative (mocked fetch)')
   {
     useNotificationStore.setState({
-      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
+      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true, followUps: true },
     })
 
     // Track every channels.sales transition. Zustand fires subscribe on every
@@ -493,7 +493,7 @@ async function main() {
   console.log('\nP. STORE: Failed sync rolls back (mocked fetch returns 500)')
   {
     useNotificationStore.setState({
-      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
+      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true, followUps: true },
     })
 
     const originalFetch = global.fetch
@@ -512,7 +512,7 @@ async function main() {
   console.log('\nQ. STORE: Server reconcile merges ONLY mutated key (mocked fetch)')
   {
     useNotificationStore.setState({
-      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true },
+      channels: { sales: true, lowStock: true, overduePayments: true, gradeChanges: true, backups: true, followUps: true },
     })
     // Manually set lowStock=false (simulating concurrent local mutation)
     useNotificationStore.setState((s) => ({ channels: { ...s.channels, lowStock: false } }))

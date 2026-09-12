@@ -194,6 +194,35 @@ async function createFollowUpNotification(opts: {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// §PREFERENCE-HELPER: checks if follow-up notifications are enabled for a
+// business. Follows the EXACT same convention as createSaleNotification:
+//   - No preference row → default enabled (true)
+//   - Preference row exists → use its `enabled` value
+// This is a per-business check — the scheduler loads preferences for all
+// relevant businesses in a bounded batch to avoid N+1 queries.
+// ════════════════════════════════════════════════════════════════════════
+const FOLLOWUP_PREF_KEY = 'followUps'
+
+async function loadFollowUpPrefs(businessIds: string[]): Promise<Map<string, boolean>> {
+  if (businessIds.length === 0) return new Map()
+  const prefs = await db.notificationChannelPreference.findMany({
+    where: { businessId: { in: businessIds }, key: FOLLOWUP_PREF_KEY },
+    select: { businessId: true, enabled: true },
+  })
+  const map = new Map<string, boolean>()
+  for (const p of prefs) {
+    map.set(p.businessId, p.enabled)
+  }
+  return map
+}
+
+// §PREF-CHECK: returns true if follow-up notifications are enabled for this
+// business (default true if no preference row exists).
+function isFollowUpNotifEnabled(businessId: string, prefsMap: Map<string, boolean>): boolean {
+  return prefsMap.get(businessId) ?? true
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // §PROCESS-DUE-SOON: find PENDING follow-ups due within the next hour.
 //
 // §SCAN:
@@ -201,6 +230,11 @@ async function createFollowUpNotification(opts: {
 //   dueAt >= now (due now or in the future — inclusive boundary)
 //   dueAt <= now + DUE_SOON_WINDOW_MS (within the window)
 //   snoozedUntil IS NULL (not snoozed)
+//
+// §PREFERENCE-GATING: before creating a notification, checks if follow-up
+// notifications are enabled for the follow-up's business. No preference row
+// → default enabled (true). Disabled → skip notification creation.
+// Wake behavior is NOT affected by this preference (wake runs independently).
 //
 // §BOUNDARY: dueAt === now is classified as "due soon" (not overdue).
 // Overdue means dueAt < now (strictly past). This ensures no follow-up
@@ -215,10 +249,10 @@ async function createFollowUpNotification(opts: {
 // ════════════════════════════════════════════════════════════════════════
 export async function processDueSoonReminders(
   limit = SCHEDULER_PROCESS_LIMIT,
-): Promise<{ scanned: number; created: number; deduped: number; failed: number }> {
+): Promise<{ scanned: number; created: number; deduped: number; failed: number; skipped: number }> {
   const now = new Date()
   const horizon = new Date(now.getTime() + DUE_SOON_WINDOW_MS)
-  const summary = { scanned: 0, created: 0, deduped: 0, failed: 0 }
+  const summary = { scanned: 0, created: 0, deduped: 0, failed: 0, skipped: 0 }
 
   const dueSoon = await db.followUp.findMany({
     where: {
@@ -235,7 +269,17 @@ export async function processDueSoonReminders(
 
   summary.scanned = dueSoon.length
 
+  // §BATCH-PREFS: load follow-up notification preferences for all relevant
+  // businesses in ONE query (avoids N+1).
+  const businessIds = [...new Set(dueSoon.map(fu => fu.businessId))]
+  const prefsMap = await loadFollowUpPrefs(businessIds)
+
   for (const fu of dueSoon) {
+    // §PREFERENCE-CHECK: skip if follow-up notifications are disabled for this business
+    if (!isFollowUpNotifEnabled(fu.businessId, prefsMap)) {
+      summary.skipped++
+      continue
+    }
     try {
       const partyName = fu.party?.name || 'Unknown customer'
       const dueLabel = fu.dueAt ? new Date(fu.dueAt).toLocaleString('en-IN') : 'soon'
@@ -266,6 +310,9 @@ export async function processDueSoonReminders(
 //   dueAt < now (overdue)
 //   snoozedUntil IS NULL (not snoozed)
 //
+// §PREFERENCE-GATING: same as due-soon — checks follow-up notification
+// preference per business before creating a notification.
+//
 // §EXCLUSIONS: COMPLETED, CANCELLED, SNOOZED are excluded (not PENDING).
 //
 // §DEDUP: DB unique index (businessId, followUpId, 'followup_overdue') prevents
@@ -275,9 +322,9 @@ export async function processDueSoonReminders(
 // ════════════════════════════════════════════════════════════════════════
 export async function processOverdueReminders(
   limit = SCHEDULER_PROCESS_LIMIT,
-): Promise<{ scanned: number; created: number; deduped: number; failed: number }> {
+): Promise<{ scanned: number; created: number; deduped: number; failed: number; skipped: number }> {
   const now = new Date()
-  const summary = { scanned: 0, created: 0, deduped: 0, failed: 0 }
+  const summary = { scanned: 0, created: 0, deduped: 0, failed: 0, skipped: 0 }
 
   const overdue = await db.followUp.findMany({
     where: {
@@ -294,7 +341,16 @@ export async function processOverdueReminders(
 
   summary.scanned = overdue.length
 
+  // §BATCH-PREFS: load follow-up notification preferences for all relevant businesses
+  const businessIds = [...new Set(overdue.map(fu => fu.businessId))]
+  const prefsMap = await loadFollowUpPrefs(businessIds)
+
   for (const fu of overdue) {
+    // §PREFERENCE-CHECK: skip if follow-up notifications are disabled for this business
+    if (!isFollowUpNotifEnabled(fu.businessId, prefsMap)) {
+      summary.skipped++
+      continue
+    }
     try {
       const partyName = fu.party?.name || 'Unknown customer'
       const dueLabel = fu.dueAt ? new Date(fu.dueAt).toLocaleString('en-IN') : 'unknown'
@@ -328,8 +384,8 @@ export async function processOverdueReminders(
 // ════════════════════════════════════════════════════════════════════════
 export async function processAllFollowUpReminders(): Promise<{
   wake: { scanned: number; woken: number; failed: number }
-  dueSoon: { scanned: number; created: number; deduped: number; failed: number }
-  overdue: { scanned: number; created: number; deduped: number; failed: number }
+  dueSoon: { scanned: number; created: number; deduped: number; failed: number; skipped: number }
+  overdue: { scanned: number; created: number; deduped: number; failed: number; skipped: number }
 }> {
   // §PHASE-1: wake snoozed follow-ups (SNOOZED → PENDING)
   const wake = await processWakeableFollowUps()

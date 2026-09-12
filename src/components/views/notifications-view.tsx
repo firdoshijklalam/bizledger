@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Bell, AlertTriangle, AlertCircle, MessageSquare, CheckCircle2, TrendingUp,
   X, Settings, Megaphone, Store, FolderOpen, CheckCheck, Loader2, ShoppingBag,
+  ListTodo, Clock,
 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { ShareSheet } from '@/components/shared/share-sheet'
@@ -31,6 +32,8 @@ const TYPE_META: Record<string, { icon: any; color: string; bg: string }> = {
   defaulter: { icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-100 dark:bg-red-900/30' },
   grade: { icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-100 dark:bg-purple-900/30' },
   'custom-price': { icon: TrendingUp, color: 'text-teal-600', bg: 'bg-teal-100 dark:bg-teal-900/30' },
+  followup_due_soon: { icon: Clock, color: 'text-indigo-600', bg: 'bg-indigo-100 dark:bg-indigo-900/30' },
+  followup_overdue: { icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-100 dark:bg-red-900/30' },
   system: { icon: Bell, color: 'text-muted-foreground', bg: 'bg-muted' },
 }
 
@@ -43,6 +46,7 @@ const CHANNEL_LABELS = [
   { key: 'overduePayments' as const, label: 'Overdue Payment Warnings', labelBn: 'বকেয়া পেমেন্ট সতর্কতা' },
   { key: 'gradeChanges' as const, label: 'Customer Grade Changes', labelBn: 'গ্রেড পরিবর্তন' },
   { key: 'backups' as const, label: 'App System Backups', labelBn: 'সিস্টেম ব্যাকআপ' },
+  { key: 'followUps' as const, label: 'Follow-Up Reminders', labelBn: 'ফলো-আপ রিমাইন্ডার' },
 ]
 
 export function NotificationsView() {
