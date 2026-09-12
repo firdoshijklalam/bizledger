@@ -89,6 +89,8 @@ model Business {
   // §REWARDS: profit-based loyalty reward cycles
   rewardCycles         CustomerRewardCycle[]
   rewardEvents         CustomerRewardEvent[]
+  // §REWARD-OUTBOX: durable reward-accrual work records (Step 7 reliability layer)
+  rewardAccrualOutbox  RewardAccrualOutbox[]
 }
 
 // §INVOICE-SEQUENCE: Dedicated sequence table for concurrency-safe invoice numbering.
@@ -1416,4 +1418,58 @@ model CustomerRewardEvent {
   @@unique([businessId, sourceInvoiceId]) // idempotency: invoice accrues once per business
   @@index([cycleId, createdAt])
   @@index([businessId, partyId, createdAt])
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §STEP7-REWARD-ACCRUAL-OUTBOX: Durable work record for reward accrual.
+//
+// §PURPOSE: closes the fire-and-forget gap. When an eligible sale invoice
+// commits, a matching outbox row is created IN THE SAME db.$transaction.
+// This guarantees: if the invoice committed, there is a durable record of
+// the reward-accrual work that must eventually be done.
+//
+// §LIFECYCLE:
+//   PENDING              — created, not yet processed (or re-queued for retry)
+//   PROCESSING           — a processor has claimed the row (claimToken set)
+//   COMPLETED            — accrueCustomerRewardFromInvoice returned successfully
+//                          (either accrued=true OR idempotent accrued=false)
+//   FAILED               — accrual threw; attempts < MAX_ATTEMPTS; will retry
+//   PERMANENTLY_FAILED   — attempts >= MAX_ATTEMPTS; alertable, no auto-retry
+//
+// §INVARIANT: @@unique([invoiceId]) — exactly one outbox row per invoice.
+//   This makes reconciliation idempotent (reconciliation creating a duplicate
+//   for an invoice that already has a row hits P2002 → no-op).
+//
+// §CONCURRENT-PROCESSOR-SAFETY: a processor claims a row via an atomic
+//   conditional UPDATE (updateMany WHERE status IN ('PENDING','FAILED') AND
+//   (lastAttemptAt IS NULL OR lastAttemptAt < now() - backoff)). Only the
+//   claimToken holder may transition PROCESSING → COMPLETED/FAILED. If the
+//   processor crashes mid-flight, the row stays PROCESSING until a stale
+//   reclaim picks it up.
+//
+// §NO-REWARD-MUTATION: the outbox row is a SCHEDULING record only. It never
+//   modifies CustomerRewardCycle or CustomerRewardEvent directly. The actual
+//   accrual is performed by accrueCustomerRewardFromInvoice (src/lib/rewards.ts),
+//   which is idempotent via CustomerRewardEvent.@@unique([businessId, sourceInvoiceId]).
+//
+// §TENANT-ISOLATION: businessId from the authenticated session, never from
+//   request body. All queries are business-scoped.
+model RewardAccrualOutbox {
+  id                  String    @id @default(cuid())
+  businessId          String
+  invoiceId           String    @unique   // §INVARIANT: 1:1 with Invoice
+  status              String    @default("PENDING") // PENDING | PROCESSING | COMPLETED | FAILED | PERMANENTLY_FAILED
+  attempts            Int       @default(0)
+  lastError           String?   // truncated error message from last failure
+  lastAttemptAt       DateTime? // when the last attempt was made (for backoff)
+  completedAt         DateTime? // when status became COMPLETED
+  processingStartedAt DateTime? // when a processor claimed the row (for stale detection)
+  claimToken          String?   // identifies the current processor; null when not PROCESSING
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  business            Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([status, lastAttemptAt])   // §CRON-QUERY: drain PENDING/FAILED rows by backoff
+  @@index([businessId, status])       // §TENANT-SCOPED queries
 }

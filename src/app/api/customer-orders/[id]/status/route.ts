@@ -3,7 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
 import { apiError } from '@/lib/api-error'
 import { serializeDecimals } from '@/lib/decimal-serializer'
-import { accrueCustomerRewardFromInvoice } from '@/lib/rewards'
+import { processOutboxRowForInvoice } from '@/lib/reward-outbox'
 
 /**
  * PATCH /api/customer-orders/[id]/status — update order status.
@@ -238,6 +238,23 @@ async function syncCompletedOrder(order: any, businessId: string) {
       data: { invoiceId: invoice.id },
     })
 
+    // §STEP7-REWARD-OUTBOX: create the durable reward-accrual work record
+    // INSIDE the same $transaction as the invoice + transaction + order update.
+    // Atomicity guarantee: if the order completes, the outbox row commits; if
+    // the outbox write fails, the entire order completion rolls back.
+    //
+    // §ELIGIBILITY: the invoice created here is type='retail' (line 207) with
+    // a non-null partyId (party is always find-or-created above). It is always
+    // eligible for reward accrual.
+    await tx.rewardAccrualOutbox.create({
+      data: {
+        businessId,
+        invoiceId: invoice.id,
+        status: 'PENDING',
+        attempts: 0,
+      },
+    })
+
     // §ORDER-SYNC: Mark the order as completed + link the transaction + invoice.
     const updatedOrder = await tx.customerOrder.update({
       where: { id: order.id },
@@ -251,32 +268,19 @@ async function syncCompletedOrder(order: any, businessId: string) {
     return { order: updatedOrder, transaction, invoice, party }
   })
 
-  // §REWARD-ACCRUAL: post-commit, idempotent, non-fatal. Runs AFTER the
-  // syncCompletedOrder $transaction has committed — the invoice + transaction
-  // + party balance + order update are all already durable. If this fails,
-  // the completed online order remains committed (fire-and-forget .catch).
+  // §STEP7-REWARD-OUTBOX: durable post-commit processing. Replaces the old
+  // fire-and-forget accrueCustomerRewardFromInvoice(...).catch(console.error).
   //
-  // §IDEMPOTENCY: dual-layered.
-  //   Layer 1 (order-level): syncedTransactionId guard at the PATCH entry
-  //     (line 61) ensures syncCompletedOrder runs AT MOST ONCE per order.
-  //     A repeat `completed` PATCH skips sync entirely → accrual is not
-  //     re-invoked from this path.
-  //   Layer 2 (reward-level): CustomerRewardEvent.@@unique([businessId,
-  //     sourceInvoiceId]) guarantees the committed invoice contributes profit
-  //     AT MOST ONCE, even if accrual is somehow called twice (e.g., a future
-  //     re-sync path, or concurrent retry).
+  // This invokes processOutboxRowForInvoice which:
+  //   1. finds the outbox row (created atomically above)
+  //   2. invokes accrueCustomerRewardFromInvoice (idempotent by sourceInvoiceId)
+  //   3. marks the outbox row COMPLETED (success) or FAILED (error + attempts++)
   //
-  // §ELIGIBILITY: accrueCustomerRewardFromInvoice itself filters — the
-  // invoice created here is `type: 'retail'` (eligible) with a non-null
-  // partyId (party is always find-or-created above), so it will accrue.
-  // Void/purchase/walk-in invoices are no-ops. The route does NOT duplicate
-  // eligibility logic.
-  //
-  // §NO-MUTATION: accrual never touches Invoice, Transaction, Party.balance,
-  // or Product — only CustomerRewardCycle + CustomerRewardEvent.
-  accrueCustomerRewardFromInvoice(businessId, result.invoice.id).catch((e) =>
-    console.error('Reward accrual failed (non-fatal) for online-order invoice', result.invoice.id, e)
-  )
+  // §NON-FATAL: if this fails, the completed online order remains committed.
+  // The outbox row stays PENDING/FAILED and the cron worker will retry.
+  // §NON-BLOCKING: this is fire-and-forget (not awaited) — the response is
+  // returned immediately. The outbox row is the durable record.
+  processOutboxRowForInvoice(businessId, result.invoice.id)
 
   // §DECIMAL-FIX-C: result.order is a CustomerOrder with raw Decimal fields
   // (subtotal, deliveryCharge, grandTotal, commissionAmount).

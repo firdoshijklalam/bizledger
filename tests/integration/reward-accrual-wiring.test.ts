@@ -65,6 +65,7 @@ async function setup() {
 
 async function cleanup() {
   try {
+    await db.rewardAccrualOutbox.deleteMany({ where: { businessId: TEST_BIZ } })
     await db.customerRewardEvent.deleteMany({ where: { businessId: TEST_BIZ } })
     await db.customerRewardCycle.deleteMany({ where: { businessId: TEST_BIZ } })
     await db.invoiceItem.deleteMany({ where: { invoice: { businessId: TEST_BIZ } } })
@@ -144,6 +145,29 @@ async function stubCreateInvoice(body: any, _business: { id: string }) {
         purchasePriceSnapshot: snapshot,
       },
     })
+  }
+  // §STEP7-OUTBOX-MIRROR: the stub must mirror the production createInvoice's
+  // outbox row creation (src/lib/invoice-service.ts). Only eligible invoices
+  // (sales/retail, non-void, with partyId) get an outbox row — matches the
+  // production eligibility filter. Without this, processOutboxRowForInvoice
+  // finds no outbox row and the reward accrual is not triggered.
+  const isPurchase = type === 'purchase'
+  const isEligibleForReward = !isPurchase && partyId && status !== 'void'
+  if (isEligibleForReward) {
+    try {
+      await db.rewardAccrualOutbox.create({
+        data: {
+          businessId: _business.id,
+          invoiceId: inv.id,
+          status: 'PENDING',
+          attempts: 0,
+        },
+      })
+    } catch (e: any) {
+      // §P2002: outbox row already exists (e.g., reconciliation created it).
+      // Safe to ignore — the row exists, which is all we need.
+      if (e?.code !== 'P2002') throw e
+    }
   }
   lastCreatedInvoiceId = inv.id
   return { ...inv, items: [] }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { serializeDecimals } from '@/lib/decimal-serializer'
 import { createInvoice, InvoiceValidationError } from '@/lib/invoice-service'
-import { accrueCustomerRewardFromInvoice } from '@/lib/rewards'
+import { processOutboxRowForInvoice } from '@/lib/reward-outbox'
 
 // §VERCEL-LIMIT: Allow up to 20s for invoice creation (stock validation + transaction with many items)
 export const maxDuration = 20
@@ -120,24 +120,24 @@ export async function POST(req: NextRequest) {
     // §NOTIFICATION-SALE: Call the extracted core function (same logic, testable)
     const saleNotificationCreated = await createSaleNotification(business.id, invoice)
 
-    // §REWARD-ACCRUAL: post-commit, idempotent, non-fatal. Runs AFTER
-    // createInvoice() has committed — the invoice is already durable. If this
-    // fails, the sale remains committed (fire-and-forget with .catch).
+    // §STEP7-REWARD-OUTBOX: durable post-commit processing. Replaces the old
+    // fire-and-forget accrueCustomerRewardFromInvoice(...).catch(console.error).
     //
+    // The outbox row was created atomically INSIDE createInvoice's
+    // $transaction (src/lib/invoice-service.ts). This call invokes
+    // processOutboxRowForInvoice which:
+    //   1. finds the outbox row (already committed with the invoice)
+    //   2. invokes accrueCustomerRewardFromInvoice (idempotent by sourceInvoiceId)
+    //   3. marks the outbox row COMPLETED (success) or FAILED (error + attempts++)
+    //
+    // §NON-FATAL: if this fails, the sale remains committed. The outbox row
+    // stays PENDING/FAILED and the cron worker will retry.
+    // §NON-BLOCKING: this is fire-and-forget (not awaited) — the response is
+    // returned immediately. The outbox row is the durable record.
     // §IDEMPOTENCY: CustomerRewardEvent.@@unique([businessId, sourceInvoiceId])
-    // guarantees an invoice contributes to rewards at most once. Retries
-    // (SalePad, network, duplicate post-commit invocation) all collapse to a
-    // single PROFIT_ACCRUAL event — see src/lib/rewards.ts.
-    //
-    // §ELIGIBILITY: accrueCustomerRewardFromInvoice itself filters: only
-    // non-void sales/retail invoices with a partyId accrue. Purchase, void,
-    // walk-in (no partyId) invoices are no-ops.
-    //
-    // §NO-MUTATION: accrual never touches Invoice, Transaction, Party.balance,
-    // or Product — only CustomerRewardCycle + CustomerRewardEvent.
-    accrueCustomerRewardFromInvoice(business.id, invoice.id).catch((e) =>
-      console.error('Reward accrual failed (non-fatal) for invoice', invoice.id, e)
-    )
+    // guarantees at-most-once accrual. The outbox row is the at-least-once
+    // trigger. Together: exactly-once.
+    processOutboxRowForInvoice(business.id, invoice.id)
 
     const response = NextResponse.json(serializeDecimals(invoice))
     if (saleNotificationCreated) {

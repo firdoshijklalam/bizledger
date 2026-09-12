@@ -70,6 +70,7 @@ async function setup() {
 
 async function cleanup() {
   try {
+    await db.rewardAccrualOutbox.deleteMany({ where: { businessId: TEST_BIZ } })
     await db.customerRewardEvent.deleteMany({ where: { businessId: TEST_BIZ } })
     await db.customerRewardCycle.deleteMany({ where: { businessId: TEST_BIZ } })
     await db.invoiceItem.deleteMany({ where: { invoice: { businessId: TEST_BIZ } } })
@@ -151,6 +152,7 @@ async function cleanupTestOrder(body: { synced?: { invoiceId?: string; partyId?:
   const { invoiceId, partyId } = body.synced
   try {
     if (invoiceId) {
+      await db.rewardAccrualOutbox.deleteMany({ where: { invoiceId } })
       await db.customerRewardEvent.deleteMany({ where: { sourceInvoiceId: invoiceId } })
       await db.invoiceItem.deleteMany({ where: { invoiceId } })
       await db.transaction.deleteMany({ where: { invoiceId } })

@@ -674,6 +674,34 @@ export async function createInvoice(body: any, business: { id: string }): Promis
         }
       }
 
+      // §STEP7-REWARD-OUTBOX: create the durable reward-accrual work record
+      // INSIDE the same $transaction as the invoice. This is the atomicity
+      // guarantee: if the invoice commits, the outbox row commits; if the
+      // outbox write fails, the invoice rolls back. There is no window where
+      // the invoice is committed but the reward work is not durably recorded.
+      //
+      // §ELIGIBILITY: only eligible invoices get an outbox row. This matches
+      // accrueCustomerRewardFromInvoice's filter:
+      //   - type IN ('sales', 'retail') → !isPurchase && (type is 'sales' default or 'retail')
+      //   - status != 'void' → the invoice is never 'void' on creation (status is paid/partial/unpaid)
+      //   - partyId IS NOT NULL → body.partyId must be set
+      // Purchase invoices, walk-in sales (no partyId), and void invoices get
+      // NO outbox row — the reward service would reject them anyway.
+      //
+      // §NO-ACCOUNTING-CHANGE: this is a new table write, not a modification
+      // of Invoice/Transaction/Party/Product. The accounting formulas are
+      // unchanged. The outbox row is a SCHEDULING record only.
+      if (!isPurchase && body.partyId) {
+        await tx.rewardAccrualOutbox.create({
+          data: {
+            businessId: business.id,
+            invoiceId: inv.id,
+            status: 'PENDING',
+            attempts: 0,
+          },
+        })
+      }
+
       return inv
     }, { timeout: TX_TIMEOUT_MS })
     // §P16-STEP3.8.1-FIX: break out of the retry loop on SUCCESS. Without
