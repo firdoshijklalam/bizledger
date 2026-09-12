@@ -194,6 +194,56 @@ async function main() {
     assert(notifs === 0, 'I: no notification created by wake')
   }
 
+  // ═══ WAKE ACTOR ═══
+  console.log('\nWAKE ACTOR: scheduler vs user API')
+  {
+    // §SCHEDULER-ACTOR: wake via scheduler path → actor='system'
+    const fuSched = await makeFollowUp({ status: 'SNOOZED', snoozedUntil: new Date(Date.now() - 60000), dueAt: new Date(Date.now() - 30000) })
+    await db.$transaction(async (tx) => wakeSnoozedFollowUp(tx, fuSched.id, TEST_BIZ, new Date()))
+    const schedEvents = await db.followUpEvent.findMany({ where: { followUpId: fuSched.id, eventType: 'STATUS_CHANGE' } })
+    assert(schedEvents.length === 1, 'WAKE-ACTOR-1: 1 STATUS_CHANGE event from scheduler wake')
+    assert(schedEvents[0].actor === 'system', `WAKE-ACTOR-2: scheduler wake actor='system' (got '${schedEvents[0].actor}')`)
+
+    // §USER-ACTOR: wake via transition API → actor=user.id
+    // Re-snooze the follow-up first
+    await db.followUp.update({ where: { id: fuSched.id }, data: { status: 'SNOOZED', snoozedUntil: new Date(Date.now() - 60000) } })
+    const transitionRoute = await import('@/app/api/followups/[id]/transition/route')
+    const res = await transitionRoute.POST(
+      makePost(`http://localhost/api/followups/${fuSched.id}/transition`, { toStatus: 'PENDING' }),
+      { params: Promise.resolve({ id: fuSched.id }) }
+    )
+    assert(res.status === 200, `WAKE-ACTOR-3: API transition → 200 (got ${res.status})`)
+    const apiEvents = await db.followUpEvent.findMany({
+      where: { followUpId: fuSched.id, eventType: 'STATUS_CHANGE' },
+      orderBy: { createdAt: 'desc' },
+    })
+    assert(apiEvents.length === 2, `WAKE-ACTOR-4: 2 STATUS_CHANGE events total (scheduler + API) (got ${apiEvents.length})`)
+    assert(apiEvents[0].actor === testUser.id, `WAKE-ACTOR-5: API wake actor=user.id (got '${apiEvents[0].actor}')`)
+    assert(apiEvents[1].actor === 'system', `WAKE-ACTOR-6: scheduler wake actor='system' (got '${apiEvents[1].actor}')`)
+  }
+
+  // ═══ DUE-TIME BOUNDARY ═══
+  console.log('\nDUE-TIME BOUNDARY: dueAt ≈ now')
+  {
+    // §BOUNDARY: dueAt close to now → due-soon (inclusive), NOT overdue.
+    // The scheduler creates its own `now` internally (a few ms after we create
+    // the follow-up). To test the inclusive boundary safely, we set dueAt to
+    // NOW + 100ms. This guarantees:
+    //   - due-soon scan: dueAt >= now (100ms ahead) → due-soon notification created
+    //   - overdue scan (runs a few ms later): dueAt is still >= now (100ms margin) → NOT overdue
+    // We verify BOTH: due-soon created, overdue NOT created.
+    const boundaryTime = new Date(Date.now() + 100) // 100ms in the future
+    const fu = await makeFollowUp({ dueAt: boundaryTime })
+    const result = await processDueSoonReminders(50)
+    const dueSoonNotif = await db.notification.findFirst({ where: { followUpId: fu.id, type: 'followup_due_soon' } })
+    assert(dueSoonNotif !== null, 'BOUNDARY-1: dueAt≈now → due-soon notification created (inclusive boundary)')
+
+    // §NOT-OVERDUE: the same follow-up should NOT have an overdue notification
+    await processOverdueReminders(50)
+    const overdueNotif = await db.notification.findFirst({ where: { followUpId: fu.id, type: 'followup_overdue' } })
+    assert(overdueNotif === null, 'BOUNDARY-2: dueAt≈now → NOT overdue (strictly past required)')
+  }
+
   // ═══ DUE SOON ═══
   console.log('\nDUE SOON: PENDING within 1 hour')
   {

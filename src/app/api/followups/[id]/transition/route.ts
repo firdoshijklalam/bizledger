@@ -16,7 +16,6 @@ import {
   cancelEvent,
   FollowUpDomainError,
 } from '@/lib/followups'
-import { wakeSnoozedFollowUp } from '@/lib/followup-scheduler'
 
 // §FOLLOWUP-TRANSITION: POST /api/followups/[id]/transition
 //
@@ -77,16 +76,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const now = new Date()
 
-    // §SHARED-WAKE-SERVICE: SNOOZED → PENDING uses the shared function
-    // (same as the scheduler). The API passes the authenticated user's
-    // businessId + the current time. The function handles the atomic
-    // update + event inside a $transaction.
+    // §WAKE: SNOOZED → PENDING. The API allows user-initiated wake at any time
+    // (the user can unsnooze early). The scheduler's wakeSnoozedFollowUp()
+    // checks isWakeable (snoozedUntil <= now) — but the API does NOT require
+    // the snooze to have expired. Both use the same domain state machine
+    // (validateStatusTransition + getUnsnoozePatch) + statusChangeEvent.
     if (toStatus === 'PENDING' && current.status === 'SNOOZED') {
       const result = await db.$transaction(async (tx) => {
-        // §NOTE: we call wakeSnoozedFollowUp with the authenticated user as
-        // a custom actor. The function checks status + isWakeable internally.
-        // However, the API already validated the transition above, so we
-        // use a direct approach that preserves the user as actor.
         const patch = getUnsnoozePatch()
         const eventPayload = statusChangeEvent({
           businessId: user.businessId,

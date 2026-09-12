@@ -51,7 +51,7 @@ export const SYSTEM_ACTOR = 'system'
 //   - transitions SNOOZED → PENDING using getUnsnoozePatch()
 //   - clears snoozedUntil
 //   - emits exactly one STATUS_CHANGE event (fromValue=SNOOZED, toValue=PENDING)
-//   - actor = 'system' (scheduler convention)
+//   - actor = caller-provided (scheduler passes 'system', API passes user.id)
 //   - entire update + event in ONE transaction
 //   - idempotent if invoked concurrently (atomic conditional updateMany)
 //   - does NOT create a notification
@@ -62,6 +62,7 @@ export async function wakeSnoozedFollowUp(
   followUpId: string,
   businessId: string,
   now: Date,
+  actor: string = SYSTEM_ACTOR,
 ): Promise<{ woken: boolean }> {
   // §FETCH-CURRENT: read current status from DB (never trust caller's state)
   const current = await tx.followUp.findFirst({
@@ -86,7 +87,7 @@ export async function wakeSnoozedFollowUp(
     followUpId,
     fromStatus: 'SNOOZED',
     toStatus: 'PENDING',
-    actor: SYSTEM_ACTOR,
+    actor,
   })
 
   // §CONDITIONAL-UPDATE: only update if status is still SNOOZED
@@ -197,9 +198,13 @@ async function createFollowUpNotification(opts: {
 //
 // §SCAN:
 //   status = 'PENDING'
-//   dueAt > now (not already overdue)
+//   dueAt >= now (due now or in the future — inclusive boundary)
 //   dueAt <= now + DUE_SOON_WINDOW_MS (within the window)
 //   snoozedUntil IS NULL (not snoozed)
+//
+// §BOUNDARY: dueAt === now is classified as "due soon" (not overdue).
+// Overdue means dueAt < now (strictly past). This ensures no follow-up
+// is missed at the exact boundary.
 //
 // §EXCLUSIONS: COMPLETED, CANCELLED, SNOOZED are excluded (not PENDING).
 //
@@ -218,7 +223,7 @@ export async function processDueSoonReminders(
   const dueSoon = await db.followUp.findMany({
     where: {
       status: 'PENDING',
-      dueAt: { gt: now, lte: horizon },
+      dueAt: { gte: now, lte: horizon },
       snoozedUntil: null,
     },
     select: {
