@@ -1,0 +1,339 @@
+import { db } from '@/lib/db'
+import type { PrismaClient } from '@prisma/client'
+import {
+  isWakeable,
+  getUnsnoozePatch,
+  statusChangeEvent,
+  validateStatusTransition,
+} from '@/lib/followups'
+
+// §STEP8FB-FOLLOWUP-SCHEDULER: Server-side scheduler for follow-up reminders.
+//
+// §NO-HTTP: this module does NOT call HTTP routes. It uses shared server-side
+// domain functions (getUnsnoozePatch, statusChangeEvent) — the SAME functions
+// the transition API uses. This avoids the HTTP overhead + preserves the
+// domain state machine rules.
+//
+// §CONCURRENCY: safe under concurrent cron invocations:
+//   - Wake: uses an atomic conditional updateMany (WHERE status='SNOOZED')
+//   - Due-soon/overdue: relies on DB-level unique index
+//     (businessId, followUpId, type) WHERE followUpId IS NOT NULL.
+//     Duplicate inserts hit P2002 → caught + treated as dedup success.
+//
+// §ACTOR: all scheduler-created events use actor='system' (not a user ID).
+// This follows the existing convention (ComplaintEvent.actor can be 'system',
+// AuditLog.staffName defaults to 'system').
+
+type TxClient = PrismaClient | Parameters<Parameters<PrismaClient['$transaction']>[0]>[0]
+
+// §DUE-SOON-WINDOW: follow-ups due within the next 1 hour.
+// The cron runs hourly (0 * * * *). A delayed run (e.g. 5min late) still
+// catches follow-ups entering the window because the scan uses dueAt <= now+1h
+// (not a fixed boundary). DB uniqueness dedupes overlapping windows.
+export const DUE_SOON_WINDOW_MS = 60 * 60 * 1000 // 1 hour
+
+// §PROCESS-LIMIT: bounded follow-ups per category per cron run.
+export const SCHEDULER_PROCESS_LIMIT = 100
+
+// §SYSTEM-ACTOR: the actor string for scheduler-created events.
+export const SYSTEM_ACTOR = 'system'
+
+// ════════════════════════════════════════════════════════════════════════
+// §SHARED-WAKE-SERVICE: wakes a SNOOZED follow-up to PENDING.
+//
+// This is the SAME domain logic the transition API uses for SNOOZED → PENDING.
+// Extracted as a shared function so both the API route + the scheduler call it
+// without duplicating behavior.
+//
+// §REQUIREMENTS:
+//   - only wakes SNOOZED follow-ups (validates current status from DB)
+//   - requires snoozedUntil <= now
+//   - transitions SNOOZED → PENDING using getUnsnoozePatch()
+//   - clears snoozedUntil
+//   - emits exactly one STATUS_CHANGE event (fromValue=SNOOZED, toValue=PENDING)
+//   - actor = 'system' (scheduler convention)
+//   - entire update + event in ONE transaction
+//   - idempotent if invoked concurrently (atomic conditional updateMany)
+//   - does NOT create a notification
+//   - does NOT call HTTP routes
+// ════════════════════════════════════════════════════════════════════════
+export async function wakeSnoozedFollowUp(
+  tx: TxClient,
+  followUpId: string,
+  businessId: string,
+  now: Date,
+): Promise<{ woken: boolean }> {
+  // §FETCH-CURRENT: read current status from DB (never trust caller's state)
+  const current = await tx.followUp.findFirst({
+    where: { id: followUpId, businessId },
+    select: { id: true, status: true, snoozedUntil: true },
+  })
+
+  if (!current) return { woken: false }
+  if (current.status !== 'SNOOZED') return { woken: false }
+  if (!isWakeable(current, now)) return { woken: false }
+
+  // §VALIDATE-TRANSITION: use the domain library
+  const validation = validateStatusTransition(current.status, 'PENDING')
+  if (!validation.ok) return { woken: false }
+
+  // §ATOMIC: update + event in ONE transaction.
+  // §IDEMPOTENT: the update uses WHERE status='SNOOZED' — if another worker
+  // already woke it, the update matches 0 rows → we detect via count.
+  const patch = getUnsnoozePatch()
+  const eventPayload = statusChangeEvent({
+    businessId,
+    followUpId,
+    fromStatus: 'SNOOZED',
+    toStatus: 'PENDING',
+    actor: SYSTEM_ACTOR,
+  })
+
+  // §CONDITIONAL-UPDATE: only update if status is still SNOOZED
+  const updateResult = await tx.followUp.updateMany({
+    where: { id: followUpId, status: 'SNOOZED' },
+    data: patch,
+  })
+
+  if (updateResult.count === 0) {
+    // Another worker already woke it — idempotent no-op
+    return { woken: false }
+  }
+
+  // §CREATE-EVENT: exactly one STATUS_CHANGE event
+  await tx.followUpEvent.create({ data: eventPayload })
+
+  return { woken: true }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §PROCESS-WAKEABLE: find + wake all SNOOZED follow-ups where snoozedUntil <= now.
+//
+// §FLOW:
+//   1. find SNOOZED follow-ups WHERE snoozedUntil <= now (across all businesses)
+//   2. for each: run wakeSnoozedFollowUp inside a $transaction
+//   3. per-follow-up errors are caught + recorded — do NOT abort the whole batch
+// ════════════════════════════════════════════════════════════════════════
+export async function processWakeableFollowUps(
+  limit = SCHEDULER_PROCESS_LIMIT,
+): Promise<{ scanned: number; woken: number; failed: number }> {
+  const now = new Date()
+  const summary = { scanned: 0, woken: 0, failed: 0 }
+
+  const wakeable = await db.followUp.findMany({
+    where: {
+      status: 'SNOOZED',
+      snoozedUntil: { lte: now },
+    },
+    select: { id: true, businessId: true },
+    take: limit,
+  })
+
+  summary.scanned = wakeable.length
+
+  for (const fu of wakeable) {
+    try {
+      const result = await db.$transaction(async (tx) => {
+        return wakeSnoozedFollowUp(tx, fu.id, fu.businessId, now)
+      })
+      if (result.woken) summary.woken++
+    } catch (e) {
+      console.error('Failed to wake follow-up', fu.id, e)
+      summary.failed++
+    }
+  }
+
+  return summary
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §CREATE-FOLLOWUP-NOTIFICATION: creates a follow-up reminder notification.
+//
+// §DEDUP: relies on the DB-level partial unique index
+//   (businessId, followUpId, type) WHERE followUpId IS NOT NULL.
+//   Does NOT do findFirst-then-create. Attempts create directly.
+//   On P2002 (unique conflict for the expected key), treats as dedup success.
+//   On any OTHER error, rethrows (does NOT swallow unrelated DB errors).
+//
+// §CLASSIFY-P2002: only P2002 with the follow-up index target is treated as
+//   dedup. Other P2002s (e.g. on invoiceId) are rethrown.
+// ════════════════════════════════════════════════════════════════════════
+async function createFollowUpNotification(opts: {
+  businessId: string
+  followUpId: string
+  type: string
+  title: string
+  body: string
+  link: string
+}): Promise<{ created: boolean; deduped: boolean }> {
+  try {
+    await db.notification.create({
+      data: {
+        businessId: opts.businessId,
+        type: opts.type,
+        title: opts.title,
+        body: opts.body,
+        link: opts.link,
+        isRead: false,
+        followUpId: opts.followUpId,
+        // invoiceId is NOT set for follow-up reminders
+      },
+    })
+    return { created: true, deduped: false }
+  } catch (e: any) {
+    if (e?.code === 'P2002') {
+      // §DEDUP: the unique index (businessId, followUpId, type) rejected
+      // the insert — a notification of this type already exists for this
+      // follow-up. This is the expected dedup behavior.
+      return { created: false, deduped: true }
+    }
+    // §UNRELATED-ERROR: do NOT swallow. Rethrow so the caller can handle.
+    throw e
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §PROCESS-DUE-SOON: find PENDING follow-ups due within the next hour.
+//
+// §SCAN:
+//   status = 'PENDING'
+//   dueAt > now (not already overdue)
+//   dueAt <= now + DUE_SOON_WINDOW_MS (within the window)
+//   snoozedUntil IS NULL (not snoozed)
+//
+// §EXCLUSIONS: COMPLETED, CANCELLED, SNOOZED are excluded (not PENDING).
+//
+// §DEDUP: DB unique index (businessId, followUpId, 'followup_due_soon') prevents
+// duplicates. Repeated cron runs → P2002 → deduped.
+// Overlapping windows (delayed cron) are safe because the unique index is
+// the authoritative guard — not the application's check.
+// ════════════════════════════════════════════════════════════════════════
+export async function processDueSoonReminders(
+  limit = SCHEDULER_PROCESS_LIMIT,
+): Promise<{ scanned: number; created: number; deduped: number; failed: number }> {
+  const now = new Date()
+  const horizon = new Date(now.getTime() + DUE_SOON_WINDOW_MS)
+  const summary = { scanned: 0, created: 0, deduped: 0, failed: 0 }
+
+  const dueSoon = await db.followUp.findMany({
+    where: {
+      status: 'PENDING',
+      dueAt: { gt: now, lte: horizon },
+      snoozedUntil: null,
+    },
+    select: {
+      id: true, businessId: true, title: true, dueAt: true,
+      party: { select: { id: true, name: true } },
+    },
+    take: limit,
+  })
+
+  summary.scanned = dueSoon.length
+
+  for (const fu of dueSoon) {
+    try {
+      const partyName = fu.party?.name || 'Unknown customer'
+      const dueLabel = fu.dueAt ? new Date(fu.dueAt).toLocaleString('en-IN') : 'soon'
+      const result = await createFollowUpNotification({
+        businessId: fu.businessId,
+        followUpId: fu.id,
+        type: 'followup_due_soon',
+        title: 'Follow-up due soon',
+        body: `${partyName} • ${fu.title} • Due: ${dueLabel}`,
+        link: `/?party=${fu.party?.id || ''}`,
+      })
+      if (result.created) summary.created++
+      else if (result.deduped) summary.deduped++
+    } catch (e) {
+      console.error('Failed to create due-soon notification for follow-up', fu.id, e)
+      summary.failed++
+    }
+  }
+
+  return summary
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §PROCESS-OVERDUE: find PENDING follow-ups that are overdue.
+//
+// §SCAN:
+//   status = 'PENDING'
+//   dueAt < now (overdue)
+//   snoozedUntil IS NULL (not snoozed)
+//
+// §EXCLUSIONS: COMPLETED, CANCELLED, SNOOZED are excluded (not PENDING).
+//
+// §DEDUP: DB unique index (businessId, followUpId, 'followup_overdue') prevents
+// duplicates. Repeated cron runs → P2002 → deduped. The overdue notification
+// is created ONCE per follow-up. If the follow-up is completed then reopened,
+// the existing overdue notification persists — no duplicate is created.
+// ════════════════════════════════════════════════════════════════════════
+export async function processOverdueReminders(
+  limit = SCHEDULER_PROCESS_LIMIT,
+): Promise<{ scanned: number; created: number; deduped: number; failed: number }> {
+  const now = new Date()
+  const summary = { scanned: 0, created: 0, deduped: 0, failed: 0 }
+
+  const overdue = await db.followUp.findMany({
+    where: {
+      status: 'PENDING',
+      dueAt: { lt: now },
+      snoozedUntil: null,
+    },
+    select: {
+      id: true, businessId: true, title: true, dueAt: true,
+      party: { select: { id: true, name: true } },
+    },
+    take: limit,
+  })
+
+  summary.scanned = overdue.length
+
+  for (const fu of overdue) {
+    try {
+      const partyName = fu.party?.name || 'Unknown customer'
+      const dueLabel = fu.dueAt ? new Date(fu.dueAt).toLocaleString('en-IN') : 'unknown'
+      const result = await createFollowUpNotification({
+        businessId: fu.businessId,
+        followUpId: fu.id,
+        type: 'followup_overdue',
+        title: 'Follow-up overdue',
+        body: `${partyName} • ${fu.title} • Was due: ${dueLabel}`,
+        link: `/?party=${fu.party?.id || ''}`,
+      })
+      if (result.created) summary.created++
+      else if (result.deduped) summary.deduped++
+    } catch (e) {
+      console.error('Failed to create overdue notification for follow-up', fu.id, e)
+      summary.failed++
+    }
+  }
+
+  return summary
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §PROCESS-ALL: the main entry point for the cron route. Runs all 3 phases.
+//
+// §ORDER: wake first (so woken follow-ups return to PENDING and can be
+// caught by the due-soon/overdue scans in the SAME cron run if applicable).
+//
+// §PER-BUSINESS: processing is per-follow-up, not per-business. Each follow-up
+// is processed independently — errors in one do not abort others.
+// ════════════════════════════════════════════════════════════════════════
+export async function processAllFollowUpReminders(): Promise<{
+  wake: { scanned: number; woken: number; failed: number }
+  dueSoon: { scanned: number; created: number; deduped: number; failed: number }
+  overdue: { scanned: number; created: number; deduped: number; failed: number }
+}> {
+  // §PHASE-1: wake snoozed follow-ups (SNOOZED → PENDING)
+  const wake = await processWakeableFollowUps()
+
+  // §PHASE-2: due-soon reminders (PENDING, due within 1h)
+  const dueSoon = await processDueSoonReminders()
+
+  // §PHASE-3: overdue reminders (PENDING, past due)
+  const overdue = await processOverdueReminders()
+
+  return { wake, dueSoon, overdue }
+}

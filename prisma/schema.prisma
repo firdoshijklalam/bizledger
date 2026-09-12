@@ -213,6 +213,11 @@ model Notification {
   // notification with this invoiceId already exists. NULL for non-sale
   // notifications (system, custom-price, etc.).
   invoiceId  String?
+  // §FOLLOWUP-DEDUP: Associates a follow-up reminder notification with the
+  // specific FollowUp that triggered it. Used for DB-level idempotency: the
+  // partial unique index (businessId, followUpId, type) WHERE followUpId IS
+  // NOT NULL prevents duplicate reminders. NULL for non-follow-up notifications.
+  followUpId String?
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
@@ -224,6 +229,11 @@ model Notification {
   // constraint ensures only one succeeds. NULL values are allowed
   // (non-sale notifications have no invoiceId).
   @@unique([businessId, invoiceId])
+  // §FOLLOWUP-DEDUP-INDEX: Prevents duplicate follow-up reminder notifications.
+  // A follow-up can have BOTH a 'followup_due_soon' AND a 'followup_overdue'
+  // notification (different type values), but NOT two of the same type.
+  // The partial unique index is created via raw SQL in the migration
+  // (Prisma cannot express WHERE clauses on @@unique).
 }
 
 // §NOTIFICATION-CHANNEL-PREF: Normalized per-channel notification preference.

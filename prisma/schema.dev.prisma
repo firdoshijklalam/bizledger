@@ -172,6 +172,7 @@ model Notification {
   isRead       Boolean  @default(false)
   createdAt    DateTime @default(now())
   invoiceId    String?
+  followUpId   String?
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 

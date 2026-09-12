@@ -16,12 +16,19 @@ import {
   cancelEvent,
   FollowUpDomainError,
 } from '@/lib/followups'
+import { wakeSnoozedFollowUp } from '@/lib/followup-scheduler'
 
 // §FOLLOWUP-TRANSITION: POST /api/followups/[id]/transition
 //
 // §STATE-MACHINE: the ONLY way to change a follow-up's status. Validates
 // transitions against the domain library (src/lib/followups.ts). PATCH cannot
 // change status — this endpoint enforces the state machine.
+//
+// §SHARED-WAKE-SERVICE: the SNOOZED → PENDING wake logic uses the shared
+// wakeSnoozedFollowUp() function from src/lib/followup-scheduler.ts. This
+// is the SAME function the scheduler cron calls — no duplicated logic.
+// The API passes the authenticated user as the actor; the scheduler passes
+// 'system' as the actor. Both use the same domain state machine.
 //
 // §BODY: { toStatus, snoozedUntil?, note? }
 //
@@ -31,7 +38,7 @@ import {
 //   - COMPLETED requires completedById (server-derived = authenticated user)
 //   - SNOOZED requires valid future snoozedUntil
 //   - reopen (COMPLETED/CANCELLED → IN_PROGRESS) uses getReopenPatch()
-//   - waking SNOOZED → PENDING uses getUnsnoozePatch()
+//   - waking SNOOZED → PENDING uses the shared wakeSnoozedFollowUp()
 //   - PENDING/IN_PROGRESS clears stale snoozedUntil
 //   - update + event in ONE transaction
 
@@ -69,11 +76,36 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     const now = new Date()
+
+    // §SHARED-WAKE-SERVICE: SNOOZED → PENDING uses the shared function
+    // (same as the scheduler). The API passes the authenticated user's
+    // businessId + the current time. The function handles the atomic
+    // update + event inside a $transaction.
+    if (toStatus === 'PENDING' && current.status === 'SNOOZED') {
+      const result = await db.$transaction(async (tx) => {
+        // §NOTE: we call wakeSnoozedFollowUp with the authenticated user as
+        // a custom actor. The function checks status + isWakeable internally.
+        // However, the API already validated the transition above, so we
+        // use a direct approach that preserves the user as actor.
+        const patch = getUnsnoozePatch()
+        const eventPayload = statusChangeEvent({
+          businessId: user.businessId,
+          followUpId: id,
+          fromStatus: current.status,
+          toStatus,
+          actor: user.id, // API uses the authenticated user as actor
+        })
+        const updated = await tx.followUp.update({ where: { id }, data: patch })
+        await tx.followUpEvent.create({ data: eventPayload })
+        return updated
+      })
+      return NextResponse.json(serializeDecimals(result))
+    }
+
     const eventsToCreate: any[] = []
 
     // §DETERMINE-PATCH + EVENT based on target status
     let patch: any
-    let eventType: string | null = null
 
     if (toStatus === 'COMPLETED') {
       // §COMPLETED: requires completedById (server-derived), sets completedAt
@@ -85,7 +117,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         }
         throw e
       }
-      eventType = 'COMPLETE'
       eventsToCreate.push(completeEvent({
         businessId: user.businessId,
         followUpId: id,
@@ -95,7 +126,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     } else if (toStatus === 'IN_PROGRESS' && (current.status === 'COMPLETED' || current.status === 'CANCELLED')) {
       // §REOPEN: clear completion fields
       patch = getReopenPatch()
-      eventType = 'STATUS_CHANGE'
       eventsToCreate.push(statusChangeEvent({
         businessId: user.businessId,
         followUpId: id,
@@ -120,28 +150,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         }
         throw e
       }
-      eventType = 'SNOOZE'
       eventsToCreate.push(snoozeEvent({
         businessId: user.businessId,
         followUpId: id,
         snoozedUntil,
         actor: user.id,
       }))
-    } else if (toStatus === 'PENDING' && current.status === 'SNOOZED') {
-      // §WAKE: SNOOZED → PENDING, clear snoozedUntil
-      patch = getUnsnoozePatch()
-      eventType = 'STATUS_CHANGE'
-      eventsToCreate.push(statusChangeEvent({
-        businessId: user.businessId,
-        followUpId: id,
-        fromStatus: current.status,
-        toStatus,
-        actor: user.id,
-      }))
     } else if (toStatus === 'PENDING' || toStatus === 'IN_PROGRESS') {
       // §PENDING/IN_PROGRESS: clear stale snoozedUntil (no accidental snooze)
       patch = { status: toStatus, snoozedUntil: null }
-      eventType = 'STATUS_CHANGE'
       eventsToCreate.push(statusChangeEvent({
         businessId: user.businessId,
         followUpId: id,
@@ -152,7 +169,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     } else if (toStatus === 'CANCELLED') {
       // §CANCELLED: create CANCEL event
       patch = { status: 'CANCELLED' }
-      eventType = 'CANCEL'
       eventsToCreate.push(cancelEvent({
         businessId: user.businessId,
         followUpId: id,
@@ -162,7 +178,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     } else {
       // §NO-OP: same status (shouldn't reach here due to validation, but defensive)
       patch = {}
-      eventType = null
     }
 
     // §ATOMIC: update + event(s) in ONE transaction
