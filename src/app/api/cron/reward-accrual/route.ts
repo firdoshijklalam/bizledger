@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { processPendingRewardAccruals, PROCESS_LIMIT } from '@/lib/reward-outbox'
 import { reconcileRewardAccrualOutbox, RECONCILIATION_LIMIT } from '@/lib/reward-reconciliation'
 
-// §STEP7-CRON-ROUTE: drains the RewardAccrualOutbox + runs reconciliation.
+// §STEP7A-CRON-ROUTE: drains the RewardAccrualOutbox + runs cursor-based
+// incremental reconciliation.
 //
 // §SCHEDULE: */5 * * * * (every 5 minutes, configured in vercel.json).
 //
@@ -10,15 +11,45 @@ import { reconcileRewardAccrualOutbox, RECONCILIATION_LIMIT } from '@/lib/reward
 // sends `Authorization: Bearer ${CRON_SECRET}`. We reject any request
 // without a matching secret. The secret is read from env — NEVER hard-coded.
 //
-// §BOUNDED: processes at most PROCESS_LIMIT (50) outbox rows per invocation
-// + scans at most RECONCILIATION_LIMIT (500) recent invoices for reconciliation.
-// This keeps the route within Vercel's maxDuration (60s for cron routes).
+// §BOUNDED:
+//   - Outbox drain: at most PROCESS_LIMIT (50) rows per invocation.
+//   - Reconciliation: at most RECONCILIATION_LIMIT (500) invoices PER BUSINESS
+//     per invocation. The cron iterates all businesses that have eligible
+//     invoices (capped at 1000 businesses for safety).
+//
+// §RECONCILIATION-STRATEGY (Step 7A — cursor-based incremental):
+//   - Each business has ONE RewardReconciliationCursor (durable, @unique(businessId)).
+//   - Each run processes the next bounded batch of eligible invoices AFTER the
+//     cursor position (lastCreatedAt, lastInvoiceId), ordered (createdAt ASC, id ASC).
+//   - The cursor advances based on SCANNED rows, NOT on successfully-created
+//     outbox rows. A problematic invoice does NOT block the cursor.
+//   - When the cursor reaches the newest invoice (batch < limit), the NEXT run
+//     finds 0 rows + wraps the cursor to the start (cyclic) + increments cycleCount.
+//   - This guarantees COMPLETE eventual coverage of ALL eligible invoices,
+//     including historical gaps (pre-Step-7 invoices) — not just the latest N.
+//
+// §CRON-BEHAVIOR:
+//   - batch size: RECONCILIATION_LIMIT (500) per business
+//   - cursor advancement: after each batch, the cursor moves to the last
+//     scanned invoice (createdAt, id)
+//   - no invoices after cursor → wrap to start (cyclic), increment cycleCount
+//   - batch of only already-processed invoices → cursor still advances (they
+//     are scanned, just not missing)
+//   - mid-run failure → cursor does NOT advance past unscanned rows (cursor
+//     update happens only after the full batch is processed). Replay is safe.
 //
 // §CONCURRENT-SAFETY: the outbox processor uses atomic claim (updateMany with
 // WHERE status IN ('PENDING','FAILED')). Even if Vercel Cron invokes this
-// route twice concurrently (rare, but possible during deploy handoff), the
-// two invocations will not double-process the same row. And even if they did,
-// accrueCustomerRewardFromInvoice is idempotent by sourceInvoiceId.
+// route twice concurrently, the two invocations will not double-process the
+// same row. And even if they did, accrueCustomerRewardFromInvoice is idempotent
+// by sourceInvoiceId.
+//
+// §TERMINOLOGY (Step 7A correction):
+//   - outbox delivery/processing = at-least-once
+//   - reward accrual event = idempotent / at-most-once per invoice
+//   - resulting business effect = effectively exactly-once
+//   - PERMANENTLY_FAILED = automatic retry exhausted; durable failure record;
+//     manual/operator retry possible. NOT automatic eventual success.
 //
 // §RESPONSE: returns a summary for observability.
 
@@ -56,18 +87,12 @@ export async function POST(req: NextRequest) {
     // This is the primary retry path. Bounded to PROCESS_LIMIT rows.
     const processSummary = await processPendingRewardAccruals(PROCESS_LIMIT)
 
-    // §STEP-2: run reconciliation as a safety net. Finds eligible invoices
-    // that have NEITHER a PROFIT_ACCRUAL event NOR an outbox row, and creates
-    // PENDING outbox rows for them. Bounded to RECONCILIATION_LIMIT recent
-    // invoices. The NEXT cron invocation will drain the newly-created rows.
-    //
-    // §STRATEGY: scan the most recent RECONCILIATION_LIMIT invoices (by
-    // createdAt DESC) across ALL businesses. This catches recent misses
-    // without a full-table scan. Since the cron runs every 5 minutes, any
-    // missed invoice is caught within 5 minutes. Historical gaps (pre-Step-7
-    // invoices) are caught gradually as they fall within the recent window;
-    // a separate one-time backfill script can handle bulk historical gaps
-    // (out of scope for this cron route).
+    // §STEP-2: run cursor-based incremental reconciliation. Finds eligible
+    // invoices that have NEITHER a PROFIT_ACCRUAL event NOR an outbox row,
+    // and creates PENDING outbox rows for them. Bounded to RECONCILIATION_LIMIT
+    // invoices PER BUSINESS. The cursor advances forward through ALL eligible
+    // invoice history, ensuring complete eventual coverage (including
+    // historical gaps). The NEXT cron invocation drains the newly-created rows.
     const reconciliationSummary = await reconcileRewardAccrualOutbox(null, RECONCILIATION_LIMIT)
 
     return NextResponse.json({

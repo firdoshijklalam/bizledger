@@ -91,6 +91,8 @@ model Business {
   rewardEvents         CustomerRewardEvent[]
   // §REWARD-OUTBOX: durable reward-accrual work records (Step 7 reliability layer)
   rewardAccrualOutbox  RewardAccrualOutbox[]
+  // §REWARD-RECONCILIATION: cursor for incremental historical scan (Step 7A)
+  rewardReconciliationCursors  RewardReconciliationCursor[]
 }
 
 // §INVOICE-SEQUENCE: Dedicated sequence table for concurrency-safe invoice numbering.
@@ -1472,4 +1474,56 @@ model RewardAccrualOutbox {
 
   @@index([status, lastAttemptAt])   // §CRON-QUERY: drain PENDING/FAILED rows by backoff
   @@index([businessId, status])       // §TENANT-SCOPED queries
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §STEP7A-REWARD-RECONCILIATION-CURSOR: Durable progress marker for
+// incremental historical reconciliation.
+//
+// §PURPOSE: the Step 7 reconciliation only scanned the most recent 500
+// invoices — an eligible invoice older than that window could remain
+// missing both a PROFIT_ACCRUAL event AND an outbox row FOREVER. This
+// cursor enables a full historical walk: each cron run processes the next
+// bounded batch starting from (lastCreatedAt, lastInvoiceId) + 1, advancing
+// forward through ALL eligible invoice history.
+//
+// §CURSOR-KEY: (lastCreatedAt, lastInvoiceId). createdAt alone is NOT a safe
+// cursor because multiple invoices can share the same timestamp (especially
+// under bulk import). lastInvoiceId is the stable tie-breaker: the next batch
+// scans invoices WHERE (createdAt > lastCreatedAt) OR (createdAt == lastCreatedAt
+// AND id > lastInvoiceId), ordered by (createdAt ASC, id ASC).
+//
+// §SCAN-DIRECTION: oldest-first (createdAt ASC). This ensures historical gaps
+// (pre-Step-7 invoices) are covered first. When the cursor reaches the
+// newest invoice, the next run wraps back to the oldest (cyclic) — but by
+// then the historical gap is closed and only NEW missed invoices (recent)
+// need catching, which the cyclic rescan handles.
+//
+// §BUSINESS-SCOPED: one cursor per business. @unique(businessId) ensures
+// exactly one cursor per business. Business A's reconciliation never
+// touches Business B's cursor.
+//
+// §ADVANCEMENT-SAFETY: the cursor advances based on SCANNED source rows, NOT
+// on successfully-created outbox rows. A permanently problematic invoice
+// (e.g., one that always fails outbox creation for an unexpected reason)
+// does NOT block the cursor — the cursor advances past it after scanning,
+// and the error is recorded in the summary for observability.
+//
+// §FAILURE-REPLAY-SAFETY: if reconciliation crashes mid-batch, the cursor
+// has NOT advanced past the unscanned rows. Re-running the same batch
+// re-scans the same invoices — idempotent (P2002 on existing outbox rows is
+// a safe no-op, existing reward events are skipped).
+model RewardReconciliationCursor {
+  id              String   @id @default(cuid())
+  businessId      String   @unique   // §ONE-CURSOR-PER-BUSINESS
+  lastCreatedAt   DateTime @default(now())  // §CURSOR-PART-1: createdAt boundary
+  lastInvoiceId   String   @default("")     // §CURSOR-PART-2: stable tie-breaker
+  scannedCount    Int      @default(0)      // §OBSERVABILITY: total rows ever scanned
+  cycleCount      Int      @default(0)     // §OBSERVABILITY: number of full-table cycles completed
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
 }

@@ -29,6 +29,13 @@ import { accrueCustomerRewardFromInvoice } from '@/lib/rewards'
 // §MAX-ATTEMPTS: after this many failures, the row becomes PERMANENTLY_FAILED.
 // 10 attempts with the backoff schedule below = ~10.6 hours of retries before
 // giving up. This is generous enough to ride out a multi-hour DB outage.
+//
+// §PERMANENTLY_FAILED-SEMANTICS: PERMANENTLY_FAILED means AUTOMATIC retry is
+// exhausted. The durable failure record remains (never deleted). MANUAL or
+// operator-initiated retry is still possible later (e.g., by resetting the
+// row to PENDING via a future admin route or DB query). Do NOT claim
+// automatic eventual success after MAX_ATTEMPTS — the reward may remain
+// un-accrued until manual intervention.
 export const MAX_ATTEMPTS = 10
 
 // §STALE-THRESHOLD: a PROCESSING row older than this is considered crashed

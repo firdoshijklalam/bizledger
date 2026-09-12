@@ -79,6 +79,8 @@ model Business {
   rewardEvents         CustomerRewardEvent[]
   // §REWARD-OUTBOX: durable reward-accrual work records (Step 7 reliability layer)
   rewardAccrualOutbox  RewardAccrualOutbox[]
+  // §REWARD-RECONCILIATION: cursor for incremental historical scan (Step 7A)
+  rewardReconciliationCursors  RewardReconciliationCursor[]
 }
 
 model InvoiceSequence {
@@ -1309,4 +1311,21 @@ model RewardAccrualOutbox {
 
   @@index([status, lastAttemptAt])
   @@index([businessId, status])
+}
+
+// §STEP7A-REWARD-RECONCILIATION-CURSOR: see prisma/schema.prisma for full docs.
+// Dev SQLite mirror of the production model. Identical fields + indexes.
+model RewardReconciliationCursor {
+  id              String   @id @default(cuid())
+  businessId      String   @unique
+  lastCreatedAt   DateTime @default(now())
+  lastInvoiceId   String   @default("")
+  scannedCount    Int      @default(0)
+  cycleCount      Int      @default(0)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
 }

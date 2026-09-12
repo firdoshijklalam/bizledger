@@ -135,8 +135,10 @@ export async function POST(req: NextRequest) {
     // §NON-BLOCKING: this is fire-and-forget (not awaited) — the response is
     // returned immediately. The outbox row is the durable record.
     // §IDEMPOTENCY: CustomerRewardEvent.@@unique([businessId, sourceInvoiceId])
-    // guarantees at-most-once accrual. The outbox row is the at-least-once
-    // trigger. Together: exactly-once.
+    // guarantees at-most-once accrual (idempotent / at-most-once per invoice).
+    // The outbox row is the at-least-once trigger (the cron + immediate
+    // handler may both invoke accrual). Together: effectively exactly-once
+    // business effect.
     processOutboxRowForInvoice(business.id, invoice.id)
 
     const response = NextResponse.json(serializeDecimals(invoice))
