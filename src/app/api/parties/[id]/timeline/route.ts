@@ -8,8 +8,16 @@ import { serializeDecimals } from '@/lib/decimal-serializer'
 // §NO-NEW-TABLE: This is a read-model/view. It does NOT create a
 // CustomerTimelineEvent table. It queries existing authoritative records
 // (Invoice, Transaction, Message, Complaint, ComplaintEvent,
-// CustomerBehaviourHistory, PartyNote) and merges them into a unified
-// chronological feed.
+// CustomerBehaviourHistory, PartyNote, FollowUpEvent) and merges them into
+// a unified chronological feed.
+//
+// §FOLLOWUP-CANONICAL-CREATION: FollowUp creation is represented by the
+// FollowUpEvent(CREATED) row, NOT the FollowUp row itself. This avoids
+// duplicate creation entries (one from the FollowUp row + one from the
+// CREATED event). All FollowUp lifecycle events (CREATED, STATUS_CHANGE,
+// PRIORITY_CHANGE, ASSIGN, SNOOZE, COMMENT, COMPLETE, CANCEL) are sourced
+// from FollowUpEvent. The FollowUp row is used only for metadata lookup
+// (followUpNumber, title, type, priority).
 //
 // §ACCOUNTING-SAFE: This endpoint is purely read-only. It does NOT mutate
 // any Invoice, Transaction, Product, Party balance, or accounting state.
@@ -38,13 +46,13 @@ import { serializeDecimals } from '@/lib/decimal-serializer'
 
 interface TimelineEvent {
   id: string
-  type: string // invoice | transaction | message | complaint | complaint_event | behaviour_change | note
+  type: string // invoice | transaction | message | complaint | complaint_event | behaviour_change | note | follow_up
   occurredAt: string
   title: string
   description: string | null
   partyId: string
   entityId: string
-  entityType: string // the source entity type (e.g. 'invoice', 'transaction')
+  entityType: string // the source entity type (e.g. 'invoice', 'transaction', 'follow_up')
   metadata: Record<string, unknown> | null
 }
 
@@ -73,7 +81,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // customer so that global merge + sort + paginate is correct.
     // Each query is scoped to (businessId + partyId) and selects only the
     // fields needed for the timeline.
-    const [invoices, transactions, messages, complaints, complaintEvents, behaviourHistory, partyNotes] = await Promise.all([
+    const [invoices, transactions, messages, complaints, complaintEvents, behaviourHistory, partyNotes, followUpEvents] = await Promise.all([
       // 1. Invoices (sales/retail, non-void)
       db.invoice.findMany({
         where: { businessId: business.id, partyId, status: { not: 'void' }, type: { in: ['sales', 'retail'] } },
@@ -118,6 +126,28 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         where: { partyId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: { id: true, type: true, content: true, author: true, createdAt: true },
+      }),
+      // 8. Follow-Up Events (via followUp → partyId linkage)
+      // §CANONICAL-CREATION: FollowUp lifecycle is sourced from FollowUpEvent
+      // (CREATED, STATUS_CHANGE, PRIORITY_CHANGE, ASSIGN, SNOOZE, COMMENT,
+      // COMPLETE, CANCEL). The FollowUp row itself is NOT a separate source —
+      // this avoids duplicate creation entries.
+      // §TENANT-ISOLATION: scoped by businessId + followUp.partyId = partyId.
+      // §NULL-PARTY-SAFETY: followUp.partyId is nullable at DB level (for
+      // onDelete: SetNull). The `followUp: { partyId }` filter ensures only
+      // events for follow-ups that belong to THIS party are included — a
+      // follow-up whose partyId was nulled (party deleted) will NOT appear.
+      db.followUpEvent.findMany({
+        where: {
+          businessId: business.id,
+          followUp: { partyId },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true, followUpId: true, eventType: true, fromValue: true,
+          toValue: true, note: true, actor: true, createdAt: true,
+          followUp: { select: { id: true, followUpNumber: true, title: true, type: true, priority: true } },
+        },
       }),
     ])
 
@@ -228,6 +258,81 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         entityId: note.id,
         entityType: 'party_note',
         metadata: { noteType: note.type, author: note.author },
+      })
+    }
+
+    // Follow-Up Events
+    // §CANONICAL-CREATION: each FollowUpEvent is one timeline entry. The CREATED
+    // event is the single canonical "follow-up created" entry — the FollowUp row
+    // is NOT a separate source. Each event type gets a human-readable title + the
+    // followUpNumber + title for context.
+    for (const fue of followUpEvents) {
+      const fu = fue.followUp
+      const fuNumber = fu?.followUpNumber || 'FU-????'
+      const fuTitle = fu?.title || 'Follow-up'
+      const eventType = fue.eventType
+
+      // §TITLE-PER-EVENT-TYPE: human-readable title for each lifecycle event
+      let title = `Follow-up ${fuNumber}`
+      let description: string | null = fue.note || null
+
+      switch (eventType) {
+        case 'CREATED':
+          title = `Follow-up ${fuNumber} created`
+          description = fuTitle
+          break
+        case 'STATUS_CHANGE':
+          title = `Follow-up ${fuNumber}: ${fue.fromValue || '?'} → ${fue.toValue || '?'}`
+          description = fuTitle
+          break
+        case 'PRIORITY_CHANGE':
+          title = `Follow-up ${fuNumber} priority: ${fue.fromValue || '?'} → ${fue.toValue || '?'}`
+          description = fuTitle
+          break
+        case 'ASSIGN':
+          title = `Follow-up ${fuNumber} assigned`
+          description = fuTitle
+          break
+        case 'SNOOZE':
+          title = `Follow-up ${fuNumber} snoozed`
+          description = fue.toValue ? `Until ${fue.toValue}` : fuTitle
+          break
+        case 'COMMENT':
+          title = `Follow-up ${fuNumber} comment`
+          // description already = fue.note
+          break
+        case 'COMPLETE':
+          title = `Follow-up ${fuNumber} completed`
+          description = fue.note || fuTitle
+          break
+        case 'CANCEL':
+          title = `Follow-up ${fuNumber} cancelled`
+          description = fue.note || fuTitle
+          break
+        default:
+          title = `Follow-up ${fuNumber}: ${eventType.replace(/_/g, ' ').toLowerCase()}`
+      }
+
+      allEvents.push({
+        id: `follow_up:${fue.id}`,
+        type: 'follow_up',
+        occurredAt: fue.createdAt.toISOString(),
+        title,
+        description,
+        partyId,
+        entityId: fue.followUpId, // stable reference to the FollowUp
+        entityType: 'follow_up',
+        metadata: {
+          followUpId: fue.followUpId,
+          followUpNumber: fuNumber,
+          followUpTitle: fuTitle,
+          eventType,
+          fromValue: fue.fromValue,
+          toValue: fue.toValue,
+          actor: fue.actor,
+          followUpType: fu?.type || null,
+          followUpPriority: fu?.priority || null,
+        },
       })
     }
 

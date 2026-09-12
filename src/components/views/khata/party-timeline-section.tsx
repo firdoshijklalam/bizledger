@@ -6,7 +6,7 @@ import { timeAgo, formatDateTime, formatCurrency } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Loader2, AlertTriangle, Clock, Receipt, ArrowDownLeft, ArrowUpRight,
-  MessageSquare, FileWarning, GitBranch, Heart, FileText, ChevronDown,
+  MessageSquare, FileWarning, GitBranch, Heart, FileText, ChevronDown, ListTodo,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -42,6 +42,7 @@ const TYPE_META: Record<string, { icon: typeof Clock; color: string; label: stri
   complaint_event: { icon: GitBranch, color: 'text-orange-600 bg-orange-100 dark:bg-orange-950/40', label: 'Complaint Update' },
   behaviour_change: { icon: Heart, color: 'text-purple-600 bg-purple-100 dark:bg-purple-950/40', label: 'Behaviour' },
   note: { icon: FileText, color: 'text-muted-foreground bg-muted', label: 'Note' },
+  follow_up: { icon: ListTodo, color: 'text-indigo-600 bg-indigo-100 dark:bg-indigo-950/40', label: 'Follow-up' },
 }
 
 export function PartyTimelineSection({ partyId }: { partyId: string }) {
@@ -145,6 +146,11 @@ export function PartyTimelineSection({ partyId }: { partyId: string }) {
                         {event.type === 'behaviour_change' && event.metadata.rating != null && (
                           <span className="text-[9px] font-medium text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-950/40 px-1.5 py-0.5 rounded">
                             {String(event.metadata.rating)}
+                          </span>
+                        )}
+                        {event.type === 'follow_up' && event.metadata.followUpNumber != null && (
+                          <span className="text-[9px] font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded">
+                            {String(event.metadata.followUpNumber)}
                           </span>
                         )}
                       </div>
