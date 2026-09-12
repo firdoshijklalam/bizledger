@@ -93,6 +93,10 @@ model Business {
   rewardAccrualOutbox  RewardAccrualOutbox[]
   // §REWARD-RECONCILIATION: cursor for incremental historical scan (Step 7A)
   rewardReconciliationCursors  RewardReconciliationCursor[]
+  // §FOLLOWUPS: customer follow-up tasks (Step 8A CRM foundation)
+  followUps            FollowUp[]
+  followUpEvents       FollowUpEvent[]
+  followUpSequence     FollowUpSequence?
 }
 
 // §INVOICE-SEQUENCE: Dedicated sequence table for concurrency-safe invoice numbering.
@@ -121,6 +125,12 @@ model User {
   businessId   String
   business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
   sessions     Session[]
+  // §FOLLOWUPS: follow-ups assigned to / created by / completed by this user
+  // (3 separate relations — User can be assignee, creator, or completer).
+  // onDelete: SetNull on the FollowUp side preserves history when a user is deleted.
+  assignedFollowUps   FollowUp[] @relation("FollowUpAssignee")
+  createdFollowUps    FollowUp[] @relation("FollowUpCreator")
+  completedFollowUps  FollowUp[] @relation("FollowUpCompleter")
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -293,6 +303,10 @@ model Party {
   // §REWARDS: reward cycles for this customer
   rewardCycles         CustomerRewardCycle[]
   rewardEvents         CustomerRewardEvent[]
+  // §FOLLOWUPS: follow-up tasks for this customer (partyId is REQUIRED in the
+  // current CRM version — all follow-ups must have a customer. onDelete: SetNull
+  // preserves follow-up history if a party is ever deleted.)
+  followUps           FollowUp[]
 
   @@index([businessId])
 }
@@ -515,6 +529,8 @@ model Invoice {
   transactions Transaction[]
   // §COMPLAINTS: complaints linked to this invoice (nullable FK on Complaint side)
   complaints   Complaint[]
+  // §FOLLOWUPS: follow-ups linked to this invoice (nullable FK on FollowUp side)
+  relatedFollowUps FollowUp[]
 
   // §UNIQUE-CONSTRAINT: Prevents duplicate invoice numbers within the same business.
   // Without this, concurrent requests could create invoices with the same number.
@@ -1179,6 +1195,8 @@ model Complaint {
   relatedInvoice   Invoice?  @relation(fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
   relatedProduct   Product?  @relation(fields: [relatedProductId], references: [id], onDelete: SetNull)
   events           ComplaintEvent[]
+  // §FOLLOWUPS: follow-ups linked to this complaint (nullable FK on FollowUp side)
+  relatedFollowUps FollowUp[]
 
   @@unique([businessId, complaintNumber]) // business-scoped uniqueness
   @@index([businessId, status])
@@ -1526,4 +1544,162 @@ model RewardReconciliationCursor {
   business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId])
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §STEP8A-CUSTOMER-FOLLOWUP: Generic follow-up task system for the CRM loop.
+//
+// §PURPOSE: tracks future work related to a customer — payment reminders,
+// feedback requests, complaint follow-ups, reorder reminders, warranty
+// expiry, callbacks, offers, birthdays, manual tasks, etc. The model is the
+// smallest extensible foundation that supports all planned use cases without
+// over-engineering.
+//
+// §ARCHITECTURE: mirrors the proven Complaint model (status + priority +
+// assignment + append-only FollowUpEvent audit trail + business-scoped
+// sequence for race-safe numbering). See Step 8 architecture audit for the
+// full design rationale.
+//
+// §TENANT-ISOLATION: every query MUST be scoped by businessId (from
+// getCurrentBusiness(), never from the client). DB FKs validate entity
+// existence but do NOT prevent cross-tenant relationships — the API layer
+// (Step 8C) must validate followUp.businessId === relatedEntity.businessId
+// for partyId, assignedToId, relatedInvoiceId, relatedComplaintId.
+//
+// §PARTY-ID-REQUIRED: partyId is non-nullable in this CRM version — all
+// follow-ups must have a customer. The relation uses onDelete: SetNull so
+// that if a party is ever deleted, the follow-up row is preserved (partyId
+// becomes null) rather than cascading the delete. The application layer
+// enforces partyId presence on creation.
+//
+// §ASSIGNMENT: assignedToId is a proper FK to User.id (NOT a free-form string
+// like Complaint.assignedTo). This enables referential integrity + workload
+// queries. onDelete: SetNull preserves history when a user is deleted.
+//
+// §SOURCE-SEMANTICS: sourceType/sourceId record PROVENANCE — how the
+// follow-up was created. They do NOT replace relatedInvoiceId/relatedComplaintId
+// when an explicit relationship exists. Examples:
+//   MANUAL          → sourceId null (user created it)
+//   SYSTEM_CREATED  → sourceId may reference a generating workflow (e.g. an
+//                     invoice id that triggered an automatic payment reminder)
+//   AUTOMATED_RULE  → sourceId may reference a future automation rule id
+// When a follow-up is linked to a specific invoice, use relatedInvoiceId
+// (explicit FK), NOT sourceId.
+//
+// §STATUS-STATE-MACHINE (canonical vocabulary — enforced by src/lib/followups.ts
+// in the API step):
+//   PENDING     → initial state
+//   IN_PROGRESS → assigned / being worked on
+//   COMPLETED   → done (terminal; completedAt + completedById set)
+//   CANCELLED   → abandoned (terminal)
+//   SNOOZED     → deferred (snoozedUntil set; cron wakes back to PENDING)
+// "Missed" is NOT a persisted status — it is derived dynamically from
+// dueAt < now() AND status = 'PENDING'. This avoids incorrect state
+// transitions caused by client-side time.
+//
+// §PRIORITY: LOW | MEDIUM | HIGH | URGENT (same vocabulary as Complaint).
+//
+// §TYPE: payment_reminder | product_feedback | complaint_followup |
+//   reorder_reminder | warranty_expiry | callback | offer | birthday |
+//   manual | generic_custom. Free-form String (app-validated) — consistent
+//   with codebase convention of avoiding Prisma enums.
+//
+// §NO-FUTURE-FKS: relatedFeedbackId / relatedMessageId / relatedCallId are
+// NOT added yet because those models don't exist. Use sourceType/sourceId
+// for application-level linking to future entity types until they have models.
+//
+// §NO-ATTACHMENTS / NO-RECURRING-RULE: out of scope for this step.
+model FollowUp {
+  id                  String    @id @default(cuid())
+  businessId          String
+  followUpNumber      String    // FU-0001 (business-scoped sequence)
+  partyId             String?   // §REQUIRED at app layer in this CRM version; nullable at DB level for onDelete: SetNull
+  type                String    @default("manual") // payment_reminder | product_feedback | complaint_followup | reorder_reminder | warranty_expiry | callback | offer | birthday | manual | generic_custom
+  sourceType          String    @default("MANUAL") // MANUAL | SYSTEM_CREATED | AUTOMATED_RULE
+  sourceId            String?   // application-level ref to generating entity (no DB FK)
+  title               String
+  description         String?
+  status              String    @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | CANCELLED | SNOOZED
+  priority            String    @default("MEDIUM") // LOW | MEDIUM | HIGH | URGENT
+  assignedToId        String?   // FK to User.id (proper FK, not free-form). onDelete: SetNull
+  createdById         String?   // FK to User.id. onDelete: SetNull
+  dueAt               DateTime? // when the follow-up is due. NULL = no deadline (manual backlog)
+  snoozedUntil        DateTime? // when a SNOOZED follow-up should wake up
+  completedAt         DateTime?
+  completedById       String?   // FK to User.id. onDelete: SetNull
+  outcome             String?   // free-form outcome notes when COMPLETED
+  relatedInvoiceId    String?   // explicit FK to Invoice. onDelete: SetNull
+  relatedComplaintId  String?   // explicit FK to Complaint. onDelete: SetNull
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  business            Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party               Party?    @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  assignedTo          User?     @relation("FollowUpAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdBy           User?     @relation("FollowUpCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  completedBy         User?     @relation("FollowUpCompleter", fields: [completedById], references: [id], onDelete: SetNull)
+  relatedInvoice      Invoice?  @relation(fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
+  relatedComplaint    Complaint? @relation(fields: [relatedComplaintId], references: [id], onDelete: SetNull)
+  events              FollowUpEvent[]
+
+  @@unique([businessId, followUpNumber]) // business-scoped uniqueness
+  @@index([businessId, status])
+  @@index([businessId, partyId])
+  @@index([businessId, assignedToId])
+  @@index([businessId, priority])
+  @@index([businessId, dueAt])
+  @@index([businessId, type])
+  @@index([businessId, createdAt])
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §FOLLOWUP-EVENT: Append-only audit trail of every follow-up state change.
+// Mirrors ComplaintEvent. Each row is an immutable snapshot of a transition.
+// The API never edits or deletes history rows — only GET + POST (create).
+//
+// §EVENT-TYPES: CREATED | STATUS_CHANGE | PRIORITY_CHANGE | ASSIGN | SNOOZE |
+//   COMMENT | COMPLETE | CANCEL. Canonical vocabulary enforced by
+//   src/lib/followups.ts.
+//
+// §ACTOR-SEMANTICS: actor is a free-form String? (not a FK to User.id) because
+// it must support BOTH "staff user id" AND "system" (for cron-triggered
+// transitions like SNOOZED → PENDING wake-up). This mirrors ComplaintEvent.actor
+// + AuditLog.staffId convention.
+//
+// §CASCADE: followUpId is NOT nullable + onDelete: Cascade (same as
+// ComplaintEvent). A follow-up's event history is tightly coupled to its
+// lifetime. The API uses soft-archive (CANCELLED) rather than hard-delete to
+// preserve history.
+model FollowUpEvent {
+  id           String   @id @default(cuid())
+  businessId   String
+  followUpId   String
+  eventType    String   // CREATED | STATUS_CHANGE | PRIORITY_CHANGE | ASSIGN | SNOOZE | COMMENT | COMPLETE | CANCEL
+  fromValue    String?  // previous value (for STATUS_CHANGE, PRIORITY_CHANGE, ASSIGN)
+  toValue      String?  // new value
+  note         String?  // comment text or description
+  actor        String?  // staff userId or "system" (free-form, mirrors ComplaintEvent.actor)
+  createdAt    DateTime @default(now())
+
+  followUp     FollowUp @relation(fields: [followUpId], references: [id], onDelete: Cascade)
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([followUpId, createdAt])
+  @@index([businessId, createdAt])
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §FOLLOWUP-SEQUENCE: Dedicated sequence table for concurrency-safe follow-up
+// numbering. Mirrors ComplaintSequence + InvoiceSequence. Each business has
+// exactly one sequence record. nextNumber is atomically incremented inside a
+// transaction, guaranteeing unique sequential follow-up numbers even under
+// concurrent requests. Number format: FU-0001, FU-0002, ...
+model FollowUpSequence {
+  id          String   @id @default(cuid())
+  businessId  String   @unique
+  nextNumber  Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 }
