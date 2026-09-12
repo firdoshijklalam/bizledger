@@ -74,6 +74,9 @@ model Business {
   channelIdentities    CustomerChannelIdentity[]
   conversations        Conversation[]
   messages             Message[]
+  // §REWARDS: profit-based loyalty reward cycles
+  rewardCycles         CustomerRewardCycle[]
+  rewardEvents         CustomerRewardEvent[]
 }
 
 model InvoiceSequence {
@@ -233,6 +236,9 @@ model Party {
   conversations        Conversation[]
   // §MESSAGING: messages sent to/from this party
   messages             Message[]
+  // §REWARDS: reward cycles for this customer
+  rewardCycles         CustomerRewardCycle[]
+  rewardEvents         CustomerRewardEvent[]
 
   @@index([businessId])
 }
@@ -516,6 +522,8 @@ model AppSettings {
   dashboardSections    String?  // JSON: DashboardSectionConfig
   // §NOTIFICATION-CHANNELS: JSON storing per-channel notification preferences
   notificationChannels String?  // JSON: {sales, lowStock, overduePayments, gradeChanges, backups}
+  // §REWARDS: configurable profit threshold for reward cycle (default ₹400)
+  rewardThreshold     Decimal  @default(400)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -1231,4 +1239,50 @@ model Message {
   @@index([conversationId, createdAt])
   @@index([businessId, partyId, createdAt])
   @@index([businessId, isRead])
+}
+
+// §CUSTOMER-REWARD-CYCLE: Persistent profit-based loyalty reward cycle.
+model CustomerRewardCycle {
+  id                String   @id @default(cuid())
+  businessId        String
+  partyId           String
+  cycleNumber       Int      @default(1)
+  threshold         Decimal  @default(400) // snapshot from AppSettings at cycle creation
+  accumulatedProfit Decimal  @default(0)
+  status            String   @default("ACTIVE") // ACTIVE | UNLOCKED | REWARDED
+  startedAt         DateTime @default(now())
+  unlockedAt        DateTime?
+  rewardGivenAt     DateTime?
+  rewardDescription String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party             Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  events            CustomerRewardEvent[]
+
+  @@unique([businessId, partyId, cycleNumber])
+  @@index([businessId, partyId, status])
+  @@index([businessId, status])
+}
+
+// §CUSTOMER-REWARD-EVENT: Append-only audit trail for reward cycle events.
+model CustomerRewardEvent {
+  id              String   @id @default(cuid())
+  businessId      String
+  partyId         String
+  cycleId         String
+  eventType       String   // PROFIT_ACCRUAL | REWARD_UNLOCKED | REWARD_GIVEN | CYCLE_RESET
+  amount          Decimal  @default(0) // profit amount for PROFIT_ACCRUAL
+  sourceInvoiceId String?  // the invoice that contributed profit (for idempotency)
+  note            String?
+  createdAt       DateTime @default(now())
+
+  cycle           CustomerRewardCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  business        Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party               @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, sourceInvoiceId]) // idempotency: invoice accrues once per business
+  @@index([cycleId, createdAt])
+  @@index([businessId, partyId, createdAt])
 }

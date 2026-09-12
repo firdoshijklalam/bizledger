@@ -35,6 +35,8 @@ import { PartyMessagesSection } from './party-messages-section'
 import { PartyLifetimeProfitSection } from './party-lifetime-profit-section'
 // §TIMELINE: Read-only composed timeline from existing domain records.
 import { PartyTimelineSection } from './party-timeline-section'
+// §REWARDS: Profit-based loyalty reward cycle.
+import { PartyRewardsSection } from './party-rewards-section'
 import {
   Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -399,6 +401,12 @@ export function PartyDetail({ partyId }: { partyId: string }) {
           (Invoice, Transaction, Message, Complaint, BehaviourHistory, Note). */}
       {isCustomer && (
         <PartyTimelineSection partyId={partyId} />
+      )}
+
+      {/* §REWARDS: Profit-based loyalty reward cycle. Shows progress toward
+          threshold + Give Reward action when unlocked. */}
+      {isCustomer && (
+        <PartyRewardsSection partyId={partyId} />
       )}
 
       {/* Transactions — multi-select + share (PRD Part 6 §2 + Part 7 §4) */}

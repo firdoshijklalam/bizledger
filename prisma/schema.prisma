@@ -86,6 +86,9 @@ model Business {
   channelIdentities    CustomerChannelIdentity[]
   conversations        Conversation[]
   messages             Message[]
+  // §REWARDS: profit-based loyalty reward cycles
+  rewardCycles         CustomerRewardCycle[]
+  rewardEvents         CustomerRewardEvent[]
 }
 
 // §INVOICE-SEQUENCE: Dedicated sequence table for concurrency-safe invoice numbering.
@@ -283,6 +286,9 @@ model Party {
   conversations        Conversation[]
   // §MESSAGING: messages sent to/from this party
   messages             Message[]
+  // §REWARDS: reward cycles for this customer
+  rewardCycles         CustomerRewardCycle[]
+  rewardEvents         CustomerRewardEvent[]
 
   @@index([businessId])
 }
@@ -604,6 +610,8 @@ model AppSettings {
   // synced from the client Zustand store. Format: {sales:true, lowStock:true, ...}
   // The server reads this to decide whether to generate notifications.
   notificationChannels      String?   // JSON: {sales, lowStock, overduePayments, gradeChanges, backups}
+  // §REWARDS: configurable profit threshold for reward cycle (default ₹400)
+  rewardThreshold          Decimal   @default(400) @db.Decimal(18, 2)
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
@@ -1333,4 +1341,79 @@ model Message {
   @@index([conversationId, createdAt])
   @@index([businessId, partyId, createdAt])
   @@index([businessId, isRead])
+}
+
+// §CUSTOMER-REWARD-CYCLE: Persistent profit-based loyalty reward cycle.
+// Each customer has a sequence of cycles. Only one ACTIVE cycle per customer.
+// When accumulated profit reaches the threshold, the cycle becomes UNLOCKED.
+// When the merchant gives the reward, the cycle becomes REWARDED and a new
+// ACTIVE cycle is created.
+//
+// §CARRY-OVER SEMANTICS: When an invoice pushes accumulated profit past the
+// threshold, the FULL invoice profit is attributed to the current cycle (which
+// unlocks). The excess (accumulatedProfit - threshold) does NOT carry over to
+// the next cycle — the next cycle starts at ₹0. This is the simpler, more common
+// loyalty model: each cycle is independent, and the merchant's threshold defines
+// the "cost" of a reward in terms of profit earned.
+//
+// §UNIQUENESS: (businessId, partyId, cycleNumber) is unique — cycle numbers
+// are sequential per customer. Only one ACTIVE cycle per (businessId, partyId)
+// is enforced via partial unique index in PostgreSQL (migration SQL).
+//
+// §THRESHOLD: Stored as a snapshot on the cycle at creation time (from
+// AppSettings.rewardThreshold). This ensures historical cycles preserve
+// the threshold that was in effect when they were created.
+model CustomerRewardCycle {
+  id                String   @id @default(cuid())
+  businessId        String
+  partyId           String
+  cycleNumber       Int      @default(1)
+  threshold         Decimal  @db.Decimal(18, 2) // snapshot from AppSettings at cycle creation
+  accumulatedProfit Decimal  @default(0) @db.Decimal(18, 2)
+  status            String   @default("ACTIVE") // ACTIVE | UNLOCKED | REWARDED
+  startedAt         DateTime @default(now())
+  unlockedAt        DateTime?
+  rewardGivenAt     DateTime?
+  rewardDescription String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party             Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  events            CustomerRewardEvent[]
+
+  @@unique([businessId, partyId, cycleNumber])
+  @@index([businessId, partyId, status])
+  @@index([businessId, status])
+}
+
+// §CUSTOMER-REWARD-EVENT: Append-only audit trail for reward cycle events.
+// Each event records a state transition or accrual. Events are immutable.
+//
+// §IDEMPOTENCY: (businessId, sourceInvoiceId) is unique — an invoice can
+// only contribute profit ONCE per business. This prevents duplicate accrual
+// from retries/concurrent requests. sourceInvoiceId is NULL for non-invoice
+// events (REWARD_UNLOCKED, REWARD_GIVEN, CYCLE_RESET).
+//
+// §EVENT-TYPES: PROFIT_ACCRUAL (invoice contributes profit),
+// REWARD_UNLOCKED (threshold reached), REWARD_GIVEN (merchant gives reward),
+// CYCLE_RESET (new cycle created after reward).
+model CustomerRewardEvent {
+  id              String   @id @default(cuid())
+  businessId      String
+  partyId         String
+  cycleId         String
+  eventType       String   // PROFIT_ACCRUAL | REWARD_UNLOCKED | REWARD_GIVEN | CYCLE_RESET
+  amount          Decimal  @default(0) @db.Decimal(18, 2) // profit amount for PROFIT_ACCRUAL
+  sourceInvoiceId String?  // the invoice that contributed profit (for idempotency)
+  note            String?
+  createdAt       DateTime @default(now())
+
+  cycle           CustomerRewardCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  business        Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party               @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, sourceInvoiceId]) // idempotency: invoice accrues once per business
+  @@index([cycleId, createdAt])
+  @@index([businessId, partyId, createdAt])
 }
