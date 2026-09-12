@@ -29,6 +29,8 @@ import { PartyNotesSection } from './party-notes-section'
 import { CustomerBehaviourSection } from './customer-behaviour-section'
 // §COMPLAINTS: Compact complaints summary on the customer profile.
 import { PartyComplaintsSection } from './party-complaints-section'
+// §FOLLOWUPS: Compact follow-up summary on the customer profile.
+import { PartyFollowupsSection } from './party-followups-section'
 // §MESSAGING: Compact conversations summary on the customer profile.
 import { PartyMessagesSection } from './party-messages-section'
 // §LIFETIME-PROFIT: Read-only customer profit derived from authoritative accounting.
@@ -386,6 +388,11 @@ export function PartyDetail({ partyId }: { partyId: string }) {
       {/* §COMPLAINTS: Compact complaints summary. Customers + suppliers
           (any party with a relation) can have complaints. */}
       <PartyComplaintsSection partyId={partyId} partyName={data.name} />
+
+      {/* §FOLLOWUPS: Compact follow-up summary. Shows active follow-ups,
+          overdue count, and a quick-create action. Placed after complaints
+          since follow-ups often relate to complaints (complaint_followup type). */}
+      <PartyFollowupsSection partyId={partyId} />
 
       {/* §MESSAGING: Compact conversations summary. Shows recent conversations
           + last message + unread count. Clicking opens the Messages view. */}
