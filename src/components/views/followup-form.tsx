@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { apiPost } from '@/hooks/use-fetch'
+import { useState, useMemo } from 'react'
+import { useFetch, apiPost } from '@/hooks/use-fetch'
 import { toast } from 'sonner'
 import {
   Loader2,
@@ -68,7 +68,7 @@ export function FollowUpForm({
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
-  partyId: string
+  partyId?: string
   onSaved?: () => void
 }) {
   const [title, setTitle] = useState('')
@@ -77,6 +77,30 @@ export function FollowUpForm({
   const [priority, setPriority] = useState<Priority>('MEDIUM')
   const [dueAt, setDueAt] = useState('')
   const [saving, setSaving] = useState(false)
+  const [selectedPartyId, setSelectedPartyId] = useState<string>('')
+  const [partySearch, setPartySearch] = useState('')
+
+  // §PARTY-PICKER: when partyId is not provided (global board), fetch parties
+  // for selection. Uses the existing /api/parties endpoint.
+  const needsPartyPicker = !partyId
+  const { data: partyData } = useFetch<any>(
+    needsPartyPicker ? '/api/parties?limit=100' : null,
+    [needsPartyPicker]
+  )
+  const parties = useMemo(() => {
+    if (!partyData) return []
+    if (Array.isArray(partyData)) return partyData
+    if (partyData && typeof partyData === 'object' && 'items' in partyData) return (partyData as any).items
+    return []
+  }, [partyData])
+
+  const filteredParties = useMemo(() => {
+    if (!partySearch.trim()) return parties.slice(0, 20)
+    const q = partySearch.toLowerCase()
+    return parties.filter((p: any) =>
+      p.name?.toLowerCase().includes(q) || p.phone?.includes(q)
+    ).slice(0, 20)
+  }, [parties, partySearch])
 
   // §SYNC-ON-OPEN: reset form fields when the dialog opens.
   const [lastOpen, setLastOpen] = useState(false)
@@ -87,10 +111,14 @@ export function FollowUpForm({
     setPriority('MEDIUM')
     setDueAt('')
     setSaving(false)
+    setSelectedPartyId('')
+    setPartySearch('')
     setLastOpen(true)
   } else if (!open && lastOpen) {
     setLastOpen(false)
   }
+
+  const effectivePartyId = partyId || selectedPartyId
 
   const handleSave = async () => {
     const trimmedTitle = title.trim()
@@ -98,11 +126,14 @@ export function FollowUpForm({
       toast.error('Title is required')
       return
     }
+    if (!effectivePartyId) {
+      toast.error('Please select a customer')
+      return
+    }
     if (!dueAt) {
       toast.error('Due date is required')
       return
     }
-    // §CLIENT-VALIDATION: validate dueAt is a valid date (server is authoritative)
     const dueDate = new Date(dueAt)
     if (isNaN(dueDate.getTime())) {
       toast.error('Invalid due date')
@@ -112,7 +143,7 @@ export function FollowUpForm({
     setSaving(true)
     try {
       const payload = {
-        partyId,
+        partyId: effectivePartyId,
         title: trimmedTitle,
         description: description.trim() || null,
         type,
@@ -133,6 +164,55 @@ export function FollowUpForm({
 
   const formContent = (
     <div className="space-y-4 py-2">
+      {/* Party picker (when no pre-selected partyId) */}
+      {needsPartyPicker && (
+        <div className="space-y-1.5">
+          <Label className="text-xs" htmlFor="fu-party">
+            Customer <span className="text-red-500">*</span>
+          </Label>
+          {!selectedPartyId ? (
+            <>
+              <Input
+                id="fu-party"
+                value={partySearch}
+                onChange={(e) => setPartySearch(e.target.value)}
+                className="h-9 text-xs"
+                placeholder="Search customer by name or phone…"
+                aria-label="Search for a customer"
+              />
+              {filteredParties.length > 0 && (
+                <div className="max-h-32 overflow-y-auto rounded-md border border-border divide-y divide-border">
+                  {filteredParties.map((p: any) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => { setSelectedPartyId(p.id); setPartySearch('') }}
+                      className="w-full text-left px-3 py-2 hover:bg-muted/50 text-xs"
+                    >
+                      <span className="font-medium">{p.name}</span>
+                      {p.phone && <span className="text-muted-foreground ml-2">{p.phone}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center gap-2 p-2 rounded-md bg-muted/40">
+              <span className="text-xs font-medium flex-1 truncate">
+                {parties.find(p => p.id === selectedPartyId)?.name || 'Selected'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedPartyId('')}
+                className="text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                Change
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Title (required) */}
       <div className="space-y-1.5">
         <Label className="text-xs" htmlFor="fu-title">
@@ -233,7 +313,7 @@ export function FollowUpForm({
       <Button
         size="sm"
         onClick={handleSave}
-        disabled={saving || !title.trim() || !dueAt}
+        disabled={saving || !title.trim() || !dueAt || (!partyId && !selectedPartyId)}
         className="text-xs"
       >
         {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}

@@ -3,7 +3,7 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
-import { Home, BookOpen, Package, Receipt, MoreHorizontal, BarChart3, Sparkles, Settings, Bell, Store, Users, History, ShoppingBag, ClipboardList, MessageSquare, MessageCircle } from 'lucide-react'
+import { Home, BookOpen, Package, Receipt, MoreHorizontal, BarChart3, Sparkles, Settings, Bell, Store, Users, History, ShoppingBag, ClipboardList, MessageSquare, MessageCircle, ListTodo } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ViewId } from '@/lib/types'
 import { useState } from 'react'
@@ -27,6 +27,7 @@ const MORE_ITEMS = [
   { id: 'notifications' as ViewId, icon: Bell, labelKey: 'header.notifications', color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30' },
   { id: 'staff' as ViewId, icon: Users, labelKey: 'Staff', color: 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' },
   { id: 'complaints' as ViewId, icon: MessageSquare, labelKey: 'Complaints', color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30' },
+  { id: 'followups' as ViewId, icon: ListTodo, labelKey: 'Follow-ups', color: 'text-indigo-600 bg-indigo-100 dark:bg-indigo-900/30' },
   { id: 'messages' as ViewId, icon: MessageCircle, labelKey: 'Messages', color: 'text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30' },
   { id: 'settings' as ViewId, icon: Settings, labelKey: 'set.title', color: 'text-teal-600 bg-teal-100 dark:bg-teal-900/30' },
 ]
@@ -65,7 +66,7 @@ export function BottomTabNav() {
           {visibleTabs.map((tab) => {
             const isActive =
               tab.id === 'more'
-                ? ['reports', 'sourcing', 'ai-tools', 'settings', 'notifications', 'staff', 'online-orders'].includes(activeView)
+                ? ['reports', 'sourcing', 'ai-tools', 'settings', 'notifications', 'staff', 'online-orders', 'complaints', 'followups', 'messages'].includes(activeView)
                 : activeView === tab.id
             const Icon = tab.icon
             return (
