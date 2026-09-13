@@ -33,6 +33,7 @@ await mock.module('@/lib/auth/session', () => ({
 
 const followupsRoute = await import('@/app/api/followups/route')
 const transitionRoute = await import('@/app/api/followups/[id]/transition/route')
+const usersRoute = await import('@/app/api/users/route')
 
 async function setup() {
   await db.business.create({ data: { id: TEST_BIZ, name: 'Board Biz', currency: 'INR' } })
@@ -155,19 +156,45 @@ async function main() {
     assert(body.items.every((i: any) => i.priority === 'URGENT'), 'E1: priority=URGENT filter works')
   }
 
-  // ─── F. assigned-user filter ────────────────────────────────────────
+  // ─── F. assigned-user filter (via /api/users User source) ─────────
   console.log('\nF. Assigned-user filter')
   {
+    // §API-USERS: verify /api/users returns business-scoped User records
+    const usersRes = await usersRoute.GET(makeGet('http://localhost/api/users'))
+    const usersBody = await usersRes.json()
+    assert(usersRes.status === 200, `F0a: GET /api/users → 200 (got ${usersRes.status})`)
+    assert(Array.isArray(usersBody.items), 'F0b: response has items array')
+    // A. returns only users from current business
+    assert(usersBody.items.every((u: any) => u.id !== undefined), 'F0c: each user has id')
+    // C. response contains only id/name/email/role
+    const sampleUser = usersBody.items[0]
+    const keys = Object.keys(sampleUser)
+    assert(keys.length === 4, `F0d: exactly 4 fields (got ${keys.length}: ${keys.join(',')})`)
+    assert(keys.includes('id') && keys.includes('name') && keys.includes('email') && keys.includes('role'), 'F0e: fields are id/name/email/role only')
+    assert(!keys.includes('passwordHash'), 'F0f: no passwordHash in response')
+
+    // B. another business's users are excluded
+    const bizBUser = await db.user.create({ data: { email: `fub-b-${Date.now()}@test.com`, passwordHash: 'x', businessId: TEST_BIZ_B, name: 'Biz B User', role: 'OWNER' } })
+    const usersRes2 = await usersRoute.GET(makeGet('http://localhost/api/users'))
+    const usersBody2 = await usersRes2.json()
+    assert(!usersBody2.items.some((u: any) => u.id === bizBUser.id), 'F0g: Biz B user NOT in Biz A users list')
+
+    // D. FollowupsView uses /api/users, not /api/staff (source inspection)
+    const fs = await import('fs')
+    const viewSource = fs.readFileSync('/home/z/my-project/src/components/views/followups-view.tsx', 'utf-8')
+    assert(viewSource.includes('/api/users'), 'F0h: FollowupsView uses /api/users')
+    assert(!viewSource.includes('/api/staff'), 'F0i: FollowupsView does NOT use /api/staff')
+
+    // E+F. selected value is a User.id + assignedToId query is generated from it
     const user2 = (await db.user.create({ data: { email: `fub2-${Date.now()}@test.com`, passwordHash: 'x', businessId: TEST_BIZ, name: 'User 2', role: 'STAFF' } })).id
     const fu = await makeFollowUp()
     await db.followUp.update({ where: { id: fu.id }, data: { assignedToId: user2 } })
-    // §A: selecting an assignee changes the API query
     const res = await followupsRoute.GET(makeGet(`http://localhost/api/followups?assignedToId=${user2}`))
     const body = await res.json()
     assert(body.items.every((i: any) => i.assignedToId === user2), 'F1: assignedToId filter returns only that user\'s follow-ups')
     assert(body.items.some((i: any) => i.id === fu.id), 'F2: assigned follow-up is in the filtered list')
 
-    // §B: clearing the assignee filter removes assignedToId
+    // G. clearing the filter removes assignedToId
     const resAll = await followupsRoute.GET(makeGet('http://localhost/api/followups'))
     const bodyAll = await resAll.json()
     assert(!bodyAll.items.every((i: any) => i.assignedToId === user2), 'F3: clearing assignee filter returns all follow-ups (not just one user)')
@@ -228,36 +255,65 @@ async function main() {
     assert(source.includes('createdAt'), 'H4-2: createdAt used in sort comparison')
   }
 
-  // ─── H5. Completed Today metric ────────────────────────────────────
-  console.log('\nH5. Completed Today metric')
+  // ─── H5. Completed Today metric (IST) ───────────────────────────────
+  console.log('\nH5. Completed Today metric (IST)')
   {
-    // Create a follow-up completed today
+    // §IMPORT: use the SAME IST helper the view uses
+    const { calendarTodayStartIST } = await import('../../src/lib/date-ranges')
+    const istTodayStart = calendarTodayStartIST()
+
+    // A. completion during current IST day → counted
     const fuCompleted = await makeFollowUp({ status: 'COMPLETED' })
     await db.followUp.update({ where: { id: fuCompleted.id }, data: { completedAt: new Date() } })
-    // Create a follow-up completed yesterday
+
+    // B. completion during previous IST day → not counted
     const fuYesterday = await makeFollowUp({ status: 'COMPLETED' })
-    const yesterday = new Date(Date.now() - 86400000)
-    await db.followUp.update({ where: { id: fuYesterday.id }, data: { completedAt: yesterday } })
+    const yesterdayIST = new Date(istTodayStart.getTime() - 86400000) // exactly 1 day before IST midnight
+    await db.followUp.update({ where: { id: fuYesterday.id }, data: { completedAt: yesterdayIST } })
 
     const res = await followupsRoute.GET(makeGet('http://localhost/api/followups?status=COMPLETED'))
     const body = await res.json()
     const completedItems = body.items as any[]
+
+    // A. completion during current IST day → counted
     const completedToday = completedItems.filter((i: any) => {
       if (!i.completedAt) return false
-      const now = new Date()
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-      return new Date(i.completedAt) >= todayStart
+      return new Date(i.completedAt) >= istTodayStart
     })
-    assert(completedToday.length >= 1, `H5-1: at least 1 completed today (got ${completedToday.length})`)
-    assert(completedToday.some((i: any) => i.id === fuCompleted.id), 'H5-2: today\'s completion is counted')
-    assert(!completedToday.some((i: any) => i.id === fuYesterday.id), 'H5-3: yesterday\'s completion is NOT counted as today')
+    assert(completedToday.length >= 1, `H5-1: at least 1 completed today IST (got ${completedToday.length})`)
+    assert(completedToday.some((i: any) => i.id === fuCompleted.id), 'H5-2: today IST completion is counted')
 
-    // §SOURCE: verify the completedTodayCount metric exists in the view
+    // B. completion during previous IST day → not counted
+    assert(!completedToday.some((i: any) => i.id === fuYesterday.id), 'H5-3: yesterday IST completion is NOT counted as today')
+
+    // C. a UTC timestamp near the IST midnight boundary is classified according to IST
+    // §IST midnight is 18:30 UTC of the PREVIOUS day. A completion at 18:29 UTC
+    // (just before IST midnight) should be "yesterday IST" → not counted as today.
+    // A completion at 18:31 UTC (just after IST midnight) should be "today IST" → counted.
+    const fuBoundaryBefore = await makeFollowUp({ status: 'COMPLETED' })
+    const justBeforeISTMidnight = new Date(istTodayStart.getTime() - 60000) // 1 min before IST midnight
+    await db.followUp.update({ where: { id: fuBoundaryBefore.id }, data: { completedAt: justBeforeISTMidnight } })
+
+    const fuBoundaryAfter = await makeFollowUp({ status: 'COMPLETED' })
+    const justAfterISTMidnight = new Date(istTodayStart.getTime() + 60000) // 1 min after IST midnight
+    await db.followUp.update({ where: { id: fuBoundaryAfter.id }, data: { completedAt: justAfterISTMidnight } })
+
+    const res2 = await followupsRoute.GET(makeGet('http://localhost/api/followups?status=COMPLETED'))
+    const body2 = await res2.json()
+    const completedToday2 = (body2.items as any[]).filter((i: any) => {
+      if (!i.completedAt) return false
+      return new Date(i.completedAt) >= istTodayStart
+    })
+    assert(!completedToday2.some((i: any) => i.id === fuBoundaryBefore.id), 'H5-3b: completion 1min before IST midnight → NOT counted as today')
+    assert(completedToday2.some((i: any) => i.id === fuBoundaryAfter.id), 'H5-3c: completion 1min after IST midnight → counted as today')
+
+    // D. source no longer uses runtime-local midnight calculation
     const fs = await import('fs')
     const source = fs.readFileSync('/home/z/my-project/src/components/views/followups-view.tsx', 'utf-8')
-    assert(source.includes('completedTodayCount'), 'H5-4: completedTodayCount metric exists in view source')
-    assert(source.includes('Done Today'), 'H5-5: "Done Today" label in summary grid')
-    assert(source.includes('todayStart'), 'H5-6: todayStart derived from local calendar day')
+    assert(source.includes('calendarTodayStartIST'), 'H5-4a: source uses calendarTodayStartIST (IST convention)')
+    assert(!source.includes('new Date(now.getFullYear()'), 'H5-4b: source does NOT use runtime-local midnight (new Date(year,month,date))')
+    assert(source.includes('completedTodayCount'), 'H5-5: completedTodayCount metric exists in view source')
+    assert(source.includes('Done Today'), 'H5-6: "Done Today" label in summary grid')
   }
 
   // ─── I. status action mapping ───────────────────────────────────────

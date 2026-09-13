@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { timeAgo, formatDateTime } from '@/lib/utils'
+import { calendarTodayStartIST } from '@/lib/date-ranges'
 import { FollowUpForm } from './followup-form'
 import { FollowUpDetailSheet } from './followup-detail-sheet'
 
@@ -177,8 +178,11 @@ export function FollowupsView() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [transitioning, setTransitioning] = useState<string | null>(null)
 
-  // §ASSIGNEE-LIST: fetch business users for the assignee filter dropdown
-  const { data: usersData } = useFetch<any>('/api/staff', [])
+  // §ASSIGNEE-LIST: fetch business-scoped User records for the assignee
+  // filter dropdown. Uses /api/users (NOT the legacy Staff endpoint — Staff is a
+  // parallel model with different IDs; FollowUp.assignedToId is a FK to
+  // User.id, so the dropdown must use User IDs).
+  const { data: usersData } = useFetch<{ items: Array<{ id: string; name: string | null; email: string; role: string }> }>('/api/users', [])
   const assignees = useMemo(() => {
     if (!usersData) return []
     if (Array.isArray(usersData)) return usersData
@@ -219,9 +223,10 @@ export function FollowupsView() {
     f.status === 'PENDING' && f.dueAt && new Date(f.dueAt) >= now && new Date(f.dueAt) <= new Date(now.getTime() + 3600000) && !f.snoozedUntil
   ).length
   const highUrgentCount = items.filter(f => ['HIGH', 'URGENT'].includes(f.priority) && ['PENDING', 'IN_PROGRESS'].includes(f.status)).length
-  // §COMPLETED-TODAY: completedAt falls within the user's local calendar day.
-  // Uses the existing application date convention (JS Date, local timezone).
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  // §COMPLETED-TODAY: completedAt falls within the current IST calendar day.
+  // Uses the established BizLedger IST convention (calendarTodayStartIST
+  // from src/lib/date-ranges.ts) — same as the dashboard's "Today's Sales".
+  const todayStart = calendarTodayStartIST()
   const completedTodayCount = items.filter(f =>
     f.status === 'COMPLETED' && f.completedAt && new Date(f.completedAt) >= todayStart
   ).length
@@ -344,7 +349,7 @@ export function FollowupsView() {
           >
             Overdue
           </button>
-          {/* §ASSIGNEE-FILTER: dropdown populated from /api/staff (business-scoped) */}
+          {/* §ASSIGNEE-FILTER: dropdown populated from /api/users (business-scoped User records) */}
           <select
             value={assigneeFilter}
             onChange={(e) => setAssigneeFilter(e.target.value)}
