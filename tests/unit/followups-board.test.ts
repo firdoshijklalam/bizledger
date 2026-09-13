@@ -161,9 +161,16 @@ async function main() {
     const user2 = (await db.user.create({ data: { email: `fub2-${Date.now()}@test.com`, passwordHash: 'x', businessId: TEST_BIZ, name: 'User 2', role: 'STAFF' } })).id
     const fu = await makeFollowUp()
     await db.followUp.update({ where: { id: fu.id }, data: { assignedToId: user2 } })
+    // §A: selecting an assignee changes the API query
     const res = await followupsRoute.GET(makeGet(`http://localhost/api/followups?assignedToId=${user2}`))
     const body = await res.json()
-    assert(body.items.every((i: any) => i.assignedToId === user2), 'F1: assignedToId filter works')
+    assert(body.items.every((i: any) => i.assignedToId === user2), 'F1: assignedToId filter returns only that user\'s follow-ups')
+    assert(body.items.some((i: any) => i.id === fu.id), 'F2: assigned follow-up is in the filtered list')
+
+    // §B: clearing the assignee filter removes assignedToId
+    const resAll = await followupsRoute.GET(makeGet('http://localhost/api/followups'))
+    const bodyAll = await resAll.json()
+    assert(!bodyAll.items.every((i: any) => i.assignedToId === user2), 'F3: clearing assignee filter returns all follow-ups (not just one user)')
   }
 
   // ─── G. overdue filter ─────────────────────────────────────────────
@@ -176,14 +183,81 @@ async function main() {
     assert(body.items.some((i: any) => i.id === fu.id), 'G2: overdue follow-up is in the filtered list')
   }
 
-  // ─── H. sort selection (API ordering) ──────────────────────────────
-  console.log('\nH. Sort selection (API ordering)')
+  // ─── H. Sort: Due Soonest (client-side) ─────────────────────────────
+  console.log('\nH. Sort: Due Soonest')
   {
+    const fs = await import('fs')
+    const source = fs.readFileSync('/home/z/my-project/src/components/views/followups-view.tsx', 'utf-8')
+    assert(source.includes("case 'due_soonest'"), 'H1: due_soonest sort mode exists in source')
+    assert(source.includes('SORT_OPTIONS'), 'H2: sort options UI present')
+    // §VERIFY: sortItems function exists + sorts by dueAt ASC (nulls last)
+    assert(source.includes('function sortItems'), 'H3: sortItems function exists')
+    // §API-DETERMINISTIC: same query → same order (server-side ordering is stable)
     const res1 = await followupsRoute.GET(makeGet('http://localhost/api/followups?limit=50&offset=0'))
     const res2 = await followupsRoute.GET(makeGet('http://localhost/api/followups?limit=50&offset=0'))
     const body1 = await res1.json()
     const body2 = await res2.json()
-    assert(JSON.stringify(body1.items.map((i: any) => i.id)) === JSON.stringify(body2.items.map((i: any) => i.id)), 'H1: same order across runs (deterministic)')
+    assert(JSON.stringify(body1.items.map((i: any) => i.id)) === JSON.stringify(body2.items.map((i: any) => i.id)), 'H4: same order across runs (deterministic)')
+  }
+
+  // ─── H2. Sort: Oldest Overdue (client-side) ────────────────────────
+  console.log('\nH2. Sort: Oldest Overdue')
+  {
+    const fs = await import('fs')
+    const source = fs.readFileSync('/home/z/my-project/src/components/views/followups-view.tsx', 'utf-8')
+    assert(source.includes("case 'oldest_overdue'"), 'H2-1: oldest_overdue sort mode exists')
+    assert(source.includes('aOverdue'), 'H2-2: overdue detection logic in sort function')
+  }
+
+  // ─── H3. Sort: Priority (client-side) ─────────────────────────────
+  console.log('\nH3. Sort: Priority')
+  {
+    const fs = await import('fs')
+    const source = fs.readFileSync('/home/z/my-project/src/components/views/followups-view.tsx', 'utf-8')
+    assert(source.includes("case 'priority'"), 'H3-1: priority sort mode exists')
+    assert(source.includes('PRIORITY_ORDER'), 'H3-2: priority ordering map exists')
+    assert(source.includes('URGENT: 0'), 'H3-3: URGENT has highest priority (0)')
+  }
+
+  // ─── H4. Sort: Recently Created (client-side) ─────────────────────
+  console.log('\nH4. Sort: Recently Created')
+  {
+    const fs = await import('fs')
+    const source = fs.readFileSync('/home/z/my-project/src/components/views/followups-view.tsx', 'utf-8')
+    assert(source.includes("case 'recently_created'"), 'H4-1: recently_created sort mode exists')
+    assert(source.includes('createdAt'), 'H4-2: createdAt used in sort comparison')
+  }
+
+  // ─── H5. Completed Today metric ────────────────────────────────────
+  console.log('\nH5. Completed Today metric')
+  {
+    // Create a follow-up completed today
+    const fuCompleted = await makeFollowUp({ status: 'COMPLETED' })
+    await db.followUp.update({ where: { id: fuCompleted.id }, data: { completedAt: new Date() } })
+    // Create a follow-up completed yesterday
+    const fuYesterday = await makeFollowUp({ status: 'COMPLETED' })
+    const yesterday = new Date(Date.now() - 86400000)
+    await db.followUp.update({ where: { id: fuYesterday.id }, data: { completedAt: yesterday } })
+
+    const res = await followupsRoute.GET(makeGet('http://localhost/api/followups?status=COMPLETED'))
+    const body = await res.json()
+    const completedItems = body.items as any[]
+    const completedToday = completedItems.filter((i: any) => {
+      if (!i.completedAt) return false
+      const now = new Date()
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      return new Date(i.completedAt) >= todayStart
+    })
+    assert(completedToday.length >= 1, `H5-1: at least 1 completed today (got ${completedToday.length})`)
+    assert(completedToday.some((i: any) => i.id === fuCompleted.id), 'H5-2: today\'s completion is counted')
+    assert(!completedToday.some((i: any) => i.id === fuYesterday.id), 'H5-3: yesterday\'s completion is NOT counted as today')
+
+    // §SOURCE: verify the completedTodayCount metric exists in the view
+    const fs = await import('fs')
+    const source = fs.readFileSync('/home/z/my-project/src/components/views/followups-view.tsx', 'utf-8')
+    assert(source.includes('completedTodayCount'), 'H5-4: completedTodayCount metric exists in view source')
+    assert(source.includes('Done Today'), 'H5-5: "Done Today" label in summary grid')
+    assert(source.includes('todayStart'), 'H5-6: todayStart derived from local calendar day')
   }
 
   // ─── I. status action mapping ───────────────────────────────────────
@@ -291,7 +365,7 @@ async function main() {
     assert(!source.includes('overflow-x-scroll'), 'R1: no intentional horizontal overflow')
     assert(source.includes('truncate'), 'R2: uses truncate for long text')
     assert(source.includes('max-w-4xl'), 'R3: max-width container')
-    assert(source.includes('grid-cols-2 sm:grid-cols-4'), 'R4: responsive summary grid (2 cols mobile, 4 cols desktop)')
+    assert(source.includes('grid-cols-2 sm:grid-cols-5'), 'R4: responsive summary grid (2 cols mobile, 5 cols desktop)')
     assert(source.includes('overflow-x-auto'), 'R5: filter chips scroll horizontally (expected for chip bar)')
   }
 

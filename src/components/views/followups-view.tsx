@@ -47,6 +47,7 @@ interface FollowUpsResponse { items: FollowUp[]; total: number; hasMore: boolean
 
 type StatusFilter = 'ALL' | 'PENDING' | 'IN_PROGRESS' | 'SNOOZED' | 'COMPLETED' | 'CANCELLED'
 type PriorityFilter = 'ALL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'
+type SortMode = 'due_soonest' | 'oldest_overdue' | 'priority' | 'recently_created'
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
   PENDING: { label: 'Pending', color: 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' },
@@ -73,6 +74,68 @@ const TYPE_LABELS: Record<string, string> = {
 
 const STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'IN_PROGRESS', 'SNOOZED', 'COMPLETED', 'CANCELLED']
 const PRIORITY_FILTERS: PriorityFilter[] = ['ALL', 'URGENT', 'HIGH', 'MEDIUM', 'LOW']
+
+const SORT_OPTIONS: Array<{ value: SortMode; label: string }> = [
+  { value: 'due_soonest', label: 'Due Soonest' },
+  { value: 'oldest_overdue', label: 'Oldest Overdue' },
+  { value: 'priority', label: 'Priority' },
+  { value: 'recently_created', label: 'Recently Created' },
+]
+
+const PRIORITY_ORDER: Record<string, number> = { URGENT: 0, HIGH: 1, MEDIUM: 2, LOW: 3 }
+
+// §CLIENT-SORT: sorts the fetched dataset client-side. Does NOT change the
+// API's server-side ordering. Applied AFTER useFetch returns data.
+function sortItems(items: FollowUp[], mode: SortMode): FollowUp[] {
+  const sorted = [...items]
+  switch (mode) {
+    case 'due_soonest':
+      // earliest non-null dueAt first; null dueAt last
+      sorted.sort((a, b) => {
+        if (!a.dueAt && !b.dueAt) return b.id.localeCompare(a.id)
+        if (!a.dueAt) return 1
+        if (!b.dueAt) return -1
+        const diff = new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()
+        return diff !== 0 ? diff : b.id.localeCompare(a.id)
+      })
+      break
+    case 'oldest_overdue':
+      // overdue items first (oldest dueAt), then non-overdue (newest createdAt)
+      sorted.sort((a, b) => {
+        const now = Date.now()
+        const aOverdue = a.status === 'PENDING' && a.dueAt && new Date(a.dueAt).getTime() < now && !a.snoozedUntil
+        const bOverdue = b.status === 'PENDING' && b.dueAt && new Date(b.dueAt).getTime() < now && !b.snoozedUntil
+        if (aOverdue && !bOverdue) return -1
+        if (!aOverdue && bOverdue) return 1
+        if (aOverdue && bOverdue) {
+          const diff = new Date(a.dueAt!).getTime() - new Date(b.dueAt!).getTime()
+          return diff !== 0 ? diff : b.id.localeCompare(a.id)
+        }
+        // both non-overdue: newest createdAt first
+        const diff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        return diff !== 0 ? diff : b.id.localeCompare(a.id)
+      })
+      break
+    case 'priority':
+      // URGENT → HIGH → MEDIUM → LOW, tie-break by createdAt DESC
+      sorted.sort((a, b) => {
+        const pa = PRIORITY_ORDER[a.priority] ?? 99
+        const pb = PRIORITY_ORDER[b.priority] ?? 99
+        if (pa !== pb) return pa - pb
+        const diff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        return diff !== 0 ? diff : b.id.localeCompare(a.id)
+      })
+      break
+    case 'recently_created':
+      // newest createdAt first, id DESC tie-breaker
+      sorted.sort((a, b) => {
+        const diff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        return diff !== 0 ? diff : b.id.localeCompare(a.id)
+      })
+      break
+  }
+  return sorted
+}
 
 // §TRANSITION-ACTIONS: available actions per status (same as detail sheet)
 function getActions(status: string): Array<{ toStatus: string; label: string; icon: any; variant?: string }> {
@@ -107,10 +170,21 @@ export function FollowupsView() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL')
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('ALL')
   const [overdueOnly, setOverdueOnly] = useState(false)
+  const [assigneeFilter, setAssigneeFilter] = useState<string>('')
+  const [sortMode, setSortMode] = useState<SortMode>('due_soonest')
   const [formOpen, setFormOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [transitioning, setTransitioning] = useState<string | null>(null)
+
+  // §ASSIGNEE-LIST: fetch business users for the assignee filter dropdown
+  const { data: usersData } = useFetch<any>('/api/staff', [])
+  const assignees = useMemo(() => {
+    if (!usersData) return []
+    if (Array.isArray(usersData)) return usersData
+    if (usersData && typeof usersData === 'object' && 'items' in usersData) return (usersData as any).items
+    return []
+  }, [usersData])
 
   // §BUILD-QUERY: filters map to API query params
   const query = useMemo(() => {
@@ -118,8 +192,9 @@ export function FollowupsView() {
     if (statusFilter !== 'ALL') params.set('status', statusFilter)
     if (priorityFilter !== 'ALL') params.set('priority', priorityFilter)
     if (overdueOnly) params.set('overdue', 'true')
+    if (assigneeFilter) params.set('assignedToId', assigneeFilter)
     return `/api/followups?${params.toString()}`
-  }, [statusFilter, priorityFilter, overdueOnly])
+  }, [statusFilter, priorityFilter, overdueOnly, assigneeFilter])
 
   const { data, loading, error, refetch } = useFetch<FollowUpsResponse>(query, [query])
 
@@ -129,6 +204,10 @@ export function FollowupsView() {
     if (data && typeof data === 'object' && 'items' in data) return (data as any).items as FollowUp[]
     return []
   }, [data])
+
+  // §CLIENT-SORT: apply the selected sort mode to the fetched items.
+  // Does NOT change the API's server-side ordering.
+  const sortedItems = useMemo(() => sortItems(items, sortMode), [items, sortMode])
 
   // §SUMMARY-METRICS: derived from the fetched items
   const now = new Date()
@@ -140,6 +219,12 @@ export function FollowupsView() {
     f.status === 'PENDING' && f.dueAt && new Date(f.dueAt) >= now && new Date(f.dueAt) <= new Date(now.getTime() + 3600000) && !f.snoozedUntil
   ).length
   const highUrgentCount = items.filter(f => ['HIGH', 'URGENT'].includes(f.priority) && ['PENDING', 'IN_PROGRESS'].includes(f.status)).length
+  // §COMPLETED-TODAY: completedAt falls within the user's local calendar day.
+  // Uses the existing application date convention (JS Date, local timezone).
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const completedTodayCount = items.filter(f =>
+    f.status === 'COMPLETED' && f.completedAt && new Date(f.completedAt) >= todayStart
+  ).length
 
   const openDetail = useCallback((id: string) => {
     setDetailId(id)
@@ -188,7 +273,7 @@ export function FollowupsView() {
       </div>
 
       {/* Summary metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         <div className="rounded-xl bg-card border border-border p-3 text-center">
           <p className="text-xl font-bold text-blue-600 dark:text-blue-400">{openCount}</p>
           <p className="text-[10px] text-muted-foreground">Open</p>
@@ -204,6 +289,10 @@ export function FollowupsView() {
         <div className="rounded-xl bg-card border border-border p-3 text-center">
           <p className="text-xl font-bold text-orange-600 dark:text-orange-400">{highUrgentCount}</p>
           <p className="text-[10px] text-muted-foreground">High/Urgent</p>
+        </div>
+        <div className="rounded-xl bg-card border border-border p-3 text-center">
+          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{completedTodayCount}</p>
+          <p className="text-[10px] text-muted-foreground">Done Today</p>
         </div>
       </div>
 
@@ -255,6 +344,32 @@ export function FollowupsView() {
           >
             Overdue
           </button>
+          {/* §ASSIGNEE-FILTER: dropdown populated from /api/staff (business-scoped) */}
+          <select
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value)}
+            className="text-[10px] h-6 rounded-full border border-input bg-background px-2 shrink-0"
+            aria-label="Filter by assigned user"
+          >
+            <option value="">All Assignees</option>
+            {assignees.map((u: any) => (
+              <option key={u.id} value={u.id}>{u.name || u.email || 'Unknown'}</option>
+            ))}
+          </select>
+        </div>
+        {/* §SORT-SELECTION: client-side sort over fetched dataset */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted-foreground shrink-0">Sort:</span>
+          <select
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as SortMode)}
+            className="text-[10px] h-6 rounded-full border border-input bg-background px-2"
+            aria-label="Sort mode"
+          >
+            {SORT_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -273,7 +388,7 @@ export function FollowupsView() {
         <div className="flex flex-col items-center justify-center py-12 gap-2 text-center">
           <ListTodo className="w-8 h-8 text-muted-foreground/30" />
           <p className="text-sm text-muted-foreground">
-            {statusFilter !== 'ALL' || priorityFilter !== 'ALL' || overdueOnly
+            {statusFilter !== 'ALL' || priorityFilter !== 'ALL' || overdueOnly || assigneeFilter
               ? 'No follow-ups match the current filters'
               : 'No follow-ups yet. Create one to get started.'}
           </p>
@@ -281,7 +396,7 @@ export function FollowupsView() {
       ) : (
         <div className="space-y-2">
           <AnimatePresence initial={false}>
-            {items.map((fu) => {
+            {sortedItems.map((fu) => {
               const isOverdue = fu.status === 'PENDING' && fu.dueAt && new Date(fu.dueAt) < now && !fu.snoozedUntil
               const actions = getActions(fu.status)
               const partyName = fu.party?.name || 'Unknown'
