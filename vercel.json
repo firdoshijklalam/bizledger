@@ -1,15 +1,5 @@
 {
   "buildCommand": "prisma generate --schema prisma/schema.prisma && npx prisma migrate deploy --schema prisma/schema.prisma && next build",
   "installCommand": "npm install",
-  "framework": "nextjs",
-  "crons": [
-    {
-      "path": "/api/cron/reward-accrual",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/followup-reminders",
-      "schedule": "0 * * * *"
-    }
-  ]
+  "framework": "nextjs"
 }
