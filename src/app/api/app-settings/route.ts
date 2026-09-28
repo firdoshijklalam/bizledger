@@ -32,6 +32,31 @@ export async function PUT(req: NextRequest) {
     const business = await getCurrentBusiness()
     if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
 
+    // §REWARD-THRESHOLD-VALIDATION: Validate the configurable profit threshold
+    // for reward-cycle unlock. Must be a finite positive number within sensible
+    // bounds. Default is ₹400 (schema @default(400)). Lower bound ₹1 (a positive
+    // amount; 0 would unlock immediately on any profit), upper bound ₹10,00,000
+    // (₹10 lakh — prevents abusive/absurd values while allowing any realistic
+    // merchant threshold). businessId is derived from the authenticated session
+    // via getCurrentBusiness() — NEVER from the client body (tenant isolation).
+    // §SNAPSHOT-INVARIANT: Changing this global setting does NOT mutate existing
+    // CustomerRewardCycle.threshold (a snapshot taken at cycle creation). The
+    // new value only affects NEW cycles created after the change.
+    const REWARD_THRESHOLD_MIN = 1
+    const REWARD_THRESHOLD_MAX = 1_000_000
+    let rewardThreshold: number | undefined
+    if (body.rewardThreshold !== undefined) {
+      const n = Number(body.rewardThreshold)
+      if (!Number.isFinite(n) || n < REWARD_THRESHOLD_MIN || n > REWARD_THRESHOLD_MAX) {
+        return NextResponse.json(
+          { error: `Reward threshold must be a finite positive number between ₹${REWARD_THRESHOLD_MIN} and ₹${REWARD_THRESHOLD_MAX}` },
+          { status: 400 }
+        )
+      }
+      // Round to 2 decimal places (Prisma Decimal(18,2)) — safe for INR (paise).
+      rewardThreshold = Math.round(n * 100) / 100
+    }
+
     const updated = await db.appSettings.upsert({
       where: { businessId: business.id },
       update: {
@@ -53,6 +78,10 @@ export async function PUT(req: NextRequest) {
         gateOwnerSwitch: body.gateOwnerSwitch,
         gateHighValueDiscount: body.gateHighValueDiscount,
         gateDiscountLimit: body.gateDiscountLimit,
+        // §REWARD-THRESHOLD: configurable profit threshold for reward cycle.
+        // Only included when the client sent it (undefined → Prisma leaves the
+        // existing value untouched, preserving unrelated fields).
+        rewardThreshold,
         gateDataExport: body.gateDataExport,
         gateInventoryPrice: body.gateInventoryPrice,
         gateDangerZone: body.gateDangerZone,
@@ -82,6 +111,7 @@ export async function PUT(req: NextRequest) {
         gateOwnerSwitch: body.gateOwnerSwitch ?? true,
         gateHighValueDiscount: body.gateHighValueDiscount ?? true,
         gateDiscountLimit: body.gateDiscountLimit ?? 5000,
+        rewardThreshold: rewardThreshold ?? 400,
         gateDataExport: body.gateDataExport ?? true,
         gateInventoryPrice: body.gateInventoryPrice ?? true,
         gateDangerZone: body.gateDangerZone ?? true,

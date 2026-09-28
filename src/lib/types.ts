@@ -201,6 +201,9 @@ export interface AppSettingsData {
   dateFormat: string
   invoicePrefix: string
   pinEnabled: boolean
+  // §REWARD-THRESHOLD: configurable profit threshold (INR) for reward-cycle
+  // unlock. Serialized to a number by serializeDecimals (Prisma Decimal).
+  rewardThreshold?: number
 }
 
 // PRD Part 13: B2B Sourcing types

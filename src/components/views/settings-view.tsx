@@ -11,7 +11,7 @@ import {
   Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette, Mic, Keyboard,
   AlertCircle, CheckCircle2, QrCode, ChevronDown, ChevronUp, Lock, Fingerprint,
   Store, MapPin, Navigation, Star, TrendingUp, ShoppingCart, Crown, ExternalLink,
-  Smartphone, Radio, Globe, Server, Ban, Cloud, User, Volume2, LogOut, Loader2,
+  Smartphone, Radio, Globe, Server, Ban, Cloud, User, Volume2, LogOut, Loader2, Gift,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -85,7 +85,7 @@ export function SettingsView() {
     }
   }
 
-  const { data: settings } = useFetch<AppSettingsData & { id: string }>('/api/app-settings', [])
+  const { data: settings, refetch: refetchSettings } = useFetch<AppSettingsData & { id: string }>('/api/app-settings', [])
 
   // Profile form state — sync from business (adjust during render to avoid effect setState)
   const [form, setForm] = useState<Partial<Business>>({})
@@ -119,6 +119,12 @@ export function SettingsView() {
     externalScannerEnabled: false,
     defaulterRegistryEnabled: true,
   })
+  // §REWARD-THRESHOLD: configurable profit threshold (INR) for reward-cycle
+  // unlock. Synced from settings.rewardThreshold (default ₹400). Saved via
+  // PUT /api/app-settings on blur; the response re-syncs the value (no stale
+  // local overwrite).
+  const [rewardThreshold, setRewardThreshold] = useState(400)
+  const [rewardThresholdSaving, setRewardThresholdSaving] = useState(false)
   const [lastSettingsId, setLastSettingsId] = useState<string | null>(null)
   if (settings && settings.id !== lastSettingsId) {
     setLastSettingsId(settings.id)
@@ -135,6 +141,7 @@ export function SettingsView() {
       externalScannerEnabled: (settings as any).externalScannerEnabled ?? false,
       defaulterRegistryEnabled: (settings as any).defaulterRegistryEnabled ?? true,
     })
+    setRewardThreshold((settings as any).rewardThreshold ?? 400)
     setPrefs({
       notificationsEnabled: settings.notificationsEnabled,
       autoBackupEnabled: settings.autoBackupEnabled,
@@ -1208,6 +1215,55 @@ export function SettingsView() {
                     inputMode="numeric"
                   />
                 </div>
+              </div>
+            </Card>
+
+            {/* §REWARD-THRESHOLD: Customer Reward Threshold configuration */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Gift className="w-4 h-4 text-amber-600" />
+                <h3 className="text-sm font-semibold">Customer Reward Threshold</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                The profit amount a customer must accumulate to unlock a reward cycle. Changing this does not affect existing reward cycles (their threshold is snapshotted at creation); only newly created cycles use the updated value.
+              </p>
+              <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-muted/30">
+                <div className="flex items-start gap-2 flex-1 min-w-0">
+                  <IndianRupee className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium">Reward Threshold (₹)</p>
+                    <p className="text-[10px] text-muted-foreground">Profit required to unlock a reward cycle (₹1 – ₹10,00,000)</p>
+                  </div>
+                </div>
+                <Input
+                  type="number"
+                  value={rewardThreshold}
+                  onChange={(e) => setRewardThreshold(Number(e.target.value))}
+                  onBlur={async () => {
+                    // §SAVE: validation is enforced server-side (1–1,000,000).
+                    // On success, refetch /api/app-settings so the UI reflects
+                    // the server-returned value (no stale local overwrite,
+                    // no full-page reload). On error, toast shows the server's
+                    // rejection message and the local state is re-synced from
+                    // the cached settings on next render.
+                    setRewardThresholdSaving(true)
+                    try {
+                      await apiPut('/api/app-settings', { rewardThreshold })
+                      toast.success('Reward threshold updated')
+                      await refetchSettings()
+                    } catch (e: any) {
+                      toast.error(e?.message || 'Invalid reward threshold')
+                      await refetchSettings()
+                    } finally {
+                      setRewardThresholdSaving(false)
+                    }
+                  }}
+                  className="w-28 h-9 text-xs"
+                  inputMode="numeric"
+                  disabled={rewardThresholdSaving}
+                  min={1}
+                  max={1000000}
+                />
               </div>
             </Card>
 

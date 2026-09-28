@@ -3,6 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { apiError } from '@/lib/api-error'
 import { serializeDecimals } from '@/lib/decimal-serializer'
 import { logAudit } from '@/lib/audit'
+import { DEFAULT_REWARD_THRESHOLD } from '@/lib/rewards'
 
 // §GIVE-REWARD: Merchant confirms the reward was given.
 //
@@ -71,13 +72,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         },
       })
 
-      // 3. Create next ACTIVE cycle (starts at ₹0 — no carry-over)
+      // 3. Create next ACTIVE cycle (starts at ₹0 — no carry-over of PROFIT).
+      // §THRESHOLD-SNAPSHOT: the next cycle snapshots the CURRENT configured
+      // threshold from AppSettings (NOT the old cycle's threshold), so that
+      // changes to the global reward threshold take effect for new cycles
+      // created via give-reward. Existing cycle history is untouched (each
+      // cycle carries its own snapshotted threshold — see schema comment).
+      const settings = await tx.appSettings.findUnique({
+        where: { businessId: business.id },
+        select: { rewardThreshold: true },
+      })
+      const nextThreshold = settings?.rewardThreshold.toNumber() ?? DEFAULT_REWARD_THRESHOLD
       const nextCycle = await tx.customerRewardCycle.create({
         data: {
           businessId: business.id,
           partyId,
           cycleNumber: cycle.cycleNumber + 1,
-          threshold: cycle.threshold, // carry the same threshold
+          threshold: nextThreshold,
           accumulatedProfit: 0,
           status: 'ACTIVE',
         },
