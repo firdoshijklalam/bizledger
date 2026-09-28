@@ -46,7 +46,22 @@ export async function PUT(req: NextRequest) {
     const REWARD_THRESHOLD_MAX = 1_000_000
     let rewardThreshold: number | undefined
     if (body.rewardThreshold !== undefined) {
-      const n = Number(body.rewardThreshold)
+      const v = body.rewardThreshold
+      // §STRICT-TYPE-CHECK: accept only finite numbers OR non-empty numeric
+      // strings (HTML <input type=number> may send values as strings, e.g.
+      // "300"). Explicitly reject booleans (true/false — Number(true)=1 would
+      // otherwise be silently accepted), null, objects, arrays (Number([500])
+      // =500 would otherwise be accepted), empty strings, and non-numeric /
+      // non-finite strings ("NaN", "Infinity", "abc"). This prevents
+      // type-coercion surprises from Number().
+      const isAcceptableType = typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')
+      if (!isAcceptableType) {
+        return NextResponse.json(
+          { error: `Reward threshold must be a finite positive number between ₹${REWARD_THRESHOLD_MIN} and ₹${REWARD_THRESHOLD_MAX}` },
+          { status: 400 }
+        )
+      }
+      const n = Number(v)
       if (!Number.isFinite(n) || n < REWARD_THRESHOLD_MIN || n > REWARD_THRESHOLD_MAX) {
         return NextResponse.json(
           { error: `Reward threshold must be a finite positive number between ₹${REWARD_THRESHOLD_MIN} and ₹${REWARD_THRESHOLD_MAX}` },

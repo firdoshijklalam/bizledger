@@ -206,23 +206,32 @@ async function main() {
     assert(settings?.rewardThreshold.toNumber() === 500, `5.2: DB unchanged=500`)
   }
 
-  // ─── 6. Invalid NaN / non-numeric / Infinity rejected ────────────
-  console.log('\n6. Invalid NaN / non-numeric / Infinity rejected')
+  // ─── 6. Invalid / wrong-type / non-finite / over-maximum rejected ────
+  console.log('\n6. Invalid values rejected (wrong type / non-numeric / non-finite / over-maximum)')
   {
-    // §ACTUAL-VALUES: test "NaN" and "Infinity" as actual STRING request
-    // values (NOT relying on JSON.stringify() converting JS NaN/Infinity
-    // into null). Also test null (the JS NaN/Infinity → null path) + a
-    // generic non-numeric string.
-    const res1 = await callPut({ rewardThreshold: 'not-a-number' })
-    assert(res1.status === 400, `6.1: PUT 'not-a-number' → 400 (got ${res1.status})`)
-    const res2 = await callPut({ rewardThreshold: 'NaN' })
-    assert(res2.status === 400, `6.2: PUT 'NaN' (string) → 400 (got ${res2.status})`)
-    const res3 = await callPut({ rewardThreshold: 'Infinity' })
-    assert(res3.status === 400, `6.3: PUT 'Infinity' (string) → 400 (got ${res3.status})`)
-    const res4 = await callPut({ rewardThreshold: null })
-    assert(res4.status === 400, `6.4: PUT null → 400 (got ${res4.status})`)
+    // §STRICT-TYPE-CHECK (API contract): the API must explicitly reject
+    // non-numeric types (booleans, null, objects, arrays) + non-numeric /
+    // non-finite strings ("NaN", "Infinity", "abc", "") + over-maximum.
+    // This is an API-level validation test; it does NOT prove React UI
+    // behavior. (zero + negative are covered separately by tests 4 + 5.)
+    const cases: Array<{ label: string; value: unknown }> = [
+      { label: 'true', value: true },
+      { label: 'false', value: false },
+      { label: 'null', value: null },
+      { label: '[]', value: [] },
+      { label: '{}', value: {} },
+      { label: '""', value: '' },
+      { label: '"NaN"', value: 'NaN' },
+      { label: '"Infinity"', value: 'Infinity' },
+      { label: '"abc"', value: 'abc' },
+      { label: 'over-maximum (1000001)', value: 1_000_001 },
+    ]
+    for (const c of cases) {
+      const res = await callPut({ rewardThreshold: c.value })
+      assert(res.status === 400, `6: PUT ${c.label} → 400 (got ${res.status})`)
+    }
     const settings = await db.appSettings.findUnique({ where: { businessId: TEST_BIZ_A } })
-    assert(settings?.rewardThreshold.toNumber() === 500, `6.5: DB unchanged=500 (got ${settings?.rewardThreshold.toNumber()})`)
+    assert(settings?.rewardThreshold.toNumber() === 500, `6: DB unchanged=500 after all invalid attempts (got ${settings?.rewardThreshold.toNumber()})`)
   }
 
   // ─── 7. Unauthorized role (STAFF) cannot update it ────────────────
@@ -342,10 +351,9 @@ async function main() {
   // ─── 13. 2-decimal server rounding: server returns the rounded value ──
   console.log('\n13. 2-decimal server rounding — server returns the rounded value')
   {
-    // §UI-SYNC: the UI's onBlur handler uses the apiPut RESPONSE body's
-    // rewardThreshold (not the local input) to set the local state. Verify
-    // the server returns the 2-dp-rounded value so the UI reflects the exact
-    // persisted value (e.g., 300.456 → 300.46).
+    // §API-CONTRACT: the PUT response body contains the server-persisted
+    // rewardThreshold, 2-dp-rounded (Prisma Decimal(18,2)). This is an
+    // API-level contract test (the response shape), NOT a React UI test.
     const res = await callPut({ rewardThreshold: 300.456 })
     assert(res.status === 200, `13.1: PUT 300.456 → 200 (got ${res.status})`)
     const body = await res.json()
@@ -357,9 +365,8 @@ async function main() {
   // ─── 14. Rejected invalid save preserves the previous saved value ────
   console.log('\n14. Rejected invalid save — previous server value preserved')
   {
-    // §UI-RESTORE: the UI's onBlur handler captures prevServerValue BEFORE
-    // the save + restores it on failure. Verify the server keeps the previous
-    // value after a rejected save (so the UI's restore target is correct).
+    // §API-CONTRACT: a rejected (invalid) save returns 400 AND leaves the
+    // persisted value unchanged. API-level contract test, NOT a React UI test.
     await callPut({ rewardThreshold: 500 }) // set a known server value
     const before = await db.appSettings.findUnique({ where: { businessId: TEST_BIZ_A } })
     assert(before?.rewardThreshold.toNumber() === 500, `14.1: prev server value=500 (got ${before?.rewardThreshold.toNumber()})`)
@@ -372,11 +379,9 @@ async function main() {
   // ─── 15. Refetch same AppSettings id — returns the updated threshold ──
   console.log('\n15. Refetch same AppSettings id — returns the updated reward threshold')
   {
-    // §ID-SYNC-BUG: the UI's id-change sync (settings.id !== lastSettingsId)
-    // is SKIPPED when refetching the same record (same id). The fix uses the
-    // apiPut response directly. Verify that a GET (refetch) after a save
-    // returns the SAME id + the UPDATED rewardThreshold — proving the
-    // apiPut response (not the id-change sync) is what the UI uses to update.
+    // §API-CONTRACT: a GET (refetch) after a save returns the SAME
+    // AppSettings id + the UPDATED rewardThreshold. API-level contract test
+    // (the GET response shape after a PUT), NOT a React UI test.
     const before = await callGetSettings()
     const beforeBody = await before.json()
     const settingsId = beforeBody.id
