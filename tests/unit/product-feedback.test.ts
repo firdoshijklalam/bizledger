@@ -28,6 +28,19 @@
  *   10. No cross-business access (Biz A cannot GET/PATCH Biz B's feedback → 404)
  *   11. Unrelated FollowUp behavior remains intact (manual FollowUp still works)
  *   12. Default feedbackDelayHours = 48 (from AppSettings default)
+ *   13. AppSettings PUT feedbackDelayHours validation (bonus round)
+ *
+ * §COVERAGE-COMPLETENESS (extends the above with the wired-in feature):
+ *   14. Request Feedback creation (POST creates feedback + FollowUp + verifies dedupKey)
+ *   15. Purchase/invoice-triggered creation (paid sales → auto; purchase/unpaid/walk-in → NOT)
+ *   16. Product-specific timing (product.feedbackDelayHours overrides global)
+ *   17. Global fallback timing (no product.feedbackDelayHours → AppSettings.feedbackDelayHours)
+ *   18. Timing override precedence (explicit delayHours > product.feedbackDelayHours > AppSettings.feedbackDelayHours)
+ *   19. Duplicate prevention under concurrent creation (two simultaneous creates → only one succeeds, P2002 caught)
+ *   20. Due/scheduled lifecycle (feedback with FollowUp dueAt in the past → followup-scheduler recognizes it)
+ *   21. Tenant isolation regression (section 2 still passes)
+ *   22. Complaint escalation regression (section 8 still passes)
+ *   23. Existing FollowUp regression (section 11 still passes)
  */
 /// <reference types="bun-types" />
 export {}
@@ -75,6 +88,11 @@ const feedbackRoute = await import('@/app/api/feedback/route')
 const feedbackItemRoute = await import('@/app/api/feedback/[id]/route')
 const feedbackComplaintRoute = await import('@/app/api/feedback/[id]/complaint/route')
 const followupsRoute = await import('@/app/api/followups/route')
+// §FEEDBACK-COMPLETENESS: also exercise the shared core + invoice-flow hook
+// + followup-scheduler integration directly (no HTTP self-call).
+const productFeedbackLib = await import('@/lib/product-feedback')
+const invoicesRoute = await import('@/app/api/invoices/route')
+const followupScheduler = await import('@/lib/followup-scheduler')
 
 async function setup() {
   await db.business.create({ data: { id: TEST_BIZ_A, name: 'PF Biz A', currency: 'INR' } })
@@ -567,6 +585,362 @@ async function main() {
     const cols = await db.$queryRaw`PRAGMA table_info(AppSettings)`
     const colNames = (cols as any[]).map((c) => c.name)
     assert(colNames.includes('feedbackDelayHours'), '13a: AppSettings.feedbackDelayHours column exists')
+  }
+
+  // ─── 14. Request Feedback creation (POST creates feedback + FollowUp + verifies dedupKey) ──
+  console.log('\n14. Request Feedback creation (POST creates feedback + FollowUp + verifies dedupKey)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+    const { res, body } = await createFeedback({ productId: productA1, invoiceId: invoiceA1, delayHours: 24 })
+    assert(res.status === 201, `14a: POST returns 201 (got ${res.status})`)
+    assert(body.id, '14b: feedback id returned')
+    assert(body.followUpId, '14c: followUpId linked')
+
+    // §DEDUP-KEY: the persisted record must have dedupKey set to the
+    // deterministic [businessId, partyId, invoiceId, productId].join('|').
+    const pf = await db.productFeedback.findUnique({ where: { id: body.id }, select: { dedupKey: true, status: true } })
+    assert(pf !== null, '14d: feedback record persisted')
+    assert(pf!.dedupKey !== null && pf!.dedupKey !== '', '14e: dedupKey is non-empty')
+    const expectedKey = [TEST_BIZ_A, partyA1, invoiceA1, productA1].join('|')
+    assert(pf!.dedupKey === expectedKey, `14f: dedupKey = expected tuple (got ${pf!.dedupKey})`)
+
+    // §DEDUP-KEY-FOR-NULLS: a request without invoiceId/productId must use ''
+    // for those slots in the dedupKey (so the partial unique index treats
+    // null and '' as the same key — fully race-safe for ALL tuples).
+    const { body: body2 } = await createFeedback({ delayHours: 12 }) // no invoiceId/productId
+    const pf2 = await db.productFeedback.findUnique({ where: { id: body2.id }, select: { dedupKey: true } })
+    const expectedKey2 = [TEST_BIZ_A, partyA1, '', ''].join('|')
+    assert(pf2!.dedupKey === expectedKey2, `14g: null invoiceId/productId → '' in dedupKey (got ${pf2!.dedupKey})`)
+
+    // §LINKED-FOLLOWUP-INTACT: still creates type=product_feedback FollowUp.
+    const fu = await db.followUp.findUnique({ where: { id: body.followUpId }, select: { type: true, status: true, dueAt: true } })
+    assert(fu!.type === 'product_feedback', `14h: linked FollowUp.type=product_feedback (got ${fu!.type})`)
+    assert(fu!.status === 'PENDING', `14i: linked FollowUp.status=PENDING (got ${fu!.status})`)
+    assert(fu!.dueAt !== null, '14j: linked FollowUp.dueAt set to requestedAt')
+  }
+
+  // ─── 15. Purchase/invoice-triggered creation ─────────────────────
+  console.log('\n15. Purchase/invoice-triggered creation (paid sales → auto; purchase/unpaid → NOT)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §PAID-SALES: paid sales invoice WITH a party → feedback auto-created.
+    await invoicesRoute.maybeCreateProductFeedbackForInvoice(TEST_BIZ_A, {
+      id: invoiceA1, status: 'paid', partyId: partyA1, type: 'sales',
+    })
+    const fbAfter1 = await db.productFeedback.findMany({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: invoiceA1 },
+      select: { id: true, status: true },
+    })
+    assert(fbAfter1.length === 1, `15a: paid sales invoice → 1 feedback auto-created (got ${fbAfter1.length})`)
+    assert(fbAfter1[0].status === 'scheduled', `15b: status=scheduled (got ${fbAfter1[0].status})`)
+
+    // §IDEMPOTENT: a second call for the same invoice → no new feedback (dedup).
+    await invoicesRoute.maybeCreateProductFeedbackForInvoice(TEST_BIZ_A, {
+      id: invoiceA1, status: 'paid', partyId: partyA1, type: 'sales',
+    })
+    const fbAfter2 = await db.productFeedback.findMany({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: invoiceA1 },
+      select: { id: true },
+    })
+    assert(fbAfter2.length === 1, `15c: idempotent — second call does NOT create a duplicate (got ${fbAfter2.length})`)
+
+    // §PURCHASE-INVOICE: a 'purchase' invoice → NOT created (feedback is for buyers).
+    // §NOTE: don't delete invoiceA1 — it's still needed by sections 19 + 22
+    // below. Create a SEPARATE purchase invoice instead.
+    const purchaseInv = await db.invoice.create({
+      data: { businessId: TEST_BIZ_A, partyId: partyA1, type: 'purchase', status: 'paid', subtotal: 50, discountAmount: 0, grandTotal: 50, gstAmount: 0, invoiceNumber: 'INV-PF-PUR-' + Date.now() },
+    })
+    await invoicesRoute.maybeCreateProductFeedbackForInvoice(TEST_BIZ_A, {
+      id: purchaseInv.id, status: 'paid', partyId: partyA1, type: 'purchase',
+    })
+    const fbAfterPur = await db.productFeedback.findMany({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: purchaseInv.id },
+      select: { id: true },
+    })
+    assert(fbAfterPur.length === 0, `15d: purchase invoice → NOT created (got ${fbAfterPur.length})`)
+
+    // §UNPAID: an unpaid sales invoice → NOT created.
+    const unpaidInv = await db.invoice.create({
+      data: { businessId: TEST_BIZ_A, partyId: partyA1, type: 'sales', status: 'unpaid', subtotal: 50, discountAmount: 0, grandTotal: 50, gstAmount: 0, invoiceNumber: 'INV-PF-UNP-' + Date.now() },
+    })
+    await invoicesRoute.maybeCreateProductFeedbackForInvoice(TEST_BIZ_A, {
+      id: unpaidInv.id, status: 'unpaid', partyId: partyA1, type: 'sales',
+    })
+    const fbAfterUnp = await db.productFeedback.findMany({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: unpaidInv.id },
+      select: { id: true },
+    })
+    assert(fbAfterUnp.length === 0, `15e: unpaid sales invoice → NOT created (got ${fbAfterUnp.length})`)
+
+    // §WALK-IN: a paid sales invoice with NO partyId → NOT created (no party
+    // to ask feedback from).
+    const walkinInv = await db.invoice.create({
+      data: { businessId: TEST_BIZ_A, partyId: null, type: 'sales', status: 'paid', subtotal: 50, discountAmount: 0, grandTotal: 50, gstAmount: 0, invoiceNumber: 'INV-PF-WLK-' + Date.now() },
+    })
+    await invoicesRoute.maybeCreateProductFeedbackForInvoice(TEST_BIZ_A, {
+      id: walkinInv.id, status: 'paid', partyId: null, type: 'sales',
+    })
+    const fbAfterWlk = await db.productFeedback.findMany({
+      where: { businessId: TEST_BIZ_A, invoiceId: walkinInv.id },
+      select: { id: true },
+    })
+    assert(fbAfterWlk.length === 0, `15f: walk-in (no party) sales invoice → NOT created (got ${fbAfterWlk.length})`)
+  }
+
+  // ─── 16. Product-specific timing override ───────────────────────
+  console.log('\n16. Product-specific timing (product.feedbackDelayHours overrides global)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §SET-PRODUCT-OVERRIDE: this product's feedbackDelayHours = 12 (over the
+    // global default of 48). Server resolves via resolveEffectiveFeedbackDelay.
+    await db.product.update({ where: { id: productA1 }, data: { feedbackDelayHours: 12 } })
+
+    const before = Date.now()
+    // §NO-EXPLICIT-DELAY: omit delayHours so the lib fetches Product + AppSettings.
+    const result = await productFeedbackLib.createProductFeedbackRecord(db, {
+      businessId: TEST_BIZ_A,
+      partyId: partyA1,
+      productId: productA1,
+      actorUserId: testUser.id,
+    })
+    assert(result.created === true, '16a: shared-core create returns created=true')
+    const r16: any = result
+    const requestedAtMs = new Date(r16.feedback.requestedAt).getTime()
+    const expectedMs = before + 12 * 60 * 60 * 1000 // 12h, not 48h
+    assert(Math.abs(requestedAtMs - expectedMs) < 5000, `16b: requestedAt ≈ now + 12h (product override; delta=${Math.abs(requestedAtMs - expectedMs)}ms)`)
+
+    // §RESET: clear the product override for subsequent tests.
+    await db.product.update({ where: { id: productA1 }, data: { feedbackDelayHours: null } })
+  }
+
+  // ─── 17. Global fallback timing ─────────────────────────────────
+  console.log('\n17. Global fallback timing (no product.feedbackDelayHours → AppSettings.feedbackDelayHours)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §NO-PRODUCT-OVERRIDE: product.feedbackDelayHours IS null (default). The
+    // lib should fall back to AppSettings.feedbackDelayHours = 48 (the schema
+    // default set in setup()).
+    const prod = await db.product.findUnique({ where: { id: productA1 }, select: { feedbackDelayHours: true } })
+    assert(prod!.feedbackDelayHours === null, '17a: precondition — product.feedbackDelayHours IS null')
+
+    // §SET-GLOBAL-CUSTOM: bump AppSettings.feedbackDelayHours to 72 to make
+    // the fallback detectable (not the default 48).
+    await db.appSettings.update({ where: { businessId: TEST_BIZ_A }, data: { feedbackDelayHours: 72 } })
+
+    const before = Date.now()
+    const result = await productFeedbackLib.createProductFeedbackRecord(db, {
+      businessId: TEST_BIZ_A,
+      partyId: partyA1,
+      productId: productA1,
+      actorUserId: testUser.id,
+    })
+    assert(result.created === true, '17b: shared-core create returns created=true')
+    const r17: any = result
+    const requestedAtMs = new Date(r17.feedback.requestedAt).getTime()
+    const expectedMs = before + 72 * 60 * 60 * 1000 // 72h, the global default
+    assert(Math.abs(requestedAtMs - expectedMs) < 5000, `17c: requestedAt ≈ now + 72h (global fallback; delta=${Math.abs(requestedAtMs - expectedMs)}ms)`)
+
+    // §RESET: restore the AppSettings default for subsequent tests.
+    await db.appSettings.update({ where: { businessId: TEST_BIZ_A }, data: { feedbackDelayHours: 48 } })
+  }
+
+  // ─── 18. Timing override precedence ─────────────────────────────
+  console.log('\n18. Timing override precedence (explicit > product > AppSettings)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §SETUP: global = 72 (high), product = 12 (low), explicit = 6 (lowest).
+    // Effective should be 6 (explicit wins over product wins over global).
+    await db.appSettings.update({ where: { businessId: TEST_BIZ_A }, data: { feedbackDelayHours: 72 } })
+    await db.product.update({ where: { id: productA1 }, data: { feedbackDelayHours: 12 } })
+
+    // §EXPLICIT-WINS: passing delayHours=6 should override BOTH.
+    const before = Date.now()
+    const result = await productFeedbackLib.createProductFeedbackRecord(db, {
+      businessId: TEST_BIZ_A,
+      partyId: partyA1,
+      productId: productA1,
+      delayHours: 6, // explicit override
+      actorUserId: testUser.id,
+    })
+    assert(result.created === true, '18a: shared-core create returns created=true')
+    const r18: any = result
+    const requestedAtMs = new Date(r18.feedback.requestedAt).getTime()
+    const expectedMs = before + 6 * 60 * 60 * 1000 // 6h — explicit wins
+    assert(Math.abs(requestedAtMs - expectedMs) < 5000, `18b: explicit delayHours=6 overrides product=12 + global=72 (delta=${Math.abs(requestedAtMs - expectedMs)}ms)`)
+
+    // §PRODUCT-NO-EXPLICIT: now without explicit, product (12) should win over global (72).
+    await cleanupFeedbackBetweenTests()
+    const before2 = Date.now()
+    const result2 = await productFeedbackLib.createProductFeedbackRecord(db, {
+      businessId: TEST_BIZ_A,
+      partyId: partyA1,
+      productId: productA1,
+      actorUserId: testUser.id,
+    })
+    const r18b: any = result2
+    const requestedAtMs2 = new Date(r18b.feedback.requestedAt).getTime()
+    const expectedMs2 = before2 + 12 * 60 * 60 * 1000 // 12h — product wins
+    assert(Math.abs(requestedAtMs2 - expectedMs2) < 5000, `18c: product=12 overrides global=72 (delta=${Math.abs(requestedAtMs2 - expectedMs2)}ms)`)
+
+    // §RESET for subsequent tests.
+    await db.appSettings.update({ where: { businessId: TEST_BIZ_A }, data: { feedbackDelayHours: 48 } })
+    await db.product.update({ where: { id: productA1 }, data: { feedbackDelayHours: null } })
+  }
+
+  // ─── 19. Concurrent duplicate-prevention (P2002 race-safe) ───────
+  console.log('\n19. Duplicate prevention under concurrent creation (two simultaneous creates → one succeeds)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §PARALLEL: fire TWO creates simultaneously with the SAME tuple. Both
+    // pass the application-level findFirst (race window). The DB partial
+    // unique index on (dedupKey) WHERE status in pending/scheduled is the
+    // authoritative guard — only ONE insert succeeds, the other hits P2002
+    // (caught by the lib + returned as { created: false, duplicate: true }).
+    const [r1, r2] = await Promise.all([
+      productFeedbackLib.createProductFeedbackRecord(db, {
+        businessId: TEST_BIZ_A,
+        partyId: partyA1,
+        productId: productA1,
+        invoiceId: invoiceA1,
+        delayHours: 12,
+        actorUserId: testUser.id,
+      }),
+      productFeedbackLib.createProductFeedbackRecord(db, {
+        businessId: TEST_BIZ_A,
+        partyId: partyA1,
+        productId: productA1,
+        invoiceId: invoiceA1,
+        delayHours: 12,
+        actorUserId: testUser.id,
+      }),
+    ])
+
+    // §EXACTLY-ONE-SUCCESS: one created=true, the other created=false.
+    const successes = [r1, r2].filter((r) => r.created === true).length
+    const dups = [r1, r2].filter((r) => r.created === false).length
+    assert(successes === 1, `19a: exactly one create succeeds (got ${successes})`)
+    assert(dups === 1, `19b: exactly one create returns duplicate (got ${dups})`)
+
+    // §DB-STATE: only ONE ProductFeedback record persisted for this tuple.
+    const all = await db.productFeedback.findMany({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: invoiceA1, productId: productA1 },
+      select: { id: true, status: true },
+    })
+    assert(all.length === 1, `19c: only 1 ProductFeedback persisted (got ${all.length})`)
+    assert(all[0].status === 'scheduled', `19d: status=scheduled (got ${all[0].status})`)
+  }
+
+  // ─── 20. Due/scheduled lifecycle (followup-scheduler recognizes feedback) ──
+  console.log('\n20. Due/scheduled lifecycle (FollowUp dueAt in past → scheduler recognizes)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §CREATE: a feedback record. Its linked FollowUp has dueAt=requestedAt
+    // (future). Scheduler's processOverdueReminders should NOT pick it up yet.
+    const { body } = await createFeedback({ productId: productA1, delayHours: 12 })
+    const fuBefore = await db.followUp.findUnique({ where: { id: body.followUpId }, select: { id: true, status: true, dueAt: true } })
+    assert(fuBefore!.status === 'PENDING', `20a: linked FollowUp.status=PENDING (got ${fuBefore!.status})`)
+
+    // §FORCE-OVERDUE: manually move the FollowUp's dueAt into the past so the
+    // scheduler classifies it as overdue. The scheduler scans PENDING +
+    // dueAt < now + snoozedUntil IS NULL.
+    const past = new Date(Date.now() - 60 * 1000) // 1 min ago
+    await db.followUp.update({ where: { id: body.followUpId }, data: { dueAt: past } })
+
+    // §CLEAR-NOTIFS: delete any stale overdue notifications for this followup
+    // so the deduped count starts at 0.
+    await db.notification.deleteMany({ where: { followUpId: body.followUpId } })
+
+    // §SCHEDULER-RUN: invoke processOverdueReminders directly (no HTTP cron).
+    const result = await followupScheduler.processOverdueReminders(50)
+    assert(result.scanned >= 1, `20b: scheduler scanned at least 1 overdue followUp (got ${result.scanned})`)
+    assert(result.created >= 1, `20c: scheduler created at least 1 overdue notification (got ${result.created})`)
+
+    // §VERIFY-LINKED: the FollowUp for this feedback was scanned + got an
+    // overdue notification. (The deduped count may include other follow-ups
+    // from prior tests if not fully cleared, so we focus on OUR followup.)
+    const notifs = await db.notification.findMany({
+      where: { followUpId: body.followUpId },
+      select: { id: true, type: true },
+    })
+    assert(notifs.length >= 1, `20d: linked FollowUp got ≥1 notification (got ${notifs.length})`)
+    assert(notifs.some((n) => n.type === 'followup_overdue'), '20e: notification type=followup_overdue')
+  }
+
+  // ─── 21. Tenant isolation (regression — section 2 still passes) ──
+  console.log('\n21. Tenant isolation regression (Biz A cannot see Biz B\'s feedback)')
+  {
+    await cleanupFeedbackBetweenTests()
+    // §BIZ-B-CREATES: Biz B schedules a feedback request.
+    authOverride = testUserB
+    const { body: fbB } = await createFeedback({ partyId: partyB1, productId: productB1, delayHours: 12 })
+    assert(fbB.id, '21a: Biz B feedback created')
+
+    // §BIZ-A-LISTS: Biz A's GET list must NOT contain Biz B's record.
+    authOverride = testUser
+    const res = await feedbackRoute.GET(makeGet('http://localhost/api/feedback'))
+    const list = await res.json()
+    assert(res.status === 200, `21b: GET returns 200 (got ${res.status})`)
+    assert(list.items.every((f: any) => f.businessId === TEST_BIZ_A), '21c: all items belong to Biz A')
+    assert(!list.items.some((f: any) => f.id === fbB.id), '21d: Biz B feedback NOT in Biz A list')
+  }
+
+  // ─── 22. Complaint escalation (regression — section 8 still passes) ──
+  console.log('\n22. Complaint escalation regression (low-rating feedback → Complaint)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+    const { body: pf } = await createFeedback({ productId: productA1, invoiceId: invoiceA1, delayHours: 12 })
+    // §SUBMIT-LOW-RATING: rate=2 → typical escalation trigger.
+    await feedbackItemRoute.PATCH(
+      makePatch(`http://localhost/api/feedback/${pf.id}`, { status: 'submitted', rating: 2, comment: 'Wrong item' }),
+      { params: Promise.resolve({ id: pf.id }) },
+    )
+    const res = await feedbackComplaintRoute.POST(
+      makePost(`http://localhost/api/feedback/${pf.id}/complaint`, { title: 'Damaged' }),
+      { params: Promise.resolve({ id: pf.id }) },
+    )
+    assert(res.status === 201, `22a: POST /complaint → 201 (got ${res.status})`)
+    const body = await res.json()
+    assert(body.complaint.sourceType === 'FEEDBACK', `22b: sourceType=FEEDBACK (got ${body.complaint.sourceType})`)
+    assert(body.complaint.sourceId === pf.id, '22c: sourceId = productFeedbackId')
+    assert(body.complaint.productFeedbackId === pf.id, '22d: productFeedbackId FK set')
+  }
+
+  // ─── 23. Existing FollowUp regression (section 11 still passes) ──
+  console.log('\n23. Existing FollowUp regression (manual FollowUp still works)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+    const res = await followupsRoute.POST(makePost('http://localhost/api/followups', {
+      partyId: partyA1,
+      title: 'Manual follow-up (completeness regression)',
+      dueAt: new Date(Date.now() + 86400000).toISOString(),
+      type: 'manual',
+    }))
+    assert(res.status === 201, `23a: manual FollowUp POST → 201 (got ${res.status})`)
+    const body = await res.json()
+    assert(body.id, '23b: followUp id returned')
+    assert(body.type === 'manual', `23c: type=manual (got ${body.type})`)
+    assert(body.businessId === TEST_BIZ_A, '23d: businessId = Biz A')
+
+    // §CREATED-EVENT: still fires for manual follow-ups (unaffected by the
+    // feedback-completeness changes to the FollowUp schema).
+    const events = await db.followUpEvent.findMany({ where: { followUpId: body.id } })
+    assert(events.length === 1, `23e: 1 CREATED event (got ${events.length})`)
+    assert(events[0].eventType === 'CREATED', '23f: event type=CREATED')
   }
 
   await cleanup()

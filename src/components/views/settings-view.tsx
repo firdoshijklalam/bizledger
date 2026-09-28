@@ -11,7 +11,7 @@ import {
   Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette, Mic, Keyboard,
   AlertCircle, CheckCircle2, QrCode, ChevronDown, ChevronUp, Lock, Fingerprint,
   Store, MapPin, Navigation, Star, TrendingUp, ShoppingCart, Crown, ExternalLink,
-  Smartphone, Radio, Globe, Server, Ban, Cloud, User, Volume2, LogOut, Loader2, Gift,
+  Smartphone, Radio, Globe, Server, Ban, Cloud, User, Volume2, LogOut, Loader2, Gift, Clock,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -125,6 +125,13 @@ export function SettingsView() {
   // local overwrite).
   const [rewardThreshold, setRewardThreshold] = useState(400)
   const [rewardThresholdSaving, setRewardThresholdSaving] = useState(false)
+  // §FEEDBACK-DELAY-HOURS: configurable delay (hours) before requesting
+  // product feedback after a purchase. Synced from settings.feedbackDelayHours
+  // (default 48). Saved via PUT /api/app-settings on blur; the response
+  // re-syncs the value (no stale local overwrite). Mirrors the rewardThreshold
+  // server-sync fix exactly.
+  const [feedbackDelayHours, setFeedbackDelayHours] = useState(48)
+  const [feedbackDelaySaving, setFeedbackDelaySaving] = useState(false)
   const [lastSettingsId, setLastSettingsId] = useState<string | null>(null)
   if (settings && settings.id !== lastSettingsId) {
     setLastSettingsId(settings.id)
@@ -142,6 +149,7 @@ export function SettingsView() {
       defaulterRegistryEnabled: (settings as any).defaulterRegistryEnabled ?? true,
     })
     setRewardThreshold((settings as any).rewardThreshold ?? 400)
+    setFeedbackDelayHours((settings as any).feedbackDelayHours ?? 48)
     setPrefs({
       notificationsEnabled: settings.notificationsEnabled,
       autoBackupEnabled: settings.autoBackupEnabled,
@@ -1276,6 +1284,67 @@ export function SettingsView() {
                   disabled={rewardThresholdSaving}
                   min={1}
                   max={1000000}
+                />
+              </div>
+            </Card>
+
+            {/* §FEEDBACK-DELAY-HOURS: Product Feedback Delay configuration.
+                Mirrors the reward-threshold Card pattern exactly — same
+                layout, same server-sync fix (apiPut → response value
+                replaces local input → refetch + sync). Range 1-168 hours. */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-violet-600" />
+                <h3 className="text-sm font-semibold">Feedback Delay (hours)</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Hours after a purchase before requesting product feedback (1–168).
+                A per-product override on the Product profile takes precedence over
+                this global default at request-creation time.
+              </p>
+              <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-muted/30">
+                <div className="flex items-start gap-2 flex-1 min-w-0">
+                  <Clock className="w-3.5 h-3.5 text-violet-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium">Feedback Delay (hours)</p>
+                    <p className="text-[10px] text-muted-foreground">Delay before a post-purchase feedback request (1–168 hours)</p>
+                  </div>
+                </div>
+                <Input
+                  type="number"
+                  value={feedbackDelayHours}
+                  onChange={(e) => setFeedbackDelayHours(Number(e.target.value))}
+                  onBlur={async () => {
+                    // §SERVER-SYNC-FIX: capture the current server-saved value
+                    // so we can restore it if the save is rejected. After a
+                    // successful save, use the server-RETURNED value (from the
+                    // apiPut response body) to update the local state — NOT
+                    // the local input value, which may differ from the
+                    // server's persisted value. Mirrors the rewardThreshold
+                    // server-sync fix exactly.
+                    const prevServerValue = (settings as any).feedbackDelayHours ?? 48
+                    setFeedbackDelaySaving(true)
+                    try {
+                      const updated = await apiPut('/api/app-settings', { feedbackDelayHours })
+                      const serverValue = (updated as any)?.feedbackDelayHours
+                      if (typeof serverValue === 'number' && !Number.isNaN(serverValue)) {
+                        setFeedbackDelayHours(serverValue)
+                      }
+                      toast.success('Feedback delay updated')
+                      await refetchSettings()
+                    } catch (e: any) {
+                      toast.error(e?.message || 'Invalid feedback delay hours')
+                      setFeedbackDelayHours(prevServerValue)
+                      await refetchSettings()
+                    } finally {
+                      setFeedbackDelaySaving(false)
+                    }
+                  }}
+                  className="w-28 h-9 text-xs"
+                  inputMode="numeric"
+                  disabled={feedbackDelaySaving}
+                  min={1}
+                  max={168}
                 />
               </div>
             </Card>

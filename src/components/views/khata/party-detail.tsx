@@ -39,6 +39,11 @@ import { PartyLifetimeProfitSection } from './party-lifetime-profit-section'
 import { PartyTimelineSection } from './party-timeline-section'
 // §REWARDS: Profit-based loyalty reward cycle.
 import { PartyRewardsSection } from './party-rewards-section'
+// §PRODUCT-FEEDBACK: first-class customer feedback request domain. Renders
+// after rewards so a merchant reviewing a customer's relationship sees
+// rewards first, then product feedback history + the "Request Feedback"
+// action. Customers only (feedback is for buyers, not suppliers).
+import { PartyFeedbackSection } from './party-feedback-section'
 import {
   Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -414,6 +419,14 @@ export function PartyDetail({ partyId }: { partyId: string }) {
           threshold + Give Reward action when unlocked. */}
       {isCustomer && (
         <PartyRewardsSection partyId={partyId} />
+      )}
+
+      {/* §PRODUCT-FEEDBACK: post-purchase review requests for this customer.
+          Shows pending/submitted counts, the feedback list (rating, comment,
+          status), and the "Request Feedback" action that schedules a new
+          request. Customers only — feedback is for buyers, not suppliers. */}
+      {isCustomer && (
+        <PartyFeedbackSection partyId={partyId} partyName={data.name} />
       )}
 
       {/* Transactions — multi-select + share (PRD Part 6 §2 + Part 7 §4) */}

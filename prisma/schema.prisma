@@ -358,6 +358,10 @@ model Product {
   // §3: Cross-lingual phonetic search tags (JSON array of English phonetic variants)
   // e.g. "উৎসব" → ["utsab","utshob","utsob","উৎসব"]
   searchTags        String? // JSON array string
+  // §PRODUCT-FEEDBACK-DELAY: optional per-product override for the global
+  // AppSettings.feedbackDelayHours. null → use the business-wide global default.
+  // When set (1–168), this product's feedback requests use this delay instead.
+  feedbackDelayHours Int?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -1794,6 +1798,12 @@ model ProductFeedback {
   rating          Int?      // 1-5, null until submitted
   comment         String?
   metadata        String?   // JSON string for attachments/extra fields
+  // §DEDUP-KEY: deterministic key for race-safe duplicate prevention. Computed
+  // from [businessId, partyId, invoiceId ?? '', productId ?? ''].join('|').
+  // A partial unique index (WHERE status in pending/scheduled) enforces at-most-
+  // one ACTIVE feedback per tuple — application-level findFirst is just an
+  // early-exit UX optimization, the DB index is the real guard.
+  dedupKey        String?
   requestedAt     DateTime? // when the request is scheduled to be sent
   submittedAt     DateTime? // when the customer submitted feedback
   expiresAt       DateTime? // when the request expires if not submitted

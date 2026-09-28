@@ -6,19 +6,15 @@ import { requireAuth } from '@/lib/auth/session'
 import {
   assertPartyBelongsToBusiness,
   assertInvoiceBelongsToBusiness,
-  generateFollowUpNumber,
-  createdEvent,
   FollowUpDomainError,
 } from '@/lib/followups'
 import {
   FEEDBACK_STATUSES,
-  FEEDBACK_ACTIVE_STATUSES,
   FEEDBACK_DELAY_DEFAULT_HOURS,
   FEEDBACK_DELAY_MIN_HOURS,
   FEEDBACK_DELAY_MAX_HOURS,
-  calculateFeedbackRequestTime,
-  calculateFeedbackExpiryTime,
   assertProductBelongsToBusiness,
+  createProductFeedbackRecord,
   ProductFeedbackDomainError,
 } from '@/lib/product-feedback'
 
@@ -32,6 +28,11 @@ import {
 // atomically inside one $transaction. The FollowUp is the reminder that will
 // be due at the requestedAt time. The link ProductFeedback.followUpId is set
 // AFTER both records are created (chicken-and-egg).
+//
+// §SHARED-CORE: the actual create logic lives in
+// src/lib/product-feedback.ts:createProductFeedbackRecord so the same logic
+// is invoked by both this route AND the invoice flow (fire-and-forget). This
+// avoids an HTTP self-call from the invoice route to the feedback route.
 
 // GET /api/feedback — list feedback for the authenticated business
 // Query params: ?partyId&productId&invoiceId&status&limit&offset
@@ -94,11 +95,17 @@ export async function GET(req: NextRequest) {
 //
 // §DELAY-HOURS: optional override for the AppSettings.feedbackDelayHours
 // default. Range 1-168. If omitted, falls back to the business's AppSettings
-// value (default 48h on schema).
+// value (default 48h on schema). If a productId is provided AND that Product
+// has a non-null feedbackDelayHours, that product-specific value wins over
+// the global default. Precedence:
+//   explicit delayHours > Product.feedbackDelayHours > AppSettings.feedbackDelayHours
 //
 // §DUPLICATE-PREVENTION: at most one ProductFeedback with status in
 // (pending, scheduled) for the same (businessId, partyId, invoiceId, productId)
-// tuple. A second POST for the same tuple returns 409 Conflict.
+// tuple. The application-level findFirst is an early-exit UX optimization; the
+// real guard is the partial unique index on (dedupKey) WHERE status in
+// (pending, scheduled). Two concurrent creates race past the findFirst; only
+// one insert succeeds, the other hits P2002 (caught + returned as 409).
 export async function POST(req: NextRequest) {
   try {
     const user = await requireAuth()
@@ -116,7 +123,7 @@ export async function POST(req: NextRequest) {
     // §DELAY-HOURS-VALIDATION: optional override. Accept finite numbers OR
     // non-empty numeric strings (HTML <input type=number> sends strings).
     // Reject booleans/null/objects/arrays/non-numeric/over-max/under-min.
-    let delayHours: number = FEEDBACK_DELAY_DEFAULT_HOURS
+    let explicitDelayHours: number | undefined
     if (body.delayHours !== undefined && body.delayHours !== null) {
       const v = body.delayHours
       const isAcceptableType = typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')
@@ -133,19 +140,7 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         )
       }
-      delayHours = n
-    } else {
-      // §FALLBACK: load the business's AppSettings.feedbackDelayHours (default
-      // 48 from the schema). If settings don't exist yet, the schema default
-      // applies — we still need the row to exist for the relation; if it
-      // doesn't, we use FEEDBACK_DELAY_DEFAULT_HOURS.
-      const settings = await db.appSettings.findUnique({
-        where: { businessId: user.businessId },
-        select: { feedbackDelayHours: true },
-      })
-      if (settings?.feedbackDelayHours) {
-        delayHours = settings.feedbackDelayHours
-      }
+      explicitDelayHours = n
     }
 
     // §TENANT-OWNERSHIP-VALIDATION: verify all referenced entities belong to
@@ -166,108 +161,27 @@ export async function POST(req: NextRequest) {
       throw e
     }
 
-    // §DUPLICATE-PREVENTION: check if an ACTIVE feedback request already
-    // exists for the same (businessId, partyId, invoiceId, productId) tuple.
-    // Active = status in (pending, scheduled). Submitted/skipped/expired
-    // records do NOT block a new request (the customer can be re-asked).
-    const dupWhere: any = {
+    // §SHARED-CORE: delegate to the canonical creation function (also used by
+    // the invoice flow). It resolves the effective delay (explicit > product >
+    // global), computes dedupKey, does the atomic transaction, catches P2002.
+    const result = await createProductFeedbackRecord(db, {
       businessId: user.businessId,
       partyId: body.partyId,
-      status: { in: FEEDBACK_ACTIVE_STATUSES },
-    }
-    if (body.invoiceId) dupWhere.invoiceId = body.invoiceId
-    else dupWhere.invoiceId = null
-    if (body.productId) dupWhere.productId = body.productId
-    else dupWhere.productId = null
-    const existing = await db.productFeedback.findFirst({ where: dupWhere, select: { id: true } })
-    if (existing) {
-      return NextResponse.json(
-        { error: 'An active feedback request already exists for this party/invoice/product tuple' },
-        { status: 409 },
-      )
-    }
-
-    // §TIMING: requestedAt = now + delayHours; expiresAt = requestedAt + 30 days.
-    const now = new Date()
-    const requestedAt = calculateFeedbackRequestTime(now, delayHours)
-    const expiresAt = calculateFeedbackExpiryTime(requestedAt)
-
-    // §STATUS: 'scheduled' if requestedAt is in the future; 'pending' if
-    // immediate (delayHours = 0 would mean now — but min is 1h, so this is
-    // almost always 'scheduled'). The status will transition to 'pending'
-    // when the scheduler fires at requestedAt (out of scope for this PR).
-    const status = requestedAt > now ? 'scheduled' : 'pending'
-
-    // §ATOMIC-CREATE: ProductFeedback + FollowUp + CREATED event + link
-    // ProductFeedback.followUpId all in ONE transaction. If any step fails,
-    // all roll back.
-    // §CHICKEN-AND-EGG: create ProductFeedback first (followUpId=null), then
-    // create the FollowUp (sourceId=productFeedback.id), then UPDATE
-    // ProductFeedback.followUpId = followUp.id inside the same $transaction.
-    const result = await db.$transaction(async (tx) => {
-      const productFeedback = await tx.productFeedback.create({
-        data: {
-          businessId: user.businessId,
-          partyId: body.partyId,
-          invoiceId: body.invoiceId || null,
-          productId: body.productId || null,
-          followUpId: null, // §LINKED-AFTER: set below once FollowUp exists
-          status,
-          requestedAt,
-          expiresAt,
-        },
-      })
-
-      // §GENERATE-FOLLOWUP-NUMBER: atomic per-business sequence.
-      const followUpNumber = await generateFollowUpNumber(tx, user.businessId)
-
-      // §CREATE-FOLLOWUP: type='product_feedback', sourceType='SYSTEM_CREATED',
-      // sourceId=productFeedback.id (application-level ref — no DB FK).
-      // dueAt=requestedAt — when the reminder should fire.
-      const followUp = await tx.followUp.create({
-        data: {
-          businessId: user.businessId,
-          followUpNumber,
-          partyId: body.partyId,
-          type: 'product_feedback',
-          sourceType: 'SYSTEM_CREATED',
-          sourceId: productFeedback.id,
-          title: `Request product feedback from ${body.partyId}`,
-          description: 'Automatically created feedback reminder. Submit a rating + comment when the customer responds.',
-          status: 'PENDING',
-          priority: 'MEDIUM',
-          createdById: user.id, // §SERVER-DERIVED: never from client
-          dueAt: requestedAt,
-          relatedInvoiceId: body.invoiceId || null,
-          relatedProductId: body.productId || null,
-        },
-      })
-
-      // §CREATED-EVENT: append-only audit trail. Actor = authenticated user.
-      await tx.followUpEvent.create({
-        data: createdEvent({
-          businessId: user.businessId,
-          followUpId: followUp.id,
-          actor: user.id,
-        }),
-      })
-
-      // §LINK: now that the FollowUp exists, set ProductFeedback.followUpId.
-      const updated = await tx.productFeedback.update({
-        where: { id: productFeedback.id },
-        data: { followUpId: followUp.id },
-        include: {
-          party: { select: { id: true, name: true, phone: true } },
-          product: { select: { id: true, name: true, sku: true } },
-          invoice: { select: { id: true, invoiceNumber: true, grandTotal: true } },
-          followUp: { select: { id: true, followUpNumber: true, status: true, dueAt: true } },
-        },
-      })
-
-      return updated
+      invoiceId: body.invoiceId || null,
+      productId: body.productId || null,
+      delayHours: explicitDelayHours,
+      actorUserId: user.id,
     })
 
-    return NextResponse.json(serializeDecimals(result), { status: 201 })
+    if (result.created) {
+      return NextResponse.json(serializeDecimals(result.feedback), { status: 201 })
+    }
+
+    // §DUPLICATE: an active feedback request already exists for this tuple.
+    return NextResponse.json(
+      { error: 'An active feedback request already exists for this party/invoice/product tuple' },
+      { status: 409 },
+    )
   } catch (e) {
     return apiError(e, 'Failed to create product feedback')
   }

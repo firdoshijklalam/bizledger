@@ -1,4 +1,11 @@
 import type { PrismaClient } from '@prisma/client'
+import { db as defaultDb } from '@/lib/db'
+import {
+  generateFollowUpNumber,
+  createdEvent,
+  assertPartyBelongsToBusiness,
+  assertInvoiceBelongsToBusiness,
+} from '@/lib/followups'
 
 // §PRODUCT-FEEDBACK-DOMAIN: Pure domain/service layer for the Product Feedback
 // system. Mirrors the architecture of src/lib/followups.ts — canonical
@@ -195,3 +202,273 @@ export async function assertProductFeedbackBelongsToBusiness(
 // §ACTIVE-STATUSES: statuses where a feedback request is still open (not yet
 // submitted/skipped/expired). Used for duplicate-prevention queries.
 export const FEEDBACK_ACTIVE_STATUSES: FeedbackStatus[] = ['pending', 'scheduled']
+
+// ════════════════════════════════════════════════════════════════════════
+// §6 EFFECTIVE DELAY RESOLUTION — pure precedence helper
+// ════════════════════════════════════════════════════════════════════════
+//
+// resolveEffectiveFeedbackDelay: pure helper that picks the effective delay
+// (in hours) for a feedback request given:
+//   - productDelayHours: optional per-product override (Product.feedbackDelayHours)
+//   - globalDelayHours:  the business-wide AppSettings.feedbackDelayHours
+//
+// §PRECEDENCE:
+//   1. If productDelayHours is set AND a positive finite number, use it
+//      (clamped to [FEEDBACK_DELAY_MIN_HOURS, FEEDBACK_DELAY_MAX_HOURS]).
+//   2. Otherwise fall back to globalDelayHours (the AppSettings default).
+//
+// §NOTE: explicit delayHours passed in the POST body ALWAYS wins — that
+// override happens at the API layer BEFORE calling this helper. This helper
+// is only invoked when delayHours is NOT provided explicitly.
+//
+// §PURE: no Date.now(), no DB access. Caller supplies both values.
+
+export function resolveEffectiveFeedbackDelay(
+  productDelayHours: number | null | undefined,
+  globalDelayHours: number,
+): number {
+  if (productDelayHours != null && Number.isFinite(productDelayHours) && productDelayHours > 0) {
+    return Math.min(
+      Math.max(Math.floor(productDelayHours), FEEDBACK_DELAY_MIN_HOURS),
+      FEEDBACK_DELAY_MAX_HOURS,
+    )
+  }
+  return globalDelayHours
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §7 DEDUP-KEY COMPUTATION — race-safe duplicate prevention
+// ════════════════════════════════════════════════════════════════════════
+//
+// computeFeedbackDedupKey: deterministic key for race-safe duplicate
+// prevention. Converts null/undefined invoiceId/productId to '' so the
+// partial unique index (WHERE status in pending/scheduled) treats all tuples
+// uniformly — null invoiceId and '' invoiceId produce the SAME dedupKey.
+//
+// §EXAMPLES:
+//   (biz1, p1, inv1, prod1) → "biz1|p1|inv1|prod1"
+//   (biz1, p1, null,  null)  → "biz1|p1||"
+//   (biz1, p1, inv1,  null)  → "biz1|p1|inv1|"
+//
+// §AUTHORITATIVE-GUARD: the partial unique index on (dedupKey) WHERE
+// status='pending' OR status='scheduled' is the real duplicate guard. The
+// application-level findFirst in the POST handler is just an early-exit UX
+// optimization. Two concurrent creates that race past the findFirst will
+// both attempt the unique insert — only ONE succeeds, the other hits P2002.
+
+export function computeFeedbackDedupKey(opts: {
+  businessId: string
+  partyId: string
+  invoiceId?: string | null
+  productId?: string | null
+}): string {
+  return [
+    opts.businessId,
+    opts.partyId,
+    opts.invoiceId ?? '',
+    opts.productId ?? '',
+  ].join('|')
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §8 SHARED CREATE-FEEDBACK FUNCTION — used by API + invoice flow
+// ════════════════════════════════════════════════════════════════════════
+//
+// createProductFeedbackRecord: the canonical feedback-creation function.
+// Shared between:
+//   - POST /api/feedback (creates a feedback record on demand)
+//   - POST /api/invoices (auto-creates a feedback record for paid sales
+//     invoices with a party — fire-and-forget, non-fatal)
+//
+// §PRECEDENCE for delayHours (only resolved when opts.delayHours is omitted):
+//   1. opts.delayHours (explicit override — caller already validated)
+//   2. Product.feedbackDelayHours (per-product override — fetched from DB)
+//   3. AppSettings.feedbackDelayHours (global default)
+// Resolve via resolveEffectiveFeedbackDelay.
+//
+// §TENANT-OWNERSHIP: partyId/invoiceId/productId are validated to belong to
+// opts.businessId (using the same assertXxxBelongsToBusiness helpers the
+// POST /api/feedback route uses).
+//
+// §ATOMIC: ProductFeedback + FollowUp + CREATED event + link
+// ProductFeedback.followUpId all in ONE $transaction.
+//
+// §CHICKEN-AND-EGG: create ProductFeedback first (followUpId=null), create
+// the FollowUp (sourceId=productFeedback.id), then UPDATE
+// ProductFeedback.followUpId inside the SAME $transaction.
+//
+// §DEDUP-SAFETY: computes dedupKey + sets it on create. The partial unique
+// index on (dedupKey) WHERE status in pending/scheduled is the authoritative
+// guard. Application-level findFirst is an early-exit UX optimization that
+// returns null without attempting the insert when a duplicate is found.
+//
+// §P2002-HANDLING: returns { created: false, duplicate: true } when the
+// unique index rejects the insert (a duplicate active request exists). The
+// caller (POST /api/feedback) maps this to HTTP 409; the invoice flow
+// silently skips.
+//
+// §RETURNS: { created: true, feedback: <full record> } on success;
+// { created: false, duplicate: true } on duplicate; throws on other errors.
+
+type CreateFeedbackResult =
+  | { created: true; feedback: any }
+  | { created: false; duplicate: true }
+
+export async function createProductFeedbackRecord(
+  client: PrismaClient | typeof defaultDb,
+  opts: {
+    businessId: string
+    partyId: string
+    invoiceId?: string | null
+    productId?: string | null
+    delayHours?: number // explicit override — bypasses AppSettings/Product lookup
+    actorUserId?: string | null // the user who triggered creation (FollowUp.createdById)
+  },
+): Promise<CreateFeedbackResult> {
+  // §TENANT-OWNERSHIP-VALIDATION: verify all referenced entities belong to
+  // the same business. DB FKs validate existence but NOT cross-tenant safety.
+  await assertPartyBelongsToBusiness(client, opts.partyId, opts.businessId)
+  if (opts.productId) {
+    await assertProductBelongsToBusiness(client, opts.productId, opts.businessId)
+  }
+  if (opts.invoiceId) {
+    await assertInvoiceBelongsToBusiness(client, opts.invoiceId, opts.businessId)
+  }
+
+  // §DELAY-RESOLUTION: explicit override wins. Otherwise fetch AppSettings
+  // (global default) + Product (per-product override) and resolve.
+  let delayHours: number
+  if (opts.delayHours != null && Number.isFinite(opts.delayHours) && opts.delayHours > 0) {
+    delayHours = Math.min(
+      Math.max(Math.floor(opts.delayHours), FEEDBACK_DELAY_MIN_HOURS),
+      FEEDBACK_DELAY_MAX_HOURS,
+    )
+  } else {
+    const [settings, product] = await Promise.all([
+      client.appSettings.findUnique({
+        where: { businessId: opts.businessId },
+        select: { feedbackDelayHours: true },
+      }),
+      opts.productId
+        ? client.product.findUnique({
+            where: { id: opts.productId },
+            select: { feedbackDelayHours: true },
+          })
+        : null,
+    ])
+    const globalDelay = settings?.feedbackDelayHours ?? FEEDBACK_DELAY_DEFAULT_HOURS
+    delayHours = resolveEffectiveFeedbackDelay(product?.feedbackDelayHours, globalDelay)
+  }
+
+  // §DEDUP-KEY: deterministic — converts nulls to '' so the partial unique
+  // index treats all tuples uniformly.
+  const dedupKey = computeFeedbackDedupKey({
+    businessId: opts.businessId,
+    partyId: opts.partyId,
+    invoiceId: opts.invoiceId,
+    productId: opts.productId,
+  })
+
+  // §EARLY-EXIT-UX: optional application-level findFirst. The DB unique index
+  // is the authoritative guard; this is just an early-exit UX optimization so
+  // the caller can return a friendly 409 without attempting the insert.
+  const existing = await client.productFeedback.findFirst({
+    where: {
+      businessId: opts.businessId,
+      partyId: opts.partyId,
+      status: { in: FEEDBACK_ACTIVE_STATUSES },
+      ...(opts.invoiceId ? { invoiceId: opts.invoiceId } : { invoiceId: null }),
+      ...(opts.productId ? { productId: opts.productId } : { productId: null }),
+    },
+    select: { id: true },
+  })
+  if (existing) {
+    return { created: false, duplicate: true }
+  }
+
+  // §TIMING: requestedAt = now + delayHours; expiresAt = requestedAt + 30 days.
+  const now = new Date()
+  const requestedAt = calculateFeedbackRequestTime(now, delayHours)
+  const expiresAt = calculateFeedbackExpiryTime(requestedAt)
+
+  // §STATUS: 'scheduled' if requestedAt is in the future; 'pending' if immediate.
+  const status: FeedbackStatus = requestedAt > now ? 'scheduled' : 'pending'
+
+  try {
+    const result = await client.$transaction(async (tx) => {
+      const productFeedback = await tx.productFeedback.create({
+        data: {
+          businessId: opts.businessId,
+          partyId: opts.partyId,
+          invoiceId: opts.invoiceId || null,
+          productId: opts.productId || null,
+          followUpId: null, // §LINKED-AFTER: set below once FollowUp exists
+          status,
+          requestedAt,
+          expiresAt,
+          dedupKey,
+        },
+      })
+
+      // §GENERATE-FOLLOWUP-NUMBER: atomic per-business sequence.
+      const followUpNumber = await generateFollowUpNumber(tx, opts.businessId)
+
+      // §CREATE-FOLLOWUP: type='product_feedback', sourceType='SYSTEM_CREATED',
+      // sourceId=productFeedback.id (application-level ref — no DB FK).
+      // dueAt=requestedAt — when the reminder should fire.
+      const followUp = await tx.followUp.create({
+        data: {
+          businessId: opts.businessId,
+          followUpNumber,
+          partyId: opts.partyId,
+          type: 'product_feedback',
+          sourceType: 'SYSTEM_CREATED',
+          sourceId: productFeedback.id,
+          title: `Request product feedback from ${opts.partyId}`,
+          description: 'Automatically created feedback reminder. Submit a rating + comment when the customer responds.',
+          status: 'PENDING',
+          priority: 'MEDIUM',
+          createdById: opts.actorUserId ?? null, // §SERVER-DERIVED: never from client
+          dueAt: requestedAt,
+          relatedInvoiceId: opts.invoiceId || null,
+          relatedProductId: opts.productId || null,
+        },
+      })
+
+      // §CREATED-EVENT: append-only audit trail. Actor = authenticated user
+      // OR null for fire-and-forget (invoice flow).
+      await tx.followUpEvent.create({
+        data: createdEvent({
+          businessId: opts.businessId,
+          followUpId: followUp.id,
+          actor: opts.actorUserId ?? null,
+        }),
+      })
+
+      // §LINK: now that the FollowUp exists, set ProductFeedback.followUpId.
+      const updated = await tx.productFeedback.update({
+        where: { id: productFeedback.id },
+        data: { followUpId: followUp.id },
+        include: {
+          party: { select: { id: true, name: true, phone: true } },
+          product: { select: { id: true, name: true, sku: true } },
+          invoice: { select: { id: true, invoiceNumber: true, grandTotal: true } },
+          followUp: { select: { id: true, followUpNumber: true, status: true, dueAt: true } },
+        },
+      })
+
+      return updated
+    })
+
+    return { created: true, feedback: result }
+  } catch (e: any) {
+    // §P2002 = unique violation. The partial unique index on (dedupKey)
+    // WHERE status in pending/scheduled rejected the insert — a duplicate
+    // ACTIVE request already exists. This is the authoritative race-safe
+    // guard. Catch + treat as duplicate.
+    if (e?.code === 'P2002') {
+      return { created: false, duplicate: true }
+    }
+    throw e
+  }
+}
