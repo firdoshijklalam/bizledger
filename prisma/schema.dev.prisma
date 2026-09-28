@@ -85,6 +85,8 @@ model Business {
   followUps            FollowUp[]
   followUpEvents       FollowUpEvent[]
   followUpSequence     FollowUpSequence?
+  // §PRODUCT-FEEDBACK: first-class product feedback requests
+  productFeedbacks     ProductFeedback[]
 }
 
 model InvoiceSequence {
@@ -254,6 +256,8 @@ model Party {
   rewardEvents         CustomerRewardEvent[]
   // §FOLLOWUPS: follow-up tasks for this customer (onDelete: SetNull)
   followUps           FollowUp[]
+  // §PRODUCT-FEEDBACK: feedback requests issued to this customer
+  productFeedbacks    ProductFeedback[]
 
   @@index([businessId])
 }
@@ -301,6 +305,10 @@ model Product {
   stockMovements StockMovement[]
   // §COMPLAINTS: complaints linked to this product (nullable FK on Complaint side)
   complaints     Complaint[]
+  // §PRODUCT-FEEDBACK: feedback records targeting this product
+  productFeedbacks ProductFeedback[]
+  // §FOLLOWUPS: follow-ups linked to this product (named relation)
+  followUpProducts FollowUp[] @relation("FollowUpProduct")
 
   @@index([businessId])
   @@index([supplierId])
@@ -453,6 +461,8 @@ model Invoice {
   complaints   Complaint[]
   // §FOLLOWUPS: follow-ups linked to this invoice (nullable FK on FollowUp side)
   relatedFollowUps FollowUp[]
+  // §PRODUCT-FEEDBACK: feedback requests tied to this invoice
+  productFeedbacks ProductFeedback[]
 
   @@index([businessId])
   @@index([partyId])
@@ -541,6 +551,8 @@ model AppSettings {
   notificationChannels String?  // JSON: {sales, lowStock, overduePayments, gradeChanges, backups}
   // §REWARDS: configurable profit threshold for reward cycle (default ₹400)
   rewardThreshold     Decimal  @default(400)
+  // §PRODUCT-FEEDBACK: configurable delay (in hours) before requesting feedback
+  feedbackDelayHours  Int     @default(48)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -1078,6 +1090,7 @@ model Complaint {
   assignedTo       String?   // staff userId (free-form, like PartyNote.author)
   relatedInvoiceId String?
   relatedProductId String?
+  productFeedbackId  String?
   resolution       String?
   internalNotes    String?   // JSON array of {note, author, createdAt}
   attachments      String?   // JSON array of {name, type, dataUrl}
@@ -1089,6 +1102,7 @@ model Complaint {
   party            Party?    @relation(fields: [partyId], references: [id], onDelete: SetNull)
   relatedInvoice   Invoice?  @relation(fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
   relatedProduct   Product?  @relation(fields: [relatedProductId], references: [id], onDelete: SetNull)
+  productFeedback  ProductFeedback? @relation(fields: [productFeedbackId], references: [id], onDelete: SetNull)
   events           ComplaintEvent[]
   // §FOLLOWUPS: follow-ups linked to this complaint (nullable FK on FollowUp side)
   relatedFollowUps FollowUp[]
@@ -1368,6 +1382,7 @@ model FollowUp {
   outcome             String?
   relatedInvoiceId    String?
   relatedComplaintId  String?
+  relatedProductId    String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -1378,7 +1393,9 @@ model FollowUp {
   completedBy         User?     @relation("FollowUpCompleter", fields: [completedById], references: [id], onDelete: SetNull)
   relatedInvoice      Invoice?  @relation(fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
   relatedComplaint    Complaint? @relation(fields: [relatedComplaintId], references: [id], onDelete: SetNull)
+  relatedProduct      Product?  @relation("FollowUpProduct", fields: [relatedProductId], references: [id], onDelete: SetNull)
   events              FollowUpEvent[]
+  productFeedbacks    ProductFeedback[]
 
   @@unique([businessId, followUpNumber])
   @@index([businessId, status])
@@ -1388,6 +1405,7 @@ model FollowUp {
   @@index([businessId, dueAt])
   @@index([businessId, type])
   @@index([businessId, createdAt])
+  @@index([businessId, relatedProductId])
 }
 
 model FollowUpEvent {
@@ -1416,4 +1434,38 @@ model FollowUpSequence {
   updatedAt   DateTime @updatedAt
 
   business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// §PRODUCT-FEEDBACK: first-class customer feedback request domain.
+// See prisma/schema.prisma for full design docs. Dev mirror (no @db.Decimal).
+model ProductFeedback {
+  id              String    @id @default(cuid())
+  businessId      String
+  partyId         String?
+  invoiceId       String?
+  productId       String?
+  followUpId      String?
+  status          String    @default("pending")
+  rating          Int?
+  comment         String?
+  metadata        String?
+  requestedAt     DateTime?
+  submittedAt     DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party?    @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  invoice         Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  product         Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  followUp        FollowUp? @relation(fields: [followUpId], references: [id], onDelete: SetNull)
+  // §COMPLAINT-ESCALATION: 1-to-many back-relation (FK on Complaint side)
+  complaints      Complaint[]
+
+  @@index([businessId, partyId])
+  @@index([businessId, productId])
+  @@index([businessId, invoiceId])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
 }

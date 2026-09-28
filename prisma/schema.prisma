@@ -97,6 +97,9 @@ model Business {
   followUps            FollowUp[]
   followUpEvents       FollowUpEvent[]
   followUpSequence     FollowUpSequence?
+  // §PRODUCT-FEEDBACK: first-class product feedback requests (linked to a
+  // Party + optional Product/Invoice + a system-created FollowUp reminder).
+  productFeedbacks     ProductFeedback[]
 }
 
 // §INVOICE-SEQUENCE: Dedicated sequence table for concurrency-safe invoice numbering.
@@ -317,6 +320,9 @@ model Party {
   // current CRM version — all follow-ups must have a customer. onDelete: SetNull
   // preserves follow-up history if a party is ever deleted.)
   followUps           FollowUp[]
+  // §PRODUCT-FEEDBACK: feedback requests issued to this customer. onDelete:
+  // SetNull preserves feedback history if a party is deleted.
+  productFeedbacks    ProductFeedback[]
 
   @@index([businessId])
 }
@@ -365,6 +371,14 @@ model Product {
   stockMovements StockMovement[]
   // §COMPLAINTS: complaints linked to this product (nullable FK on Complaint side)
   complaints     Complaint[]
+  // §PRODUCT-FEEDBACK: feedback records targeting this product (nullable FK on
+  // ProductFeedback side). onDelete: SetNull preserves feedback history.
+  productFeedbacks ProductFeedback[]
+  // §FOLLOWUPS: follow-ups linked to this product via FollowUp.relatedProductId.
+  // Named relation to disambiguate from Product.complaints (which is the
+  // back-relation for Complaint.relatedProduct). onDelete: SetNull on the
+  // FollowUp side preserves follow-up history.
+  followUpProducts FollowUp[] @relation("FollowUpProduct")
 
   @@index([businessId])
   @@index([supplierId])
@@ -541,6 +555,9 @@ model Invoice {
   complaints   Complaint[]
   // §FOLLOWUPS: follow-ups linked to this invoice (nullable FK on FollowUp side)
   relatedFollowUps FollowUp[]
+  // §PRODUCT-FEEDBACK: feedback requests tied to this invoice (nullable FK on
+  // ProductFeedback side). onDelete: SetNull preserves feedback history.
+  productFeedbacks ProductFeedback[]
 
   // §UNIQUE-CONSTRAINT: Prevents duplicate invoice numbers within the same business.
   // Without this, concurrent requests could create invoices with the same number.
@@ -642,6 +659,9 @@ model AppSettings {
   notificationChannels      String?   // JSON: {sales, lowStock, overduePayments, gradeChanges, backups}
   // §REWARDS: configurable profit threshold for reward cycle (default ₹400)
   rewardThreshold          Decimal   @default(400) @db.Decimal(18, 2)
+  // §PRODUCT-FEEDBACK: configurable delay (in hours) before requesting
+  // feedback after a purchase. Default 48 hours. Range 1-168 (1 hour to 1 week).
+  feedbackDelayHours       Int       @default(48)
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
@@ -1193,6 +1213,10 @@ model Complaint {
   assignedTo       String?   // staff userId (free-form, like PartyNote.author)
   relatedInvoiceId String?
   relatedProductId String?
+  // §PRODUCT-FEEDBACK: optional FK to the ProductFeedback that was escalated
+  // into this complaint. onDelete: SetNull preserves the complaint when the
+  // feedback record is deleted (the complaint stands on its own).
+  productFeedbackId  String?
   resolution       String?
   internalNotes    String?   // JSON array of {note, author, createdAt}
   attachments      String?   // JSON array of {name, type, dataUrl}
@@ -1204,6 +1228,7 @@ model Complaint {
   party            Party?    @relation(fields: [partyId], references: [id], onDelete: SetNull)
   relatedInvoice   Invoice?  @relation(fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
   relatedProduct   Product?  @relation(fields: [relatedProductId], references: [id], onDelete: SetNull)
+  productFeedback  ProductFeedback? @relation(fields: [productFeedbackId], references: [id], onDelete: SetNull)
   events           ComplaintEvent[]
   // §FOLLOWUPS: follow-ups linked to this complaint (nullable FK on FollowUp side)
   relatedFollowUps FollowUp[]
@@ -1640,6 +1665,7 @@ model FollowUp {
   outcome             String?   // free-form outcome notes when COMPLETED
   relatedInvoiceId    String?   // explicit FK to Invoice. onDelete: SetNull
   relatedComplaintId  String?   // explicit FK to Complaint. onDelete: SetNull
+  relatedProductId    String?   // §PRODUCT-FEEDBACK: explicit FK to Product. onDelete: SetNull
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -1650,7 +1676,13 @@ model FollowUp {
   completedBy         User?     @relation("FollowUpCompleter", fields: [completedById], references: [id], onDelete: SetNull)
   relatedInvoice      Invoice?  @relation(fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
   relatedComplaint    Complaint? @relation(fields: [relatedComplaintId], references: [id], onDelete: SetNull)
+  // §NAMED-RELATION: "FollowUpProduct" disambiguates the FollowUp→Product link
+  // from the existing Complaint→Product link (Product.complaints back-relation).
+  relatedProduct      Product?  @relation("FollowUpProduct", fields: [relatedProductId], references: [id], onDelete: SetNull)
   events              FollowUpEvent[]
+  // §PRODUCT-FEEDBACK: feedback requests linked to this follow-up (the
+  // system-created reminder that prompted the customer to leave feedback).
+  productFeedbacks    ProductFeedback[]
 
   @@unique([businessId, followUpNumber]) // business-scoped uniqueness
   @@index([businessId, status])
@@ -1660,6 +1692,7 @@ model FollowUp {
   @@index([businessId, dueAt])
   @@index([businessId, type])
   @@index([businessId, createdAt])
+  @@index([businessId, relatedProductId])
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1712,4 +1745,76 @@ model FollowUpSequence {
   updatedAt   DateTime @updatedAt
 
   business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §PRODUCT-FEEDBACK: First-class customer feedback request domain.
+//
+// §ARCHITECTURE: a ProductFeedback record represents a SCHEDULED request for a
+// customer to leave feedback (rating + comment) after a purchase. It is linked
+// to a Party (required) and optionally to a Product, Invoice, and a system-
+// created FollowUp reminder (FollowUp.type='product_feedback',
+// sourceType='SYSTEM_CREATED', sourceId=<this.id>).
+//
+// §LIFECYCLE: pending → scheduled → submitted | skipped | expired.
+//   - pending:    created but not yet scheduled (immediate request, no delay)
+//   - scheduled:  requestedAt is in the future — the reminder will fire later
+//   - submitted:  customer submitted a rating + optional comment
+//   - skipped:    business or customer declined to leave feedback
+//   - expired:    the request window elapsed with no submission
+//
+// §TENANT-ISOLATION: businessId always comes from the authenticated session
+// (requireAuth), never from the client body. Every query is scoped by
+// businessId; cross-tenant access returns 404.
+//
+// §DUPLICATE-PREVENTION: at most one ProductFeedback with status in
+// (pending, scheduled) for the same (businessId, partyId, invoiceId, productId)
+// tuple — the API returns 409 on duplicate creation.
+//
+// §RATING: 1-5 integer (null until submitted). Validated by isValidRating().
+//
+// §LINKED-FOLLOWUP: when a ProductFeedback is created, the API also creates a
+// FollowUp of type 'product_feedback' with sourceId = productFeedback.id. The
+// followUpId field on ProductFeedback is set AFTER both records are created
+// inside the same $transaction (chicken-and-egg: ProductFeedback.followUpId
+// needs the FollowUp's id; FollowUp.sourceId needs ProductFeedback.id).
+//
+// §COMPLAINT-ESCALATION: a ProductFeedback can be escalated into a Complaint
+// (POST /api/feedback/[id]/complaint). The resulting Complaint has
+// sourceType='FEEDBACK', sourceId=<productFeedbackId>, and the explicit FK
+// Complaint.productFeedbackId set.
+model ProductFeedback {
+  id              String    @id @default(cuid())
+  businessId      String
+  partyId         String?   // §REQUIRED at app layer; nullable at DB level for onDelete: SetNull
+  invoiceId       String?
+  productId       String?
+  followUpId      String?   // the system-created reminder FollowUp
+  status          String    @default("pending") // pending | scheduled | submitted | skipped | expired
+  rating          Int?      // 1-5, null until submitted
+  comment         String?
+  metadata        String?   // JSON string for attachments/extra fields
+  requestedAt     DateTime? // when the request is scheduled to be sent
+  submittedAt     DateTime? // when the customer submitted feedback
+  expiresAt       DateTime? // when the request expires if not submitted
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party?    @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  invoice         Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  product         Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  followUp        FollowUp? @relation(fields: [followUpId], references: [id], onDelete: SetNull)
+  // §COMPLAINT-ESCALATION: 1-to-many back-relation — a feedback record can be
+  // escalated into one or more Complaints. The FK (productFeedbackId) lives on
+  // the Complaint side; this is just the back-reference for Prisma's relation
+  // resolution. onDelete: SetNull preserves the complaints when the feedback
+  // is deleted (each complaint stands on its own).
+  complaints      Complaint[]
+
+  @@index([businessId, partyId])
+  @@index([businessId, productId])
+  @@index([businessId, invoiceId])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
 }

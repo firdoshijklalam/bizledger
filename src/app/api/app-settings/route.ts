@@ -72,6 +72,36 @@ export async function PUT(req: NextRequest) {
       rewardThreshold = Math.round(n * 100) / 100
     }
 
+    // §FEEDBACK-DELAY-HOURS-VALIDATION: configurable delay (in hours) before
+    // the system requests product feedback after a purchase. Default 48h
+    // (schema @default(48)). Range 1-168 (1 hour to 1 week). businessId is
+    // derived from the authenticated session via getCurrentBusiness() — NEVER
+    // from the client body (tenant isolation).
+    const FEEDBACK_DELAY_MIN = 1
+    const FEEDBACK_DELAY_MAX = 168
+    let feedbackDelayHours: number | undefined
+    if (body.feedbackDelayHours !== undefined) {
+      const v = body.feedbackDelayHours
+      // §STRICT-TYPE-CHECK: accept only finite integers OR non-empty numeric
+      // strings. Reject booleans, null, objects, arrays, empty strings,
+      // non-numeric strings, non-finite strings, non-integers, out-of-range.
+      const isAcceptableType = typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')
+      if (!isAcceptableType) {
+        return NextResponse.json(
+          { error: `Feedback delay hours must be an integer between ${FEEDBACK_DELAY_MIN} and ${FEEDBACK_DELAY_MAX}` },
+          { status: 400 }
+        )
+      }
+      const n = Number(v)
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < FEEDBACK_DELAY_MIN || n > FEEDBACK_DELAY_MAX) {
+        return NextResponse.json(
+          { error: `Feedback delay hours must be an integer between ${FEEDBACK_DELAY_MIN} and ${FEEDBACK_DELAY_MAX}` },
+          { status: 400 }
+        )
+      }
+      feedbackDelayHours = n
+    }
+
     const updated = await db.appSettings.upsert({
       where: { businessId: business.id },
       update: {
@@ -97,6 +127,11 @@ export async function PUT(req: NextRequest) {
         // Only included when the client sent it (undefined → Prisma leaves the
         // existing value untouched, preserving unrelated fields).
         rewardThreshold,
+        // §FEEDBACK-DELAY-HOURS: configurable delay (hours) before requesting
+        // product feedback. Only included when the client sent it (undefined →
+        // Prisma leaves the existing value untouched, preserving unrelated
+        // fields). Range 1-168 enforced above.
+        feedbackDelayHours,
         gateDataExport: body.gateDataExport,
         gateInventoryPrice: body.gateInventoryPrice,
         gateDangerZone: body.gateDangerZone,
@@ -127,6 +162,9 @@ export async function PUT(req: NextRequest) {
         gateHighValueDiscount: body.gateHighValueDiscount ?? true,
         gateDiscountLimit: body.gateDiscountLimit ?? 5000,
         rewardThreshold: rewardThreshold ?? 400,
+        // §FEEDBACK-DELAY-HOURS: default 48h on schema. The client may omit
+        // it (defaults to 48h) or send a value within 1-168.
+        feedbackDelayHours: feedbackDelayHours ?? 48,
         gateDataExport: body.gateDataExport ?? true,
         gateInventoryPrice: body.gateInventoryPrice ?? true,
         gateDangerZone: body.gateDangerZone ?? true,
