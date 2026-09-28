@@ -1240,19 +1240,32 @@ export function SettingsView() {
                   value={rewardThreshold}
                   onChange={(e) => setRewardThreshold(Number(e.target.value))}
                   onBlur={async () => {
-                    // §SAVE: validation is enforced server-side (1–1,000,000).
-                    // On success, refetch /api/app-settings so the UI reflects
-                    // the server-returned value (no stale local overwrite,
-                    // no full-page reload). On error, toast shows the server's
-                    // rejection message and the local state is re-synced from
-                    // the cached settings on next render.
+                    // §SERVER-SYNC-FIX: capture the current server-saved value
+                    // so we can restore it if the save is rejected. After a
+                    // successful save, use the server-RETURNED value (from the
+                    // apiPut response body) to update the local state — NOT
+                    // the local input value, which may differ from the
+                    // server's 2-dp-rounded persisted value. This guarantees
+                    // the UI reflects the exact server-returned value without
+                    // relying on the id-change sync (which is skipped when
+                    // refetching the same AppSettings record/id) and without
+                    // a full-page reload.
+                    const prevServerValue = (settings as any).rewardThreshold ?? 400
                     setRewardThresholdSaving(true)
                     try {
-                      await apiPut('/api/app-settings', { rewardThreshold })
+                      const updated = await apiPut('/api/app-settings', { rewardThreshold })
+                      const serverValue = (updated as any)?.rewardThreshold
+                      if (typeof serverValue === 'number' && !Number.isNaN(serverValue)) {
+                        setRewardThreshold(serverValue)
+                      }
                       toast.success('Reward threshold updated')
                       await refetchSettings()
                     } catch (e: any) {
                       toast.error(e?.message || 'Invalid reward threshold')
+                      // §RESTORE: restore the previous server-saved value
+                      // (the invalid local input is discarded; no stale
+                      // value remains).
+                      setRewardThreshold(prevServerValue)
                       await refetchSettings()
                     } finally {
                       setRewardThresholdSaving(false)

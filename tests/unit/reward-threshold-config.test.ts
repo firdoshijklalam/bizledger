@@ -209,14 +209,20 @@ async function main() {
   // ─── 6. Invalid NaN / non-numeric / Infinity rejected ────────────
   console.log('\n6. Invalid NaN / non-numeric / Infinity rejected')
   {
+    // §ACTUAL-VALUES: test "NaN" and "Infinity" as actual STRING request
+    // values (NOT relying on JSON.stringify() converting JS NaN/Infinity
+    // into null). Also test null (the JS NaN/Infinity → null path) + a
+    // generic non-numeric string.
     const res1 = await callPut({ rewardThreshold: 'not-a-number' })
     assert(res1.status === 400, `6.1: PUT 'not-a-number' → 400 (got ${res1.status})`)
-    const res2 = await callPut({ rewardThreshold: NaN })
-    assert(res2.status === 400, `6.2: PUT NaN → 400 (got ${res2.status})`)
-    const res3 = await callPut({ rewardThreshold: Infinity })
-    assert(res3.status === 400, `6.3: PUT Infinity → 400 (got ${res3.status})`)
+    const res2 = await callPut({ rewardThreshold: 'NaN' })
+    assert(res2.status === 400, `6.2: PUT 'NaN' (string) → 400 (got ${res2.status})`)
+    const res3 = await callPut({ rewardThreshold: 'Infinity' })
+    assert(res3.status === 400, `6.3: PUT 'Infinity' (string) → 400 (got ${res3.status})`)
+    const res4 = await callPut({ rewardThreshold: null })
+    assert(res4.status === 400, `6.4: PUT null → 400 (got ${res4.status})`)
     const settings = await db.appSettings.findUnique({ where: { businessId: TEST_BIZ_A } })
-    assert(settings?.rewardThreshold.toNumber() === 500, `6.4: DB unchanged=500`)
+    assert(settings?.rewardThreshold.toNumber() === 500, `6.5: DB unchanged=500 (got ${settings?.rewardThreshold.toNumber()})`)
   }
 
   // ─── 7. Unauthorized role (STAFF) cannot update it ────────────────
@@ -331,6 +337,61 @@ async function main() {
     assert(after?.invoicePrefix === 'RTINV', `12.4: invoicePrefix preserved=RTINV (got ${after?.invoicePrefix})`)
     assert(after?.language === 'hi', `12.5: language preserved=hi (got ${after?.language})`)
     assert(after?.defaulterRegistryEnabled === false, `12.6: defaulterRegistryEnabled preserved=false (got ${after?.defaulterRegistryEnabled})`)
+  }
+
+  // ─── 13. 2-decimal server rounding: server returns the rounded value ──
+  console.log('\n13. 2-decimal server rounding — server returns the rounded value')
+  {
+    // §UI-SYNC: the UI's onBlur handler uses the apiPut RESPONSE body's
+    // rewardThreshold (not the local input) to set the local state. Verify
+    // the server returns the 2-dp-rounded value so the UI reflects the exact
+    // persisted value (e.g., 300.456 → 300.46).
+    const res = await callPut({ rewardThreshold: 300.456 })
+    assert(res.status === 200, `13.1: PUT 300.456 → 200 (got ${res.status})`)
+    const body = await res.json()
+    assert(body.rewardThreshold === 300.46, `13.2: response rewardThreshold=300.46 (2-dp rounded) (got ${body.rewardThreshold})`)
+    const settings = await db.appSettings.findUnique({ where: { businessId: TEST_BIZ_A } })
+    assert(settings?.rewardThreshold.toNumber() === 300.46, `13.3: DB rewardThreshold=300.46 (got ${settings?.rewardThreshold.toNumber()})`)
+  }
+
+  // ─── 14. Rejected invalid save preserves the previous saved value ────
+  console.log('\n14. Rejected invalid save — previous server value preserved')
+  {
+    // §UI-RESTORE: the UI's onBlur handler captures prevServerValue BEFORE
+    // the save + restores it on failure. Verify the server keeps the previous
+    // value after a rejected save (so the UI's restore target is correct).
+    await callPut({ rewardThreshold: 500 }) // set a known server value
+    const before = await db.appSettings.findUnique({ where: { businessId: TEST_BIZ_A } })
+    assert(before?.rewardThreshold.toNumber() === 500, `14.1: prev server value=500 (got ${before?.rewardThreshold.toNumber()})`)
+    const res = await callPut({ rewardThreshold: 0 }) // invalid → rejected
+    assert(res.status === 400, `14.2: PUT 0 → 400 (got ${res.status})`)
+    const after = await db.appSettings.findUnique({ where: { businessId: TEST_BIZ_A } })
+    assert(after?.rewardThreshold.toNumber() === 500, `14.3: DB unchanged=500 after rejected save (got ${after?.rewardThreshold.toNumber()})`)
+  }
+
+  // ─── 15. Refetch same AppSettings id — returns the updated threshold ──
+  console.log('\n15. Refetch same AppSettings id — returns the updated reward threshold')
+  {
+    // §ID-SYNC-BUG: the UI's id-change sync (settings.id !== lastSettingsId)
+    // is SKIPPED when refetching the same record (same id). The fix uses the
+    // apiPut response directly. Verify that a GET (refetch) after a save
+    // returns the SAME id + the UPDATED rewardThreshold — proving the
+    // apiPut response (not the id-change sync) is what the UI uses to update.
+    const before = await callGetSettings()
+    const beforeBody = await before.json()
+    const settingsId = beforeBody.id
+    const beforeValue = beforeBody.rewardThreshold
+    // Save a new value
+    const saveRes = await callPut({ rewardThreshold: 777 })
+    assert(saveRes.status === 200, `15.1: PUT 777 → 200 (got ${saveRes.status})`)
+    const saveBody = await saveRes.json()
+    assert(saveBody.rewardThreshold === 777, `15.2: apiPut response rewardThreshold=777 (got ${saveBody.rewardThreshold})`)
+    // Refetch (GET) — same id, but updated rewardThreshold
+    const after = await callGetSettings()
+    const afterBody = await after.json()
+    assert(afterBody.id === settingsId, `15.3: refetch returns SAME id (got ${afterBody.id})`)
+    assert(afterBody.rewardThreshold === 777, `15.4: refetch rewardThreshold=777 (updated, same id) (got ${afterBody.rewardThreshold})`)
+    assert(beforeValue !== 777, `15.5: value actually changed (was ${beforeValue})`)
   }
 
   await cleanup()
