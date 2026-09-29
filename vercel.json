@@ -1,5 +1,11 @@
 {
   "buildCommand": "prisma generate --schema prisma/schema.prisma && npx prisma migrate deploy --schema prisma/schema.prisma && next build",
   "installCommand": "npm install",
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/feedback-outbox",
+      "schedule": "0 0 * * *"
+    }
+  ]
 }

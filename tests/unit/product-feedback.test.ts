@@ -1502,6 +1502,184 @@ async function main() {
     assert(invoice!.partyId === partyA1, `34j: invoice.partyId=partyA1 (got ${invoice!.partyId})`)
   }
 
+  // ─── 35. Exactly-once attempt increment per actual processing attempt ──
+  console.log('\n35. Exactly-once attempt increment')
+  {
+    const { processFeedbackOutboxRow } = await import('../../src/lib/feedback-outbox')
+    // Create a real invoice for the FK, then a FeedbackOutbox row with an invalid partyId.
+    const testInv = await db.invoice.create({ data: { businessId: TEST_BIZ_A, partyId: partyA1, type: 'sales', status: 'paid', subtotal: 100, discountAmount: 0, grandTotal: 100, gstAmount: 0, invoiceNumber: 'INV-FBO35-' + Date.now() } })
+    const outbox = await db.feedbackOutbox.create({
+      data: { businessId: TEST_BIZ_A, invoiceId: testInv.id, partyId: 'nonexistent-party', productIds: null, status: 'PENDING', attempts: 0 },
+    })
+    // Call processFeedbackOutboxRow → should claim (attempts: 0→1) + fail.
+    const result = await processFeedbackOutboxRow(outbox.id)
+    assert(result.status === 'FAILED', `35.1: first call → FAILED (got ${result.status})`)
+    const row1 = await db.feedbackOutbox.findUnique({ where: { id: outbox.id }, select: { attempts: true, status: true } })
+    assert(row1?.attempts === 1, `35.2: attempts=1 after first failure (got ${row1?.attempts})`)
+    assert(row1?.status === 'FAILED', `35.3: status=FAILED (got ${row1?.status})`)
+    // Cleanup
+    await db.feedbackOutbox.delete({ where: { id: outbox.id } })
+    await db.invoice.delete({ where: { id: testInv.id } })
+  }
+
+  // ─── 36. 10 failures → PERMANENTLY_FAILED ───────────────────────────
+  console.log('\n36. 10 failures → PERMANENTLY_FAILED')
+  {
+    const { processFeedbackOutboxRow, MAX_ATTEMPTS } = await import('../../src/lib/feedback-outbox')
+    assert(MAX_ATTEMPTS === 10, `36.0: MAX_ATTEMPTS=10 (got ${MAX_ATTEMPTS})`)
+    const testInv36 = await db.invoice.create({ data: { businessId: TEST_BIZ_A, partyId: partyA1, type: 'sales', status: 'paid', subtotal: 100, discountAmount: 0, grandTotal: 100, gstAmount: 0, invoiceNumber: 'INV-FBO36-' + Date.now() } })
+    const outbox = await db.feedbackOutbox.create({
+      data: { businessId: TEST_BIZ_A, invoiceId: testInv36.id, partyId: 'nonexistent-party', productIds: null, status: 'PENDING', attempts: 0 },
+    })
+    for (let i = 1; i <= 10; i++) {
+      const r = await processFeedbackOutboxRow(outbox.id)
+      if (i < 10) {
+        assert(r.status === 'FAILED', `36.${i}: attempt ${i} → FAILED (got ${r.status})`)
+      } else {
+        assert(r.status === 'PERMANENTLY_FAILED', `36.10: attempt 10 → PERMANENTLY_FAILED (got ${r.status})`)
+      }
+    }
+    const row = await db.feedbackOutbox.findUnique({ where: { id: outbox.id }, select: { attempts: true, status: true } })
+    assert(row?.attempts === 10, `36.11: attempts=10 (got ${row?.attempts})`)
+    assert(row?.status === 'PERMANENTLY_FAILED', `36.12: status=PERMANENTLY_FAILED (got ${row?.status})`)
+    // 11th call → short-circuit (no reprocessing)
+    const r11 = await processFeedbackOutboxRow(outbox.id)
+    assert(r11.status === 'PERMANENTLY_FAILED', `36.13: 11th call → PERMANENTLY_FAILED (got ${r11.status})`)
+    const row11 = await db.feedbackOutbox.findUnique({ where: { id: outbox.id }, select: { attempts: true } })
+    assert(row11?.attempts === 10, `36.14: attempts still 10 (got ${row11?.attempts})`)
+    await db.feedbackOutbox.delete({ where: { id: outbox.id } })
+    await db.invoice.delete({ where: { id: testInv36.id } })
+  }
+
+  // ─── 37. Backoff schedule is respected at each retry ─────────────────
+  console.log('\n37. Backoff schedule respected')
+  {
+    const { backoffForAttempt, BACKOFF_SCHEDULE_MS, processPendingFeedbackOutbox } = await import('../../src/lib/feedback-outbox')
+    // Verify the backoff function returns the correct schedule
+    assert(backoffForAttempt(0) === 30 * 1000, `37.1: backoff(0)=30s (got ${backoffForAttempt(0)})`)
+    assert(backoffForAttempt(1) === 60 * 1000, `37.2: backoff(1)=60s (got ${backoffForAttempt(1)})`)
+    assert(backoffForAttempt(2) === 2 * 60 * 1000, `37.3: backoff(2)=2m (got ${backoffForAttempt(2)})`)
+    assert(backoffForAttempt(9) === 320 * 60 * 1000, `37.4: backoff(9)=320m (got ${backoffForAttempt(9)})`)
+    assert(backoffForAttempt(10) === null, `37.5: backoff(10)=null (MAX_ATTEMPTS) (got ${String(backoffForAttempt(10))})`)
+
+    // Create a FAILED row with attempts=1, lastAttemptAt=now → NOT eligible (backoff=60s)
+    const testInv37 = await db.invoice.create({ data: { businessId: TEST_BIZ_A, partyId: partyA1, type: 'sales', status: 'paid', subtotal: 100, discountAmount: 0, grandTotal: 100, gstAmount: 0, invoiceNumber: 'INV-FBO37-' + Date.now() } })
+    const outbox = await db.feedbackOutbox.create({
+      data: { businessId: TEST_BIZ_A, invoiceId: testInv37.id, partyId: 'nonexistent-party', productIds: null, status: 'FAILED', attempts: 1, lastAttemptAt: new Date() },
+    })
+    const summary1 = await processPendingFeedbackOutbox()
+    // §NOTE: claimed count may include rows from other test sections.
+    // The important check is that THIS row was NOT claimed (backoff not elapsed).
+    const row1 = await db.feedbackOutbox.findUnique({ where: { id: outbox.id }, select: { attempts: true, status: true } })
+    assert(row1?.status === 'FAILED', `37.6: row still FAILED (backoff not elapsed) (got ${row1?.status})`)
+    assert(row1?.attempts === 1, `37.7: attempts still 1 (not claimed) (got ${row1?.attempts})`)
+
+    // Set lastAttemptAt to 61 seconds ago → eligible (backoff=60s)
+    await db.feedbackOutbox.update({ where: { id: outbox.id }, data: { lastAttemptAt: new Date(Date.now() - 61 * 1000) } })
+    const summary2 = await processPendingFeedbackOutbox()
+    assert(summary2.claimed === 1, `37.8: claimed after backoff elapsed (got claimed=${summary2.claimed})`)
+    const row2 = await db.feedbackOutbox.findUnique({ where: { id: outbox.id }, select: { attempts: true, status: true } })
+    assert(row2?.attempts === 2, `37.9: attempts=2 (incremented at claim) (got ${row2?.attempts})`)
+    assert(row2?.status === 'FAILED', `37.10: status=FAILED (processing failed) (got ${row2?.status})`)
+    await db.feedbackOutbox.delete({ where: { id: outbox.id } })
+    await db.invoice.delete({ where: { id: testInv37.id } })
+  }
+
+  // ─── 38. Stale PROCESSING reclaim ────────────────────────────────────
+  console.log('\n38. Stale PROCESSING reclaim')
+  {
+    const { reclaimStaleProcessing, processPendingFeedbackOutbox } = await import('../../src/lib/feedback-outbox')
+    // Create a PROCESSING row with processingStartedAt 6 minutes ago (stale)
+    const staleTime = new Date(Date.now() - 6 * 60 * 1000)
+    const testInv38 = await db.invoice.create({ data: { businessId: TEST_BIZ_A, partyId: partyA1, type: 'sales', status: 'paid', subtotal: 100, discountAmount: 0, grandTotal: 100, gstAmount: 0, invoiceNumber: 'INV-FBO38-' + Date.now() } })
+    const outbox = await db.feedbackOutbox.create({
+      data: { businessId: TEST_BIZ_A, invoiceId: testInv38.id, partyId: 'nonexistent-party', productIds: null, status: 'PROCESSING', attempts: 1, processingStartedAt: staleTime, claimToken: 'stale-token' },
+    })
+    const reclaimed = await reclaimStaleProcessing()
+    assert(reclaimed >= 1, `38.1: reclaimed >= 1 (got ${reclaimed})`)
+    const row = await db.feedbackOutbox.findUnique({ where: { id: outbox.id }, select: { status: true, attempts: true, claimToken: true } })
+    assert(row?.status === 'PENDING', `38.2: status=PENDING after reclaim (got ${row?.status})`)
+    assert(row?.attempts === 1, `38.3: attempts NOT reset (got ${row?.attempts})`)
+    assert(row?.claimToken === null, `38.4: claimToken cleared (got ${row?.claimToken})`)
+    // Process the reclaimed row via processPendingFeedbackOutbox
+    const summary = await processPendingFeedbackOutbox()
+    assert(summary.claimed >= 1, `38.5: claimed the reclaimed row (got claimed=${summary.claimed})`)
+    await db.feedbackOutbox.delete({ where: { id: outbox.id } })
+    await db.invoice.delete({ where: { id: testInv38.id } })
+  }
+
+  // ─── 39. Concurrent claim does not double-process ────────────────────
+  console.log('\n39. Concurrent claim does not double-process')
+  {
+    const { processFeedbackOutboxRow, processPendingFeedbackOutbox } = await import('../../src/lib/feedback-outbox')
+    // Create a PENDING row
+    const testInv39 = await db.invoice.create({ data: { businessId: TEST_BIZ_A, partyId: partyA1, type: 'sales', status: 'paid', subtotal: 100, discountAmount: 0, grandTotal: 100, gstAmount: 0, invoiceNumber: 'INV-FBO39-' + Date.now() } })
+    const outbox = await db.feedbackOutbox.create({
+      data: { businessId: TEST_BIZ_A, invoiceId: testInv39.id, partyId: 'nonexistent-party', productIds: null, status: 'PENDING', attempts: 0 },
+    })
+    // Manually claim it (simulate another worker)
+    await db.feedbackOutbox.update({ where: { id: outbox.id }, data: { status: 'PROCESSING', claimToken: 'other-worker', attempts: 1, processingStartedAt: new Date(), lastAttemptAt: new Date() } })
+    // processPendingFeedbackOutbox should NOT claim it (it's PROCESSING, not PENDING/FAILED)
+    const summary = await processPendingFeedbackOutbox()
+    assert(summary.claimed === 0, `39.1: not claimed by cron (already PROCESSING) (got claimed=${summary.claimed})`)
+    const row = await db.feedbackOutbox.findUnique({ where: { id: outbox.id }, select: { attempts: true, status: true } })
+    assert(row?.attempts === 1, `39.2: attempts still 1 (not double-incremented) (got ${row?.attempts})`)
+    assert(row?.status === 'PROCESSING', `39.3: status still PROCESSING (got ${row?.status})`)
+    await db.feedbackOutbox.delete({ where: { id: outbox.id } })
+    await db.invoice.delete({ where: { id: testInv39.id } })
+  }
+
+  // ─── 40. Cron route invokes processPendingFeedbackOutbox with CRON_SECRET ──
+  console.log('\n40. Cron route CRON_SECRET protection')
+  {
+    const cronRoute = await import('@/app/api/cron/feedback-outbox/route')
+    const { NextRequest } = await import('next/server')
+    const oldSecret = process.env.CRON_SECRET
+    // No CRON_SECRET → fail-closed
+    delete process.env.CRON_SECRET
+    const reqNoSecret = new NextRequest('http://localhost/api/cron/feedback-outbox', { method: 'POST' })
+    const resNoSecret = await cronRoute.POST(reqNoSecret)
+    assert(resNoSecret.status === 401, `40.1: no CRON_SECRET → 401 (got ${resNoSecret.status})`)
+    // Wrong secret → 401
+    process.env.CRON_SECRET = 'correct-secret'
+    const reqWrong = new NextRequest('http://localhost/api/cron/feedback-outbox', { method: 'POST', headers: { authorization: 'Bearer wrong-secret' } })
+    const resWrong = await cronRoute.POST(reqWrong)
+    assert(resWrong.status === 401, `40.2: wrong secret → 401 (got ${resWrong.status})`)
+    // Correct secret → 200
+    const reqCorrect = new NextRequest('http://localhost/api/cron/feedback-outbox', { method: 'POST', headers: { authorization: 'Bearer correct-secret' } })
+    const resCorrect = await cronRoute.POST(reqCorrect)
+    assert(resCorrect.status === 200, `40.3: correct secret → 200 (got ${resCorrect.status})`)
+    const body = await resCorrect.json()
+    assert(body.ok === true, `40.4: response.ok=true (got ${body.ok})`)
+    assert(typeof body.claimed === 'number', `40.5: response.claimed is number (got ${typeof body.claimed})`)
+    // Restore
+    if (oldSecret !== undefined) { process.env.CRON_SECRET = oldSecret } else { delete process.env.CRON_SECRET }
+  }
+
+  // ─── 41. Existing reward-outbox behavior remains unchanged ───────────
+  console.log('\n41. Existing reward-outbox behavior unchanged')
+  {
+    // Create a paid sales invoice via createInvoice → verify RewardAccrualOutbox row still created
+    const { createInvoice } = await import('../../src/lib/invoice-service')
+    const inv = await createInvoice({
+      type: 'sales', partyId: partyA1, subtotal: 100, discountAmount: 0, grandTotal: 100,
+      amountPaid: 100,
+      items: [{ productId: productA1, quantity: 1, unitPrice: 100, name: 'Test Product' }],
+    } as any, { id: TEST_BIZ_A, name: 'Test Biz', currency: 'INR' } as any)
+    const rewardOutbox = await db.rewardAccrualOutbox.findUnique({ where: { invoiceId: inv.id } })
+    assert(rewardOutbox !== null, '41.1: RewardAccrualOutbox row exists (regression)')
+    assert(rewardOutbox!.status === 'PENDING', `41.2: reward outbox status=PENDING (got ${rewardOutbox!.status})`)
+    assert(rewardOutbox!.attempts === 0, `41.3: reward outbox attempts=0 (got ${rewardOutbox!.attempts})`)
+    // Also verify FeedbackOutbox row was created (the new reliability layer)
+    const feedbackOutbox = await db.feedbackOutbox.findFirst({ where: { invoiceId: inv.id } })
+    assert(feedbackOutbox !== null, '41.4: FeedbackOutbox row also created')
+    // Cleanup
+    await db.feedbackOutbox.deleteMany({ where: { invoiceId: inv.id } })
+    await db.rewardAccrualOutbox.deleteMany({ where: { invoiceId: inv.id } })
+    await db.invoiceItem.deleteMany({ where: { invoiceId: inv.id } })
+    await db.invoice.delete({ where: { id: inv.id } })
+  }
+
   await cleanup()
 
   console.log(`\n${'='.repeat(60)}`)
