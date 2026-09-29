@@ -702,6 +702,64 @@ export async function createInvoice(body: any, business: { id: string }): Promis
         })
       }
 
+      // §FEEDBACK-OUTBOX: durable product-feedback-request work record, created
+      // INSIDE the same $transaction as the invoice + reward outbox. Mirrors
+      // the RewardAccrualOutbox pattern — closes the fire-and-forget gap on
+      // the feedback side. If the invoice commits, the feedback work is
+      // durably recorded; a fire-and-forget post-commit call processes it
+      // immediately + a cron recovers any missed rows.
+      //
+      // §ELIGIBILITY: only PAID sales/retail invoices with a party. Matches
+      // the existing maybeCreateProductFeedbackForInvoice gate, with the
+      // §RELIABILITY-FIX: paid sales + paid retail are BOTH eligible (the
+      // prior gate excluded retail via `type === 'sales'` only). The
+      // eligibility filter is now: !isPurchase && partyId && status === 'paid'.
+      //   - !isPurchase → excludes 'purchase' (suppliers, not buyers)
+      //   - partyId → walk-in (no party) is excluded (no one to ask)
+      //   - status === 'paid' → unpaid/partial are excluded (not yet completed)
+      //   - type !== 'challan' → challan (delivery note, no sale) is excluded
+      //     implicitly because isPurchase=false but type='challan' has no
+      //     grand-total recognition — the gate !isPurchase + paid + partyId
+      //     still applies. A paid challan is unusual but allowed if it exists.
+      //
+      // §MULTI-PRODUCT: extract ALL unique productIds from serverItems (the
+      // in-memory array used to create InvoiceItems, available inside the
+      // transaction). Deterministic: first-appearance order. Stored as a
+      // JSON string on the outbox row's `productIds` field. The processor
+      // creates one ProductFeedback per unique productId (each gets a distinct
+      // dedupKey, so no duplicates). If no product-backed items, productIds
+      // is null and the processor creates one generic feedback (productId=null).
+      //
+      // §NO-ACCOUNTING-CHANGE: this is a new table write, not a modification
+      // of Invoice/Transaction/Party/Product. The accounting formulas are
+      // unchanged. The outbox row is a SCHEDULING record only.
+      if (!isPurchase && body.partyId && status === 'paid') {
+        // §EXTRACT-UNIQUE-PRODUCTIDS: deterministic first-appearance order.
+        // Filters out null/undefined/empty productIds (e.g., ad-hoc line items).
+        const uniqueProductIds: string[] = []
+        const seen = new Set<string>()
+        for (const si of serverItems) {
+          const pid = si.productId
+          if (typeof pid === 'string' && pid.length > 0 && !seen.has(pid)) {
+            seen.add(pid)
+            uniqueProductIds.push(pid)
+          }
+        }
+        await tx.feedbackOutbox.create({
+          data: {
+            businessId: business.id,
+            invoiceId: inv.id,
+            partyId: body.partyId,
+            // §JSON: empty array → null (so the processor creates one generic
+            // feedback record with productId=null). Non-empty → JSON array
+            // of unique productIds, processed in order.
+            productIds: uniqueProductIds.length > 0 ? JSON.stringify(uniqueProductIds) : null,
+            status: 'PENDING',
+            attempts: 0,
+          },
+        })
+      }
+
       return inv
     }, { timeout: TX_TIMEOUT_MS })
     // §P16-STEP3.8.1-FIX: break out of the retry loop on SUCCESS. Without

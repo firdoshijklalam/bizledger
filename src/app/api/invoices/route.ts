@@ -3,66 +3,10 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { serializeDecimals } from '@/lib/decimal-serializer'
 import { createInvoice, InvoiceValidationError } from '@/lib/invoice-service'
 import { processOutboxRowForInvoice } from '@/lib/reward-outbox'
-import { createProductFeedbackRecord } from '@/lib/product-feedback'
+import { processFeedbackOutboxRowForInvoice } from '@/lib/feedback-outbox'
 
 // §VERCEL-LIMIT: Allow up to 20s for invoice creation (stock validation + transaction with many items)
 export const maxDuration = 20
-
-// §FEEDBACK-AUTO-REQUEST: Fire-and-forget product-feedback-request creation
-// for a paid sales invoice with a party. Mirrors the existing reward-outbox
-// pattern: durable, non-fatal, catches all errors so the sale remains
-// committed even if feedback scheduling fails. Idempotent — duplicate
-// (409/P2002) is silently skipped. The lib function does the dedupKey +
-// partial unique index dance; this wrapper only resolves the productId
-// from the invoice's first item.
-//
-// §GATE: only paid sales invoices with a partyId. Purchase invoices, walk-in
-// sales (no party), unpaid sales — skip.
-export async function maybeCreateProductFeedbackForInvoice(
-  businessId: string,
-  invoice: { id: string; status: string; partyId?: string | null; type?: string },
-): Promise<void> {
-  // §GATE: paid sales invoices with a party only.
-  if (invoice.status !== 'paid') return
-  if (!invoice.partyId) return
-  if (invoice.type && invoice.type !== 'sales') return
-
-  try {
-    // §FIRST-PRODUCT: pick the first productId from the invoice's items (if any).
-    // A feedback request is tied to a specific product when possible, otherwise
-    // it's a generic purchase feedback. InvoiceItem has no createdAt column;
-    // sort by id (cuid — monotonically increasing by timestamp prefix).
-    const firstItem = await db.invoiceItem.findFirst({
-      where: { invoiceId: invoice.id },
-      select: { productId: true },
-      orderBy: { id: 'asc' },
-    })
-    const productId = firstItem?.productId ?? null
-
-    // §SHARED-CORE: invoke the canonical create function. It resolves the
-    // effective delay (Product.feedbackDelayHours > AppSettings.feedbackDelayHours),
-    // computes dedupKey, does the atomic transaction, catches P2002.
-    const result = await createProductFeedbackRecord(db, {
-      businessId,
-      partyId: invoice.partyId,
-      invoiceId: invoice.id,
-      productId,
-      actorUserId: null, // §SYSTEM-TRIGGERED — no human actor for invoice-flow
-    })
-    if (result.created) {
-      // §SUCCESS: feedback request scheduled. Non-fatal — nothing more to do.
-      return
-    }
-    // §DUPLICATE: an active feedback request already exists for this tuple
-    // (e.g. merchant already manually requested feedback before the invoice
-    // hook fired). Silently skip — the existing request stands.
-    return
-  } catch (e) {
-    // §NON-FATAL: invoice is already committed. Log + move on. The customer
-    // can still be manually asked for feedback later.
-    console.error('Product feedback auto-request failed (non-fatal):', e)
-  }
-}
 
 // GET /api/invoices — optimized with pagination
 export async function GET(req: NextRequest) {
@@ -198,12 +142,24 @@ export async function POST(req: NextRequest) {
     // business effect.
     processOutboxRowForInvoice(business.id, invoice.id)
 
-    // §PRODUCT-FEEDBACK-AUTO-REQUEST: fire-and-forget creation of a product
-    // feedback request for paid sales invoices with a party. Non-fatal —
-    // invoice is already committed. Catches all errors including duplicate
-    // (P2002/409) so the sale remains intact. Mirrors the reward-outbox
-    // pattern (fire-and-forget, non-blocking).
-    maybeCreateProductFeedbackForInvoice(business.id, invoice)
+    // §PRODUCT-FEEDBACK-OUTBOX: durable post-commit processing. Replaces the
+    // old fire-and-forget maybeCreateProductFeedbackForInvoice. The outbox
+    // row was created atomically INSIDE createInvoice's $transaction
+    // (src/lib/invoice-service.ts). This call invokes
+    // processFeedbackOutboxRowForInvoice which:
+    //   1. finds the outbox row (already committed with the invoice)
+    //   2. parses the productIds JSON → one ProductFeedback per unique
+    //      productId (or one generic record when productIds is null/empty)
+    //   3. marks the outbox row COMPLETED (success) or FAILED (error + attempts++)
+    //
+    // §NON-FATAL: if this fails, the sale remains committed. The outbox row
+    // stays PENDING/FAILED and the cron worker will retry.
+    // §NON-BLOCKING: fire-and-forget (not awaited) — the response is returned
+    // immediately. The outbox row is the durable record.
+    // §IDEMPOTENCY: createProductFeedbackRecord's dedupKey + partial unique
+    // index guarantees at-most-one active feedback per (party, invoice,
+    // product) tuple. The outbox row is the at-least-once trigger.
+    processFeedbackOutboxRowForInvoice(business.id, invoice.id)
 
     const response = NextResponse.json(serializeDecimals(invoice))
     if (saleNotificationCreated) {

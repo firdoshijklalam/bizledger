@@ -93,6 +93,8 @@ model Business {
   rewardAccrualOutbox  RewardAccrualOutbox[]
   // §REWARD-RECONCILIATION: cursor for incremental historical scan (Step 7A)
   rewardReconciliationCursors  RewardReconciliationCursor[]
+  // §FEEDBACK-OUTBOX: durable product-feedback-request work records (reliability layer)
+  feedbackOutbox       FeedbackOutbox[]
   // §FOLLOWUPS: customer follow-up tasks (Step 8A CRM foundation)
   followUps            FollowUp[]
   followUpEvents       FollowUpEvent[]
@@ -562,6 +564,10 @@ model Invoice {
   // §PRODUCT-FEEDBACK: feedback requests tied to this invoice (nullable FK on
   // ProductFeedback side). onDelete: SetNull preserves feedback history.
   productFeedbacks ProductFeedback[]
+  // §FEEDBACK-OUTBOX: 1:1 durable work record (reliability layer). onDelete
+  // Cascade keeps the outbox + invoice lifecycle in sync. invoiceId is @unique
+  // on FeedbackOutbox so this back-relation is 1:1.
+  feedbackOutbox     FeedbackOutbox?
 
   // §UNIQUE-CONSTRAINT: Prevents duplicate invoice numbers within the same business.
   // Without this, concurrent requests could create invoices with the same number.
@@ -1528,6 +1534,71 @@ model RewardAccrualOutbox {
   updatedAt           DateTime  @updatedAt
 
   business            Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([status, lastAttemptAt])   // §CRON-QUERY: drain PENDING/FAILED rows by backoff
+  @@index([businessId, status])       // §TENANT-SCOPED queries
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §FEEDBACK-OUTBOX: Durable work record for post-purchase product feedback
+// request creation. Mirrors the RewardAccrualOutbox pattern (Step 7 reliability
+// layer) — closes the fire-and-forget gap on the feedback side.
+//
+// §PURPOSE: when an eligible sale invoice commits, a matching outbox row is
+// created IN THE SAME db.$transaction as the invoice. This guarantees: if the
+// invoice committed, there is a durable record of the feedback work that must
+// eventually be done. A fire-and-forget post-commit call processes it
+// immediately; a cron recovers any missed rows.
+//
+// §GUARANTEE: if an eligible sale commits, EITHER a ProductFeedback record
+// eventually exists for each unique productId (or one generic request when no
+// product-backed items exist), OR a durable FeedbackOutbox row exists recording
+// the unfinished work. The feedback request is NEVER silently lost.
+//
+// §INVARIANT: invoiceId is @unique — exactly one outbox row per invoice.
+//   This makes reconciliation idempotent (creating a duplicate for an
+//   invoice that already has a row hits P2002 → no-op).
+//
+// §PARTY: partyId is the customer who will be asked for feedback (copied from
+//   the invoice at creation time; null for walk-in sales — those rows are not
+//   created because the eligibility gate requires partyId).
+//
+// §PRODUCTIDS: JSON-stringified array of unique productIds (in deterministic
+//   first-appearance order from the invoice items). null when no product-backed
+//   items exist (a single generic feedback record is created). The outbox
+//   processor parses this and creates one ProductFeedback per unique productId
+//   (or one generic record when productIds is null/empty).
+//
+// §STATUSES: PENDING | PROCESSING | COMPLETED | FAILED | PERMANENTLY_FAILED
+//   (stored as TEXT; application enforces the enum)
+//
+// §CONCURRENT-PROCESSOR-SAFETY: claiming a row uses an atomic conditional
+//   UPDATE (updateMany with WHERE status IN ('PENDING','FAILED') AND backoff).
+//   Only the claimToken holder may transition PROCESSING → COMPLETED/FAILED.
+//   Even if two processors race, only one's updateMany matches (count===1).
+//
+// §IDEMPOTENCY: each ProductFeedback created via createProductFeedbackRecord
+//   is race-safe by dedupKey (partial unique index on (dedupKey) WHERE status
+//   in pending/scheduled). Retrying a COMPLETED invoice is safe — second call
+//   short-circuits.
+model FeedbackOutbox {
+  id                  String    @id @default(cuid())
+  businessId          String
+  invoiceId           String    @unique   // §INVARIANT: 1:1 with Invoice
+  partyId             String?   // §CUSTOMER: from Invoice.partyId (null for walk-in — but the eligibility gate already requires partyId)
+  productIds          String?   // §JSON: JSON array of unique productIds (deterministic, first-appearance order); null/empty → generic
+  status              String    @default("PENDING") // PENDING | PROCESSING | COMPLETED | FAILED | PERMANENTLY_FAILED
+  attempts            Int       @default(0)
+  lastError           String?   // truncated error message from last failure
+  lastAttemptAt       DateTime? // when the last attempt was made (for backoff)
+  completedAt         DateTime? // when status became COMPLETED
+  processingStartedAt DateTime? // when a processor claimed the row (for stale detection)
+  claimToken          String?   // identifies the current processor; null when not PROCESSING
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  business            Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  invoice             Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([status, lastAttemptAt])   // §CRON-QUERY: drain PENDING/FAILED rows by backoff
   @@index([businessId, status])       // §TENANT-SCOPED queries

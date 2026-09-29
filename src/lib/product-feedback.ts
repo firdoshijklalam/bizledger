@@ -54,7 +54,7 @@ export const FEEDBACK_EXPIRY_DAYS = 30
 //
 // Allowed transitions:
 //   pending    → scheduled, submitted, skipped, expired
-//   scheduled  → submitted, skipped, expired
+//   scheduled  → pending, submitted, skipped, expired
 //   submitted  → (terminal — no reopen)
 //   skipped    → (terminal)
 //   expired    → (terminal)
@@ -62,10 +62,19 @@ export const FEEDBACK_EXPIRY_DAYS = 30
 // Rejected: any transition not listed above (e.g. submitted → pending — no
 // reopen; the customer cannot un-submit a rating). A submitted record can be
 // edited (rating/comment) via PATCH but the status remains 'submitted'.
+//
+// §SCHEDULED→PENDING: this transition is the lifecycle handoff from the
+// feedback domain's scheduler (src/lib/followup-scheduler.ts
+// processScheduledFeedbackTransitions). When a feedback record's requestedAt
+// arrives, the followup-scheduler atomically transitions it from 'scheduled'
+// to 'pending' so it is "actionable" in the feedback domain. The linked
+// FollowUp is already PENDING with dueAt=requestedAt — the existing
+// due-soon/overdue scans handle the reminder notifications; this transition
+// only marks the feedback record itself as actionable.
 
 export const FEEDBACK_STATUS_TRANSITIONS: Record<FeedbackStatus, FeedbackStatus[]> = {
   pending: ['scheduled', 'submitted', 'skipped', 'expired'],
-  scheduled: ['submitted', 'skipped', 'expired'],
+  scheduled: ['pending', 'submitted', 'skipped', 'expired'],
   submitted: [],
   skipped: [],
   expired: [],

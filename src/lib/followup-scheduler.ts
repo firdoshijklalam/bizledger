@@ -374,21 +374,99 @@ export async function processOverdueReminders(
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// §PROCESS-ALL: the main entry point for the cron route. Runs all 3 phases.
+// §PROCESS-SCHEDULED-FEEDBACK-TRANSITIONS: scan ProductFeedback rows whose
+// requestedAt has arrived and atomically transition them from 'scheduled' to
+// 'pending'. This is the lifecycle handoff in the feedback domain — when a
+// scheduled feedback request reaches its requestedAt time, it becomes
+// "actionable" (pending). The linked FollowUp is already PENDING with
+// dueAt=requestedAt, so the existing due-soon/overdue scans handle the
+// reminder notifications; this transition only marks the ProductFeedback
+// record itself as actionable.
 //
-// §ORDER: wake first (so woken follow-ups return to PENDING and can be
-// caught by the due-soon/overdue scans in the SAME cron run if applicable).
+// §ATOMIC: uses updateMany with WHERE id AND status='scheduled' — conditional
+// update. If two cron workers race, only one's updateMany matches
+// (count===1); the other sees count===0 and skips. Idempotent.
 //
-// §PER-BUSINESS: processing is per-follow-up, not per-business. Each follow-up
-// is processed independently — errors in one do not abort others.
+// §FILTER: status='scheduled' AND requestedAt <= now. Pending/submitted/
+// skipped/expired records are NOT transitioned (they are already actionable
+// or terminal).
+//
+// §NOTE: ProductFeedback.requestedAt is nullable in the schema (legacy
+// records created without requestedAt). The Prisma filter `requestedAt: { lte: now }`
+// implicitly excludes NULL values (NULL is not <= anything in SQL), so
+// legacy records with requestedAt=null are skipped — they are not transitioned
+// by this phase. They will be transitioned only when the merchant explicitly
+// submits/skips them via the API. This is acceptable — those legacy records
+// are not "scheduled" in the new lifecycle sense.
+// ════════════════════════════════════════════════════════════════════════
+export async function processScheduledFeedbackTransitions(
+  limit: number = SCHEDULER_PROCESS_LIMIT,
+  now: Date = new Date(),
+): Promise<{ scanned: number; transitioned: number; failed: number }> {
+  const summary = { scanned: 0, transitioned: 0, failed: 0 }
+
+  const scheduled = await db.productFeedback.findMany({
+    where: {
+      status: 'scheduled',
+      requestedAt: { lte: now },
+    },
+    select: { id: true, followUpId: true },
+    take: limit,
+  })
+
+  summary.scanned = scheduled.length
+
+  for (const pf of scheduled) {
+    try {
+      // §ATOMIC-CONDITIONAL-UPDATE: only transition if status is still
+      // 'scheduled'. If another worker already transitioned it (or the
+      // merchant submitted/skipped it via the API), count===0 → no-op.
+      const result = await db.productFeedback.updateMany({
+        where: { id: pf.id, status: 'scheduled' },
+        data: { status: 'pending' },
+      })
+      if (result.count > 0) {
+        summary.transitioned++
+      }
+      // §NOTE: count===0 means another worker won OR the status changed
+      // between our scan + our update. Both are fine — idempotent no-op.
+    } catch (e) {
+      console.error('Failed to transition scheduled feedback', pf.id, e)
+      summary.failed++
+    }
+  }
+
+  return summary
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// §PROCESS-ALL: the main entry point for the cron route. Runs all 4 phases.
+//
+// §ORDER:
+//   1. wake snoozed follow-ups (SNOOZED → PENDING)
+//   2. transition scheduled feedback → pending (when requestedAt arrives)
+//   3. due-soon reminders (PENDING, due within 1h)
+//   4. overdue reminders (PENDING, past due)
+//
+// §PER-BUSINESS: processing is per-entity, not per-business. Each follow-up
+// + feedback record is processed independently — errors in one do not abort
+// others.
 // ════════════════════════════════════════════════════════════════════════
 export async function processAllFollowUpReminders(): Promise<{
   wake: { scanned: number; woken: number; failed: number }
+  scheduled: { scanned: number; transitioned: number; failed: number }
   dueSoon: { scanned: number; created: number; deduped: number; failed: number; skipped: number }
   overdue: { scanned: number; created: number; deduped: number; failed: number; skipped: number }
 }> {
   // §PHASE-1: wake snoozed follow-ups (SNOOZED → PENDING)
   const wake = await processWakeableFollowUps()
+
+  // §PHASE-1.5: transition scheduled feedback → pending (when requestedAt
+  // arrives). Runs AFTER wake (so woken follow-ups are not double-counted)
+  // and BEFORE due-soon/overdue (so the feedback domain status reflects
+  // "actionable" before the reminder scans run — though the scans key off
+  // the FollowUp, not the ProductFeedback, this ordering is logical).
+  const scheduled = await processScheduledFeedbackTransitions()
 
   // §PHASE-2: due-soon reminders (PENDING, due within 1h)
   const dueSoon = await processDueSoonReminders()
@@ -396,5 +474,5 @@ export async function processAllFollowUpReminders(): Promise<{
   // §PHASE-3: overdue reminders (PENDING, past due)
   const overdue = await processOverdueReminders()
 
-  return { wake, dueSoon, overdue }
+  return { wake, scheduled, dueSoon, overdue }
 }

@@ -32,7 +32,9 @@
  *
  * §COVERAGE-COMPLETENESS (extends the above with the wired-in feature):
  *   14. Request Feedback creation (POST creates feedback + FollowUp + verifies dedupKey)
- *   15. Purchase/invoice-triggered creation (paid sales → auto; purchase/unpaid/walk-in → NOT)
+ *   15. Durable invoice-triggered creation (createInvoice → FeedbackOutbox row
+ *       created atomically inside the $transaction; processFeedbackOutboxRowForInvoice
+ *       → ProductFeedback created; Problem 1: durable outbox mirrors RewardAccrualOutbox)
  *   16. Product-specific timing (product.feedbackDelayHours overrides global)
  *   17. Global fallback timing (no product.feedbackDelayHours → AppSettings.feedbackDelayHours)
  *   18. Timing override precedence (explicit delayHours > product.feedbackDelayHours > AppSettings.feedbackDelayHours)
@@ -41,6 +43,26 @@
  *   21. Tenant isolation regression (section 2 still passes)
  *   22. Complaint escalation regression (section 8 still passes)
  *   23. Existing FollowUp regression (section 11 still passes)
+ *
+ * §COVERAGE-RELIABILITY (durable outbox + scheduled→pending lifecycle + retail/multi-product):
+ *   24. Paid retail invoice → FeedbackOutbox created (Problem 3: retail now eligible)
+ *   25. Unpaid invoice → no FeedbackOutbox (gate: status==='paid')
+ *   26. Purchase invoice → no FeedbackOutbox (gate: !isPurchase)
+ *   27. Walk-in (no party) → no FeedbackOutbox (gate: body.partyId)
+ *   28. Retry idempotency (second processFeedbackOutboxRowForInvoice → no-op;
+ *       row already COMPLETED, no duplicate ProductFeedback)
+ *   29. Multi-product invoice → multiple ProductFeedback records (one per
+ *       unique productId, distinct dedupKeys; Problem 4: all products captured)
+ *   30. No-product invoice (ad-hoc items) → one generic ProductFeedback
+ *       (productId=null, dedupKey uses '' for productId slot)
+ *   31. Scheduled→pending lifecycle (createProductFeedbackRecord with future
+ *       requestedAt → status=scheduled; processScheduledFeedbackTransitions
+ *       with now > requestedAt → status=pending; Problem 2: scheduler transitions)
+ *   32. Submitted/skipped remain terminal (cannot transition back to pending)
+ *   33. Tenant isolation regression for FeedbackOutbox (Biz A cannot process
+ *       Biz B's outbox row via processFeedbackOutboxRowForInvoice — defense-in-depth)
+ *   34. Existing reward/invoice behavior unchanged (RewardAccrualOutbox still
+ *       created atomically; Problem 1: outbox pattern mirrored, no regressions)
  */
 /// <reference types="bun-types" />
 export {}
@@ -64,7 +86,7 @@ const TEST_BIZ_B = 'test-pf-B-' + Date.now()
 let testUser: { id: string; email: string; name: string | null; role: string; businessId: string }
 let testUserB: { id: string; email: string; name: string | null; role: string; businessId: string }
 let partyA1: string, partyB1: string
-let productA1: string, productB1: string
+let productA1: string, productA2: string, productB1: string
 let invoiceA1: string, invoiceB1: string
 
 let authOverride: any = null
@@ -91,8 +113,10 @@ const followupsRoute = await import('@/app/api/followups/route')
 // §FEEDBACK-COMPLETENESS: also exercise the shared core + invoice-flow hook
 // + followup-scheduler integration directly (no HTTP self-call).
 const productFeedbackLib = await import('@/lib/product-feedback')
-const invoicesRoute = await import('@/app/api/invoices/route')
 const followupScheduler = await import('@/lib/followup-scheduler')
+// §FEEDBACK-RELIABILITY: durable outbox + scheduled→pending lifecycle integration
+const feedbackOutboxLib = await import('@/lib/feedback-outbox')
+const invoiceService = await import('@/lib/invoice-service')
 
 async function setup() {
   await db.business.create({ data: { id: TEST_BIZ_A, name: 'PF Biz A', currency: 'INR' } })
@@ -102,8 +126,10 @@ async function setup() {
   await db.appSettings.create({ data: { businessId: TEST_BIZ_B } })
   partyA1 = (await db.party.create({ data: { businessId: TEST_BIZ_A, name: 'PF Party A1', type: 'customer' } })).id
   partyB1 = (await db.party.create({ data: { businessId: TEST_BIZ_B, name: 'PF Party B1', type: 'customer' } })).id
-  productA1 = (await db.product.create({ data: { businessId: TEST_BIZ_A, name: 'PF Prod A1', purchasePrice: 50, salePrice: 100 } })).id
-  productB1 = (await db.product.create({ data: { businessId: TEST_BIZ_B, name: 'PF Prod B1', purchasePrice: 50, salePrice: 100 } })).id
+  productA1 = (await db.product.create({ data: { businessId: TEST_BIZ_A, name: 'PF Prod A1', purchasePrice: 50, salePrice: 100, stock: 1000 } })).id
+  // §MULTI-PRODUCT: a second product in Biz A for the multi-product invoice test
+  productA2 = (await db.product.create({ data: { businessId: TEST_BIZ_A, name: 'PF Prod A2', purchasePrice: 25, salePrice: 50, stock: 1000 } })).id
+  productB1 = (await db.product.create({ data: { businessId: TEST_BIZ_B, name: 'PF Prod B1', purchasePrice: 50, salePrice: 100, stock: 1000 } })).id
   invoiceA1 = (await db.invoice.create({
     data: { businessId: TEST_BIZ_A, partyId: partyA1, type: 'sales', status: 'paid', subtotal: 100, discountAmount: 0, grandTotal: 100, gstAmount: 0, invoiceNumber: 'INV-PF-A-' + Date.now() },
   })).id
@@ -126,6 +152,10 @@ async function cleanup() {
     await db.followUpEvent.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
     await db.followUp.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
     await db.followUpSequence.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
+    // §FEEDBACK-OUTBOX: delete before invoices (outbox.invoiceId has onDelete:
+    // Cascade, but explicit delete is defensive).
+    await db.feedbackOutbox.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
+    await db.rewardAccrualOutbox.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
     await db.invoiceItem.deleteMany({ where: { invoice: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } } })
     await db.invoice.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
     await db.product.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
@@ -161,6 +191,13 @@ async function cleanupFeedbackBetweenTests() {
     await db.followUpEvent.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
     await db.followUp.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
     await db.followUpSequence.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
+    // §FEEDBACK-OUTBOX + §REWARD-OUTBOX: clean up durable work records between
+    // tests. Invoices are NOT deleted here (kept as fixtures); the outbox rows
+    // reference those invoices. Deleting the outbox rows explicitly ensures
+    // the next test starts with a clean slate (e.g. the "no outbox" assertions
+    // in sections 25-27 are not polluted by stale rows from prior tests).
+    await db.feedbackOutbox.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
+    await db.rewardAccrualOutbox.deleteMany({ where: { businessId: { in: [TEST_BIZ_A, TEST_BIZ_B] } } })
   } catch {}
 }
 
@@ -620,74 +657,76 @@ async function main() {
     assert(fu!.dueAt !== null, '14j: linked FollowUp.dueAt set to requestedAt')
   }
 
-  // ─── 15. Purchase/invoice-triggered creation ─────────────────────
-  console.log('\n15. Purchase/invoice-triggered creation (paid sales → auto; purchase/unpaid → NOT)')
+  // ─── 15. Durable invoice-triggered creation ─────────────────────
+  console.log('\n15. Durable invoice-triggered creation (createInvoice → FeedbackOutbox row + processFeedbackOutboxRowForInvoice → ProductFeedback)')
   {
     await cleanupFeedbackBetweenTests()
     authOverride = testUser
 
-    // §PAID-SALES: paid sales invoice WITH a party → feedback auto-created.
-    await invoicesRoute.maybeCreateProductFeedbackForInvoice(TEST_BIZ_A, {
-      id: invoiceA1, status: 'paid', partyId: partyA1, type: 'sales',
-    })
-    const fbAfter1 = await db.productFeedback.findMany({
-      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: invoiceA1 },
-      select: { id: true, status: true },
-    })
-    assert(fbAfter1.length === 1, `15a: paid sales invoice → 1 feedback auto-created (got ${fbAfter1.length})`)
-    assert(fbAfter1[0].status === 'scheduled', `15b: status=scheduled (got ${fbAfter1[0].status})`)
+    // §REAL-INTEGRATION: invoke createInvoice (the same function the
+    // POST /api/invoices route calls) with a real body — paid sales invoice
+    // with a party + 1 product. The FeedbackOutbox row should be created
+    // ATOMICALLY inside the same $transaction (no fire-and-forget gap).
+    const saleOpId = 'pf-test-15-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const body = {
+      partyId: partyA1,
+      type: 'sales',
+      amountPaid: 100, // §FULLY-PAID → status='paid' (eligible for feedback)
+      items: [
+        { productId: productA1, name: 'PF Prod A1', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+      ],
+      saleOperationId: saleOpId,
+    }
+    const inv = await invoiceService.createInvoice(body, { id: TEST_BIZ_A })
+    assert(inv !== null && inv.id, '15a: createInvoice returns the invoice with id')
 
-    // §IDEMPOTENT: a second call for the same invoice → no new feedback (dedup).
-    await invoicesRoute.maybeCreateProductFeedbackForInvoice(TEST_BIZ_A, {
-      id: invoiceA1, status: 'paid', partyId: partyA1, type: 'sales',
+    // §DURABLE-OUTBOX: the FeedbackOutbox row should exist with status=PENDING,
+    // partyId=partyA1, productIds=JSON.stringify([productA1]) — created in the
+    // SAME $transaction as the invoice (atomicity guarantee).
+    const outboxRow = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { id: true, status: true, partyId: true, productIds: true, attempts: true },
     })
-    const fbAfter2 = await db.productFeedback.findMany({
-      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: invoiceA1 },
-      select: { id: true },
-    })
-    assert(fbAfter2.length === 1, `15c: idempotent — second call does NOT create a duplicate (got ${fbAfter2.length})`)
+    assert(outboxRow !== null, '15b: FeedbackOutbox row created atomically with invoice')
+    assert(outboxRow!.status === 'PENDING', `15c: status=PENDING (got ${outboxRow!.status})`)
+    assert(outboxRow!.partyId === partyA1, `15d: partyId=partyA1 (got ${outboxRow!.partyId})`)
+    assert(outboxRow!.productIds === JSON.stringify([productA1]), `15e: productIds=JSON([productA1]) (got ${outboxRow!.productIds})`)
+    assert(outboxRow!.attempts === 0, `15f: attempts=0 (got ${outboxRow!.attempts})`)
 
-    // §PURCHASE-INVOICE: a 'purchase' invoice → NOT created (feedback is for buyers).
-    // §NOTE: don't delete invoiceA1 — it's still needed by sections 19 + 22
-    // below. Create a SEPARATE purchase invoice instead.
-    const purchaseInv = await db.invoice.create({
-      data: { businessId: TEST_BIZ_A, partyId: partyA1, type: 'purchase', status: 'paid', subtotal: 50, discountAmount: 0, grandTotal: 50, gstAmount: 0, invoiceNumber: 'INV-PF-PUR-' + Date.now() },
+    // §PROCESS-OUTBOX: invoke the immediate post-commit handler. This finds
+    // the outbox row + invokes processFeedbackOutboxRow, which:
+    //   1. parses productIds JSON → [productA1]
+    //   2. for each productId: calls createProductFeedbackRecord
+    //   3. marks the outbox row COMPLETED
+    await feedbackOutboxLib.processFeedbackOutboxRowForInvoice(TEST_BIZ_A, inv.id)
+    const outboxAfter = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { status: true, completedAt: true, lastError: true },
     })
-    await invoicesRoute.maybeCreateProductFeedbackForInvoice(TEST_BIZ_A, {
-      id: purchaseInv.id, status: 'paid', partyId: partyA1, type: 'purchase',
-    })
-    const fbAfterPur = await db.productFeedback.findMany({
-      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: purchaseInv.id },
-      select: { id: true },
-    })
-    assert(fbAfterPur.length === 0, `15d: purchase invoice → NOT created (got ${fbAfterPur.length})`)
+    assert(outboxAfter!.status === 'COMPLETED', `15g: status=COMPLETED after process (got ${outboxAfter!.status})`)
+    assert(outboxAfter!.completedAt !== null, '15h: completedAt set')
 
-    // §UNPAID: an unpaid sales invoice → NOT created.
-    const unpaidInv = await db.invoice.create({
-      data: { businessId: TEST_BIZ_A, partyId: partyA1, type: 'sales', status: 'unpaid', subtotal: 50, discountAmount: 0, grandTotal: 50, gstAmount: 0, invoiceNumber: 'INV-PF-UNP-' + Date.now() },
+    // §PRODUCT-FEEDBACK-CREATED: exactly 1 ProductFeedback record for this
+    // invoice (one per unique productId — here just [productA1]).
+    const feedbacks = await db.productFeedback.findMany({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: inv.id },
+      select: { id: true, status: true, productId: true },
     })
-    await invoicesRoute.maybeCreateProductFeedbackForInvoice(TEST_BIZ_A, {
-      id: unpaidInv.id, status: 'unpaid', partyId: partyA1, type: 'sales',
-    })
-    const fbAfterUnp = await db.productFeedback.findMany({
-      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: unpaidInv.id },
-      select: { id: true },
-    })
-    assert(fbAfterUnp.length === 0, `15e: unpaid sales invoice → NOT created (got ${fbAfterUnp.length})`)
+    assert(feedbacks.length === 1, `15i: 1 ProductFeedback created (got ${feedbacks.length})`)
+    assert(feedbacks[0].productId === productA1, `15j: productId=productA1 (got ${feedbacks[0].productId})`)
+    assert(feedbacks[0].status === 'scheduled', `15k: status=scheduled (got ${feedbacks[0].status})`)
 
-    // §WALK-IN: a paid sales invoice with NO partyId → NOT created (no party
-    // to ask feedback from).
-    const walkinInv = await db.invoice.create({
-      data: { businessId: TEST_BIZ_A, partyId: null, type: 'sales', status: 'paid', subtotal: 50, discountAmount: 0, grandTotal: 50, gstAmount: 0, invoiceNumber: 'INV-PF-WLK-' + Date.now() },
+    // §IDEMPOTENT: a second processFeedbackOutboxRowForInvoice call is a
+    // no-op (the outbox row is already COMPLETED, short-circuits). No new
+    // ProductFeedback record is created (no duplicate).
+    const fbCountBefore = await db.productFeedback.count({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: inv.id },
     })
-    await invoicesRoute.maybeCreateProductFeedbackForInvoice(TEST_BIZ_A, {
-      id: walkinInv.id, status: 'paid', partyId: null, type: 'sales',
+    await feedbackOutboxLib.processFeedbackOutboxRowForInvoice(TEST_BIZ_A, inv.id)
+    const fbCountAfter = await db.productFeedback.count({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: inv.id },
     })
-    const fbAfterWlk = await db.productFeedback.findMany({
-      where: { businessId: TEST_BIZ_A, invoiceId: walkinInv.id },
-      select: { id: true },
-    })
-    assert(fbAfterWlk.length === 0, `15f: walk-in (no party) sales invoice → NOT created (got ${fbAfterWlk.length})`)
+    assert(fbCountAfter === fbCountBefore, `15l: idempotent re-process — no new ProductFeedback (before=${fbCountBefore}, after=${fbCountAfter})`)
   }
 
   // ─── 16. Product-specific timing override ───────────────────────
@@ -941,6 +980,526 @@ async function main() {
     const events = await db.followUpEvent.findMany({ where: { followUpId: body.id } })
     assert(events.length === 1, `23e: 1 CREATED event (got ${events.length})`)
     assert(events[0].eventType === 'CREATED', '23f: event type=CREATED')
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // §COVERAGE-RELIABILITY: durable outbox + scheduled→pending lifecycle
+  // + retail/multi-product. The next 11 sections (24-34) cover the 4 problems
+  // from the QA-FEEDBACK-RELIABILITY task.
+  // ──────────────────────────────────────────────────────────────────────
+
+  // ─── 24. Paid retail invoice → FeedbackOutbox created (Problem 3) ──
+  console.log('\n24. Paid retail invoice → FeedbackOutbox created (Problem 3: retail now eligible)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §RETAIL-ELIGIBILITY: a paid 'retail' invoice with a party → FeedbackOutbox
+    // row created. The gate is `!isPurchase && body.partyId && status === 'paid'`
+    // (NOT `type === 'sales'` only — retail is now eligible). This is the
+    // Problem 3 fix.
+    const saleOpId = 'pf-test-24-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const body = {
+      partyId: partyA1,
+      type: 'retail',
+      amountPaid: 100,
+      items: [
+        { productId: productA1, name: 'PF Prod A1', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+      ],
+      saleOperationId: saleOpId,
+    }
+    const inv = await invoiceService.createInvoice(body, { id: TEST_BIZ_A })
+    assert(inv.id, '24a: createInvoice returns the invoice')
+
+    const outboxRow = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { status: true, partyId: true, productIds: true },
+    })
+    assert(outboxRow !== null, '24b: FeedbackOutbox row created for retail invoice')
+    assert(outboxRow!.status === 'PENDING', `24c: status=PENDING (got ${outboxRow!.status})`)
+    assert(outboxRow!.partyId === partyA1, `24d: partyId=partyA1 (got ${outboxRow!.partyId})`)
+    assert(outboxRow!.productIds === JSON.stringify([productA1]), `24e: productIds=JSON([productA1]) (got ${outboxRow!.productIds})`)
+
+    // §PROCESS-OUTBOX: processFeedbackOutboxRowForInvoice should succeed +
+    // create the ProductFeedback record.
+    await feedbackOutboxLib.processFeedbackOutboxRowForInvoice(TEST_BIZ_A, inv.id)
+    const fbCount = await db.productFeedback.count({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: inv.id },
+    })
+    assert(fbCount === 1, `24f: 1 ProductFeedback created for retail invoice (got ${fbCount})`)
+  }
+
+  // ─── 25. Unpaid invoice → no FeedbackOutbox (gate: status==='paid') ──
+  console.log('\n25. Unpaid invoice → no FeedbackOutbox (gate: status === paid)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §UNPAID: a sales invoice with amountPaid=0 → status='unpaid'. The
+    // eligibility gate requires status==='paid' → NO FeedbackOutbox row
+    // should be created.
+    const saleOpId = 'pf-test-25-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const body = {
+      partyId: partyA1,
+      type: 'sales',
+      amountPaid: 0, // §UNPAID → status='unpaid' (NOT eligible)
+      items: [
+        { productId: productA1, name: 'PF Prod A1', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+      ],
+      saleOperationId: saleOpId,
+    }
+    const inv = await invoiceService.createInvoice(body, { id: TEST_BIZ_A })
+    assert(inv.id, '25a: createInvoice returns the invoice')
+
+    const outboxRow = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { id: true },
+    })
+    assert(outboxRow === null, `25b: no FeedbackOutbox row for unpaid invoice (got ${outboxRow ? 'row exists' : 'null'})`)
+  }
+
+  // ─── 26. Purchase invoice → no FeedbackOutbox (gate: !isPurchase) ──
+  console.log('\n26. Purchase invoice → no FeedbackOutbox (gate: !isPurchase)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §PURCHASE: a 'purchase' invoice → isPurchase=true → NOT eligible.
+    // Feedback is for buyers (sales/retail), not suppliers.
+    const saleOpId = 'pf-test-26-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const body = {
+      partyId: partyA1,
+      type: 'purchase',
+      amountPaid: 100, // paid in full, but type='purchase' → NOT eligible
+      items: [
+        { productId: productA1, name: 'PF Prod A1', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+      ],
+      saleOperationId: saleOpId,
+    }
+    const inv = await invoiceService.createInvoice(body, { id: TEST_BIZ_A })
+    assert(inv.id, '26a: createInvoice returns the invoice')
+
+    const outboxRow = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { id: true },
+    })
+    assert(outboxRow === null, `26b: no FeedbackOutbox row for purchase invoice (got ${outboxRow ? 'row exists' : 'null'})`)
+  }
+
+  // ─── 27. Walk-in (no party) → no FeedbackOutbox (gate: body.partyId) ──
+  console.log('\n27. Walk-in (no party) → no FeedbackOutbox (gate: body.partyId)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §WALK-IN: a paid sales invoice with partyId=null → NOT eligible
+    // (no customer to ask for feedback).
+    const saleOpId = 'pf-test-27-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const body: any = {
+      partyId: null, // §WALK-IN — no party
+      type: 'sales',
+      amountPaid: 100,
+      items: [
+        { productId: productA1, name: 'PF Prod A1', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+      ],
+      saleOperationId: saleOpId,
+      salePadMode: true, // §SALEPAD-MODE: enables walk-in cash credit transaction
+    }
+    const inv = await invoiceService.createInvoice(body, { id: TEST_BIZ_A })
+    assert(inv.id, '27a: createInvoice returns the invoice')
+
+    const outboxRow = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { id: true },
+    })
+    assert(outboxRow === null, `27b: no FeedbackOutbox row for walk-in invoice (got ${outboxRow ? 'row exists' : 'null'})`)
+  }
+
+  // ─── 28. Retry idempotency (second processFeedbackOutboxRowForInvoice → no-op) ──
+  console.log('\n28. Retry idempotency (second processFeedbackOutboxRowForInvoice → no-op)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §CREATE-INVOICE: paid sales invoice with a party + 1 product.
+    const saleOpId = 'pf-test-28-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const body = {
+      partyId: partyA1,
+      type: 'sales',
+      amountPaid: 100,
+      items: [
+        { productId: productA1, name: 'PF Prod A1', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+      ],
+      saleOperationId: saleOpId,
+    }
+    const inv = await invoiceService.createInvoice(body, { id: TEST_BIZ_A })
+
+    // §FIRST-PROCESS: should mark the outbox row COMPLETED + create 1 ProductFeedback.
+    await feedbackOutboxLib.processFeedbackOutboxRowForInvoice(TEST_BIZ_A, inv.id)
+    const outboxAfter1 = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { status: true },
+    })
+    assert(outboxAfter1!.status === 'COMPLETED', `28a: status=COMPLETED after first process (got ${outboxAfter1!.status})`)
+    const fbCount1 = await db.productFeedback.count({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: inv.id },
+    })
+    assert(fbCount1 === 1, `28b: 1 ProductFeedback after first process (got ${fbCount1})`)
+
+    // §SECOND-PROCESS: should short-circuit (status=COMPLETED → no-op).
+    // No new ProductFeedback created (the dedupKey would also prevent
+    // duplicate creation via the partial unique index, but the COMPLETED
+    // short-circuit prevents even reaching that point).
+    await feedbackOutboxLib.processFeedbackOutboxRowForInvoice(TEST_BIZ_A, inv.id)
+    const outboxAfter2 = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { status: true, attempts: true },
+    })
+    assert(outboxAfter2!.status === 'COMPLETED', `28c: status remains COMPLETED (got ${outboxAfter2!.status})`)
+    const fbCount2 = await db.productFeedback.count({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: inv.id },
+    })
+    assert(fbCount2 === fbCount1, `28d: no new ProductFeedback after second process (before=${fbCount1}, after=${fbCount2})`)
+  }
+
+  // ─── 29. Multi-product invoice → multiple ProductFeedback (Problem 4) ──
+  console.log('\n29. Multi-product invoice → multiple ProductFeedback records (Problem 4: all products captured)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §MULTI-PRODUCT: a single paid sales invoice with 3 distinct productIds
+    // (productA1 appears twice — should be deduped; productA2 appears once).
+    // The outbox row should store productIds=JSON.stringify([productA1, productA2])
+    // (deterministic first-appearance order, with duplicates removed).
+    // processFeedbackOutboxRowForInvoice should create 2 ProductFeedback
+    // records (one per unique productId, each with a distinct dedupKey).
+    const saleOpId = 'pf-test-29-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const body = {
+      partyId: partyA1,
+      type: 'sales',
+      amountPaid: 250, // 100 + 50 + 100 = 250 (productA1 appears twice for $100 each, productA2 once for $50)
+      items: [
+        { productId: productA1, name: 'PF Prod A1 (1)', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+        { productId: productA2, name: 'PF Prod A2', quantity: 1, unitPrice: 50, discount: 0, gstRate: 0 },
+        { productId: productA1, name: 'PF Prod A1 (2)', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+      ],
+      saleOperationId: saleOpId,
+    }
+    const inv = await invoiceService.createInvoice(body, { id: TEST_BIZ_A })
+    assert(inv.id, '29a: createInvoice returns the invoice')
+
+    // §DETERMINISTIC-PRODUCTIDS: productIds = JSON.stringify([productA1, productA2])
+    // (first-appearance order; productA1 appears 2x but is deduped).
+    const outboxRow = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { productIds: true, status: true },
+    })
+    assert(outboxRow !== null, '29b: FeedbackOutbox row created')
+    assert(outboxRow!.productIds === JSON.stringify([productA1, productA2]),
+      `29c: productIds=JSON([productA1, productA2]) (got ${outboxRow!.productIds})`)
+
+    // §PROCESS-OUTBOX: should create 2 ProductFeedback records (one per
+    // unique productId — each gets a distinct dedupKey).
+    await feedbackOutboxLib.processFeedbackOutboxRowForInvoice(TEST_BIZ_A, inv.id)
+    const outboxAfter = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { status: true },
+    })
+    assert(outboxAfter!.status === 'COMPLETED', `29d: status=COMPLETED (got ${outboxAfter!.status})`)
+
+    const feedbacks = await db.productFeedback.findMany({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: inv.id },
+      select: { id: true, productId: true, dedupKey: true },
+      orderBy: { productId: 'asc' },
+    })
+    assert(feedbacks.length === 2, `29e: 2 ProductFeedback created (one per unique productId; got ${feedbacks.length})`)
+    assert(feedbacks.some((f) => f.productId === productA1), '29f: ProductFeedback for productA1 exists')
+    assert(feedbacks.some((f) => f.productId === productA2), '29g: ProductFeedback for productA2 exists')
+
+    // §DISTINCT-DEDUPKEYS: each ProductFeedback has a distinct dedupKey
+    // (the productId slot in the key differs). No duplicates.
+    const dedupKeys = feedbacks.map((f) => f.dedupKey)
+    assert(new Set(dedupKeys).size === dedupKeys.length, `29h: all dedupKeys distinct (got ${dedupKeys.length} keys, ${new Set(dedupKeys).size} unique)`)
+  }
+
+  // ─── 30. No-product invoice (ad-hoc items) → one generic ProductFeedback ──
+  console.log('\n30. No-product invoice (ad-hoc items) → one generic ProductFeedback (productId=null)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §NO-PRODUCT: a paid sales invoice where NONE of the items have a
+    // productId (ad-hoc line items, e.g., "Custom item"). The outbox row
+    // should be created with productIds=null. The processor should create
+    // ONE generic ProductFeedback record with productId=null (the dedupKey
+    // uses '' for the productId slot).
+    const saleOpId = 'pf-test-30-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const body = {
+      partyId: partyA1,
+      type: 'sales',
+      amountPaid: 200,
+      items: [
+        { productId: null, name: 'Ad-hoc Item A', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+        { productId: null, name: 'Ad-hoc Item B', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+      ],
+      saleOperationId: saleOpId,
+    }
+    const inv = await invoiceService.createInvoice(body, { id: TEST_BIZ_A })
+    assert(inv.id, '30a: createInvoice returns the invoice')
+
+    // §PRODUCTIDS-NULL: no product-backed items → productIds=null (not JSON.stringify([]))
+    const outboxRow = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { productIds: true, status: true },
+    })
+    assert(outboxRow !== null, '30b: FeedbackOutbox row created')
+    assert(outboxRow!.productIds === null, `30c: productIds=null (no product-backed items; got ${outboxRow!.productIds})`)
+
+    // §PROCESS-OUTBOX: should create ONE generic ProductFeedback with
+    // productId=null. The dedupKey uses '' for the productId slot.
+    await feedbackOutboxLib.processFeedbackOutboxRowForInvoice(TEST_BIZ_A, inv.id)
+    const feedbacks = await db.productFeedback.findMany({
+      where: { businessId: TEST_BIZ_A, partyId: partyA1, invoiceId: inv.id },
+      select: { id: true, productId: true, dedupKey: true },
+    })
+    assert(feedbacks.length === 1, `30d: 1 generic ProductFeedback created (got ${feedbacks.length})`)
+    assert(feedbacks[0].productId === null, `30e: productId=null (generic; got ${feedbacks[0].productId})`)
+    // §DEDUPKEY-EMPTY-PRODUCT: dedupKey = [biz, party, invoice, ''].join('|')
+    const expectedKey = [TEST_BIZ_A, partyA1, inv.id, ''].join('|')
+    assert(feedbacks[0].dedupKey === expectedKey, `30f: dedupKey uses '' for productId slot (got ${feedbacks[0].dedupKey})`)
+  }
+
+  // ─── 31. Scheduled→pending lifecycle (Problem 2: scheduler transitions) ──
+  console.log('\n31. Scheduled→pending lifecycle (processScheduledFeedbackTransitions)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §CREATE-FUTURE-SCHEDULED: invoke createProductFeedbackRecord with
+    // delayHours=48 (default AppSettings). The requestedAt = now + 48h,
+    // which is in the future → status='scheduled'.
+    const createResult = await productFeedbackLib.createProductFeedbackRecord(db, {
+      businessId: TEST_BIZ_A,
+      partyId: partyA1,
+      productId: productA1,
+      actorUserId: testUser.id,
+      // §NO-EXPLICIT-DELAY: omit delayHours so lib resolves via AppSettings (48h)
+    })
+    assert(createResult.created === true, '31a: feedback record created')
+    const r31: any = createResult
+    assert(r31.feedback.status === 'scheduled', `31b: status=scheduled (future requestedAt; got ${r31.feedback.status})`)
+    assert(r31.feedback.requestedAt !== null, '31c: requestedAt is set (future)')
+
+    // §SCHEDULER-NOT-YET: with now < requestedAt (in the future), the
+    // scheduler should NOT transition the record (it's still scheduled).
+    const now1 = new Date(Date.now() + 1000) // 1s in the future (still before requestedAt)
+    const result1 = await followupScheduler.processScheduledFeedbackTransitions(100, now1)
+    assert(result1.scanned === 0, `31d: scheduler scans 0 records before requestedAt (got ${result1.scanned})`)
+    const pfBefore = await db.productFeedback.findUnique({ where: { id: r31.feedback.id }, select: { status: true } })
+    assert(pfBefore!.status === 'scheduled', `31e: status remains scheduled (got ${pfBefore!.status})`)
+
+    // §SCHEDULER-NOW: with now > requestedAt (in the past relative to a
+    // future now), the scheduler should transition the record to 'pending'.
+    // §SIMULATE-FUTURE: use a `now` that is BEYOND the requestedAt to
+    // simulate the passage of time.
+    const futureNow = new Date(Date.now() + 49 * 60 * 60 * 1000) // 49h in the future (past the 48h requestedAt)
+    const result2 = await followupScheduler.processScheduledFeedbackTransitions(100, futureNow)
+    assert(result2.scanned >= 1, `31f: scheduler scans ≥1 record (got ${result2.scanned})`)
+    assert(result2.transitioned >= 1, `31g: scheduler transitions ≥1 record (got ${result2.transitioned})`)
+    const pfAfter = await db.productFeedback.findUnique({ where: { id: r31.feedback.id }, select: { status: true } })
+    assert(pfAfter!.status === 'pending', `31h: status=pending after transition (got ${pfAfter!.status})`)
+
+    // §IDEMPOTENT: a second scheduler run should NOT re-transition the
+    // record (status is no longer 'scheduled' → updateMany WHERE status='scheduled'
+    // matches 0 rows).
+    const result3 = await followupScheduler.processScheduledFeedbackTransitions(100, futureNow)
+    // §NOTE: scanned counts records WHERE status='scheduled' — since our
+    // record is now 'pending', it's no longer scanned.
+    const pfAfter2 = await db.productFeedback.findUnique({ where: { id: r31.feedback.id }, select: { status: true } })
+    assert(pfAfter2!.status === 'pending', `31i: status remains pending after second run (got ${pfAfter2!.status})`)
+  }
+
+  // ─── 32. Submitted/skipped remain terminal ─────────────────────────
+  console.log('\n32. Submitted/skipped remain terminal (cannot transition back to pending)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §SUBMITTED-TERMINAL: create a ProductFeedback + manually mark it
+    // 'submitted' with a rating. The scheduler's processScheduledFeedbackTransitions
+    // should NOT transition it (status='submitted' is terminal — not scanned).
+    const createResult = await productFeedbackLib.createProductFeedbackRecord(db, {
+      businessId: TEST_BIZ_A,
+      partyId: partyA1,
+      actorUserId: testUser.id,
+      delayHours: 1, // scheduled in 1h (status='scheduled' initially)
+    })
+    const r32: any = createResult
+    assert(r32.feedback.status === 'scheduled', '32a: precondition — status=scheduled')
+
+    // §MANUALLY-SET-SUBMITTED: simulate the customer submitting the feedback.
+    await db.productFeedback.update({
+      where: { id: r32.feedback.id },
+      data: {
+        status: 'submitted',
+        rating: 5,
+        comment: 'Great product!',
+        submittedAt: new Date(),
+      },
+    })
+
+    // §SCHEDULER-RUN: with now > requestedAt, the scheduler scans records
+    // WHERE status='scheduled' — our submitted record is NOT scanned.
+    const futureNow = new Date(Date.now() + 2 * 60 * 60 * 1000) // 2h in the future (past the 1h requestedAt)
+    const result = await followupScheduler.processScheduledFeedbackTransitions(100, futureNow)
+    const pfAfter = await db.productFeedback.findUnique({
+      where: { id: r32.feedback.id },
+      select: { status: true, rating: true, comment: true },
+    })
+    assert(pfAfter!.status === 'submitted', `32b: status remains submitted (terminal; got ${pfAfter!.status})`)
+    assert(pfAfter!.rating === 5, `32c: rating preserved (got ${pfAfter!.rating})`)
+
+    // §VALIDATION: the domain validator should reject submitted→pending
+    // (the state machine map has submitted: [] — no transitions allowed).
+    const validation = productFeedbackLib.validateFeedbackStatusTransition('submitted', 'pending')
+    assert(validation.ok === false, `32d: validateFeedbackStatusTransition(submitted→pending) → ok=false (got ${validation.ok})`)
+
+    // §SKIPPED-TERMINAL: same logic for 'skipped'.
+    const createResult2 = await productFeedbackLib.createProductFeedbackRecord(db, {
+      businessId: TEST_BIZ_A,
+      partyId: partyA1,
+      actorUserId: testUser.id,
+      delayHours: 1,
+    })
+    const r32b: any = createResult2
+    await db.productFeedback.update({
+      where: { id: r32b.feedback.id },
+      data: { status: 'skipped' },
+    })
+    const result2 = await followupScheduler.processScheduledFeedbackTransitions(100, futureNow)
+    const pfAfter2 = await db.productFeedback.findUnique({
+      where: { id: r32b.feedback.id },
+      select: { status: true },
+    })
+    assert(pfAfter2!.status === 'skipped', `32e: status remains skipped (terminal; got ${pfAfter2!.status})`)
+  }
+
+  // ─── 33. Tenant isolation regression for FeedbackOutbox ──────────
+  console.log('\n33. Tenant isolation regression (Biz A cannot process Biz B\'s FeedbackOutbox)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §BIZ-B-INVOICE: create a paid sales invoice in Biz B with Biz B's
+    // party + product. This should create a FeedbackOutbox row in Biz B.
+    const saleOpIdB = 'pf-test-33-b-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const bodyB = {
+      partyId: partyB1,
+      type: 'sales',
+      amountPaid: 100,
+      items: [
+        { productId: productB1, name: 'PF Prod B1', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+      ],
+      saleOperationId: saleOpIdB,
+    }
+    const invB = await invoiceService.createInvoice(bodyB, { id: TEST_BIZ_B })
+    assert(invB.id, '33a: Biz B invoice created')
+
+    const outboxB = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: invB.id },
+      select: { id: true, businessId: true, status: true },
+    })
+    assert(outboxB !== null, '33b: Biz B FeedbackOutbox row created')
+    assert(outboxB!.businessId === TEST_BIZ_B, `33c: outbox belongs to Biz B (got ${outboxB!.businessId})`)
+    assert(outboxB!.status === 'PENDING', `33d: status=PENDING (got ${outboxB!.status})`)
+
+    // §BIZ-A-ATTEMPT-PROCESS: Biz A (TEST_BIZ_A) attempts to process Biz B's
+    // outbox row via processFeedbackOutboxRowForInvoice. The function uses
+    // `findFirst({ where: { invoiceId, businessId } })` — Biz A's businessId
+    // will NOT match Biz B's outbox row → returns null → no-op.
+    // §DEFENSE-IN-DEPTH: even though invoiceId is globally unique, scoping by
+    // businessId means a tenant can never affect another tenant's outbox.
+    await feedbackOutboxLib.processFeedbackOutboxRowForInvoice(TEST_BIZ_A, invB.id)
+    const outboxBAfter = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: invB.id },
+      select: { status: true, completedAt: true },
+    })
+    assert(outboxBAfter!.status === 'PENDING', `33e: Biz B outbox remains PENDING (Biz A could not process; got ${outboxBAfter!.status})`)
+    assert(outboxBAfter!.completedAt === null, '33f: Biz B outbox NOT completed by Biz A')
+
+    // §BIZ-B-PROCESS: Biz B processing its own outbox should succeed.
+    await feedbackOutboxLib.processFeedbackOutboxRowForInvoice(TEST_BIZ_B, invB.id)
+    const outboxBAfter2 = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: invB.id },
+      select: { status: true, completedAt: true },
+    })
+    assert(outboxBAfter2!.status === 'COMPLETED', `33g: Biz B outbox COMPLETED by Biz B (got ${outboxBAfter2!.status})`)
+
+    // §NO-CROSS-TENANT-PRODUCTFEEDBACK: Biz A should have ZERO ProductFeedback
+    // for Biz B's invoice (Biz A never processed it).
+    const bizAFeedbacksForBInvoice = await db.productFeedback.count({
+      where: { businessId: TEST_BIZ_A, invoiceId: invB.id },
+    })
+    assert(bizAFeedbacksForBInvoice === 0, `33h: Biz A has 0 ProductFeedback for Biz B's invoice (got ${bizAFeedbacksForBInvoice})`)
+
+    // §BIZ-B-HAS-ITS-OWN: Biz B should have 1 ProductFeedback for its invoice.
+    const bizBFeedbacksForBInvoice = await db.productFeedback.count({
+      where: { businessId: TEST_BIZ_B, invoiceId: invB.id },
+    })
+    assert(bizBFeedbacksForBInvoice === 1, `33i: Biz B has 1 ProductFeedback for its own invoice (got ${bizBFeedbacksForBInvoice})`)
+  }
+
+  // ─── 34. Existing reward/invoice behavior unchanged (RewardAccrualOutbox still created) ──
+  console.log('\n34. Existing reward/invoice behavior unchanged (RewardAccrualOutbox still created atomically)')
+  {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
+    // §REWARD-OUTBOX-REGRESSION: the new FeedbackOutbox write inside the
+    // $transaction must NOT break the existing RewardAccrualOutbox write
+    // (which happens immediately before it). Both should be created in the
+    // SAME transaction for the same eligible invoice.
+    const saleOpId = 'pf-test-34-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+    const body = {
+      partyId: partyA1,
+      type: 'sales',
+      amountPaid: 100,
+      items: [
+        { productId: productA1, name: 'PF Prod A1', quantity: 1, unitPrice: 100, discount: 0, gstRate: 0 },
+      ],
+      saleOperationId: saleOpId,
+    }
+    const inv = await invoiceService.createInvoice(body, { id: TEST_BIZ_A })
+    assert(inv.id, '34a: createInvoice returns the invoice')
+
+    // §REWARD-OUTBOX: should exist (the existing Step 7 pattern, unchanged).
+    const rewardOutbox = await db.rewardAccrualOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { id: true, status: true, businessId: true },
+    })
+    assert(rewardOutbox !== null, '34b: RewardAccrualOutbox row created (regression intact)')
+    assert(rewardOutbox!.status === 'PENDING', `34c: RewardAccrualOutbox status=PENDING (got ${rewardOutbox!.status})`)
+    assert(rewardOutbox!.businessId === TEST_BIZ_A, `34d: RewardAccrualOutbox businessId=Biz A (got ${rewardOutbox!.businessId})`)
+
+    // §FEEDBACK-OUTBOX: should also exist (the new reliability layer).
+    const feedbackOutbox = await db.feedbackOutbox.findUnique({
+      where: { invoiceId: inv.id },
+      select: { id: true, status: true, businessId: true },
+    })
+    assert(feedbackOutbox !== null, '34e: FeedbackOutbox row created (new reliability layer)')
+    assert(feedbackOutbox!.status === 'PENDING', `34f: FeedbackOutbox status=PENDING (got ${feedbackOutbox!.status})`)
+    assert(feedbackOutbox!.businessId === TEST_BIZ_A, `34g: FeedbackOutbox businessId=Biz A (got ${feedbackOutbox!.businessId})`)
+
+    // §INVOICE-FIELDS: the invoice itself should have the expected shape
+    // (accounting formulas unchanged).
+    const invoice = await db.invoice.findUnique({
+      where: { id: inv.id },
+      select: { type: true, status: true, partyId: true, grandTotal: true, amountPaid: true, amountDue: true },
+    })
+    assert(invoice!.type === 'sales', `34h: invoice.type=sales (got ${invoice!.type})`)
+    assert(invoice!.status === 'paid', `34i: invoice.status=paid (got ${invoice!.status})`)
+    assert(invoice!.partyId === partyA1, `34j: invoice.partyId=partyA1 (got ${invoice!.partyId})`)
   }
 
   await cleanup()
