@@ -3,7 +3,9 @@ import { processAllFollowUpReminders } from '@/lib/followup-scheduler'
 
 // §STEP8FB-CRON-ROUTE: follow-up reminder scheduler.
 //
-// §SCHEDULE: 0 * * * * (hourly, configured in vercel.json).
+// §SCHEDULE: 0 1 * * * (daily at 01:00 UTC, configured in vercel.json).
+// Hobby-compatible (daily crons only on the Vercel Hobby plan).
+// On Pro, this can be increased to hourly (0 * * * *) for faster processing.
 //
 // §SECURITY: requires CRON_SECRET in the Authorization header (same fail-closed
 // pattern as reward-accrual).
@@ -21,13 +23,16 @@ import { processAllFollowUpReminders } from '@/lib/followup-scheduler'
 
 export const maxDuration = 60
 
-const CRON_SECRET = process.env.CRON_SECRET
-
+// §CRON-SECRET: read at CALL TIME (inside isAuthorized), not at module load.
+// This allows tests to set CRON_SECRET after import + ensures the env var
+// is always current (important for serverless cold starts where env vars
+// may be set after module load).
 function isAuthorized(req: NextRequest): boolean {
-  if (!CRON_SECRET) return false
+  const secret = process.env.CRON_SECRET
+  if (!secret) return false // fail-closed
   const authHeader = req.headers.get('authorization') || req.headers.get('Authorization')
-  if (authHeader === `Bearer ${CRON_SECRET}`) return true
-  if (authHeader === CRON_SECRET) return true
+  if (authHeader === `Bearer ${secret}`) return true
+  if (authHeader === secret) return true
   return false
 }
 

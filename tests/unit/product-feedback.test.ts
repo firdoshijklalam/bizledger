@@ -1680,6 +1680,62 @@ async function main() {
     await db.invoice.delete({ where: { id: inv.id } })
   }
 
+  // ─── 42. vercel.json has both cron entries with daily schedules ─────
+  console.log('\n42. vercel.json cron registration')
+  {
+    const fs = await import('fs')
+    const path = await import('path')
+    const vercelJson = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'vercel.json'), 'utf-8'))
+    assert(Array.isArray(vercelJson.crons), '42.1: vercel.json has crons array')
+    assert(vercelJson.crons.length === 2, `42.2: exactly 2 crons (got ${vercelJson.crons.length})`)
+
+    const fbOutbox = vercelJson.crons.find((c: any) => c.path === '/api/cron/feedback-outbox')
+    assert(fbOutbox, '42.3: /api/cron/feedback-outbox registered')
+    assert(fbOutbox?.schedule === '0 0 * * *', `42.4: feedback-outbox schedule=0 0 * * * (got ${fbOutbox?.schedule})`)
+
+    const fuReminders = vercelJson.crons.find((c: any) => c.path === '/api/cron/followup-reminders')
+    assert(fuReminders, '42.5: /api/cron/followup-reminders registered')
+    assert(fuReminders?.schedule === '0 1 * * *', `42.6: followup-reminders schedule=0 1 * * * (got ${fuReminders?.schedule})`)
+
+    // §DAILY-VALID: both schedules must be daily-valid for Hobby (exactly once per day)
+    assert(fbOutbox?.schedule !== fuReminders?.schedule, '42.7: schedules are distinct (not concurrent)')
+  }
+
+  // ─── 43. Followup-reminders cron route is CRON_SECRET protected ──────
+  console.log('\n43. Followup-reminders cron route CRON_SECRET')
+  {
+    const cronRoute = await import('@/app/api/cron/followup-reminders/route')
+    const { NextRequest } = await import('next/server')
+    const oldSecret = process.env.CRON_SECRET
+
+    // No CRON_SECRET → fail-closed
+    delete process.env.CRON_SECRET
+    const reqNoSecret = new NextRequest('http://localhost/api/cron/followup-reminders', { method: 'POST' })
+    const resNoSecret = await cronRoute.POST(reqNoSecret)
+    assert(resNoSecret.status === 401, `43.1: no CRON_SECRET → 401 (got ${resNoSecret.status})`)
+
+    // Wrong secret → 401
+    process.env.CRON_SECRET = 'correct-secret'
+    const reqWrong = new NextRequest('http://localhost/api/cron/followup-reminders', { method: 'POST', headers: { authorization: 'Bearer wrong-secret' } })
+    const resWrong = await cronRoute.POST(reqWrong)
+    assert(resWrong.status === 401, `43.2: wrong secret → 401 (got ${resWrong.status})`)
+
+    // Correct secret → 200 (processAllFollowUpReminders runs, includes scheduled→pending)
+    const reqCorrect = new NextRequest('http://localhost/api/cron/followup-reminders', { method: 'POST', headers: { authorization: 'Bearer correct-secret' } })
+    const resCorrect = await cronRoute.POST(reqCorrect)
+    assert(resCorrect.status === 200, `43.3: correct secret → 200 (got ${resCorrect.status})`)
+    const body = await resCorrect.json()
+    assert(body.ok === true, `43.4: response.ok=true (got ${body.ok})`)
+    // §SCHEDULED-TRANSITION: the response must include the scheduled transition
+    // summary, proving processScheduledFeedbackTransitions() is reachable via
+    // this cron route → processAllFollowUpReminders() → processScheduledFeedbackTransitions().
+    assert(typeof body.scheduled === 'object', `43.5: response.scheduled is object (got ${typeof body.scheduled})`)
+    assert(typeof body.scheduled.scanned === 'number', `43.6: response.scheduled.scanned is number (got ${typeof body.scheduled.scanned})`)
+
+    // Restore
+    if (oldSecret !== undefined) { process.env.CRON_SECRET = oldSecret } else { delete process.env.CRON_SECRET }
+  }
+
   await cleanup()
 
   console.log(`\n${'='.repeat(60)}`)
