@@ -27,9 +27,14 @@ import {
 type TxClient = PrismaClient | Parameters<Parameters<PrismaClient['$transaction']>[0]>[0]
 
 // §DUE-SOON-WINDOW: follow-ups due within the next 1 hour.
-// The cron runs hourly (0 * * * *). A delayed run (e.g. 5min late) still
-// catches follow-ups entering the window because the scan uses dueAt <= now+1h
-// (not a fixed boundary). DB uniqueness dedupes overlapping windows.
+// The cron runs DAILY at 01:00 UTC (0 1 * * *, configured in vercel.json) —
+// the Vercel Hobby plan only permits daily cron schedules. Hobby cron timing
+// is approximate: invocations are not guaranteed to fire at the exact
+// scheduled minute and may be delayed. A delayed run still catches
+// follow-ups entering the window because the scan uses dueAt <= now+1h
+// (not a fixed boundary), and follow-ups whose dueAt passes between daily
+// runs are picked up by the overdue phase (dueAt < now, PHASE-3). DB
+// uniqueness dedupes overlapping windows.
 export const DUE_SOON_WINDOW_MS = 60 * 60 * 1000 // 1 hour
 
 // §PROCESS-LIMIT: bounded follow-ups per category per cron run.

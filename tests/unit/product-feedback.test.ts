@@ -1701,9 +1701,12 @@ async function main() {
     assert(fbOutbox?.schedule !== fuReminders?.schedule, '42.7: schedules are distinct (not concurrent)')
   }
 
-  // ─── 43. Followup-reminders cron route is CRON_SECRET protected ──────
-  console.log('\n43. Followup-reminders cron route CRON_SECRET')
+  // ─── 43. Followup-reminders cron route: CRON_SECRET + scheduled→pending ──
+  console.log('\n43. Followup-reminders cron route CRON_SECRET + scheduled→pending via HTTP route')
   {
+    await cleanupFeedbackBetweenTests()
+    authOverride = testUser
+
     const cronRoute = await import('@/app/api/cron/followup-reminders/route')
     const { NextRequest } = await import('next/server')
     const oldSecret = process.env.CRON_SECRET
@@ -1720,20 +1723,62 @@ async function main() {
     const resWrong = await cronRoute.POST(reqWrong)
     assert(resWrong.status === 401, `43.2: wrong secret → 401 (got ${resWrong.status})`)
 
-    // Correct secret → 200 (processAllFollowUpReminders runs, includes scheduled→pending)
+    // §CREATE-REAL-SCHEDULED: create a REAL ProductFeedback through the domain
+    // lib. With no explicit delayHours the lib resolves AppSettings
+    // .feedbackDelayHours (48h default) → requestedAt is in the FUTURE →
+    // status='scheduled'.
+    const createResult = await productFeedbackLib.createProductFeedbackRecord(db, {
+      businessId: TEST_BIZ_A,
+      partyId: partyA1,
+      productId: productA1,
+      actorUserId: testUser.id,
+    })
+    assert(createResult.created === true, `43.3: real ProductFeedback created via domain lib (got created=${createResult.created})`)
+    const pf43: any = createResult
+    assert(pf43.feedback.status === 'scheduled', `43.4: status=scheduled at creation (got ${pf43.feedback.status})`)
+
+    // §BACKDATE: processAllFollowUpReminders() (what the route calls) uses the
+    // REAL current time as its effective `now` — there is no injection point.
+    // Simulate the passage of time by backdating requestedAt to 1h BEFORE now,
+    // so the PHASE-1.5 scan (status='scheduled' AND requestedAt <= now) finds
+    // the record when the HTTP route is invoked below.
+    await db.productFeedback.update({
+      where: { id: pf43.feedback.id },
+      data: { requestedAt: new Date(Date.now() - 60 * 60 * 1000) },
+    })
+
+    // Correct secret → 200. The route runs the ACTUAL scheduler pipeline:
+    // POST → processAllFollowUpReminders() → PHASE-1.5
+    // processScheduledFeedbackTransitions().
     const reqCorrect = new NextRequest('http://localhost/api/cron/followup-reminders', { method: 'POST', headers: { authorization: 'Bearer correct-secret' } })
     const resCorrect = await cronRoute.POST(reqCorrect)
-    assert(resCorrect.status === 200, `43.3: correct secret → 200 (got ${resCorrect.status})`)
+    assert(resCorrect.status === 200, `43.5: correct secret → 200 (got ${resCorrect.status})`)
     const body = await resCorrect.json()
-    assert(body.ok === true, `43.4: response.ok=true (got ${body.ok})`)
-    // §SCHEDULED-TRANSITION: the response must include the scheduled transition
-    // summary, proving processScheduledFeedbackTransitions() is reachable via
-    // this cron route → processAllFollowUpReminders() → processScheduledFeedbackTransitions().
-    assert(typeof body.scheduled === 'object', `43.5: response.scheduled is object (got ${typeof body.scheduled})`)
-    assert(typeof body.scheduled.scanned === 'number', `43.6: response.scheduled.scanned is number (got ${typeof body.scheduled.scanned})`)
+    assert(body.ok === true, `43.6: response.ok=true (got ${body.ok})`)
 
-    // Restore
+    // §SCHEDULED-SUMMARY: the response must include the scheduled transition
+    // summary with numeric counters — proving the PHASE-1.5 stage ran and
+    // reported through the HTTP route.
+    assert(typeof body.scheduled === 'object' && body.scheduled !== null, `43.7: response.scheduled is object (got ${typeof body.scheduled})`)
+    assert(typeof body.scheduled.scanned === 'number', `43.8: response.scheduled.scanned is number (got ${typeof body.scheduled.scanned})`)
+    assert(typeof body.scheduled.transitioned === 'number', `43.9: response.scheduled.transitioned is number (got ${typeof body.scheduled.transitioned})`)
+    // Our backdated record was in the scan window at route-call time → the
+    // scan must have found it and the conditional update must have matched.
+    assert(body.scheduled.scanned >= 1, `43.10: scheduled.scanned ≥ 1 (our scheduled record was scanned; got ${body.scheduled.scanned})`)
+    assert(body.scheduled.transitioned >= 1, `43.11: scheduled.transitioned ≥ 1 (got ${body.scheduled.transitioned})`)
+
+    // §SAME-ROW-DB-PROOF: re-query the SAME ProductFeedback from the DB and
+    // verify the HTTP route ACTUALLY transitioned it scheduled → pending
+    // (not merely that the route responded 200 with a summary shape).
+    const pf43After = await db.productFeedback.findUnique({ where: { id: pf43.feedback.id }, select: { status: true } })
+    assert(pf43After !== null, '43.12: same ProductFeedback still exists in DB after cron run')
+    assert(pf43After!.status === 'pending', `43.13: SAME ProductFeedback transitioned scheduled→pending via HTTP route (got ${pf43After!.status})`)
+
+    // Restore CRON_SECRET + clean ALL test data created in this section (the
+    // feedback record, its linked FollowUp + events + sequences, any outbox
+    // rows for the test businesses).
     if (oldSecret !== undefined) { process.env.CRON_SECRET = oldSecret } else { delete process.env.CRON_SECRET }
+    await cleanupFeedbackBetweenTests()
   }
 
   await cleanup()
