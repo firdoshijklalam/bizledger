@@ -13,7 +13,7 @@
 // ─── Types ───────────────────────────────────────────────────────────────
 
 export interface DashboardSection {
-  id: 'summaryCards' | 'performanceChart' | 'customerQuality' | 'topInsights' | 'businessActivity' | 'quickActions'
+  id: 'summaryCards' | 'daySummary' | 'performanceChart' | 'customerQuality' | 'topInsights' | 'businessActivity' | 'quickActions'
   visible: boolean
   order: number
 }
@@ -68,11 +68,16 @@ export interface DashboardSectionConfig {
 
 export const DEFAULT_DASHBOARD_SECTIONS: DashboardSection[] = [
   { id: 'summaryCards', visible: true, order: 0 },
-  { id: 'performanceChart', visible: true, order: 1 },
-  { id: 'customerQuality', visible: true, order: 2 },
-  { id: 'topInsights', visible: true, order: 3 },
-  { id: 'businessActivity', visible: true, order: 4 },
-  { id: 'quickActions', visible: true, order: 5 },
+  // §EOD-SUMMARY: Day Summary card (today's shareable snapshot). Inserted at
+  // order 1 for new users; existing saved configs pick it up via the parser's
+  // "add missing sections from defaults" path (appended after their sections,
+  // stable-sorted — position may differ until the user reorders).
+  { id: 'daySummary', visible: true, order: 1 },
+  { id: 'performanceChart', visible: true, order: 2 },
+  { id: 'customerQuality', visible: true, order: 3 },
+  { id: 'topInsights', visible: true, order: 4 },
+  { id: 'businessActivity', visible: true, order: 5 },
+  { id: 'quickActions', visible: true, order: 6 },
 ]
 
 export const DEFAULT_DASHBOARD_CONFIG: DashboardSectionConfig = {
@@ -118,7 +123,7 @@ export const DEFAULT_DASHBOARD_CONFIG: DashboardSectionConfig = {
 // ─── Parser (defensive, mirrors parseCardConfig) ────────────────────────
 
 const VALID_SECTION_IDS = new Set([
-  'summaryCards', 'performanceChart', 'customerQuality', 'topInsights', 'businessActivity', 'quickActions'
+  'summaryCards', 'daySummary', 'performanceChart', 'customerQuality', 'topInsights', 'businessActivity', 'quickActions'
 ])
 const VALID_GRADES = new Set(['A', 'B', 'C', 'D', 'E'])
 const VALID_CQ_CHART_SHAPES = new Set<CustomerQualityChartShape>(['bar', 'donut', 'horizontal'])

@@ -44,6 +44,7 @@ import {
   type DashboardCardDef,
 } from '@/components/shared/dashboard-card-management'
 import { ProfitLossDrilldownSheet } from '@/components/shared/profit-loss-drilldown-sheet'
+import { EodSummaryCard } from '@/components/views/dashboard/eod-summary-card'
 import {
   DashboardCustomizationSheet,
   SectionSettingsSheet,
@@ -846,6 +847,9 @@ export function DashboardView() {
   const renderSection = (id: string): React.ReactNode => {
     if (!isSectionVisible(dashSectionConfig, id)) return null
     switch (id) {
+      // §EOD-SUMMARY: shareable "Day Summary" snapshot card (today IST)
+      case 'daySummary':
+        return <EodSummaryCard />
       case 'summaryCards':
         return (
           <>

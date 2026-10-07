@@ -161,6 +161,24 @@ const en: Dict = {
   'qa.addTransaction': 'লেনদেন যোগ',
   'qa.quickSale': 'Quick Sale',
   'ai.tools': 'AI Tools',
+  // §EOD-SUMMARY: Day Summary card on Dashboard
+  'eod.title': 'Day Summary',
+  'eod.sales': 'Sales',
+  'eod.collected': 'Collected',
+  'eod.creditGiven': 'Credit Given',
+  'eod.expenses': 'Expenses',
+  'eod.topCustomer': 'Top Customer',
+  'eod.followUps': 'Follow-ups',
+  'eod.lowStock': 'Low Stock',
+  'eod.bills': '{n} bills',
+  'eod.walkIn': 'Walk-in Customer',
+  'eod.share': 'Share',
+  'eod.copy': 'Copy',
+  'eod.copied': 'Day summary copied',
+  'eod.shareText': 'Day Summary — {date} · {business}',
+  'eod.noActivity': 'No activity yet today',
+  'eod.items': 'items',
+  'eod.pending': 'pending',
 }
 
 const bn: Dict = {
@@ -319,6 +337,24 @@ const bn: Dict = {
   'qa.addTransaction': 'লেনদেন যোগ',
   'qa.quickSale': 'দ্রুত বিক্রি',
   'ai.tools': 'এআই টুলস',
+  // §EOD-SUMMARY
+  'eod.title': 'দিনের হিসাব',
+  'eod.sales': 'বিক্রয়',
+  'eod.collected': 'আদায়',
+  'eod.creditGiven': 'বাকি দেওয়া',
+  'eod.expenses': 'খরচ',
+  'eod.topCustomer': 'শীর্ষ কাস্টমার',
+  'eod.followUps': 'ফলো-আপ',
+  'eod.lowStock': 'কম স্টক',
+  'eod.bills': '{n}টি বিল',
+  'eod.walkIn': 'সরাসরি কাস্টমার',
+  'eod.share': 'শেয়ার',
+  'eod.copy': 'কপি',
+  'eod.copied': 'দিনের হিসাব কপি হয়েছে',
+  'eod.shareText': 'দিনের হিসাব — {date} · {business}',
+  'eod.noActivity': 'আজ এখনও কোনো কার্যকলাপ নেই',
+  'eod.items': 'আইটেম',
+  'eod.pending': 'বাকি',
 }
 
 // Hindi translations (Phase 3)
@@ -470,6 +506,24 @@ const hi: Dict = {
   'qa.addTransaction': 'लेनदेन जोड़ें',
   'qa.quickSale': 'त्वरित बिक्री',
   'ai.tools': 'एआई टूल्स',
+  // §EOD-SUMMARY
+  'eod.title': 'दिन का सारांश',
+  'eod.sales': 'बिक्री',
+  'eod.collected': 'वसूली',
+  'eod.creditGiven': 'उधार दिया',
+  'eod.expenses': 'खर्च',
+  'eod.topCustomer': 'टॉप ग्राहक',
+  'eod.followUps': 'फॉलो-अप',
+  'eod.lowStock': 'कम स्टॉक',
+  'eod.bills': '{n} बिल',
+  'eod.walkIn': 'सीधे ग्राहक',
+  'eod.share': 'शेयर',
+  'eod.copy': 'कॉपी',
+  'eod.copied': 'दिन का सारांश कॉपी हुआ',
+  'eod.shareText': 'दिन का सारांश — {date} · {business}',
+  'eod.noActivity': 'आज अभी कोई गतिविधि नहीं',
+  'eod.items': 'आइटम',
+  'eod.pending': 'बाकी',
 }
 
 const dictionaries: Record<Language, Dict> = { en, bn, hi }

@@ -57,15 +57,18 @@ async function main() {
   console.log('\n  1. Default config has correct section order:')
   {
     const sections = DEFAULT_DASHBOARD_SECTIONS
-    assertEqual(sections.length, 6, 'D1: DEFAULT_DASHBOARD_SECTIONS has 6 sections')
+    // §EOD-SUMMARY: 7 sections since the Day Summary card (daySummary, order 1)
+    // was added — see src/lib/dashboard-preferences.ts DEFAULT_DASHBOARD_SECTIONS.
+    assertEqual(sections.length, 7, 'D1: DEFAULT_DASHBOARD_SECTIONS has 7 sections')
 
     const expected = [
       { id: 'summaryCards',      order: 0 },
-      { id: 'performanceChart',  order: 1 },
-      { id: 'customerQuality',   order: 2 },
-      { id: 'topInsights',       order: 3 },
-      { id: 'businessActivity',  order: 4 },
-      { id: 'quickActions',      order: 5 },
+      { id: 'daySummary',        order: 1 },
+      { id: 'performanceChart',  order: 2 },
+      { id: 'customerQuality',   order: 3 },
+      { id: 'topInsights',       order: 4 },
+      { id: 'businessActivity',  order: 5 },
+      { id: 'quickActions',      order: 6 },
     ]
     for (const e of expected) {
       const s = sections.find(x => x.id === e.id)
@@ -158,16 +161,18 @@ async function main() {
   // ─── 6. getVisibleSections returns only visible, sorted by order ─────
   console.log('\n  6. getVisibleSections returns only visible, sorted by order:')
   {
-    // Default: all visible — should return all 6 in order 0..5.
+    // Default: all visible — should return all 7 in order 0..6.
     const visibleDefault = getVisibleSections(DEFAULT_DASHBOARD_CONFIG)
-    assertEqual(visibleDefault.length, 6, 'G1: default config → 6 visible sections')
-    assertEqual(visibleDefault.map(s => s.id), ['summaryCards', 'performanceChart', 'customerQuality', 'topInsights', 'businessActivity', 'quickActions'], 'G2: default order preserved')
+    assertEqual(visibleDefault.length, 7, 'G1: default config → 7 visible sections')
+    assertEqual(visibleDefault.map(s => s.id), ['summaryCards', 'daySummary', 'performanceChart', 'customerQuality', 'topInsights', 'businessActivity', 'quickActions'], 'G2: default order preserved')
 
-    // Custom config: hide 2 sections + reorder remaining 4.
+    // Custom config: hide 3 sections (incl. daySummary) + reorder the rest.
+    // §EOD-SUMMARY: daySummary hidden too so the visible-set stays comparable.
     const custom: DashboardSectionConfig = {
       ...DEFAULT_DASHBOARD_CONFIG,
       sections: [
         { id: 'summaryCards', visible: false, order: 0 },
+        { id: 'daySummary', visible: false, order: 1 },
         { id: 'performanceChart', visible: true, order: 3 },
         { id: 'customerQuality', visible: false, order: 4 },
         { id: 'topInsights', visible: true, order: 1 },
@@ -176,7 +181,7 @@ async function main() {
       ],
     }
     const visibleCustom = getVisibleSections(custom)
-    assertEqual(visibleCustom.length, 4, 'G3: custom config → 4 visible sections (2 hidden)')
+    assertEqual(visibleCustom.length, 4, 'G3: custom config → 4 visible sections (3 hidden)')
     assertEqual(
       visibleCustom.map(s => s.id),
       ['quickActions', 'topInsights', 'businessActivity', 'performanceChart'],
@@ -275,7 +280,7 @@ async function main() {
   // ─── 11. Custom order preserved on parse round-trip ───────────────────
   console.log('\n  11. Custom order preserved on parse round-trip:')
   {
-    // Reverse the default order: quickActions=0, ..., summaryCards=5.
+    // Reverse the default order: quickActions=0, ..., summaryCards=6.
     const original: DashboardSectionConfig = {
       ...DEFAULT_DASHBOARD_CONFIG,
       sections: [
@@ -283,8 +288,9 @@ async function main() {
         { id: 'businessActivity',  visible: true,  order: 1 },
         { id: 'topInsights',       visible: true,  order: 2 },
         { id: 'customerQuality',   visible: false, order: 3 },
-        { id: 'performanceChart',  visible: true,  order: 4 },
-        { id: 'summaryCards',      visible: true,  order: 5 },
+        { id: 'daySummary',        visible: true,  order: 4 },
+        { id: 'performanceChart',  visible: true,  order: 5 },
+        { id: 'summaryCards',      visible: true,  order: 6 },
       ],
     }
 
@@ -303,7 +309,7 @@ async function main() {
     const visibleRoundTripped = getVisibleSections(roundTripped).map(s => s.id)
     assertEqual(
       visibleRoundTripped,
-      ['quickActions', 'businessActivity', 'topInsights', 'performanceChart', 'summaryCards'],
+      ['quickActions', 'businessActivity', 'topInsights', 'daySummary', 'performanceChart', 'summaryCards'],
       'R3: visible sections in custom order after round-trip (customerQuality hidden)'
     )
   }
@@ -355,7 +361,7 @@ async function main() {
     assert(ids.includes('summaryCards'), 'MJ5: invalid summaryCards dropped, default summaryCards added back')
     assert(ids.includes('performanceChart'), 'MJ6: invalid performanceChart dropped, default performanceChart added back')
     assert(partialBad.sections.find(s => s.id === 'summaryCards')?.visible === true, 'MJ7: re-added summaryCards has default visible=true')
-    assert(partialBad.sections.find(s => s.id === 'performanceChart')?.order === 1, 'MJ8: re-added performanceChart has default order=1')
+    assert(partialBad.sections.find(s => s.id === 'performanceChart')?.order === 2, 'MJ8: re-added performanceChart has default order=2')
   }
 
   // ─── 14. Order values are clamped to [0, 10] ──────────────────────────

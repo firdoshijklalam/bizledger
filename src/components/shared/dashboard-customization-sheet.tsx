@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   X, Loader2, Settings, ChevronUp, ChevronDown,
   LayoutGrid, BarChart3, Users, Package, ArrowLeftRight, Zap,
-  RotateCcw, Check,
+  RotateCcw, Check, MoonStar,
 } from 'lucide-react'
 import { SortableList, SortableListItem, DragHandle, reconstructOrderFromDrag } from '@/components/shared/sortable-list'
 import { DashboardVisibilityToggle } from '@/components/shared/dashboard-visibility-toggle'
@@ -50,6 +50,7 @@ interface DashboardCustomizationSheetProps {
 
 const SECTION_LABELS: Record<string, { label: string; icon: typeof LayoutGrid }> = {
   summaryCards: { label: 'Summary Cards', icon: LayoutGrid },
+  daySummary: { label: 'Day Summary', icon: MoonStar },
   performanceChart: { label: 'Performance Chart', icon: BarChart3 },
   customerQuality: { label: 'Customer Quality Distribution', icon: Users },
   topInsights: { label: 'Top Insights', icon: Users },
