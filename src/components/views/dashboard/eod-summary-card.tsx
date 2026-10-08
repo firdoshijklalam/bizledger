@@ -5,15 +5,20 @@
  *
  * Data: GET /api/dashboard/eod-summary (see route for the aggregation contract).
  *
+ * §DRILL-THROUGH (this iteration): every actionable tile/row navigates —
+ *   Sales tile      → History view, 1-day range (today's transactions)
+ *   Top Customer    → party profile overlay (via setOverlayPartyId)
+ *   Follow-ups row  → Follow-ups view
+ *   Low Stock row   → Inventory view, low-stock filter
+ * Tappable surfaces get a ChevronRight affordance + active:scale press
+ * feedback (touch-first). Non-interactive tiles stay static to avoid
+ * implying navigation that doesn't exist.
+ *
  * Design notes:
- *  - Always-compact card: 2×2 metric grid (Sales / Collected / Credit Given /
- *    Expenses) + context rows (Top Customer, Follow-ups, Low Stock) + Share /
- *    Copy actions that build a localized plain-text summary for WhatsApp.
- *  - Semantic palette (de-indigo sweep): Sales=emerald, Collected=teal,
- *    Credit=amber, Expenses=rose, Top Customer=violet, Follow-ups=cyan,
- *    Low Stock=orange.
- *  - Loading skeleton mirrors the card layout; error state is silent-empty
- *    (the card must never break the dashboard).
+ *  - Semantic palette: Sales=emerald, Collected=teal, Credit=amber,
+ *    Expenses=rose, Top Customer=violet, Follow-ups=cyan, Low Stock=orange.
+ *  - Loading skeleton uses the global .skeleton-shimmer sweep; error state
+ *    is silent-empty (the card must never break the dashboard).
  */
 'use client'
 
@@ -27,7 +32,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
 import {
   Wallet, ArrowDownLeft, HandCoins, ReceiptText,
-  Star, Clock, PackageMinus, Share2, Copy, Moon,
+  Star, Clock, PackageMinus, Share2, Copy, Moon, ChevronRight,
 } from 'lucide-react'
 
 interface EodSummary {
@@ -37,14 +42,24 @@ interface EodSummary {
   collections: number
   expenses: number
   newCreditGiven: number
-  topCustomer: { name: string; amount: number } | null
+  topCustomer: { name: string; amount: number; partyId: string | null } | null
   pendingFollowUps: number
   lowStockCount: number
 }
 
+/** Shared press-feedback classes for tappable tiles/rows. */
+const TAPPABLE =
+  'w-full text-left rounded-xl border border-border/60 bg-background/50 p-2.5 ' +
+  'transition-[transform,background-color] duration-150 active:scale-[0.98] ' +
+  'hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer'
+
 export function EodSummaryCard() {
   const { t } = useI18n()
   const business = useAppStore((s) => s.business)
+  const setActiveView = useAppStore((s) => s.setActiveView)
+  const setHistoryRangeContext = useAppStore((s) => s.setHistoryRangeContext)
+  const setInventoryFilter = useAppStore((s) => s.setInventoryFilter)
+  const setOverlayPartyId = useAppStore((s) => s.setOverlayPartyId)
   const currency = business?.currency || 'INR'
   const { data, loading } = useFetch<EodSummary>('/api/dashboard/eod-summary', [])
   const [copied, setCopied] = useState(false)
@@ -149,16 +164,36 @@ export function EodSummaryCard() {
   const hasActivity =
     data.salesTotal !== 0 || data.collections !== 0 || data.expenses !== 0 || data.newCreditGiven !== 0
 
+  // §DRILL-THROUGH targets (mirror the app-store one-shot context pattern)
+  const goToTodayHistory = () => {
+    setHistoryRangeContext({ range: '1d' })
+    setActiveView('history')
+  }
+  const goToFollowUps = () => setActiveView('followups')
+  const goToLowStock = () => {
+    setInventoryFilter('low-stock')
+    setActiveView('inventory')
+  }
+  const goToTopCustomer = () => {
+    if (data.topCustomer?.partyId) setOverlayPartyId(data.topCustomer.partyId)
+  }
+
   const metrics = [
-    { label: t('eod.sales'), value: formatCurrency(data.salesTotal, currency), icon: Wallet, cls: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30', sub: t('eod.bills').replace('{n}', String(data.salesCount)) },
-    { label: t('eod.collected'), value: formatCurrency(data.collections, currency), icon: ArrowDownLeft, cls: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30', sub: '' },
-    { label: t('eod.creditGiven'), value: formatCurrency(data.newCreditGiven, currency), icon: HandCoins, cls: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30', sub: '' },
-    { label: t('eod.expenses'), value: formatCurrency(data.expenses, currency), icon: ReceiptText, cls: 'text-rose-600 bg-rose-50 dark:bg-rose-950/30', sub: '' },
+    {
+      label: t('eod.sales'), value: formatCurrency(data.salesTotal, currency), icon: Wallet,
+      cls: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30',
+      sub: t('eod.bills').replace('{n}', String(data.salesCount)),
+      onClick: goToTodayHistory, aria: `${t('eod.sales')} — ${t('eod.viewDetails')}`,
+    },
+    { label: t('eod.collected'), value: formatCurrency(data.collections, currency), icon: ArrowDownLeft, cls: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30', sub: '', onClick: undefined, aria: '' },
+    { label: t('eod.creditGiven'), value: formatCurrency(data.newCreditGiven, currency), icon: HandCoins, cls: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30', sub: '', onClick: undefined, aria: '' },
+    { label: t('eod.expenses'), value: formatCurrency(data.expenses, currency), icon: ReceiptText, cls: 'text-rose-600 bg-rose-50 dark:bg-rose-950/30', sub: '', onClick: undefined, aria: '' },
   ]
 
   const topName = data.topCustomer
     ? data.topCustomer.name === '__WALK_IN__' ? t('eod.walkIn') : data.topCustomer.name
     : null
+  const topNavigable = !!data.topCustomer?.partyId
 
   return (
     <section aria-label={t('eod.title')} className="rounded-2xl border border-border bg-card overflow-hidden">
@@ -193,50 +228,89 @@ export function EodSummaryCard() {
         </div>
       </div>
 
-      {/* Metric grid */}
+      {/* Metric grid — Sales tile drills into History (today) */}
       <div className="p-3 grid grid-cols-2 gap-2">
-        {metrics.map((m) => (
-          <div key={m.label} className="rounded-xl border border-border/60 bg-background/50 p-2.5">
-            <div className="flex items-center gap-1.5 mb-1">
-              <span className={`w-5 h-5 rounded-md flex items-center justify-center ${m.cls}`} aria-hidden>
-                <m.icon className="w-3 h-3" />
-              </span>
-              <p className="text-[10px] font-medium text-muted-foreground truncate">{m.label}</p>
+        {metrics.map((m) =>
+          m.onClick ? (
+            <button
+              key={m.label}
+              type="button"
+              onClick={m.onClick}
+              aria-label={m.aria}
+              className={TAPPABLE}
+            >
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className={`w-5 h-5 rounded-md flex items-center justify-center ${m.cls}`} aria-hidden>
+                  <m.icon className="w-3 h-3" />
+                </span>
+                <p className="text-[10px] font-medium text-muted-foreground truncate flex-1">{m.label}</p>
+                <ChevronRight className="w-3 h-3 text-muted-foreground/70 shrink-0" aria-hidden />
+              </div>
+              <p className="text-sm font-bold tabular-nums leading-tight">{m.value}</p>
+              {m.sub && <p className="text-[10px] text-muted-foreground mt-0.5">{m.sub}</p>}
+            </button>
+          ) : (
+            <div key={m.label} className="rounded-xl border border-border/60 bg-background/50 p-2.5">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className={`w-5 h-5 rounded-md flex items-center justify-center ${m.cls}`} aria-hidden>
+                  <m.icon className="w-3 h-3" />
+                </span>
+                <p className="text-[10px] font-medium text-muted-foreground truncate">{m.label}</p>
+              </div>
+              <p className="text-sm font-bold tabular-nums leading-tight">{m.value}</p>
+              {m.sub && <p className="text-[10px] text-muted-foreground mt-0.5">{m.sub}</p>}
             </div>
-            <p className="text-sm font-bold tabular-nums leading-tight">{m.value}</p>
-            {m.sub && <p className="text-[10px] text-muted-foreground mt-0.5">{m.sub}</p>}
-          </div>
-        ))}
+          )
+        )}
       </div>
 
-      {/* Context rows */}
+      {/* Context rows — each navigable row gets chevron + press feedback */}
       <div className="px-3 pb-3 space-y-1.5">
         {topName && (
-          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-violet-50 dark:bg-violet-950/20">
+          <button
+            type="button"
+            onClick={goToTopCustomer}
+            disabled={!topNavigable}
+            aria-label={`${t('eod.topCustomer')}: ${topName}${topNavigable ? ` — ${t('eod.viewDetails')}` : ''}`}
+            className={`flex items-center gap-2 w-full px-2.5 py-1.5 rounded-lg text-left bg-violet-50 dark:bg-violet-950/20 transition-[transform,background-color] duration-150 ${topNavigable ? 'cursor-pointer hover:bg-violet-100 dark:hover:bg-violet-950/40 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' : 'cursor-default'}`}
+          >
             <Star className="w-3.5 h-3.5 text-violet-600 shrink-0" aria-hidden />
             <p className="text-[11px] text-violet-700 dark:text-violet-300 truncate flex-1">
               {t('eod.topCustomer')}: <span className="font-semibold">{topName}</span>
             </p>
-            <p className="text-[11px] font-bold tabular-nums text-violet-700 dark:text-violet-300">
+            <p className="text-[11px] font-bold tabular-nums text-violet-700 dark:text-violet-300 shrink-0">
               {formatCurrency(data.topCustomer!.amount, currency)}
             </p>
-          </div>
+            {topNavigable && <ChevronRight className="w-3 h-3 text-violet-500/70 shrink-0" aria-hidden />}
+          </button>
         )}
         {data.pendingFollowUps > 0 && (
-          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950/20">
+          <button
+            type="button"
+            onClick={goToFollowUps}
+            aria-label={`${t('eod.followUps')} — ${t('eod.viewDetails')}`}
+            className="flex items-center gap-2 w-full px-2.5 py-1.5 rounded-lg text-left bg-cyan-50 dark:bg-cyan-950/20 cursor-pointer hover:bg-cyan-100 dark:hover:bg-cyan-950/40 active:scale-[0.98] transition-[transform,background-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             <Clock className="w-3.5 h-3.5 text-cyan-600 shrink-0" aria-hidden />
             <p className="text-[11px] text-cyan-700 dark:text-cyan-300 flex-1">
               {t('eod.followUps')}: <span className="font-semibold">{data.pendingFollowUps}</span> {t('eod.pending')}
             </p>
-          </div>
+            <ChevronRight className="w-3 h-3 text-cyan-500/70 shrink-0" aria-hidden />
+          </button>
         )}
         {data.lowStockCount > 0 && (
-          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-orange-50 dark:bg-orange-950/20">
+          <button
+            type="button"
+            onClick={goToLowStock}
+            aria-label={`${t('eod.lowStock')} — ${t('eod.viewDetails')}`}
+            className="flex items-center gap-2 w-full px-2.5 py-1.5 rounded-lg text-left bg-orange-50 dark:bg-orange-950/20 cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-950/40 active:scale-[0.98] transition-[transform,background-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             <PackageMinus className="w-3.5 h-3.5 text-orange-600 shrink-0" aria-hidden />
             <p className="text-[11px] text-orange-700 dark:text-orange-300 flex-1">
               {t('eod.lowStock')}: <span className="font-semibold">{data.lowStockCount}</span> {t('eod.items')}
             </p>
-          </div>
+            <ChevronRight className="w-3 h-3 text-orange-500/70 shrink-0" aria-hidden />
+          </button>
         )}
         {!hasActivity && (
           <p className="text-[11px] text-muted-foreground text-center py-1.5">{t('eod.noActivity')}</p>

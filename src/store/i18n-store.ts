@@ -179,6 +179,7 @@ const en: Dict = {
   'eod.noActivity': 'No activity yet today',
   'eod.items': 'items',
   'eod.pending': 'pending',
+  'eod.viewDetails': 'View details',
 }
 
 const bn: Dict = {
@@ -355,6 +356,7 @@ const bn: Dict = {
   'eod.noActivity': 'আজ এখনও কোনো কার্যকলাপ নেই',
   'eod.items': 'আইটেম',
   'eod.pending': 'বাকি',
+  'eod.viewDetails': 'বিস্তারিত দেখুন',
 }
 
 // Hindi translations (Phase 3)
@@ -524,6 +526,7 @@ const hi: Dict = {
   'eod.noActivity': 'आज अभी कोई गतिविधि नहीं',
   'eod.items': 'आइटम',
   'eod.pending': 'बाकी',
+  'eod.viewDetails': 'विवरण देखें',
 }
 
 const dictionaries: Record<Language, Dict> = { en, bn, hi }

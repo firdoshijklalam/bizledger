@@ -15,7 +15,8 @@ import { calendarTodayStartIST } from '@/lib/date-ranges'
  *   - newCreditGiven           — amountDue sum of today's invoices (credit given today)
  *   - collections              — money-in transactions today (type='credit')
  *   - expenses                 — expense transactions today (type='expense')
- *   - topCustomer              — party with highest invoice total today (null if none)
+ *   - topCustomer              — party with highest invoice total today (null if none);
+ *                                includes partyId for drill-through navigation
  *   - pendingFollowUps         — active follow-ups (PENDING/IN_PROGRESS/SNOOZED)
  *   - lowStockCount            — products at/below their low-stock threshold
  *
@@ -101,7 +102,9 @@ export async function GET(_req: NextRequest) {
     const expenses = txByType.get('expense') ?? 0
 
     // §TOP-CUSTOMER-RESOLVE: groupBy returns partyId; resolve name (walk-in → null)
-    let topCustomer: { name: string; amount: number } | null = null
+    // §DRILL-THROUGH: partyId is included so the EOD card's Top Customer row can
+    // open the party profile overlay without a second lookup.
+    let topCustomer: { name: string; amount: number; partyId: string | null } | null = null
     const topPartyId = topInvoiceParty[0]?.partyId
     const topAmount = Number(topInvoiceParty[0]?._sum.grandTotal ?? 0)
     if (topPartyId) {
@@ -109,10 +112,10 @@ export async function GET(_req: NextRequest) {
         where: { id: topPartyId },
         select: { name: true },
       })
-      if (party) topCustomer = { name: party.name, amount: topAmount }
+      if (party) topCustomer = { name: party.name, amount: topAmount, partyId: topPartyId }
     } else if (topInvoiceParty.length > 0 && topAmount > 0) {
       // Retail walk-in sale without a party
-      topCustomer = { name: '__WALK_IN__', amount: topAmount }
+      topCustomer = { name: '__WALK_IN__', amount: topAmount, partyId: null }
     }
 
     const lowStockCount = products.filter(
