@@ -1,0 +1,30 @@
+-- AlterTable
+ALTER TABLE "CommissionLog" ALTER COLUMN "orderAmount" SET DATA TYPE DECIMAL(18,2),
+ALTER COLUMN "commissionAmount" SET DATA TYPE DECIMAL(18,2);
+
+-- AlterTable
+ALTER TABLE "OrderSplit" ALTER COLUMN "commissionAmount" SET DATA TYPE DECIMAL(18,2),
+ALTER COLUMN "merchantAmount" SET DATA TYPE DECIMAL(18,2);
+
+-- AlterTable
+ALTER TABLE "PaymentSplit" ALTER COLUMN "totalAmount" SET DATA TYPE DECIMAL(18,2),
+ALTER COLUMN "commissionAmount" SET DATA TYPE DECIMAL(18,2),
+ALTER COLUMN "merchantAmount" SET DATA TYPE DECIMAL(18,2);
+
+-- AlterTable
+ALTER TABLE "PurchaseOrder" ALTER COLUMN "totalAmount" SET DATA TYPE DECIMAL(18,2);
+
+-- AlterTable
+ALTER TABLE "PurchaseOrderItem" ALTER COLUMN "unitPrice" SET DATA TYPE DECIMAL(18,2),
+ALTER COLUMN "transportFare" SET DATA TYPE DECIMAL(18,2),
+ALTER COLUMN "coolieCharge" SET DATA TYPE DECIMAL(18,2),
+ALTER COLUMN "totalCost" SET DATA TYPE DECIMAL(18,2);
+
+-- AlterTable
+ALTER TABLE "ReturnRequest" ALTER COLUMN "refundAmount" SET DATA TYPE DECIMAL(18,2);
+
+-- AlterTable
+ALTER TABLE "SupplierCatalogItem" ALTER COLUMN "basePrice" SET DATA TYPE DECIMAL(18,2),
+ALTER COLUMN "transportFare" SET DATA TYPE DECIMAL(18,2),
+ALTER COLUMN "coolieCharge" SET DATA TYPE DECIMAL(18,2);
+

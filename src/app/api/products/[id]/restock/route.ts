@@ -1,0 +1,70 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
+import { logAudit, AUDIT_ACTIONS, ENTITY_TYPES } from '@/lib/audit'
+import { requireRole } from '@/lib/auth/session'
+
+// POST /api/products/[id]/restock — quick stock increment
+// Security: verifies the product belongs to the current business.
+// §RBAC: Requires OWNER or ADMIN — STAFF must not be able to manually
+// inflate stock levels (manual restock is an owner-controlled operation
+// because it directly affects inventory valuation and audit trail).
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    // §RBAC: Require OWNER or ADMIN.
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
+    const { id } = await params
+    const body = await req.json()
+    const addQty = Number(body.quantity)
+    if (!addQty || addQty <= 0) {
+      return NextResponse.json({ error: 'Invalid quantity' }, { status: 400 })
+    }
+
+    // Multi-tenant isolation: get current business, verify ownership
+    const business = await getCurrentBusiness()
+    if (!business) {
+      return NextResponse.json({ error: 'No business found' }, { status: 400 })
+    }
+
+    const existing = await db.product.findFirst({
+      where: { id, businessId: business.id },
+    })
+    if (!existing) {
+      return NextResponse.json({ error: 'Product not found in your business' }, { status: 404 })
+    }
+
+    const updated = await db.product.update({
+      where: { id },
+      data: { stock: { increment: addQty } },
+    })
+
+    // §AUDIT-LOG: Log the restock action
+    await logAudit({
+      businessId: business.id,
+      action: AUDIT_ACTIONS.RESTOCK,
+      entityType: ENTITY_TYPES.PRODUCT,
+      entityId: id,
+      description: `Restocked ${existing.name}: +${addQty} ${existing.unit} (was ${existing.stock}, now ${updated.stock})`,
+      metadata: JSON.stringify({ productId: id, productName: existing.name, addedQty: addQty, oldStock: existing.stock, newStock: updated.stock }),
+    })
+
+    // §STOCK-MOVEMENT: Record the stock movement for audit trail
+    await db.stockMovement.create({
+      data: {
+        businessId: business.id,
+        productId: id,
+        type: 'purchase',
+        quantity: addQty,
+        balanceAfter: updated.stock,
+        referenceType: 'manual',
+        description: `Manual restock: +${addQty} ${existing.unit}`,
+      },
+    }).catch(() => {}) // non-fatal if StockMovement table doesn't exist yet
+
+    return NextResponse.json({ ok: true, product: updated })
+  } catch (e) {
+    return apiError(e, "Request failed")
+  }
+}

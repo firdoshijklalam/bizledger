@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Yes, there is a card showing a **negative value**: the **Net Profit / Loss** card, which displays **-₹445**.\n\nHere is exactly how it is styled compared to the positive values:\n\n**The Negative Value (-₹445):**\n*   **Color:** It is displayed in **red** (a bright, distinct red).\n*   **Weight:** The text appears to be in a **bold or semi-bold font weight**, making it stand out prominently.\n*   **Icon:** There is a **red wavy line (tilde) icon (~)** positioned immediately to the left of the number.\n*   **Background:** The card itself has a very light, pale green or mint background (similar to other positive metric cards), but the value text and icon are distinctly red.\n\n**Comparison with Positive Values:**\n*   **Color:** Positive values (like Total Sales ₹645, Net Revenue ₹645, Total Receivable ₹1,36,900) are displayed in **dark green**.\n*   **Icon:** Positive values are accompanied by **green icons** (e.g., an upward trending arrow for sales/revenue/receivable).\n*   **Exception:** Interestingly, the \"Total Payable\" value (₹28,500) is also styled in **red** with a **red icon** (downward trend arrow), similar to the negative profit/loss, likely indicating a liability or amount owed.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1791262787,
+  "id": "20261006125941e02119a0582a4512",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261006125941e02119a0582a4512",
+  "usage": {
+    "completion_tokens": 298,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 447,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 745
+  }
+}

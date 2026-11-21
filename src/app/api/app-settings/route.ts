@@ -1,0 +1,327 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { db, getCurrentBusiness } from '@/lib/db'
+import { apiError } from '@/lib/api-error'
+import { requireRole } from '@/lib/auth/session'
+import { serializeDecimals } from '@/lib/decimal-serializer'
+
+// GET /api/app-settings
+export async function GET() {
+  const business = await getCurrentBusiness()
+  if (!business) return NextResponse.json(null)
+  const settings = await db.appSettings.findUnique({ where: { businessId: business.id } })
+  if (!settings) {
+    const created = await db.appSettings.create({ data: { businessId: business.id } })
+    // §DECIMAL-FIX-D: gateDiscountLimit is Decimal
+    return NextResponse.json(serializeDecimals(created))
+  }
+  // §DECIMAL-FIX-D: gateDiscountLimit is Decimal
+  return NextResponse.json(serializeDecimals(settings))
+}
+
+// PUT /api/app-settings
+// §RBAC: Modifying app settings (PIN, biometric gates, invoice prefix,
+// external scanner, defaulter registry) is an OWNER/ADMIN action. STAFF
+// must not be able to flip these toggles or change the invoice prefix
+// (which is used to generate sequential invoice numbers).
+export async function PUT(req: NextRequest) {
+  try {
+    const user = await requireRole(['OWNER', 'ADMIN'])
+    if (user instanceof NextResponse) return user
+
+    const body = await req.json()
+    const business = await getCurrentBusiness()
+    if (!business) return NextResponse.json({ error: 'No business' }, { status: 400 })
+
+    // §REWARD-THRESHOLD-VALIDATION: Validate the configurable profit threshold
+    // for reward-cycle unlock. Must be a finite positive number within sensible
+    // bounds. Default is ₹400 (schema @default(400)). Lower bound ₹1 (a positive
+    // amount; 0 would unlock immediately on any profit), upper bound ₹10,00,000
+    // (₹10 lakh — prevents abusive/absurd values while allowing any realistic
+    // merchant threshold). businessId is derived from the authenticated session
+    // via getCurrentBusiness() — NEVER from the client body (tenant isolation).
+    // §SNAPSHOT-INVARIANT: Changing this global setting does NOT mutate existing
+    // CustomerRewardCycle.threshold (a snapshot taken at cycle creation). The
+    // new value only affects NEW cycles created after the change.
+    const REWARD_THRESHOLD_MIN = 1
+    const REWARD_THRESHOLD_MAX = 1_000_000
+    let rewardThreshold: number | undefined
+    if (body.rewardThreshold !== undefined) {
+      const v = body.rewardThreshold
+      // §STRICT-TYPE-CHECK: accept only finite numbers OR non-empty numeric
+      // strings (HTML <input type=number> may send values as strings, e.g.
+      // "300"). Explicitly reject booleans (true/false — Number(true)=1 would
+      // otherwise be silently accepted), null, objects, arrays (Number([500])
+      // =500 would otherwise be accepted), empty strings, and non-numeric /
+      // non-finite strings ("NaN", "Infinity", "abc"). This prevents
+      // type-coercion surprises from Number().
+      const isAcceptableType = typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')
+      if (!isAcceptableType) {
+        return NextResponse.json(
+          { error: `Reward threshold must be a finite positive number between ₹${REWARD_THRESHOLD_MIN} and ₹${REWARD_THRESHOLD_MAX}` },
+          { status: 400 }
+        )
+      }
+      const n = Number(v)
+      if (!Number.isFinite(n) || n < REWARD_THRESHOLD_MIN || n > REWARD_THRESHOLD_MAX) {
+        return NextResponse.json(
+          { error: `Reward threshold must be a finite positive number between ₹${REWARD_THRESHOLD_MIN} and ₹${REWARD_THRESHOLD_MAX}` },
+          { status: 400 }
+        )
+      }
+      // Round to 2 decimal places (Prisma Decimal(18,2)) — safe for INR (paise).
+      rewardThreshold = Math.round(n * 100) / 100
+    }
+
+    // §FEEDBACK-DELAY-HOURS-VALIDATION: configurable delay (in hours) before
+    // the system requests product feedback after a purchase. Default 48h
+    // (schema @default(48)). Range 1-168 (1 hour to 1 week). businessId is
+    // derived from the authenticated session via getCurrentBusiness() — NEVER
+    // from the client body (tenant isolation).
+    const FEEDBACK_DELAY_MIN = 1
+    const FEEDBACK_DELAY_MAX = 168
+    let feedbackDelayHours: number | undefined
+    if (body.feedbackDelayHours !== undefined) {
+      const v = body.feedbackDelayHours
+      // §STRICT-TYPE-CHECK: accept only finite integers OR non-empty numeric
+      // strings. Reject booleans, null, objects, arrays, empty strings,
+      // non-numeric strings, non-finite strings, non-integers, out-of-range.
+      const isAcceptableType = typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')
+      if (!isAcceptableType) {
+        return NextResponse.json(
+          { error: `Feedback delay hours must be an integer between ${FEEDBACK_DELAY_MIN} and ${FEEDBACK_DELAY_MAX}` },
+          { status: 400 }
+        )
+      }
+      const n = Number(v)
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < FEEDBACK_DELAY_MIN || n > FEEDBACK_DELAY_MAX) {
+        return NextResponse.json(
+          { error: `Feedback delay hours must be an integer between ${FEEDBACK_DELAY_MIN} and ${FEEDBACK_DELAY_MAX}` },
+          { status: 400 }
+        )
+      }
+      feedbackDelayHours = n
+    }
+
+    // §MESSAGE-TEMPLATES: per-business overrides for customer-facing share
+    // messages. Only included when the client sent it (undefined → Prisma
+    // leaves the existing value untouched). Allow-list of 4 slot ids × 3
+    // language keys; values trimmed + capped at 640 chars (SMS-safe);
+    // empty/whitespace-only values are DROPPED (fall back to built-in
+    // defaults). businessId comes from the session — tenant isolation.
+    let messageTemplates: string | null | undefined
+    if (body.messageTemplates !== undefined) {
+      const validated = validateMessageTemplates(body.messageTemplates)
+      if (validated === false) {
+        return NextResponse.json(
+          { error: 'Message templates: each slot must be a string of at most 640 characters' },
+          { status: 400 }
+        )
+      }
+      messageTemplates = validated
+    }
+
+    const updated = await db.appSettings.upsert({
+      where: { businessId: business.id },
+      update: {
+        notificationsEnabled: body.notificationsEnabled,
+        // §NOTIFICATION-CHANNELS: Per-channel notification preferences (JSON string).
+        // Synced from the client Zustand store. The server reads this to
+        // decide whether to generate specific notification types.
+        notificationChannels: body.notificationChannels !== undefined
+          ? validateNotificationChannels(body.notificationChannels)
+          : undefined,
+        autoBackupEnabled: body.autoBackupEnabled,
+        language: body.language,
+        dateFormat: body.dateFormat,
+        invoicePrefix: body.invoicePrefix,
+        pinEnabled: body.pinEnabled,
+        userRole: body.userRole,
+        biometricEnabled: body.biometricEnabled,
+        // PRD Part 32 §1: Biometric action gates config
+        gateOwnerSwitch: body.gateOwnerSwitch,
+        gateHighValueDiscount: body.gateHighValueDiscount,
+        gateDiscountLimit: body.gateDiscountLimit,
+        // §REWARD-THRESHOLD: configurable profit threshold for reward cycle.
+        // Only included when the client sent it (undefined → Prisma leaves the
+        // existing value untouched, preserving unrelated fields).
+        rewardThreshold,
+        // §FEEDBACK-DELAY-HOURS: configurable delay (hours) before requesting
+        // product feedback. Only included when the client sent it (undefined →
+        // Prisma leaves the existing value untouched, preserving unrelated
+        // fields). Range 1-168 enforced above.
+        feedbackDelayHours,
+        // §MESSAGE-TEMPLATES: only included when sent (undefined → untouched).
+        messageTemplates,
+        gateDataExport: body.gateDataExport,
+        gateInventoryPrice: body.gateInventoryPrice,
+        gateDangerZone: body.gateDangerZone,
+        // PRD Part 32 §2: External scanner
+        externalScannerEnabled: body.externalScannerEnabled,
+        // PRD Part 32 §3: Defaulter registry
+        defaulterRegistryEnabled: body.defaulterRegistryEnabled,
+        // §CARD-PREFERENCES: JSON string with show/hide toggles. Defensive parse:
+        // only accept if it's a valid JSON string containing known boolean keys.
+        cardPreferences: body.cardPreferences !== undefined
+          ? validateCardPreferences(body.cardPreferences)
+          : undefined,
+      },
+      create: {
+        businessId: business.id,
+        notificationsEnabled: body.notificationsEnabled ?? true,
+        notificationChannels: body.notificationChannels !== undefined
+          ? validateNotificationChannels(body.notificationChannels)
+          : null,
+        autoBackupEnabled: body.autoBackupEnabled ?? false,
+        language: body.language ?? 'en',
+        dateFormat: body.dateFormat ?? 'DD/MM/YYYY',
+        invoicePrefix: body.invoicePrefix ?? 'INV',
+        pinEnabled: body.pinEnabled ?? false,
+        userRole: body.userRole ?? 'owner',
+        biometricEnabled: body.biometricEnabled ?? false,
+        gateOwnerSwitch: body.gateOwnerSwitch ?? true,
+        gateHighValueDiscount: body.gateHighValueDiscount ?? true,
+        gateDiscountLimit: body.gateDiscountLimit ?? 5000,
+        rewardThreshold: rewardThreshold ?? 400,
+        // §FEEDBACK-DELAY-HOURS: default 48h on schema. The client may omit
+        // it (defaults to 48h) or send a value within 1-168.
+        feedbackDelayHours: feedbackDelayHours ?? 48,
+        messageTemplates: messageTemplates ?? null,
+        gateDataExport: body.gateDataExport ?? true,
+        gateInventoryPrice: body.gateInventoryPrice ?? true,
+        gateDangerZone: body.gateDangerZone ?? true,
+        externalScannerEnabled: body.externalScannerEnabled ?? false,
+        defaulterRegistryEnabled: body.defaulterRegistryEnabled ?? true,
+        cardPreferences: body.cardPreferences !== undefined
+          ? validateCardPreferences(body.cardPreferences)
+          : null,
+      },
+    })
+    // §DECIMAL-FIX-D: gateDiscountLimit is Decimal
+    return NextResponse.json(serializeDecimals(updated))
+  } catch (e) {
+    return apiError(e, "Request failed")
+  }
+}
+
+// §MESSAGE-TEMPLATES-VALIDATION: Defensive parse + allow-list.
+// Accepts a JSON string or object shaped { slotId: { en?: string, bn?: string, hi?: string } }.
+// Only the 4 known slot ids and 3 language keys are persisted. Values are
+// trimmed and capped at 640 chars; empty values are dropped (→ built-in
+// default). Returns a JSON string for Prisma storage, null when nothing
+// valid remains, or `false` when the input shape is invalid (caller → 400).
+function validateMessageTemplates(input: unknown): string | null | false {
+  let raw: Record<string, unknown>
+  if (typeof input === 'string') {
+    try {
+      raw = JSON.parse(input)
+    } catch {
+      return false // malformed JSON → reject explicitly (user edited this)
+    }
+  } else if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
+    raw = input as Record<string, unknown>
+  } else {
+    return false
+  }
+
+  const SLOTS = ['paymentReceivable', 'paymentPayable', 'overdue', 'feedback'] as const
+  const LANGS = ['en', 'bn', 'hi'] as const
+  const MAX_LEN = 640
+  const clean: Record<string, Record<string, string>> = {}
+
+  for (const slot of SLOTS) {
+    if (!(slot in raw)) continue
+    const byLang = raw[slot]
+    if (typeof byLang !== 'object' || byLang === null || Array.isArray(byLang)) {
+      return false
+    }
+    for (const lang of LANGS) {
+      if (!(lang in byLang)) continue
+      const value = (byLang as Record<string, unknown>)[lang]
+      if (value === undefined || value === null) continue
+      if (typeof value !== 'string' || value.length > MAX_LEN) {
+        return false
+      }
+      const trimmed = value.trim()
+      if (!trimmed) continue // empty → drop (use built-in default)
+      if (!clean[slot]) clean[slot] = {}
+      clean[slot][lang] = trimmed
+    }
+  }
+
+  return Object.keys(clean).length > 0 ? JSON.stringify(clean) : null
+}
+
+// §CARD-PREFERENCES-VALIDATION: Defensive parse + allow-list.
+// Accepts a JSON string or object. Only known keys with correct types are persisted.
+// Malformed JSON, invalid types, or unknown keys are silently dropped.
+// Returns a JSON string safe for Prisma storage, or null if empty.
+function validateCardPreferences(input: unknown): string | null {
+  let prefs: Record<string, unknown> = {}
+  if (typeof input === 'string') {
+    try {
+      prefs = JSON.parse(input)
+    } catch {
+      return null // malformed JSON → fall back to null (defaults)
+    }
+  } else if (typeof input === 'object' && input !== null) {
+    prefs = input as Record<string, unknown>
+  } else {
+    return null
+  }
+
+  const clean: Record<string, unknown> = {}
+
+  // §VISIBILITY-TOGGLES: boolean only
+  const BOOL_KEYS = ['showOwner', 'showAddress', 'showPhone', 'showGstin'] as const
+  for (const key of BOOL_KEYS) {
+    if (key in prefs && typeof prefs[key] === 'boolean') {
+      clean[key] = prefs[key]
+    }
+  }
+
+  // §GREETING-TEXT: string, trimmed, max 30 chars
+  if ('greetingText' in prefs && typeof prefs.greetingText === 'string') {
+    const trimmed = prefs.greetingText.trim().slice(0, 30)
+    clean.greetingText = trimmed
+  }
+
+  // §COVER-BLUR: number 0–20, default 8
+  if ('coverBlur' in prefs && typeof prefs.coverBlur === 'number' && !isNaN(prefs.coverBlur)) {
+    clean.coverBlur = Math.max(0, Math.min(20, Math.round(prefs.coverBlur)))
+  }
+
+  // §COVER-OVERLAY: number 0–0.9, default 0.35
+  if ('coverOverlay' in prefs && typeof prefs.coverOverlay === 'number' && !isNaN(prefs.coverOverlay)) {
+    clean.coverOverlay = Math.max(0, Math.min(0.9, Math.round(prefs.coverOverlay * 100) / 100))
+  }
+
+  return Object.keys(clean).length > 0 ? JSON.stringify(clean) : null
+}
+
+// §NOTIFICATION-CHANNELS-VALIDATION: Validates the notificationChannels JSON.
+// Accepts a JSON string or object. Only known boolean keys are persisted.
+// Returns a JSON string safe for Prisma storage, or null if empty.
+function validateNotificationChannels(input: unknown): string | null {
+  let prefs: Record<string, unknown> = {}
+  if (typeof input === 'string') {
+    try {
+      prefs = JSON.parse(input)
+    } catch {
+      return null
+    }
+  } else if (typeof input === 'object' && input !== null) {
+    prefs = input as Record<string, unknown>
+  } else {
+    return null
+  }
+
+  const clean: Record<string, boolean> = {}
+  const VALID_KEYS = ['sales', 'lowStock', 'overduePayments', 'gradeChanges', 'backups'] as const
+  for (const key of VALID_KEYS) {
+    if (key in prefs && typeof prefs[key] === 'boolean') {
+      clean[key] = prefs[key]
+    }
+  }
+
+  return Object.keys(clean).length > 0 ? JSON.stringify(clean) : null
+}

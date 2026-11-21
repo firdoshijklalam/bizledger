@@ -1,0 +1,1535 @@
+// BizLedger — Prisma Schema
+// Supports both SQLite (dev) and PostgreSQL (Vercel/Neon)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Business {
+  id        String   @id @default(cuid())
+  name      String
+  ownerName String?
+  phone     String?
+  email     String?
+  address   String?
+  state     String?
+  gstin     String?
+  pan       String?
+  upiId     String?
+  logoUrl   String?
+  coverUrl  String?
+  currency  String   @default("INR")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // PRD Part 33 §2: Multi-store PWA — unique slug for public store URL
+  storeSlug       String?  @unique
+  // PRD Part 33 §3: Geo-fenced delivery
+  deliveryRadiusKm Int     @default(5)
+  latitude        Float?
+  longitude       Float?
+  serviceableAreas String? // JSON array of area names, e.g. ["Bhowanipore","Gariahat"]
+  // PRD Part 33 §4: Monetization
+  subscriptionPlan  String  @default("trial") // trial | active | expired | cancelled
+  trialEndsAt       DateTime?
+  subscriptionEndsAt DateTime?
+  isSponsored       Boolean @default(false)
+  sponsoredUntil    DateTime?
+  sponsoredArea     String? // area where the ad is shown
+
+  parties      Party[]
+  products     Product[]
+  transactions Transaction[]
+  invoices     Invoice[]
+  settings     AppSettings?
+  supplierCatalogItems SupplierCatalogItem[]
+  purchaseOrders PurchaseOrder[]
+  fingerprints FingerprintRecord[]
+  biometricGateLogs BiometricGateLog[]
+  customerOrders CustomerOrder[]
+  commissionEarned CommissionLog[] @relation("CommissionRecipient")
+  commissionPaid   CommissionLog[] @relation("CommissionPayer")
+  mediaAssets  ProductMediaAsset[]
+  categories   Category[]
+  // §DYNAMIC-PRICING + §NOTIFICATIONS
+  customPrices  CustomPrice[]
+  notifications Notification[]
+  notificationChannelPreferences NotificationChannelPreference[]
+  // §AUTH: Users and sessions for this business
+  users    User[]
+  invoiceSequence InvoiceSequence?
+  // §CUSTOMER-BEHAVIOUR: interaction/service behaviour for parties in this business
+  customerBehaviours   CustomerBehaviour[]
+  customerBehaviourHistory CustomerBehaviourHistory[]
+  // §COMPLAINTS: customer complaint management
+  complaints           Complaint[]
+  complaintEvents      ComplaintEvent[]
+  complaintSequence    ComplaintSequence?
+  // §MESSAGING: unified conversation + message infrastructure
+  channelIdentities    CustomerChannelIdentity[]
+  conversations        Conversation[]
+  messages             Message[]
+  // §REWARDS: profit-based loyalty reward cycles
+  rewardCycles         CustomerRewardCycle[]
+  rewardEvents         CustomerRewardEvent[]
+  // §REWARD-OUTBOX: durable reward-accrual work records (Step 7 reliability layer)
+  rewardAccrualOutbox  RewardAccrualOutbox[]
+  // §REWARD-RECONCILIATION: cursor for incremental historical scan (Step 7A)
+  rewardReconciliationCursors  RewardReconciliationCursor[]
+  // §FEEDBACK-OUTBOX: durable product-feedback-request work records (reliability layer)
+  feedbackOutbox       FeedbackOutbox[]
+  // §FEEDBACK-RECONCILIATION: cursor for incremental historical scan (mirrors
+  // the Step 7A reward-reconciliation pattern on the feedback side)
+  feedbackReconciliationCursors  FeedbackReconciliationCursor[]
+  // §FOLLOWUPS: customer follow-up tasks (Step 8A CRM foundation)
+  followUps            FollowUp[]
+  followUpEvents       FollowUpEvent[]
+  followUpSequence     FollowUpSequence?
+  // §PRODUCT-FEEDBACK: first-class product feedback requests
+  productFeedbacks     ProductFeedback[]
+}
+
+model InvoiceSequence {
+  id          String   @id @default(cuid())
+  businessId  String   @unique
+  nextNumber  Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// §AUTH: User model for authentication.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         String   @default("OWNER") // OWNER | ADMIN | STAFF
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  sessions     Session[]
+  // §FOLLOWUPS: follow-ups assigned to / created by / completed by this user
+  assignedFollowUps   FollowUp[] @relation("FollowUpAssignee")
+  createdFollowUps    FollowUp[] @relation("FollowUpCreator")
+  completedFollowUps  FollowUp[] @relation("FollowUpCompleter")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([businessId])
+}
+
+// §AUTH: Session model for secure httpOnly cookie-based sessions.
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// §DYNAMIC-PRICING: Tiered B2B pricing — resolution hierarchy:
+//   Specific Buyer Price > Group Price > Default Wholesale Price
+model CustomPrice {
+  id              String   @id @default(cuid())
+  businessId      String
+  productId       String?
+  catalogItemId   String?
+  buyerId         String?
+  buyerGroupName  String?
+  // §MULTI-PRICE: Three-tier custom pricing mirroring the main Product form.
+  customPrice          Decimal  @default(0)
+  customSalePrice      Decimal?
+  customMrp            Decimal?
+  customWholesalePrice Decimal?
+  // §RETAIL-ISOLATION: Retail prices are separate from bulk prices.
+  customRetailSalePrice Decimal?
+  customRetailMrp       Decimal?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  product     Product?  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  buyer       Party?    @relation("CustomPriceBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([productId])
+  @@index([catalogItemId])
+  @@index([buyerId])
+  @@index([buyerGroupName])
+}
+
+// §NOTIFICATIONS: DB-backed notifications
+model Notification {
+  id           String   @id @default(cuid())
+  businessId   String
+  type         String   @default("system")
+  title        String
+  body         String
+  link         String?
+  isRead       Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  invoiceId    String?
+  followUpId   String?
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([isRead])
+  @@unique([businessId, invoiceId])
+}
+
+model NotificationChannelPreference {
+  id         String   @id @default(cuid())
+  businessId String
+  key        String
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, key])
+  @@index([businessId])
+}
+
+model Party {
+  id                   String   @id @default(cuid())
+  businessId           String
+  name                 String
+  phone                String?
+  type                 String   @default("customer") // customer | supplier | both
+  balance              Decimal  @default(0) // +ve = receivable, -ve = payable
+  qualityGrade         String   @default("B") // A | B | C | D | E
+  creditLimit          Decimal?
+  openingBalance       Decimal  @default(0)
+  address              String?
+  gstin                String?
+  notes                String?
+  avgPaymentDays       Float?
+  avgDiscountPct       Float    @default(0)
+  gradeLastCalculated  DateTime?
+  gradeOverrideReason  String?
+  // PRD Part 32 §3.2: AI Credit Trust Score (1-5 stars)
+  creditTrustScore     Float    @default(3) // 1.0 - 5.0
+  maxCreditSuggestion  Decimal  @default(0) // AI-suggested max credit (₹)
+  trustScoreUpdatedAt  DateTime?
+  trustScoreReason     String?  // human-readable reason
+  // §3: Cross-lingual phonetic search tags (JSON array of English phonetic variants)
+  // Generated from Bengali name via transliteration. e.g. "অমিত" → ["amit","omit"]
+  searchTags           String?  // JSON array string: ["amit","omit","অমিত"]
+  // §DYNAMIC-PRICING: tier label for group-based custom pricing
+  buyerGroup           String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  invoices     Invoice[]
+  partyNotes   PartyNote[]
+  purchaseOrders PurchaseOrder[]
+  supplierCatalogItems SupplierCatalogItem[] @relation("SupplierCatalogItems")
+  fingerprints FingerprintRecord[]
+  // §DYNAMIC-PRICING: custom prices targeted at this buyer (as the buyer Party)
+  customPricesAsBuyer  CustomPrice[] @relation("CustomPriceBuyer")
+  // §CUSTOMER-BEHAVIOUR: interaction/service behaviour (separate from
+  // financial creditTrustScore). One current row per (businessId, partyId).
+  // History is append-only via CustomerBehaviourHistory (FK to CustomerBehaviour).
+  customerBehaviours   CustomerBehaviour[]
+  customerBehaviourHistory CustomerBehaviourHistory[]
+  // §COMPLAINTS: complaints filed for/against this party (nullable partyId
+  // for anonymous/walk-in complaints; onDelete: SetNull preserves complaint
+  // history when a party is deleted).
+  complaints           Complaint[]
+  // §MESSAGING: channel identities (WhatsApp/Telegram/etc.) linked to this party
+  channelIdentities    CustomerChannelIdentity[]
+  // §MESSAGING: conversations for this party
+  conversations        Conversation[]
+  // §MESSAGING: messages sent to/from this party
+  messages             Message[]
+  // §REWARDS: reward cycles for this customer
+  rewardCycles         CustomerRewardCycle[]
+  rewardEvents         CustomerRewardEvent[]
+  // §FOLLOWUPS: follow-up tasks for this customer (onDelete: SetNull)
+  followUps           FollowUp[]
+  // §PRODUCT-FEEDBACK: feedback requests issued to this customer
+  productFeedbacks    ProductFeedback[]
+
+  @@index([businessId])
+}
+
+model Product {
+  id                 String   @id @default(cuid())
+  businessId         String
+  name               String
+  sku                String?
+  category           String?
+  unit               String   @default("pcs") // pcs | kg | bag | box
+  purchasePrice      Decimal  @default(0)
+  salePrice          Decimal  @default(0)
+  mrp                Decimal?
+  wholesalePrice     Decimal?
+  gstRate            Float    @default(0)
+  stock              Float    @default(0) // bulk stock (bags/boxes)
+  lowStockThreshold  Float    @default(5)
+  supplierId         String?
+  // PRD Part 11: Dual-stock matrix + retail/loose config
+  retailEnabled      Boolean  @default(false)
+  retailUnit         String?  // sub-unit: kg, pcs, ltr, gm
+  conversionFactor   Float?   // 1 bag = 25 kg
+  retailSalePrice    Decimal?   // price per sub-unit (₹55 per kg)
+  retailMrp          Decimal?   // MRP per sub-unit for auto-discount calc
+  looseStock         Float    @default(0) // loose/fractional stock (kg)
+  subCategory        String?  // PRD Part 13: sub-category (e.g. Rice → Miniket)
+  // PRD Part 35 §1.2: AI auto-filled description
+  description        String?  // AI-generated professional description from OCR + web scrape
+  // PRD Part 35 §3.1: online catalog publishing status
+  isPublished        Boolean  @default(true) // auto-published to PWA store on save
+  categoryPath       String?  // PRD Part 35 §2: full nested path (e.g. "Groceries > চাল > বাসমতি")
+  // §3: Cross-lingual phonetic search tags (JSON array of English phonetic variants)
+  // e.g. "উৎসব" → ["utsab","utshob","utsob","উৎসব"]
+  searchTags         String?  // JSON array string
+  // §PRODUCT-FEEDBACK-DELAY: optional per-product override for the global
+  // AppSettings.feedbackDelayHours. null → use the business-wide global default.
+  // When set (1–168), this product's feedback requests use this delay instead.
+  feedbackDelayHours Int?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  business    Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  images      ProductImage[]
+  mediaAssets ProductMediaAsset[]
+  invoiceItems InvoiceItem[]
+  // §DYNAMIC-PRICING: custom per-buyer/per-tier prices for this product
+  customPrices CustomPrice[]
+  stockMovements StockMovement[]
+  // §COMPLAINTS: complaints linked to this product (nullable FK on Complaint side)
+  complaints     Complaint[]
+  // §PRODUCT-FEEDBACK: feedback records targeting this product
+  productFeedbacks ProductFeedback[]
+  // §FOLLOWUPS: follow-ups linked to this product (named relation)
+  followUpProducts FollowUp[] @relation("FollowUpProduct")
+
+  @@index([businessId])
+  @@index([supplierId])
+}
+
+// PRD Part 35 §2: Unlimited nested sub-category tree
+model Category {
+  id          String   @id @default(cuid())
+  businessId  String
+  name        String
+  parentId    String?  // null = root category
+  level       Int      @default(0) // 0 = root, 1 = sub, 2 = sub-sub, ...
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children Category[] @relation("CategoryTree")
+
+  @@index([businessId])
+  @@index([parentId])
+}
+
+model ProductImage {
+  id         String   @id @default(cuid())
+  productId  String
+  url        String
+  isPrimary  Boolean  @default(false)
+  order      Int      @default(0)
+  // PRD Part 34: AI Vision Core — image classification
+  imageType  String   @default("raw") // raw | processed | multi_angle | thumbnail
+  viewAngle  String?  // front | back | left | right | top | spin_frame
+  isProcessed Boolean @default(false) // AI ironing + bg removal applied
+  isHD       Boolean  @default(false) // ultra-HD text restoration applied
+  createdAt  DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+// PRD Part 34 §1: Raw media ingest & 3D digital twin generation
+model ProductMediaAsset {
+  id           String   @id @default(cuid())
+  productId    String
+  businessId   String
+  // Input media
+  inputType    String   @default("image") // image | video
+  inputUrl     String?  // stored raw upload (data URL or file path)
+  inputCount   Int      @default(1) // number of images or video seconds
+  // Processing status
+  status       String   @default("pending") // pending | processing | completed | failed | rejected
+  progress     Int      @default(0) // 0-100
+  // Output: 3D mesh + processed images
+  meshData     String?  // JSON: { vertices, faces, bounds, confidenceScore }
+  processedImageUrl String? // primary cleaned image
+  spinVideoUrl String?  // 360-degree spinning video
+  frontViewUrl String?
+  backViewUrl  String?
+  leftViewUrl  String?
+  rightViewUrl String?
+  // Quality & guardrails (PRD Part 34 §3.1)
+  qualityScore Float?   // 0-100, must be >= 90 to pass
+  symmetryScore Float?  // 0-100
+  volumeMatch  Float?   // 0-100, volume preservation vs reference
+  matchScore   Float?   // 0-100, overall match to raw reference (must be >= 90)
+  rejectionReason String?
+  // Processing metadata
+  ironingApplied   Boolean @default(false) // §2.1 fold/scratch removal
+  textRestored     Boolean @default(false) // §2.2 HD text/logo re-render
+  bgRemoved        Boolean @default(false) // §1.1 background removal
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([businessId])
+  @@index([status])
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  businessId  String
+  partyId     String?
+  type        String // credit (money in / receivable reduced) | debit (money out / payable reduced) | sale | purchase | expense
+  amount      Decimal
+  balanceAfter Decimal?
+  description String?
+  category    String?
+  invoiceId   String?
+  // §P16-STEP2: Authoritative accounting subtype (see schema.prisma for full docs)
+  transactionSubtype String?
+  source              String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party    Party?   @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  invoice  Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@index([partyId])
+  // §REPORTS-PERF: Composite index for date-range queries scoped by businessId.
+  @@index([businessId, createdAt])
+}
+
+model Invoice {
+  id              String   @id @default(cuid())
+  businessId      String
+  partyId         String?
+  invoiceNumber   String
+  type            String   @default("sales") // sales | purchase | retail | challan
+  status          String   @default("unpaid") // unpaid | partial | paid
+  isGst           Boolean  @default(false)
+  subtotal        Decimal  @default(0)
+  discountValue   Decimal  @default(0)
+  discountMode    String   @default("flat") // flat | percent
+  discountAmount  Decimal  @default(0)
+  gstAmount       Decimal  @default(0)
+  grandTotal      Decimal  @default(0)
+  // §P16-STEP3.7: Delivery/transport charge added to grandTotal.
+  deliveryCharge  Decimal  @default(0)
+  amountPaid      Decimal  @default(0)
+  amountDue       Decimal  @default(0)
+  paymentMode     String?  // cash | upi | credit | cheque
+  notes           String?
+  paymentLandingToken String? @unique
+  // PRD Part 32 §4.3: Auto-tagging audit trail (sub-tag on invoice)
+  collectedByName String? // e.g. "Rahim's Son" (when family member collects)
+  collectedByRole String? // family | partner | agent | primary
+  paidToName      String? // e.g. "Partner - Amit" (when paid to supplier partner)
+  paidToRole      String? // partner | agent | primary
+  // §3: Fulfillment status — handed | pickup | ready (for "Pick Up Later" orders)
+  deliveryStatus  String?  @default("handed") // handed | pickup | ready
+  // §P16-STEP3.8: Idempotency key for SalePad operations
+  // §P16-STEP3.8.1: NO standalone @unique — only composite (businessId, saleOperationId).
+  // Tenant-scoped: Business A and Business B can independently reuse the same saleOperationId.
+  saleOperationId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party    Party?         @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  items    InvoiceItem[]
+  transactions Transaction[]
+  // §COMPLAINTS: complaints linked to this invoice (nullable FK on Complaint side)
+  complaints   Complaint[]
+  // §FOLLOWUPS: follow-ups linked to this invoice (nullable FK on FollowUp side)
+  relatedFollowUps FollowUp[]
+  // §PRODUCT-FEEDBACK: feedback requests tied to this invoice
+  productFeedbacks ProductFeedback[]
+  // §FEEDBACK-OUTBOX: 1:1 durable work record (reliability layer)
+  feedbackOutbox     FeedbackOutbox?
+
+  @@index([businessId])
+  @@index([partyId])
+  // §UNIQUE-CONSTRAINT: Prevents duplicate invoice numbers within the same business.
+  @@unique([businessId, invoiceNumber])
+  // §P16-STEP3.8: Idempotency — unique operation ID per business
+  @@unique([businessId, saleOperationId])
+  // §REPORTS-PERF: Composite index for date-range queries scoped by businessId.
+  @@index([businessId, createdAt])
+}
+
+model InvoiceItem {
+  id        String @id @default(cuid())
+  invoiceId String
+  productId String?
+  name      String
+  quantity  Float
+  unitPrice Decimal
+  discount  Decimal  @default(0)
+  gstRate   Decimal  @default(0)
+  total     Decimal  @default(0)
+  // §PARTIAL-FULFILLMENT: Tracks how much has been handed over
+  fulfilledQty Float @default(0)
+  // §P16-STEP2: Historical cost snapshot (see schema.prisma for full docs)
+  purchasePriceSnapshot Decimal?
+
+  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+}
+
+model PartyNote {
+  id        String   @id @default(cuid())
+  partyId   String
+  type      String   @default("general") // call | meeting | payment_promise | general
+  content   String
+  author    String?
+  createdAt DateTime @default(now())
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@index([partyId])
+}
+
+model AppSettings {
+  id                   String   @id @default(cuid())
+  businessId           String   @unique
+  notificationsEnabled Boolean  @default(true)
+  autoBackupEnabled    Boolean  @default(false)
+  language             String   @default("en")
+  dateFormat           String   @default("DD/MM/YYYY")
+  invoicePrefix        String   @default("INV")
+  pinEnabled           Boolean  @default(false)
+  pinHash              String?
+  lastBackupAt         DateTime?
+  // Phase 3 additions
+  userRole             String   @default("owner") // owner | manager | sales
+  telegramEnabled      Boolean  @default(false)
+  driveEnabled         Boolean  @default(false)
+  biometricEnabled     Boolean  @default(false)
+  // PRD Part 32 §1: Biometric action gates config
+  gateOwnerSwitch      Boolean  @default(true)  // Owner mode re-switching
+  gateHighValueDiscount Boolean  @default(true)  // Discount above limit
+  gateDiscountLimit    Decimal  @default(5000)  // ₹ threshold for high-value discount gate
+  gateDataExport       Boolean  @default(true)  // JSON/CSV export or Telegram backup
+  gateInventoryPrice   Boolean  @default(true)  // Purchase price / bulk stock edit
+  gateDangerZone       Boolean  @default(true)  // Demo reset or khata delete
+  // PRD Part 32 §2: External scanner (USB OTG) enabled
+  externalScannerEnabled Boolean @default(false)
+  // PRD Part 32 §3: Merchant mesh defaulter registry
+  defaulterRegistryEnabled Boolean @default(true)
+  gateLockdownUntil    DateTime? // when 2 wrong PINs entered, locked until this time
+  // PRD Part 37 §1.1: Merchant control toggles
+  onlineSalesEnabled   Boolean  @default(true)  // Online Sales toggle — OFF hides from global catalog + GPS map
+  offlineOnlyMode      Boolean  @default(false) // Offline Billing Only — app works as pure offline ledger
+  cloudSyncMode        Boolean  @default(false) // Cloud Sync Mode — media pushed to Telegram as File IDs
+  telegramFileIdMode   Boolean  @default(false) // Store media as Telegram File IDs (zero cloud cost)
+  // PRD Part 37 §3: Dual-profile switching
+  appMode              String   @default("merchant") // merchant | customer — current active mode
+  cardPreferences      String?  // JSON: {showOwner,showAddress,showPhone,showGstin,greetingText,coverBlur,coverOverlay}
+  dashboardCards       String?  // JSON: [{id,visible,order}] — user's dashboard card configuration
+  // §DASHBOARD-CUSTOMIZATION: JSON for dashboard section visibility/order + per-section prefs
+  dashboardSections    String?  // JSON: DashboardSectionConfig
+  // §NOTIFICATION-CHANNELS: JSON storing per-channel notification preferences
+  notificationChannels String?  // JSON: {sales, lowStock, overduePayments, gradeChanges, backups}
+  // §REWARDS: configurable profit threshold for reward cycle (default ₹400)
+  rewardThreshold     Decimal  @default(400)
+  // §PRODUCT-FEEDBACK: configurable delay (in hours) before requesting feedback
+  feedbackDelayHours  Int     @default(48)
+  // §MESSAGE-TEMPLATES: per-business overrides for customer-facing share
+  // messages. JSON: { "<slot>": { "en": "text", "bn": "text", "hi": "text" } }.
+  // slot ∈ paymentReceivable | paymentPayable | overdue | feedback.
+  // Placeholders: {party} {amount} {business} {bill}. NULL → built-in defaults.
+  messageTemplates   String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// Phase 3 + PRD Part 32: Fingerprint records for customer recognition (hash only, no raw biometric)
+model FingerprintRecord {
+  id              String   @id @default(cuid())
+  fingerprintHash String   @unique
+  partyId         String?
+  businessId      String
+  hand            String   @default("right") // right | left
+  finger          String   @default("thumb") // thumb | index | middle | ring | pinky
+  // PRD Part 32 §4: Role-based fingerprint mapping
+  role            String   @default("primary") // primary | family | partner | agent
+  linkedName      String?  // e.g. "Rahim's Son", "Partner - Amit"
+  relation        String?  // son | wife | brother | partner | cashier | collection_agent
+  scannerType     String   @default("native") // native (WebAuthn) | external (USB OTG MFS100/Morpho)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  party    Party?   @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([partyId])
+  @@index([businessId])
+  @@index([role])
+}
+
+// Phase 3: Backup log for Telegram / Google Drive
+model BackupLog {
+  id         String   @id @default(cuid())
+  businessId String
+  channel    String   // telegram | drive
+  status     String   @default("success") // success | failed
+  fileUrl    String?
+  fileSize   Int?
+  createdAt  DateTime @default(now())
+
+  @@index([businessId])
+}
+
+// §IMPORT-HISTORY: Audit trail of all external imports
+model ImportHistory {
+  id              String   @id @default(cuid())
+  businessId      String
+  userId          String?
+  importType      String   // customers | suppliers | products | opening-balances | bizledger-backup
+  sourceFileName  String
+  sourceFormat    String   // csv | xlsx | json
+  rowCount        Int      @default(0)
+  importedCount   Int      @default(0)
+  skippedCount    Int      @default(0)
+  failedCount     Int      @default(0)
+  status          String   @default("PREVIEW") // PREVIEW | RUNNING | COMPLETED | FAILED | ROLLED_BACK
+  errorReportJson String?
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+
+  @@index([businessId])
+  @@index([createdAt])
+}
+
+// PRD Part 32 §3.1: Shared Defaulter Registry (cloud-synced across merchant group)
+model DefaulterRegistry {
+  id              String   @id @default(cuid())
+  fingerprintHash String?  // links to a fingerprint (if available)
+  partyName       String
+  partyPhone      String?
+  defaultAmount   Decimal  @default(0)
+  merchantName    String   // merchant reporting the default
+  merchantArea    String?  // local area for matching
+  status          String   @default("active") // active | resolved | disputed
+  notes           String?
+  reportedAt      DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([fingerprintHash])
+  @@index([status])
+  @@index([partyPhone])
+}
+
+// PRD Part 32 §1: Biometric gate verification log (audit trail of gate attempts)
+model BiometricGateLog {
+  id          String   @id @default(cuid())
+  businessId  String
+  gateType    String   // owner_switch | high_value_discount | data_export | inventory_price | danger_zone
+  method      String   // biometric | pin | lockdown
+  result      String   // success | failed | locked
+  staffName   String?
+  ipAddress   String?
+  metadata    String?  // JSON string of extra context
+  createdAt   DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([gateType])
+  @@index([result])
+}
+
+// PRD Part 33 §1: Customer orders from public WhatsApp catalog
+model CustomerOrder {
+  id            String   @id @default(cuid())
+  businessId    String
+  customerName  String
+  customerPhone String?
+  customerAddress String?
+  customerLat   Float?
+  customerLng   Float?
+  items         String   // JSON array of {productId, name, quantity, unitPrice, total}
+  subtotal      Decimal  @default(0)
+  deliveryCharge Decimal @default(0)
+  grandTotal    Decimal  @default(0)
+  status        String   @default("pending")
+  paymentMode   String   @default("cod")
+  syncedTransactionId String?
+  syncedInvoiceId      String?
+  notes         String?
+  source        String   @default("catalog")
+  referrerBusinessId String?
+  commissionAmount Decimal @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([status])
+}
+
+// PRD Part 33 §4: Commission log for cross-merchant orders
+model CommissionLog {
+  id              String   @id @default(cuid())
+  recipientBusinessId String // merchant who earned commission (referrer)
+  payerBusinessId String   // merchant whose product was ordered
+  customerOrderId String?
+  orderAmount     Decimal  @default(0)
+  commissionPct   Float    @default(2) // 1-3%
+  commissionAmount Decimal   @default(0)
+  status          String   @default("pending") // pending | paid
+  createdAt       DateTime @default(now())
+
+  recipient Business @relation("CommissionRecipient", fields: [recipientBusinessId], references: [id], onDelete: Cascade)
+  payer     Business @relation("CommissionPayer", fields: [payerBusinessId], references: [id], onDelete: Cascade)
+
+  @@index([recipientBusinessId])
+  @@index([payerBusinessId])
+}
+
+// PRD Part 13: B2B Sourcing — Supplier Catalog Item
+model SupplierCatalogItem {
+  id              String   @id @default(cuid())
+  businessId      String
+  supplierId      String
+  productName     String
+  category        String?
+  basePrice       Decimal  @default(0)
+  transportFare   Decimal  @default(0)
+  coolieCharge    Decimal  @default(0)
+  unit            String   @default("pcs")
+  minOrderQty     Int      @default(1)
+  notes           String?
+  isActive        Boolean  @default(true)
+  matchedProductId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  supplier Party    @relation("SupplierCatalogItems", fields: [supplierId], references: [id], onDelete: Cascade)
+  purchaseOrderItems PurchaseOrderItem[]
+
+  @@index([businessId])
+  @@index([supplierId])
+}
+
+// PRD Part 13: B2B Sourcing — Purchase Order
+model PurchaseOrder {
+  id            String   @id @default(cuid())
+  businessId    String
+  supplierId    String
+  poNumber      String
+  status        String   @default("sent") // sent | dispatched | received | cancelled
+  totalAmount   Decimal  @default(0)
+  notes         String?
+  dispatchedAt  DateTime?
+  receivedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  business Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  supplier Party              @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  items    PurchaseOrderItem[]
+
+  @@index([businessId])
+  @@index([supplierId])
+}
+
+// PRD Part 13: B2B Sourcing — Purchase Order Item (line items)
+model PurchaseOrderItem {
+  id              String   @id @default(cuid())
+  purchaseOrderId String
+  catalogItemId   String?
+  productName     String
+  category        String?
+  quantity        Int      @default(1)
+  unitPrice       Decimal  @default(0)
+  transportFare   Decimal  @default(0)
+  coolieCharge    Decimal  @default(0)
+  totalCost       Decimal  @default(0)
+  matchedProductId String?
+
+  purchaseOrder PurchaseOrder       @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  catalogItem   SupplierCatalogItem? @relation(fields: [catalogItemId], references: [id], onDelete: SetNull)
+
+  @@index([purchaseOrderId])
+}
+
+// PRD Part 31: Staff Management & Multi-Business
+model Staff {
+  id            String   @id @default(cuid())
+  businessId    String
+  name          String
+  phone         String?
+  role          String   @default("sales") // manager | sales
+  staffId       String   @unique // 6-digit unique ID
+  qrToken       String   @unique // QR linking token
+  isActive      Boolean  @default(true)
+  // Permission checkboxes (PRD Part 31 §2)
+  permBilling       Boolean @default(true)
+  permInventory     Boolean @default(false)
+  permKhata         Boolean @default(false)
+  permReports       Boolean @default(false)
+  permSourcing      Boolean @default(false)
+  permSettings      Boolean @default(false)
+  permExport        Boolean @default(false)
+  permDelete        Boolean @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([businessId])
+}
+
+// §STOCK-MOVEMENT: Tracks every stock change with type, quantity, and reference.
+model StockMovement {
+  id          String   @id @default(cuid())
+  businessId  String
+  productId   String
+  type        String   // sale | purchase | sale_return | purchase_return | adjustment
+  quantity    Float    // positive = stock in, negative = stock out
+  balanceAfter Float
+  referenceId String?
+  referenceType String?
+  description String?
+  createdAt   DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, productId])
+  @@index([businessId, createdAt])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  businessId  String
+  staffId     String?
+  staffName   String
+  action      String   // create_invoice | modify_invoice | delete_invoice | khata_entry | restock | settings_change | data_export | staff_change | stock_adjust
+  entityType  String   // invoice | party | product | transaction | settings | staff | export
+  entityId    String?
+  description String
+  metadata    String?
+  createdAt   DateTime @default(now())
+
+  @@index([businessId])
+  @@index([staffId])
+  @@index([businessId, entityType, createdAt])
+}
+
+model BusinessLink {
+  id          String   @id @default(cuid())
+  staffPhone  String
+  businessId  String
+  businessName String
+  role        String   @default("sales")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([staffPhone])
+}
+
+// PRD Part 36 §1.2: Favorite Shop — auto-added when customer orders from a merchant's shared link
+model FavoriteShop {
+  id           String   @id @default(cuid())
+  customerPhone String  // customer identifier (phone or session)
+  businessId   String
+  businessName String
+  storeSlug    String
+  addedAt      DateTime @default(now())
+
+  @@unique([customerPhone, businessId])
+  @@index([customerPhone])
+}
+
+// PRD Part 36 §2.1: Order split — global cart auto-split by shop
+model OrderSplit {
+  id              String   @id @default(cuid())
+  parentOrderId   String   // the original global cart order ID
+  businessId      String
+  businessName    String
+  items           String   // JSON array of items for this shop
+  subtotal        Decimal  @default(0)
+  commissionPct   Float    @default(2)
+  commissionAmount Decimal   @default(0)
+  merchantAmount  Decimal  @default(0) // subtotal - commission
+  status          String   @default("pending") // pending | confirmed | delivered | returned | cancelled
+  deliveryOtp     String?  // 4-digit OTP for delivery verification
+  otpVerifiedAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([parentOrderId])
+  @@index([businessId])
+  @@index([status])
+}
+
+// PRD Part 36 §2.2: Payment split — auto-settlement to merchant wallets
+model PaymentSplit {
+  id              String   @id @default(cuid())
+  orderSplitId    String
+  businessId      String
+  totalAmount     Decimal    @default(0)
+  commissionPct   Float    @default(2)
+  commissionAmount Decimal   @default(0)
+  merchantAmount  Decimal  @default(0)
+  settlementStatus String  @default("pending") // pending | settled | reversed
+  settledAt       DateTime?
+  reversedAt      DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([orderSplitId])
+  @@index([businessId])
+}
+
+// PRD Part 36 §3.1: Return request — on-spot rejection with instant refund
+model ReturnRequest {
+  id              String   @id @default(cuid())
+  orderSplitId    String
+  customerPhone   String?
+  reason          String   // damaged | wrong_product | quality_issue | other
+  refundAmount    Decimal  @default(0)
+  refundStatus    String   @default("pending") // pending | refunded | denied
+  refundedAt      DateTime?
+  stockRestored   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([orderSplitId])
+}
+
+// PRD Part 36 §3.2: Customer trust score — anti-fraud return shield
+model CustomerTrustScore {
+  id              String   @id @default(cuid())
+  customerPhone   String   @unique
+  trustScore      Float    @default(5.0) // 0-5 stars
+  totalOrders     Int      @default(0)
+  totalReturns    Int      @default(0)
+  consecutiveReturns Int   @default(0)
+  codLocked       Boolean  @default(false) // locked after 3 consecutive returns
+  lastReturnAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([customerPhone])
+}
+
+// PRD Part 37 §3: Dual-profile switching — single phone number can be both customer and merchant
+model UserProfile {
+  id              String   @id @default(cuid())
+  phone           String   @unique // same phone for customer + merchant
+  role            String   @default("customer") // customer | merchant | dual
+  merchantId      String?  // linked Business ID if role includes merchant
+  customerName    String?
+  merchantName    String?
+  // Security
+  pinHash         String?  // 4-6 digit master PIN hash
+  pinEnabled      Boolean  @default(false)
+  biometricEnabled Boolean @default(false)
+  // Profile metadata
+  isSeller        Boolean  @default(false)
+  sellerSince     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([phone])
+}
+
+// §CUSTOMER-BEHAVIOUR: Manually-rated interaction/service behaviour for a
+// customer (Party). This is SEPARATE from the financial `creditTrustScore`
+// (which is auto-computed from payment history). Customer Behaviour captures
+// staff-assessed interaction qualities — e.g. "Respectful", "Aggressive",
+// "Pays on time", "Frequently complains".
+//
+// §UNIQUENESS: One current behaviour row per (businessId, partyId). The
+// upsert API enforces this; the @@unique constraint guarantees it at the DB
+// level (defence in depth against races).
+//
+// §HISTORY: Every create/update appends an immutable snapshot to
+// CustomerBehaviourHistory. History is append-only (no edits/deletes from
+// the API surface in this step).
+//
+// §FIELDS:
+//   - rating: enum string VERY_BAD | BAD | GOOD | BETTER | BEST
+//   - tags:   JSON array string of lightweight tag labels (e.g.
+//             ["Respectful","Regular customer"]). NOT a separate Tag/M2M
+//             subsystem — kept simple by design.
+//   - notes:  free-form staff note (optional)
+//   - ratedBy: staff userId or "system" (free-form string, consistent with
+//             existing PartyNote.author pattern)
+model CustomerBehaviour {
+  id        String   @id @default(cuid())
+  businessId String
+  partyId    String
+  rating     String   // VERY_BAD | BAD | GOOD | BETTER | BEST
+  tags       String?  // JSON array string: ["Respectful","Regular customer"]
+  notes      String?
+  ratedBy    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party      Party     @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  history    CustomerBehaviourHistory[]
+
+  @@unique([businessId, partyId]) // one current behaviour per party per business
+  @@index([businessId])
+  @@index([partyId])
+  @@index([businessId, partyId])
+}
+
+// §CUSTOMER-BEHAVIOUR-HISTORY: Append-only audit trail of every behaviour
+// state. Each row is an immutable snapshot of what the rating/tags/notes
+// were at a point in time. The API never edits or deletes history rows.
+//
+// §BEHAVIOUR-FK-NULLABLE: behaviourId is NULLABLE + onDelete: SetNull (NOT
+// Cascade). This preserves the APPEND-ONLY AUDIT invariant: if the current
+// CustomerBehaviour row is deleted (e.g. a future "reset behaviour" feature,
+// or party deletion cascading to CustomerBehaviour), the historical snapshot
+// rows MUST survive — they are the audit trail. Deleting the current row
+// sets history.behaviourId = NULL, but the snapshot data (rating, tags,
+// notes, ratedBy, partyId, businessId) is fully retained.
+// This follows the existing codebase convention: Transaction.party?
+// @relation(... onDelete: SetNull) and Transaction.invoice? @relation(...
+// onDelete: SetNull) both use SetNull for child rows that must survive
+// parent deletion.
+//
+// §PARTY-DENORMALIZED: partyId is stored on the history row (denormalized
+// from CustomerBehaviour.partyId) so history queries can be efficiently
+// scoped by party without a join. The redundant FK relation to Party
+// ensures cascade-delete consistency (see §PARTY-DELETE note below).
+//
+// §PARTY-DELETE: party Party @relation(... onDelete: Cascade) — deleting a
+// Party DOES cascade-delete their behaviour history. This is a KNOWN
+// consequence of the current minimal design (matching the CustomerBehaviour
+// row's own party cascade). If the product later requires history to
+// survive party deletion too (like AuditLog does), partyId should become
+// nullable + SetNull in a follow-up step. That change is intentionally NOT
+// made here to keep this correction minimal and focused on the behaviourId
+// cascade invariant.
+model CustomerBehaviourHistory {
+  id           String   @id @default(cuid())
+  businessId   String
+  partyId      String
+  behaviourId  String?  // NULLABLE — see §BEHAVIOUR-FK-NULLABLE above
+  rating       String   // snapshot of CustomerBehaviour.rating at this time
+  tags         String?  // snapshot
+  notes        String?  // snapshot
+  ratedBy      String?
+  createdAt    DateTime @default(now())
+
+  behaviour    CustomerBehaviour? @relation(fields: [behaviourId], references: [id], onDelete: SetNull)
+  business     Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party        Party             @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, partyId, createdAt])
+  @@index([behaviourId, createdAt])
+  @@index([partyId, createdAt])
+}
+
+// §COMPLAINT-SEQUENCE: Per-business atomic counter for concurrency-safe complaint
+// numbering (CMP-0001, CMP-0002, ...). Mirrors the InvoiceSequence pattern:
+// upsert + { increment: 1 } inside a $transaction guarantees unique sequential
+// numbers even under concurrent creation. One row per business.
+model ComplaintSequence {
+  id         String   @id @default(cuid())
+  businessId String   @unique
+  nextNumber Int      @default(1)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// §COMPLAINT: Independent customer complaint entity. NOT copied message text —
+// a Complaint is a first-class record with its own lifecycle (status, priority,
+// assignment, resolution, event history).
+//
+// §SOURCE-REFERENCE: sourceType + sourceId form an APPLICATION-LEVEL reference
+// to the originating entity (MESSAGE, CALL, FEEDBACK, MANUAL, OTHER). There is
+// NO polymorphic database FK — sourceId is a free-form String that the API
+// validates at the application layer. This keeps the schema simple while allowing
+// future source entities to be linked without schema changes.
+//
+// §PARTY-NULLABLE: partyId is nullable to support anonymous/walk-in complaints.
+// onDelete: SetNull — deleting a Party does NOT delete their complaints (the
+// complaint history survives, with partyId = NULL).
+//
+// §RELATED-INVOICE/PRODUCT: relatedInvoiceId + relatedProductId are nullable
+// optional links. onDelete: SetNull on both — deleting an invoice/product does
+// NOT delete linked complaints.
+//
+// §COMPLAINT-NUMBER: complaintNumber is unique per business (CMP-0001, CMP-0002).
+// Generated atomically via ComplaintSequence inside a $transaction.
+model Complaint {
+  id               String    @id @default(cuid())
+  businessId       String
+  complaintNumber  String    // CMP-0001 (business-scoped sequence)
+  partyId          String?   // nullable for anonymous/walk-in complaints
+  sourceType       String    @default("MANUAL") // MESSAGE | CALL | FEEDBACK | MANUAL | OTHER
+  sourceId         String?   // application-level ref to source entity (no DB FK)
+  title            String
+  description      String?
+  status           String    @default("NEW") // NEW | IN_PROGRESS | WAITING | RESOLVED | CLOSED
+  priority         String    @default("MEDIUM") // LOW | MEDIUM | HIGH | URGENT
+  assignedTo       String?   // staff userId (free-form, like PartyNote.author)
+  relatedInvoiceId String?
+  relatedProductId String?
+  productFeedbackId  String?
+  resolution       String?
+  internalNotes    String?   // JSON array of {note, author, createdAt}
+  attachments      String?   // JSON array of {name, type, dataUrl}
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  resolvedAt       DateTime?
+
+  business         Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party            Party?    @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  relatedInvoice   Invoice?  @relation(fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
+  relatedProduct   Product?  @relation(fields: [relatedProductId], references: [id], onDelete: SetNull)
+  productFeedback  ProductFeedback? @relation(fields: [productFeedbackId], references: [id], onDelete: SetNull)
+  events           ComplaintEvent[]
+  // §FOLLOWUPS: follow-ups linked to this complaint (nullable FK on FollowUp side)
+  relatedFollowUps FollowUp[]
+
+  @@unique([businessId, complaintNumber]) // business-scoped uniqueness
+  @@index([businessId, status])
+  @@index([businessId, partyId])
+  @@index([businessId, assignedTo])
+  @@index([businessId, priority])
+  @@index([businessId, createdAt])
+}
+
+// §COMPLAINT-EVENT: Append-only audit trail of every complaint state change.
+// Each row is an immutable snapshot of a state transition (status change,
+// priority change, assignment, comment, resolve, close). The API never edits
+// or deletes history rows — only GET + POST (create) are exposed.
+//
+// §BEHAVIOUR-FK-NULLABLE: complaintId is NOT nullable + onDelete: Cascade
+// (different from CustomerBehaviourHistory). Rationale: a complaint's event
+// history is tightly coupled to the complaint's lifetime — if a complaint is
+// deleted, its event history is no longer meaningful. The DELETE API uses a
+// soft-archive approach (status=CLOSED) rather than hard-delete to preserve
+// history. If hard-delete is ever needed, complaintId should become nullable
+// + SetNull in a follow-up.
+model ComplaintEvent {
+  id           String   @id @default(cuid())
+  businessId   String
+  complaintId  String
+  eventType    String   // CREATED | STATUS_CHANGE | PRIORITY_CHANGE | ASSIGN | COMMENT | RESOLVE | CLOSE
+  fromValue    String?  // previous value (for STATUS_CHANGE, PRIORITY_CHANGE, ASSIGN)
+  toValue      String?  // new value
+  note         String?  // optional comment text (for COMMENT) or description
+  actor        String?  // staff userId or "system"
+  createdAt    DateTime @default(now())
+
+  complaint    Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  business     Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([complaintId, createdAt])
+  @@index([businessId, createdAt])
+}
+
+// §CUSTOMER-CHANNEL-IDENTITY: Maps a Party (customer) to an external channel
+// identity (WhatsApp phone number, Telegram user ID, Instagram user ID, etc.).
+//
+// §UNIQUENESS: (businessId, channel, externalUserId) is unique — the same
+// external identity cannot map to two different parties within the same
+// business. Cross-business, the same external ID can exist (tenant isolation).
+//
+// §DEDUPLICATION: When a future webhook receives an inbound message from
+// "whatsapp:919876543210", the system resolves the channel identity to the
+// correct Party. If no identity exists, a new Party can be auto-created (or
+// the message stored against an anonymous conversation until the customer is
+// identified).
+//
+// §PHONE-NUMBER: For WhatsApp/SMS channels, externalUserId IS the phone number
+// (E.164 format). For Telegram/Instagram, it's the platform's user ID.
+model CustomerChannelIdentity {
+  id              String   @id @default(cuid())
+  businessId      String
+  partyId         String
+  channel         String   // whatsapp | telegram | messenger | instagram | sms | email | in_app
+  externalUserId  String   // platform-specific user ID (phone for WhatsApp/SMS, user ID for others)
+  externalUsername String? // @handle (Telegram/Instagram) or display name
+  phoneNumber     String?  // E.164 phone (for whatsapp/sms channels — denormalized for convenience)
+  displayName     String?  // how the customer appears on this channel
+  metadata        String?  // JSON: platform-specific profile data
+  verifiedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, channel, externalUserId]) // one identity per channel per business
+  @@index([businessId, partyId])
+  @@index([businessId, channel])
+  @@index([businessId, phoneNumber])
+}
+
+// §CONVERSATION: A thread of messages between a customer and the business on a
+// specific channel. One customer can have multiple conversations (one per channel).
+//
+// §UNIQUENESS-STRATEGY:
+//   - For external channels (whatsapp, telegram, etc.): externalId is the
+//     provider's thread/chat ID. @@unique([businessId, channel, externalId])
+//     prevents duplicate conversations for the same external thread.
+//   - For in_app channel: externalId is NULL. A separate unique constraint
+//     @@unique([businessId, partyId, channel]) ensures one in_app conversation
+//     per customer per business. This works because partyId is NOT NULL for
+//     in_app conversations (you need a known customer to have an in_app chat).
+//
+// §POSTGRESQL-NULL-SEMANTICS: PostgreSQL treats NULL values as distinct in
+// unique indexes, so a NULL externalId does NOT conflict with another NULL.
+// This is why we use TWO separate unique constraints:
+//   1. (businessId, channel, externalId) — for external threads (externalId NOT NULL)
+//   2. (businessId, partyId, channel) — for in_app (where externalId is NULL)
+// This prevents the "multiple NULL externalId" problem that would allow
+// duplicate in_app conversations.
+//
+// §UNREAD-COUNT: Derived from Message.isRead=false count, NOT maintained as a
+// separate mutable counter. This avoids dual-source-of-truth issues. The
+// unreadCount field is a denormalized cache that's updated transactionally
+// when messages are created or marked read.
+model Conversation {
+  id              String    @id @default(cuid())
+  businessId      String
+  partyId         String    // the customer (NOT nullable — anonymous messages need a party first)
+  channel         String    // whatsapp | telegram | messenger | instagram | sms | email | in_app
+  externalId      String?   // provider's thread/chat ID (NULL for in_app)
+  lastMessageAt   DateTime?
+  lastMessagePreview String? // denormalized preview of last message body (first ~100 chars)
+  unreadCount     Int       @default(0) // denormalized cache; derived from Message.isRead=false
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party     @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  messages        Message[]
+
+  @@unique([businessId, channel, externalId]) // external thread uniqueness (externalId NOT NULL)
+  // §IN_APP-UNIQUENESS: enforced via partial unique index in migration SQL
+  // (Prisma cannot express WHERE clause on @@unique). The migration creates:
+  //   CREATE UNIQUE INDEX "Conversation_businessId_partyId_in_app_key"
+  //   ON "Conversation"("businessId", "partyId") WHERE "channel" = 'in_app';
+  // Application-level dedup in POST /api/conversations also handles this.
+  @@index([businessId, partyId])
+  @@index([businessId, lastMessageAt])
+  @@index([businessId, channel])
+}
+
+// §MESSAGE: Individual message in a conversation. Can be inbound (from customer),
+// outbound (from staff), or internal_note (staff-only, not visible to customer).
+//
+// §IDEMPOTENCY: externalMessageId is the provider's message ID. The partial
+// unique index @@unique([businessId, externalMessageId]) ensures that replaying
+// the same webhook event does NOT create duplicate messages. For in_app messages
+// (no externalMessageId), the field is NULL and PostgreSQL's NULL-distinctness
+// means no conflict.
+//
+// §DIRECTION: inbound (customer → business), outbound (business → customer),
+// internal_note (staff-only note, not sent to customer).
+//
+// §SENDER: senderType (customer | staff | system | bot) + senderId (free-form
+// staff name or system identifier, consistent with PartyNote.author pattern).
+model Message {
+  id                String    @id @default(cuid())
+  businessId        String
+  conversationId    String
+  partyId           String    // denormalized for efficient party-scoped queries
+  channel           String    // denormalized from conversation
+  direction         String    // inbound | outbound | internal_note
+  senderType        String    // customer | staff | system | bot
+  senderId          String?   // staff userId or external sender ID (free-form)
+  body              String?
+  attachments       String?   // JSON array of {name, type, dataUrl, size}
+  externalMessageId String?   // provider's message ID (for webhook replay idempotency)
+  isRead            Boolean   @default(false)
+  readAt            DateTime?
+  createdAt         DateTime  @default(now())
+
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  business          Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party             Party       @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, externalMessageId]) // idempotency for webhook replay
+  @@index([conversationId, createdAt])
+  @@index([businessId, partyId, createdAt])
+  @@index([businessId, isRead])
+}
+
+// §CUSTOMER-REWARD-CYCLE: Persistent profit-based loyalty reward cycle.
+model CustomerRewardCycle {
+  id                String   @id @default(cuid())
+  businessId        String
+  partyId           String
+  cycleNumber       Int      @default(1)
+  threshold         Decimal  @default(400) // snapshot from AppSettings at cycle creation
+  accumulatedProfit Decimal  @default(0)
+  status            String   @default("ACTIVE") // ACTIVE | UNLOCKED | REWARDED
+  startedAt         DateTime @default(now())
+  unlockedAt        DateTime?
+  rewardGivenAt     DateTime?
+  rewardDescription String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party             Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  events            CustomerRewardEvent[]
+
+  @@unique([businessId, partyId, cycleNumber])
+  @@index([businessId, partyId, status])
+  @@index([businessId, status])
+}
+
+// §CUSTOMER-REWARD-EVENT: Append-only audit trail for reward cycle events.
+model CustomerRewardEvent {
+  id              String   @id @default(cuid())
+  businessId      String
+  partyId         String
+  cycleId         String
+  eventType       String   // PROFIT_ACCRUAL | REWARD_UNLOCKED | REWARD_GIVEN | CYCLE_RESET
+  amount          Decimal  @default(0) // profit amount for PROFIT_ACCRUAL
+  sourceInvoiceId String?  // the invoice that contributed profit (for idempotency)
+  note            String?
+  createdAt       DateTime @default(now())
+
+  cycle           CustomerRewardCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  business        Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party               @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, sourceInvoiceId]) // idempotency: invoice accrues once per business
+  @@index([cycleId, createdAt])
+  @@index([businessId, partyId, createdAt])
+}
+
+// §STEP7-REWARD-ACCRUAL-OUTBOX: see prisma/schema.prisma for full docs.
+// Dev SQLite mirror of the production model. Identical fields + indexes.
+model RewardAccrualOutbox {
+  id                  String    @id @default(cuid())
+  businessId          String
+  invoiceId           String    @unique
+  status              String    @default("PENDING")
+  attempts            Int       @default(0)
+  lastError           String?
+  lastAttemptAt       DateTime?
+  completedAt         DateTime?
+  processingStartedAt DateTime?
+  claimToken          String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  business            Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([status, lastAttemptAt])
+  @@index([businessId, status])
+}
+
+// §FEEDBACK-OUTBOX: see prisma/schema.prisma for full docs.
+// Dev SQLite mirror of the production model. Identical fields + indexes.
+model FeedbackOutbox {
+  id                  String    @id @default(cuid())
+  businessId          String
+  invoiceId           String    @unique
+  partyId             String?
+  productIds          String?
+  status              String    @default("PENDING")
+  attempts            Int       @default(0)
+  lastError           String?
+  lastAttemptAt       DateTime?
+  completedAt         DateTime?
+  processingStartedAt DateTime?
+  claimToken          String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  business            Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  invoice             Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([status, lastAttemptAt])
+  @@index([businessId, status])
+}
+
+// §STEP7A-REWARD-RECONCILIATION-CURSOR: see prisma/schema.prisma for full docs.
+// Dev SQLite mirror of the production model. Identical fields + indexes.
+model RewardReconciliationCursor {
+  id              String   @id @default(cuid())
+  businessId      String   @unique
+  lastCreatedAt   DateTime @default(now())
+  lastInvoiceId   String   @default("")
+  scannedCount    Int      @default(0)
+  cycleCount      Int      @default(0)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+}
+
+// §FEEDBACK-RECONCILIATION-CURSOR: see prisma/schema.prisma for full docs.
+// Dev SQLite mirror — identical fields + indexes.
+model FeedbackReconciliationCursor {
+  id              String   @id @default(cuid())
+  businessId      String   @unique
+  lastCreatedAt   DateTime @default(now())
+  lastInvoiceId   String   @default("")
+  scannedCount    Int      @default(0)
+  cycleCount      Int      @default(0)
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+}
+
+// §STEP8A-CUSTOMER-FOLLOWUP: see prisma/schema.prisma for full docs.
+// Dev SQLite mirror of the production models. Identical fields + indexes.
+model FollowUp {
+  id                  String    @id @default(cuid())
+  businessId          String
+  followUpNumber      String
+  partyId             String?
+  type                String    @default("manual")
+  sourceType          String    @default("MANUAL")
+  sourceId            String?
+  title               String
+  description         String?
+  status              String    @default("PENDING")
+  priority            String    @default("MEDIUM")
+  assignedToId        String?
+  createdById         String?
+  dueAt               DateTime?
+  snoozedUntil        DateTime?
+  completedAt         DateTime?
+  completedById       String?
+  outcome             String?
+  relatedInvoiceId    String?
+  relatedComplaintId  String?
+  relatedProductId    String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  business            Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party               Party?    @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  assignedTo          User?     @relation("FollowUpAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdBy           User?     @relation("FollowUpCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  completedBy         User?     @relation("FollowUpCompleter", fields: [completedById], references: [id], onDelete: SetNull)
+  relatedInvoice      Invoice?  @relation(fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
+  relatedComplaint    Complaint? @relation(fields: [relatedComplaintId], references: [id], onDelete: SetNull)
+  relatedProduct      Product?  @relation("FollowUpProduct", fields: [relatedProductId], references: [id], onDelete: SetNull)
+  events              FollowUpEvent[]
+  productFeedbacks    ProductFeedback[]
+
+  @@unique([businessId, followUpNumber])
+  @@index([businessId, status])
+  @@index([businessId, partyId])
+  @@index([businessId, assignedToId])
+  @@index([businessId, priority])
+  @@index([businessId, dueAt])
+  @@index([businessId, type])
+  @@index([businessId, createdAt])
+  @@index([businessId, relatedProductId])
+}
+
+model FollowUpEvent {
+  id           String   @id @default(cuid())
+  businessId   String
+  followUpId   String
+  eventType    String
+  fromValue    String?
+  toValue      String?
+  note         String?
+  actor        String?
+  createdAt    DateTime @default(now())
+
+  followUp     FollowUp @relation(fields: [followUpId], references: [id], onDelete: Cascade)
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([followUpId, createdAt])
+  @@index([businessId, createdAt])
+}
+
+model FollowUpSequence {
+  id          String   @id @default(cuid())
+  businessId  String   @unique
+  nextNumber  Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// §PRODUCT-FEEDBACK: first-class customer feedback request domain.
+// See prisma/schema.prisma for full design docs. Dev mirror (no @db.Decimal).
+model ProductFeedback {
+  id              String    @id @default(cuid())
+  businessId      String
+  partyId         String?
+  invoiceId       String?
+  productId       String?
+  followUpId      String?
+  status          String    @default("pending")
+  rating          Int?
+  comment         String?
+  metadata        String?
+  // §DEDUP-KEY: deterministic key for race-safe duplicate prevention. Computed
+  // from [businessId, partyId, invoiceId ?? '', productId ?? ''].join('|').
+  // A partial unique index (WHERE status in pending/scheduled) enforces at-most-
+  // one ACTIVE feedback per tuple — application-level findFirst is just an
+  // early-exit UX optimization, the DB index is the real guard.
+  dedupKey        String?
+  requestedAt     DateTime?
+  submittedAt     DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  business        Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party?    @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  invoice         Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  product         Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  followUp        FollowUp? @relation(fields: [followUpId], references: [id], onDelete: SetNull)
+  // §COMPLAINT-ESCALATION: 1-to-many back-relation (FK on Complaint side)
+  complaints      Complaint[]
+
+  @@index([businessId, partyId])
+  @@index([businessId, productId])
+  @@index([businessId, invoiceId])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+}

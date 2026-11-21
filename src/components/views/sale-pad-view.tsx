@@ -1,0 +1,2503 @@
+'use client'
+
+import { createPortal } from 'react-dom'
+import { useAppStore } from '@/store/app-store'
+import { useCartStore, type CartItem, type HeldCart, type PaymentMode, type SaleMode } from '@/store/cart-store'
+import { useBillingStore } from '@/store/billing-store'
+import { useI18n } from '@/store/i18n-store'
+import { useFetch, apiPost } from '@/hooks/use-fetch'
+import type { Product, Party } from '@/lib/types'
+import { formatCurrency } from '@/lib/utils'
+import { motion, AnimatePresence, useAnimationControls } from 'framer-motion'
+import {
+  ShoppingBag, Package, Plus, Minus, Trash2, UserPlus, Receipt, AlertTriangle,
+  Store, Boxes, CheckCircle2, X, Wallet, QrCode, CreditCard, FileCheck,
+  ChevronLeft, ChevronRight, Calculator, Lock, Eye, EyeOff, ShieldCheck,
+  Users, BadgePercent, Layers, Share2, ArrowLeft, Loader2,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { EmptyState } from '@/components/shared/states'
+import { toast } from 'sonner'
+import { memo, useMemo, useState, useCallback, useRef, useEffect } from 'react'
+import QRCode from 'qrcode'
+import { FullScreenPicker } from '@/components/shared/full-screen-picker'
+import { useGateTrigger } from '@/store/biometric-gate-store'
+import { useSoundBox } from '@/hooks/use-sound-box'
+import { PartyForm } from './khata/party-form'
+
+// §1: Types moved to cart-store.ts — imported above
+
+// §1: Memoized CartRow — prevents full-list re-render when single item changes
+interface CartRowProps {
+  item: CartItem
+  mode: SaleMode
+  masterGstOn: boolean
+  currency: string
+  onSetUnitPrice: (cartKey: string, price: number) => void
+  onSetQty: (cartKey: string, raw: string) => void
+  onCommitQty: (cartKey: string) => void
+  onUpdateQty: (cartKey: string, delta: number) => void
+  onSetManualTotal: (cartKey: string, total: number) => void
+  onResetManualTotal: (cartKey: string) => void
+  onRemoveFromCart: (cartKey: string) => void
+  onToggleItemGst: (cartKey: string) => void
+  onSetItemGstRate: (cartKey: string, rate: number) => void
+}
+
+const CartRow = memo(function CartRow({
+  item, mode, masterGstOn, currency,
+  onSetUnitPrice, onSetQty, onCommitQty, onUpdateQty,
+  onSetManualTotal, onResetManualTotal, onRemoveFromCart,
+  onToggleItemGst, onSetItemGstRate,
+}: CartRowProps) {
+  const { t } = useI18n()
+  const effectiveMrp = item.itemMode === 'retail' ? item.retailMrp : item.mrp
+  const hasMrpDiscount = effectiveMrp > 0 && effectiveMrp > item.price
+
+  return (
+    <div className="p-2.5 rounded-xl bg-muted/40 border border-border/50">
+      {/* Row 1 — product name ONLY + trash icon */}
+      <div className="flex items-center gap-2 mb-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold truncate">
+            {item.name} {item.itemMode === 'retail' && <span className="text-[10px] text-emerald-600 font-normal">({t('sale.mode.retail')})</span>}
+          </p>
+          {hasMrpDiscount && (
+            <span className="text-[10px] text-emerald-600 font-medium">
+              {t('bill.discount')} ₹{(effectiveMrp - item.price).toFixed(2)} per {item.unit}
+            </span>
+          )}
+          {item.manualOverride && (
+            <span className="text-[10px] text-amber-600 font-medium ml-1">· {t('sale.cart.manualTotal')}</span>
+          )}
+        </div>
+        <button
+          onClick={() => onRemoveFromCart(item.cartKey)}
+          className="shrink-0 w-7 h-7 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center hover:bg-red-500/20 transition-colors"
+          aria-label={`Remove ${item.name}`}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      {/* 3-column POS row */}
+      <div className="grid grid-cols-3 gap-2 items-end">
+        {/* Column 1: rate */}
+        <div className="space-y-0.5">
+          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">{t('sale.cart.rate').replace('{unit}', item.unit)}</label>
+          <div className="flex items-baseline gap-0.5">
+            <span className="text-[10px] text-muted-foreground">₹</span>
+            <input
+              value={item.price}
+              onChange={(e) => onSetUnitPrice(item.cartKey, Number(e.target.value) || 0)}
+              className="w-full text-sm font-semibold tabular bg-transparent border-0 border-b border-border focus:border-primary outline-none px-0 py-0.5 leading-tight"
+              inputMode="decimal"
+            />
+          </div>
+        </div>
+        {/* Column 2: qty */}
+        <div className="space-y-0.5">
+          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">{t('sale.cart.qty').replace('{unit}', item.unit)}</label>
+          <div className="flex items-center gap-1">
+            <button onClick={() => onUpdateQty(item.cartKey, -1)} className="w-6 h-6 rounded bg-card border border-border flex items-center justify-center text-muted-foreground hover:bg-muted shrink-0" aria-label="Decrease">
+              <Minus className="w-3 h-3" />
+            </button>
+            <input
+              value={item.qtyStr}
+              onChange={(e) => onSetQty(item.cartKey, e.target.value)}
+              onBlur={() => onCommitQty(item.cartKey)}
+              className="flex-1 min-w-0 text-center text-sm tabular bg-transparent border-0 border-b border-border focus:border-primary outline-none px-0 py-0.5 leading-tight"
+              inputMode="decimal"
+              step="any"
+            />
+            <button onClick={() => onUpdateQty(item.cartKey, 1)} className="w-6 h-6 rounded bg-card border border-border flex items-center justify-center text-muted-foreground hover:bg-muted shrink-0" aria-label="Increase">
+              <Plus className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+        {/* Column 3: total with MRP strikethrough */}
+        <div className="space-y-0.5">
+          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block text-right">{t('sale.cart.total')}</label>
+          <div className="flex flex-col items-end">
+            {hasMrpDiscount && (
+              <del className="text-[9px] text-muted-foreground/50 tabular leading-none">
+                MRP ₹{(effectiveMrp * item.quantity).toFixed(0)}
+              </del>
+            )}
+            <div className="flex items-baseline gap-0.5 justify-end">
+              <span className="text-[10px] text-muted-foreground">₹</span>
+              <input
+                value={item.total}
+                onChange={(e) => onSetManualTotal(item.cartKey, Number(e.target.value) || 0)}
+                onDoubleClick={() => onResetManualTotal(item.cartKey)}
+                className="w-full text-right text-sm font-bold tabular bg-transparent border-0 border-b border-amber-400/40 focus:border-amber-500 outline-none px-0 py-0.5 leading-tight"
+                inputMode="numeric"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+      {/* Tax Chip + auto-discount */}
+      <div className="flex items-center justify-between mt-1.5 text-[10px] gap-2">
+        <button
+          onClick={() => onToggleItemGst(item.cartKey)}
+          className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[9px] font-medium transition-all ${
+            item.itemGstEnabled
+              ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/30 text-teal-600'
+              : 'border-border bg-card text-muted-foreground hover:border-teal-400'
+          }`}
+        >
+          {item.itemGstEnabled ? (
+            <>
+              <input
+                type="number"
+                value={item.itemGstRate}
+                onChange={(e) => onSetItemGstRate(item.cartKey, Number(e.target.value) || 0)}
+                onClick={(e) => e.stopPropagation()}
+                className="w-6 h-4 text-[9px] text-center bg-transparent border-0 outline-none tabular p-0"
+                inputMode="numeric"
+              />
+              <span>% GST</span>
+              <span className="tabular">+₹{(item.total * item.itemGstRate / 100).toFixed(2)}</span>
+            </>
+          ) : item.itemGstManuallyDisabled ? (
+            <span className="text-red-500">GST OFF</span>
+          ) : (
+            <>
+              <Plus className="w-2.5 h-2.5" />
+              <span>Add GST</span>
+              {masterGstOn && item.gstRate > 0 && (
+                <span className="text-teal-500 ml-0.5">({item.gstRate}%)</span>
+              )}
+            </>
+          )}
+        </button>
+        {hasMrpDiscount && (
+          <span className="text-emerald-600 font-medium">
+            {t('bill.discount')} ₹{((Number(effectiveMrp) - Number(item.price)) * Number(item.quantity || 0)).toFixed(2)}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+})
+
+export function SalePadView() {
+  const { business, setActiveView, setSelectedInvoiceId, triggerRefresh, showPartyForm, setShowPartyForm, pendingNewCustomerId, pendingNewCustomerName, activeView } = useAppStore()
+  const { t } = useI18n()
+  const { speak: soundBoxSpeak } = useSoundBox()
+  const { data: products } = useFetch<Product[]>('/api/products', [])
+  const { data: parties } = useFetch<Party[]>('/api/parties?type=customer', [])
+
+  // §1: Cart state from GLOBAL store — persists across screen navigations
+  // Use individual selectors for proper reactivity
+  const carts = useCartStore(s => s.carts)
+  const setStoreCarts = useCartStore(s => s.setCarts)
+  const setStoreCartId = useCartStore(s => s.setActiveCartId)
+  const updateActiveCart = useCartStore(s => s.updateActiveCart)
+  const resetCart = useCartStore(s => s.resetCart)
+  const clearBillingState = useCartStore(s => s.clearBillingState)
+  const storeDiscountMode = useCartStore(s => s.discountMode)
+  const setStoreDiscountMode = useCartStore(s => s.setDiscountMode)
+  const storeDiscountValue = useCartStore(s => s.discountValue)
+  const setStoreDiscountValue = useCartStore(s => s.setDiscountValue)
+  const storeDeliveryCharge = useCartStore(s => s.deliveryCharge)
+  const setStoreDeliveryCharge = useCartStore(s => s.setDeliveryCharge)
+  const storeFulfillmentStatus = useCartStore(s => s.fulfillmentStatus)
+  const setStoreFulfillmentStatus = useCartStore(s => s.setFulfillmentStatus)
+  const storeSplitCash = useCartStore(s => s.splitCash)
+  const setStoreSplitCash = useCartStore(s => s.setSplitCash)
+  const storeSplitUpi = useCartStore(s => s.splitUpi)
+  const setStoreSplitUpi = useCartStore(s => s.setSplitUpi)
+  const storeSplitChequeNo = useCartStore(s => s.splitChequeNo)
+  const setStoreSplitChequeNo = useCartStore(s => s.setSplitChequeNo)
+  const activeCartId = useCartStore(s => s.activeCartId)
+  const activeCart = carts.find((c) => c.id === activeCartId) || carts[0]
+
+  // §2: Sale mode — খুচরো / আস্ত / পাইকারি (wholesale PIN-gated)
+  const [mode, setMode] = useState<SaleMode>('retail')
+  const [wholesaleUnlocked, setWholesaleUnlocked] = useState(false)
+  const triggerGate = useGateTrigger()
+  // §SECRET-COST-REVEAL: Master toggle for the secret purchase price feature.
+  // When enabled, long-pressing a product card temporarily shows the cost price.
+  // When disabled, the long-press does nothing — safe to hand phone to staff/customer.
+  const [isCostRevealEnabled, setIsCostRevealEnabled] = useState(false)
+  // Track which product card is currently being long-pressed (for cost reveal)
+  const [revealedCostProductId, setRevealedCostProductId] = useState<string | null>(null)
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // §2 Cloaked Wholesale: only reveal via explicit left-swipe from right edge
+  const [wholesaleRevealed, setWholesaleRevealed] = useState(false)
+  const swipeStartX = useRef<number | null>(null)
+  const swipeStartY = useRef<number | null>(null)
+  // §1 Multi-Cart Tab Closure: prompt to wipe or hold
+  const [closePromptCartId, setClosePromptCartId] = useState<number | null>(null)
+  // §1 Held Queue: carts sent here free up active slots but stay recoverable
+  const [heldQueue, setHeldQueue] = useState<HeldCart[]>([])
+  const [showHeldQueue, setShowHeldQueue] = useState(false)
+
+  const [activeCategory, setActiveCategory] = useState<string>('All')
+  const [showCustPicker, setShowCustPicker] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  // §2: Animated credit gate — RED warning shown ONLY on final submit failure
+  const [showCreditGate, setShowCreditGate] = useState(false)
+
+  // §1: HIDDEN by default. Only shows when user interacts with Ledger Due or Pick Up Later.
+  const [showInlineCustomer, setShowInlineCustomer] = useState(false)
+
+  // §UX-REFINEMENT: Force-reanimation keys. Incrementing these forces the
+  // respective box to replay its entrance animation on EVERY tap,
+  // even when already visible on screen.
+  const [customerBlockKey, setCustomerBlockKey] = useState(0)
+  const [creditGateKey, setCreditGateKey] = useState(0)
+
+  // §UX-REFINEMENT: Imperative animation controls. Key-based remount does NOT
+  // replay framer-motion's `initial` prop on React 19 (the new node mounts
+  // directly at its `animate` state). useAnimationControls lets us imperatively
+  // .set() to initial values then .start() to final values — GUARANTEED replay.
+  const blueBoxControls = useAnimationControls()
+  const redBoxControls = useAnimationControls()
+
+  // §STATE-LEAK-FIX: Reset checkout UI states on cart switch.
+  // The Red Warning box + Blue Add Customer box visibility must NOT bleed
+  // across Person 1 / Person 2 carts. When the active cart changes (switch or
+  // new cart), reset both to false so the new cart starts fresh/un-triggered.
+  // The auto-show effect further down will re-show the blue box if the new
+  // cart's fulfillmentStatus is 'pickup' (correct per-cart behavior).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setShowCreditGate(false)
+      setShowInlineCustomer(false)
+    }, 0)
+    return () => clearTimeout(t)
+  }, [activeCartId])
+
+  // §FIX: Removed duplicate popstate handler — useBackButton (in app-shell)
+  // now handles sale-pad navigation properly. The old handler here competed
+  // with useBackButton, causing inconsistent back navigation (sometimes
+  // going to Dashboard, sometimes to Billing).
+
+  // §4: Discount from global store + live Grand Total
+  const discountMode = storeDiscountMode
+  const setDiscountMode = setStoreDiscountMode
+  const discountValue = storeDiscountValue
+  const setDiscountValue = setStoreDiscountValue
+  // §3: Global GST override (Advanced Options) — individual product GSTs apply behind the scenes
+  const [globalGstRate, setGlobalGstRate] = useState('')
+  // §3: Master GST On/Off toggle — if ON, apply database-defined product taxes. If OFF, bypass all.
+  const [masterGstOn, setMasterGstOn] = useState(true)
+  // §1: Delivery/Shipping Charge from global store
+  const deliveryCharge = storeDeliveryCharge
+  const setDeliveryCharge = setStoreDeliveryCharge
+
+  const currency = business?.currency || 'INR'
+
+  // ---- Cart helpers (operate on the active held cart) ----
+  const updateActiveCartCb = useCallback((updater: (c: HeldCart) => HeldCart) => {
+    updateActiveCart(updater)
+  }, [updateActiveCart])
+
+  const cart = activeCart.items
+  const customer = activeCart.customer
+  const paymentMode = activeCart.paymentMode
+
+  // §1: Sync active cart to billing store so Billing tab shows draft with customer name
+  const { tabs: billingTabs, updateTab: updateBillingTab } = useBillingStore()
+  useEffect(() => {
+    if (cart.length === 0) return // Don't sync empty carts
+    // Use the first billing tab as the draft holder
+    const tabId = billingTabs[0]?.id
+    if (!tabId) return
+    updateBillingTab(tabId, {
+      hasDraft: true,
+      customerId: customer?.id,
+      customerName: customer?.name,
+      items: cart.map((i) => ({
+        productId: i.productId,
+        name: i.name,
+        quantity: i.quantity,
+        unitPrice: Number(i.price) || 0,
+        gstRate: i.gstRate,
+        discount: 0,
+        total: Number(i.total) || 0,
+      })),
+      paymentMode,
+    })
+  }, [cart, customer, paymentMode])
+
+  // §2: Reactive dismissal — auto-hide red warning when customer is selected
+  useEffect(() => {
+    if (customer) {
+      const t = setTimeout(() => {
+        setShowCreditGate(false)
+      }, 0)
+      return () => clearTimeout(t)
+    }
+  }, [customer])
+
+  const setCart = (items: CartItem[] | ((prev: CartItem[]) => CartItem[])) =>
+    updateActiveCartCb((c) => ({ ...c, items: typeof items === 'function' ? items(c.items) : items }))
+  const setCustomer = (p: Party | null) => updateActiveCartCb((c) => ({ ...c, customer: p }))
+  const setPaymentMode = (m: PaymentMode) => updateActiveCartCb((c) => ({ ...c, paymentMode: m }))
+
+  // §QUICK-SALE-CUSTOMER: When navigating from Party Profile → Quick Sale,
+  // pendingNewCustomerId/Name is set in the store. Read it on mount and
+  // auto-select the customer so the sale-pad doesn't open blank.
+  useEffect(() => {
+    if (!pendingNewCustomerId) return
+    // Try to find the full party object from the fetched parties list
+    const found = parties?.find((p) => p.id === pendingNewCustomerId)
+    if (found) {
+      setCustomer(found)
+    } else if (pendingNewCustomerName) {
+      // Fallback: create a minimal party object if not found in the list
+      setCustomer({ id: pendingNewCustomerId, name: pendingNewCustomerName } as Party)
+    }
+    // Clear the pending state so it doesn't re-apply on later visits
+    useAppStore.getState().setPendingNewCustomer(null, null)
+  }, [pendingNewCustomerId, pendingNewCustomerName, parties])
+
+  const [chequeNo, setChequeNo] = useState('')
+  // §5: Fulfillment status from global store
+  const fulfillmentStatus = storeFulfillmentStatus
+  const setFulfillmentStatus = setStoreFulfillmentStatus
+  // §1: Split payment from global store
+  const splitCash = storeSplitCash
+  const setSplitCash = setStoreSplitCash
+  const splitUpi = storeSplitUpi
+  const setSplitUpi = setStoreSplitUpi
+  const splitCredit = ''
+  const setSplitCredit = (_v: string) => { /* no-op: credit split is derived, not stored */ }
+  const splitChequeNo = storeSplitChequeNo
+  const setSplitChequeNo = setStoreSplitChequeNo
+  // §2: Sub-categories — dynamically derived from products based on selected main category
+  const subCategories = useMemo(() => {
+    if (!products) return ['All']
+    let filtered = products
+    if (mode === 'retail') {
+      filtered = filtered.filter((p) => (p as any).retailEnabled && (p as any).retailSalePrice > 0)
+    } else if (mode === 'full') {
+      filtered = filtered.filter((p) => p.salePrice > 0)
+    } else if (mode === 'wholesale') {
+      filtered = filtered.filter((p) => p.wholesalePrice != null && p.wholesalePrice > 0)
+    }
+    if (activeCategory !== 'All') {
+      filtered = filtered.filter((p) => p.category === activeCategory)
+    }
+    const subCats = Array.from(new Set(filtered.map((p) => (p as any).subCategory).filter(Boolean))) as string[]
+    return ['All', ...subCats]
+  }, [products, mode, activeCategory])
+
+  const [activeSubCategory, setActiveSubCategory] = useState<string>('All')
+
+  // Reset sub-category when main category or mode changes — derived state pattern
+  // Instead of effect, we use a key-based reset: when category/mode changes,
+  // the sub-category filter is applied only if it exists in the current subCategories list
+  // This avoids setState-in-effect lint errors
+  const effectiveSubCategory = subCategories.includes(activeSubCategory) ? activeSubCategory : 'All'
+  const setActiveSubCategorySafe = (sub: string) => setActiveSubCategory(sub)
+
+  const categories = useMemo(() => {
+    if (!products) return ['All']
+    const cats = Array.from(new Set(products.map((p) => p.category).filter(Boolean))) as string[]
+    return ['All', ...cats]
+  }, [products])
+
+  // §2: Mode-based product filtering — STRICT isolation
+  const filteredProducts = useMemo(() => {
+    if (!products) return []
+    let list = products
+    if (mode === 'retail') {
+      // ONLY products with retail price set (retailEnabled + retailSalePrice > 0)
+      list = list.filter((p) => (p as any).retailEnabled && (p as any).retailSalePrice > 0)
+    } else if (mode === 'full') {
+      // ONLY products with bulk price (salePrice > 0) — sealed full bag/box
+      list = list.filter((p) => p.salePrice > 0)
+    } else if (mode === 'wholesale') {
+      // ONLY products with explicit wholesale price set
+      list = list.filter((p) => p.wholesalePrice != null && p.wholesalePrice > 0)
+    }
+    if (activeCategory !== 'All') {
+      list = list.filter((p) => p.category === activeCategory)
+    }
+    // §2: Filter by sub-category
+    if (effectiveSubCategory !== 'All') {
+      list = list.filter((p) => (p as any).subCategory === effectiveSubCategory)
+    }
+    return list
+  }, [products, mode, activeCategory, effectiveSubCategory])
+
+  // §TIERED-PRICING: Fetch custom/tiered prices for the selected customer.
+  // §MULTI-PRICE: We now fetch ALL THREE price fields (sale, mrp, wholesale)
+  // in a single resolved-price call and store them. The getPrice function
+  // picks the appropriate field based on the current sale mode.
+  //
+  // §STATE-BLEED-FIX: When the active cart changes (customer changes), we
+  // IMMEDIATELY clear the customPriceMap synchronously — before the fetch
+  // starts — so the old customer's custom prices don't bleed into the new
+  // cart's product grid. The default prices show instantly while the new
+  // customer's prices load.
+  //
+  // §CACHE: Resolved prices are cached per-customerId in state.
+  // Switching back to a previously-loaded cart loads from cache INSTANTLY
+  // — no database query fired. The cache key is `customerId:budgetGroup`.
+  type CustomPriceEntry = {
+    price: number; source: string
+    salePrice?: number | null
+    mrp?: number | null
+    wholesalePrice?: number | null
+    // §RETAIL-ISOLATION: Retail-specific prices (per kg/pcs) — SEPARATE from bulk.
+    // These do NOT fall back to bulk prices. If null, retail mode uses the
+    // product's default retailSalePrice.
+    retailSalePrice?: number | null
+    retailMrp?: number | null
+  }
+  const [customPriceMap, setCustomPriceMap] = useState<Record<string, CustomPriceEntry>>({})
+  // §CACHE: Map<cacheKey, Record<productId, CustomPriceEntry>>
+  // Using state (not useRef) so we can read it during render without
+  // triggering the react-hooks/refs lint rule.
+  const [priceCache, setPriceCache] = useState<Record<string, Record<string, CustomPriceEntry>>>({})
+  // §LOADING: True while fetching custom prices for a NEW customer (not cached).
+  // Used to show a subtle loading spinner on the product grid so the user
+  // knows custom prices are being calculated. Does NOT freeze the UI — the
+  // grid remains interactive with default prices.
+  const [isLoadingPrices, setIsLoadingPrices] = useState(false)
+
+  // §SYNC-CLEAR: Track the customer ID that customPriceMap was last built for.
+  // If the customer changed, we clear the map SYNCHRONOUSLY during render
+  // (not in an effect) — this is the React-recommended pattern for derived
+  // state that must reset when a prop changes. This prevents the old
+  // customer's "CUSTOM" price tags from bleeding into the new cart's grid.
+  const [lastLoadedCustomerId, setLastLoadedCustomerId] = useState<string | null>(null)
+  const currentCustomerId = customer?.id || null
+  if (lastLoadedCustomerId !== currentCustomerId) {
+    setLastLoadedCustomerId(currentCustomerId)
+    // §CACHE-HIT: If we've already fetched prices for this customer, restore
+    // from cache INSTANTLY (no loading delay). Only clear if no cache entry.
+    const buyerGroup = customer?.buyerGroup || ''
+    const cacheKey = `${currentCustomerId || 'none'}:${buyerGroup}`
+    const cached = currentCustomerId ? priceCache[cacheKey] : undefined
+    if (cached) {
+      setCustomPriceMap(cached)
+    } else {
+      setCustomPriceMap({})
+    }
+  }
+
+  // §FETCH: Load the new customer's custom prices. Uses the batch endpoint
+  // (resolveProductPricesBatch) to fetch ALL products in ONE request instead
+  // of N parallel requests — dramatically faster (1 round-trip vs N).
+  // §CACHE-CHECK: If prices are already cached for this customer, skip the
+  // fetch entirely (the map was already restored from cache in the sync-clear
+  // block above).
+  useEffect(() => {
+    if (!customer?.id || !products || products.length === 0) {
+      return
+    }
+    const buyerGroup = customer?.buyerGroup || ''
+    const cacheKey = `${customer.id}:${buyerGroup}`
+    // §CACHE-HIT: Already cached — the sync-clear block above already
+    // restored the cached prices to customPriceMap. No fetch needed.
+    if (priceCache[cacheKey]) {
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      // §LOADING: Not cached — show loading spinner on the product grid.
+      // Set inside the async function to avoid synchronous setState in effect.
+      setIsLoadingPrices(true)
+      try {
+        // §BATCH-FETCH: Single request to resolve all product prices for
+        // this buyer. Falls back to individual fetches if the batch
+        // endpoint isn't available.
+        const productIds = products.map((p) => p.id)
+
+        // Try the batch endpoint first (much faster — 1 request vs N)
+        try {
+          const batchRes = await fetch('/api/products/resolve-prices-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              productIds,
+              buyerId: customer.id,
+              buyerGroup,
+            }),
+          })
+          if (batchRes.ok) {
+            const batchData = await batchRes.json()
+            if (cancelled) return
+            if (batchData && typeof batchData === 'object') {
+              const map: Record<string, CustomPriceEntry> = {}
+              for (const [pid, resolved] of Object.entries(batchData)) {
+                const r = resolved as any
+                if (r && r.source !== 'default' && r.customPrices) {
+                  map[pid] = {
+                    price: r.price,
+                    source: r.source,
+                    salePrice: r.customPrices.salePrice ?? null,
+                    mrp: r.customPrices.mrp ?? null,
+                    wholesalePrice: r.customPrices.wholesalePrice ?? null,
+                    // §RETAIL-ISOLATION: Extract retail-specific prices
+                    retailSalePrice: r.customPrices.retailSalePrice ?? null,
+                    retailMrp: r.customPrices.retailMrp ?? null,
+                  }
+                }
+              }
+              if (!cancelled) {
+                // §CACHE-STORE: Save to cache so switching back is instant
+                setPriceCache((prev) => ({ ...prev, [cacheKey]: map }))
+                setCustomPriceMap(map)
+                // §LOADING-DONE: Hide spinner after successful batch fetch
+                setIsLoadingPrices(false)
+              }
+              return
+            }
+          }
+        } catch {
+          // Batch endpoint failed — fall back to individual fetches
+        }
+
+        // §FALLBACK: Individual resolved-price fetches (parallel, but N requests)
+        const entries = await Promise.all(productIds.map(async (pid) => {
+          const res = await fetch(`/api/products/${pid}/resolved-price?buyerId=${encodeURIComponent(customer.id)}`)
+          if (!res.ok) return null
+          const data = await res.json()
+          if (data && typeof data.price === 'number' && data.source !== 'default') {
+            return [pid, {
+              price: data.price,
+              source: data.source,
+              salePrice: data.customPrices?.salePrice ?? null,
+              mrp: data.customPrices?.mrp ?? null,
+              wholesalePrice: data.customPrices?.wholesalePrice ?? null,
+              // §RETAIL-ISOLATION: Extract retail-specific prices
+              retailSalePrice: data.customPrices?.retailSalePrice ?? null,
+              retailMrp: data.customPrices?.retailMrp ?? null,
+            }] as [string, CustomPriceEntry]
+          }
+          return null
+        }))
+        if (cancelled) return
+        const map: Record<string, CustomPriceEntry> = {}
+        for (const entry of entries) {
+          if (entry) map[entry[0]] = entry[1]
+        }
+        // §CACHE-STORE: Save to cache so switching back is instant
+        setPriceCache((prev) => ({ ...prev, [cacheKey]: map }))
+        setCustomPriceMap(map)
+      } catch {}
+      // §LOADING-DONE: Hide the loading spinner (whether success or error)
+      if (!cancelled) setIsLoadingPrices(false)
+    })()
+    return () => { cancelled = true }
+  }, [customer?.id, products, mode])
+
+  // §2: Price display per mode — STRICT, no mixing
+  // §RETAIL-ISOLATION: Retail (loose/kg/pcs) prices are COMPLETELY SEPARATE
+  // from bulk/full prices. A custom price set for a BAG must NOT bleed into
+  // the retail (kg) tab. If no retail-specific custom price is set, retail
+  // mode falls back to the product's default retailSalePrice — it NEVER
+  // inherits the bulk bag's custom price.
+  //
+  // Mode → custom price field mapping:
+  //   - 'retail' mode    → customRetailSalePrice (no fallback to bulk!)
+  //   - 'wholesale'      → customWholesalePrice (fallback to legacy customPrice)
+  //   - 'full' (bulk)    → customSalePrice (fallback to legacy customPrice)
+  const getPrice = (p: Product): number => {
+    const custom = customPriceMap[p.id]
+    if (custom) {
+      // §RETAIL-ISOLATION: Retail mode uses ONLY the retail-specific custom
+      // price. If it's null, fall through to the product's default retail
+      // price — do NOT use the bulk customSalePrice.
+      if (mode === 'retail') {
+        if (custom.retailSalePrice != null) {
+          return custom.retailSalePrice
+        }
+        // No retail-specific custom price → fall through to default retail price
+        return (p as any).retailSalePrice || 0
+      }
+      // §BULK-MODES: wholesale + full use the bulk custom prices
+      if (mode === 'wholesale' && custom.wholesalePrice != null) {
+        return custom.wholesalePrice
+      }
+      // For full mode, use customSalePrice (fallback to legacy price)
+      if (custom.salePrice != null) {
+        return custom.salePrice
+      }
+      // §LEGACY: If only the legacy customPrice is set (old record), use it
+      return custom.price
+    }
+
+    if (mode === 'retail') return (p as any).retailSalePrice || 0
+    if (mode === 'wholesale') return p.wholesalePrice || p.salePrice
+    return p.salePrice // 'full' mode = bulk price
+  }
+
+  const getPriceUnit = (p: Product): string => {
+    if (mode === 'retail') return (p as any).retailUnit || 'kg'
+    return p.unit
+  }
+
+  // §3: Mode-suffixed cart key — ensures strict isolation between Loose/Sealed/Wholesale.
+  // Same product in Retail mode (abc_loose) is a DIFFERENT cart item from Full mode (abc_sealed).
+  // Changing qty of a Sealed item NEVER mutates the corresponding Loose item.
+  const getCartKey = (productId: string, saleMode: SaleMode): string => {
+    const suffix = saleMode === 'retail' ? 'loose' : saleMode === 'full' ? 'sealed' : 'wholesale'
+    return `${productId}_${suffix}`
+  }
+
+  // §2: Avoid Duplicate Cart Rows — increment quantity if item exists, else append.
+  // Uses cartKey (mode-suffixed) so the same product in different modes is a separate row.
+  // §1 FIX: Grid click always increments by whole integer (1). Fractional inputs
+  // (0.5, 1.5, etc.) are only permitted via manual text input in the qty field.
+  const addToCart = (p: Product) => {
+    const price = Number(getPrice(p)) || 0
+    const unit = getPriceUnit(p)
+    const key = getCartKey(p.id, mode)
+    const existing = cart.find((i) => i.cartKey === key)
+    if (existing) {
+      // Increment by whole integer (1) — NOT 0.5
+      const newQty = Number((existing.quantity + 1).toFixed(3))
+      setCart(cart.map((i) =>
+        i.cartKey === key
+          ? {
+              ...i,
+              quantity: newQty,
+              qtyStr: String(newQty),
+              total: i.manualOverride ? Number(i.total) : newQty * Number(i.price),
+            }
+          : i
+      ))
+    } else {
+      setCart([...cart, {
+        cartKey: key,
+        productId: p.id,
+        name: p.name,
+        unit,
+        price,
+        quantity: 1,
+        qtyStr: '1',
+        total: Number(price),
+        manualOverride: false,
+        gstRate: (p as any).gstRate || 0,
+        mrp: (p as any).mrp || 0,
+        retailMrp: (p as any).retailMrp || 0,
+        itemGstEnabled: false,
+        itemGstRate: 0,
+        itemGstManuallyDisabled: false,
+        itemMode: mode, // §1: lock mode at creation — prevents MRP leakage on re-render
+      }])
+    }
+  }
+
+  const updateQty = (cartKey: string, delta: number) => {
+    setCart(cart
+      .map((i) => {
+        if (i.cartKey !== cartKey) return i
+        // §1: stepper always increments by 1 (whole integer). Fractional via manual input only.
+        const newQty = Math.max(0, Number((i.quantity + delta).toFixed(3)))
+        // Sync qtyStr with the new numeric quantity
+        if (i.manualOverride) return { ...i, quantity: newQty, qtyStr: String(newQty) }
+        return { ...i, quantity: newQty, qtyStr: String(newQty), total: newQty * Number(i.price) }
+      })
+      // §3: only remove if qty is genuinely 0 (not while typing decimals like 0.5)
+      .filter((i) => i.quantity > 0)
+    )
+  }
+
+  // §2: Float/Decimal Quantity Validation Fix — strict float parsing
+  // The qty input is bound to qtyStr (raw string), NOT quantity (number).
+  // This allows the merchant to type '0', '.', '0.', '.5', '0.5', '1.25', '0.250'
+  // without the UI breaking or clearing the entry.
+  // quantity (number) is derived from qtyStr for calculations.
+  const setQty = (cartKey: string, raw: string) => {
+    // Sanitize: allow only digits and a single dot
+    let sanitized = raw.replace(/[^\d.]/g, '')
+    // Allow only one dot
+    const dotIndex = sanitized.indexOf('.')
+    if (dotIndex !== -1) {
+      sanitized = sanitized.substring(0, dotIndex + 1) + sanitized.substring(dotIndex + 1).replace(/\./g, '')
+    }
+    setCart(cart
+      .map((i) => {
+        if (i.cartKey !== cartKey) return i
+        // Parse the sanitized string to a float
+        let qty: number
+        if (sanitized === '' || sanitized === '.') {
+          qty = 0
+        } else {
+          qty = parseFloat(sanitized)
+          if (isNaN(qty)) qty = 0
+        }
+        // Keep qtyStr as the raw sanitized string (preserves '0.', '.5', etc.)
+        // Recalculate total = price × quantity (unless manual override on total)
+        if (i.manualOverride) return { ...i, quantity: qty, qtyStr: sanitized }
+        return { ...i, quantity: qty, qtyStr: sanitized, total: qty * Number(i.price) }
+      })
+      // DO NOT filter here — keep the item even if qty is 0 so the owner
+      // can continue typing (e.g. "0" then ".5"). Removal handled on blur.
+    )
+  }
+
+  // §2: On blur, if quantity is still 0, remove the item
+  const commitQty = (cartKey: string) => {
+    setCart(prev => prev
+      .map((i) => {
+        if (i.cartKey !== cartKey) return i
+        // Normalize qtyStr on commit — trim leading/trailing dots
+        let normalized = i.qtyStr
+        if (normalized.endsWith('.')) normalized = normalized.slice(0, -1)
+        if (normalized === '' || normalized === '.') normalized = '0'
+        const qty = parseFloat(normalized) || 0
+        return { ...i, quantity: qty, qtyStr: normalized }
+      })
+      .filter((i) => !(i.cartKey === cartKey && i.quantity <= 0))
+    )
+  }
+
+  // §1: Editable Per-Unit Price — update the base rate and re-run calculation
+  // New Per-KG Rate × Quantity = Total Item Price
+  const setUnitPrice = (cartKey: string, newPrice: number) => {
+    setCart(cart.map((i) => {
+      if (i.cartKey !== cartKey) return i
+      // Always recalculate total from new price × quantity (clears manual override)
+      return { ...i, price: newPrice, total: newPrice * i.quantity, manualOverride: false }
+    }))
+  }
+
+  // §DYNAMIC-PRICING: POS automation. When a customer is selected, query the
+  // resolved-price endpoint for each cart product. If the customer has a
+  // special wholesale price (Specific Buyer > Group > Default), auto-apply it
+  // to cart items that are NOT manually overridden. This re-runs whenever the
+  // customer changes (including clearing → reverts to default).
+  useEffect(() => {
+    if (cart.length === 0) return
+    // Items eligible for re-pricing: have a productId and not manually overridden
+    const eligible = cart.filter((i) => i.productId && !i.manualOverride)
+    if (eligible.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        // Fetch resolved price for each eligible product (batch via individual
+        // resolved-price calls — lightweight and cached by HTTP).
+        const updates: Record<string, { price: number; source: string }> = {}
+        await Promise.all(eligible.map(async (item) => {
+          const url = `/api/products/${item.productId}/resolved-price` +
+            (customer?.id ? `?buyerId=${encodeURIComponent(customer.id)}` : '')
+          const res = await fetch(url)
+          if (!res.ok) return
+          const data = await res.json()
+          if (data && typeof data.price === 'number') {
+            updates[item.cartKey] = { price: data.price, source: data.source }
+          }
+        }))
+        if (cancelled || Object.keys(updates).length === 0) return
+        // §FIX: Use functional setCart(prev => ...) to avoid stale closure.
+        // The old code captured `cart` at effect-run time; if the user added
+        // items while fetches were in-flight, they'd be silently dropped.
+        setCart(prev => prev.map((i) => {
+          const u = updates[i.cartKey]
+          if (!u || u.price === i.price) return i
+          return { ...i, price: u.price, total: Number(u.price) * Number(i.quantity) }
+        }))
+        const appliedCount = Object.values(updates).filter((u) => u.source !== 'default').length
+        if (appliedCount > 0 && customer) {
+          toast.success(`${appliedCount} item${appliedCount > 1 ? 's' : ''} re-priced for ${customer.name}`)
+        }
+      } catch {}
+    })()
+    return () => { cancelled = true }
+  }, [customer?.id])
+
+  // §4: Manual Price Override — editable total field in cart
+  const setManualTotal = (cartKey: string, total: number) => {
+    setCart(cart.map((i) =>
+      i.cartKey === cartKey
+        ? { ...i, total, manualOverride: true }
+        : i
+    ))
+  }
+
+  // Reset a manually overridden item back to auto-calc
+  const resetManualTotal = (cartKey: string) => {
+    setCart(cart.map((i) =>
+      i.cartKey === cartKey
+        ? { ...i, total: Number(i.quantity) * Number(i.price), manualOverride: false }
+        : i
+    ))
+  }
+
+  const removeFromCart = (cartKey: string) => {
+    setCart(cart.filter((i) => i.cartKey !== cartKey))
+  }
+
+  // §2: Per-item GST toggle + custom rate
+  // When user toggles OFF, set itemGstManuallyDisabled = true to override Global Master GST
+  const toggleItemGst = (cartKey: string) => {
+    setCart(cart.map((i) => {
+      if (i.cartKey !== cartKey) return i
+      const newEnabled = !i.itemGstEnabled
+      return {
+        ...i,
+        itemGstEnabled: newEnabled,
+        itemGstRate: newEnabled ? (i.gstRate || 5) : 0,
+        // §2: If user explicitly turns OFF, mark as manually disabled — overrides Global Master
+        itemGstManuallyDisabled: !newEnabled && i.itemGstEnabled ? true : (newEnabled ? false : i.itemGstManuallyDisabled),
+      }
+    }))
+  }
+  const setItemGstRate = (cartKey: string, rate: number) => {
+    setCart(cart.map((i) =>
+      i.cartKey === cartKey ? { ...i, itemGstRate: rate } : i
+    ))
+  }
+
+  // §3: Calculation Pipeline — ALL wrapped in useMemo for performance
+  // Prevents expensive re-calculations on every keystroke/render cycle
+  // §DECIMAL-SAFETY: Use Number() to coerce all cart values to numbers.
+  // Prisma Decimal fields can arrive as strings from the API — without
+  // Number(), reduce() would do string concatenation (0 + "55" = "055").
+  const subtotal = useMemo(() => cart.reduce((s, i) => s + Number(i.total || 0), 0), [cart])
+
+  const globalGstNum = Number(globalGstRate) || 0
+  const gstAmount = useMemo(() => {
+    if (globalGstNum > 0) {
+      return cart.reduce((s, i) => {
+        if (i.itemGstManuallyDisabled) return s
+        if (i.itemGstEnabled) return s + (Number(i.total || 0) * Number(i.itemGstRate || 0)) / 100
+        if (!masterGstOn) return s
+        return s + (Number(i.total || 0) * globalGstNum) / 100
+      }, 0)
+    }
+    return cart.reduce((s, i) => {
+      if (i.itemGstManuallyDisabled) return s
+      if (i.itemGstEnabled) return s + (Number(i.total || 0) * Number(i.itemGstRate || 0)) / 100
+      if (!masterGstOn) return s
+      return s + (Number(i.total || 0) * Number(i.gstRate || 0)) / 100
+    }, 0)
+  }, [cart, globalGstNum, masterGstOn])
+
+  const subtotalWithGst = useMemo(() => subtotal + gstAmount, [subtotal, gstAmount])
+
+  const discountNum = Number(discountValue) || 0
+  const discountAmount = useMemo(() => discountMode === 'percent'
+    ? (subtotalWithGst * discountNum) / 100
+    : Math.min(discountNum, subtotalWithGst), [subtotalWithGst, discountNum, discountMode])
+
+  const grandTotal = useMemo(() => Math.max(0, subtotalWithGst - discountAmount), [subtotalWithGst, discountAmount])
+
+  const preDeliveryTotal = useMemo(() => Math.round(grandTotal), [grandTotal])
+  const roundOffAmount = useMemo(() => preDeliveryTotal - grandTotal, [preDeliveryTotal, grandTotal])
+
+  const deliveryChargeNum = Number(deliveryCharge) || 0
+  const roundedTotal = useMemo(() => preDeliveryTotal + deliveryChargeNum, [preDeliveryTotal, deliveryChargeNum])
+
+  const autoDiscountTotal = useMemo(() => cart.reduce((s, i) => {
+    const effectiveMrp = Number(i.itemMode === 'retail' ? i.retailMrp : i.mrp) || 0
+    const itemPrice = Number(i.price) || 0
+    if (effectiveMrp > 0 && effectiveMrp > itemPrice) return s + (effectiveMrp - itemPrice) * Number(i.quantity || 0)
+    return s
+  }, 0), [cart])
+
+  const splitCashNum = Number(splitCash) || 0
+  const splitUpiNum = Number(splitUpi) || 0
+  const upiQrAmount = splitUpiNum > 0 ? splitUpiNum : 0
+  const totalSplitPaid = splitCashNum + splitUpiNum
+  const ledgerDue = useMemo(() => Math.max(0, roundedTotal - totalSplitPaid), [roundedTotal, totalSplitPaid])
+  const overpaid = useMemo(() => Math.max(0, totalSplitPaid - roundedTotal), [totalSplitPaid, roundedTotal])
+  const hasSplitPayment = splitCashNum > 0 || splitUpiNum > 0
+  const needsCredit = hasSplitPayment && ledgerDue > 0
+  const totalPaidForExchange = totalSplitPaid
+  const exchangeDifference = useMemo(() => totalPaidForExchange - roundedTotal, [totalPaidForExchange, roundedTotal])
+  const isShortAmount = totalPaidForExchange < roundedTotal && totalPaidForExchange > 0
+  const isChangeDue = totalPaidForExchange > roundedTotal
+
+  // §3: State-driven auto-hide/show for blue customer block.
+  // MUST be AFTER ledgerDue and fulfillmentStatus are defined (TDZ fix).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (customer) {
+        setShowInlineCustomer(false)
+        return
+      }
+      if (fulfillmentStatus === 'pickup') {
+        setShowInlineCustomer(true)
+        return
+      }
+      if (ledgerDue <= 0 && fulfillmentStatus === 'handed') {
+        setShowInlineCustomer(false)
+        return
+      }
+    }, 0)
+    return () => clearTimeout(t)
+  }, [ledgerDue, fulfillmentStatus, customer])
+
+    // §3: Dynamic UPI Intent QR Code Generation
+  // When PAYMENT MODE 'UPI' is clicked, generate a QR code embedding the UPI amount
+  // into the UPI deep-link payload: upi://pay?pa=VPA&pn=MERCHANT&am=AMOUNT&cu=INR
+  // §2: If split UPI amount is set, QR requests THAT amount. Otherwise full grand total.
+  const upiId = business?.upiId || ''
+  const merchantName = business?.name || 'Merchant'
+  const [upiQrDataUrl, setUpiQrDataUrl] = useState<string>('')
+  useEffect(() => {
+    let cancelled = false
+    if (paymentMode !== 'upi' || upiQrAmount <= 0 || !upiId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setUpiQrDataUrl('')
+      return
+    }
+    const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchantName)}&am=${upiQrAmount.toFixed(2)}&cu=INR`
+    QRCode.toDataURL(upiUrl, { width: 240, margin: 1, color: { dark: '#0a0a0a', light: '#ffffff' } })
+      .then((url) => { if (!cancelled) setUpiQrDataUrl(url) })
+      .catch(() => { if (!cancelled) setUpiQrDataUrl('') })
+    return () => { cancelled = true }
+  }, [paymentMode, upiQrAmount, upiId, merchantName])
+
+  // ---- §3: Multi-Cart Hold Protocol ----
+  const addNewCart = () => {
+    const nextId = Math.max(0, ...carts.map((c) => c.id)) + 1
+    // §STATE-LEAK-FIX: new cart gets its OWN fresh billing fields (empty).
+    // No longer inherits/leaks from the previous cart's payment inputs.
+    const newCart: HeldCart = {
+      id: nextId,
+      label: t('sale.cart.person').replace('{n}', String(nextId)),
+      items: [],
+      customer: null,
+      paymentMode: 'cash',
+      splitCash: '',
+      splitUpi: '',
+      splitChequeNo: '',
+      discountMode: 'flat',
+      discountValue: '',
+      deliveryCharge: '',
+      fulfillmentStatus: 'handed',
+    }
+    setStoreCarts([...carts, newCart])
+    setStoreCartId(nextId)
+    // §STATE-LEAK-FIX: removed setDiscountValue('')/setDeliveryCharge('') —
+    // billing is now per-cart; new cart already starts empty. Clearing here
+    // would have wiped the values of the cart we just switched FROM (bug).
+    toast.success(t('sale.toast.newCart').replace('{label}', newCart.label), {
+      description: t('sale.toast.prevHeld'),
+    })
+  }
+
+  const switchCart = (id: number) => {
+    if (id === activeCartId) return
+    setStoreCartId(id)
+    // §STATE-LEAK-FIX: removed setDiscountValue('')/setDeliveryCharge('') —
+    // billing is now per-cart; switching to a cart shows THAT cart's own
+    // preserved payment inputs. The mirror subscription in the store keeps
+    // the top-level selectors in sync automatically.
+    toast(t('sale.cart.switched'), { description: carts.find((c) => c.id === id)?.label })
+  }
+
+  // §1: Multi-Cart Tab Closure — prompt to Wipe or Send to Held Queue
+  const requestCartClose = (id: number) => {
+    const target = carts.find((c) => c.id === id)
+    if (!target) return
+    if (target.items.length === 0) {
+      // Empty cart — just delete
+      doRemoveCart(id)
+      return
+    }
+    setClosePromptCartId(id)
+  }
+
+  const doRemoveCart = (id: number) => {
+    if (carts.length <= 1) {
+      toast(t('sale.cart.minOne'))
+      return
+    }
+    const newCarts = carts.filter((c) => c.id !== id)
+    setStoreCarts(newCarts)
+    if (activeCartId === id) setStoreCartId(newCarts[0].id)
+    setClosePromptCartId(null)
+  }
+
+  // Keep removeCart as an alias for backward compat (used by old remove button)
+  const removeCart = doRemoveCart
+
+  // §1: Wipe — permanently delete the cart and its items
+  const wipeCart = (id: number) => {
+    doRemoveCart(id)
+    toast.success(t('sale.cart.deleted'))
+  }
+
+  // §1: Send to Held Queue — remove from active viewport but keep recoverable
+  const sendToHeldQueue = (id: number) => {
+    const target = carts.find((c) => c.id === id)
+    if (!target) return
+    setHeldQueue([...heldQueue, target])
+    doRemoveCart(id)
+    toast.success(t('sale.cart.holdSent').replace('{name}', target.customer?.name || target.label), {
+      description: t('sale.cart.holdSentDesc'),
+    })
+  }
+
+  // §1: Restore from Held Queue back to active
+  const restoreFromHeldQueue = (id: number) => {
+    const target = heldQueue.find((c) => c.id === id)
+    if (!target) return
+    setStoreCarts([...carts, target])
+    setHeldQueue(heldQueue.filter((c) => c.id !== id))
+    setStoreCartId(id)
+    setShowHeldQueue(false)
+    toast.success(t('sale.cart.restored').replace('{name}', target.customer?.name || target.label))
+  }
+
+  const deleteFromHeldQueue = (id: number) => {
+    setHeldQueue(heldQueue.filter((c) => c.id !== id))
+    toast.success(t('sale.cart.holdDeleted'))
+  }
+
+  // §2: Wholesale mode is eye-locked — PIN gate required
+  const handleModeSwitch = (newMode: SaleMode) => {
+    if (newMode === 'wholesale') {
+      if (wholesaleUnlocked) {
+        setMode('wholesale')
+        return
+      }
+      triggerGate(
+        'inventory_price',
+        t('sale.wholesale.gate'),
+        () => {
+          setWholesaleUnlocked(true)
+          setMode('wholesale')
+          toast.success(t('sale.wholesale.unlocked'), { description: t('sale.wholesale.unlockedDesc') })
+        },
+        () => {
+          toast(t('sale.wholesale.locked'), { description: t('sale.wholesale.lockedDesc') })
+        }
+      )
+      return
+    }
+    if (mode === 'wholesale') setWholesaleUnlocked(false)
+    setMode(newMode)
+  }
+
+  // §UX-REFINEMENT: Strict mutual exclusivity + force re-animation helpers.
+  // BLUE box (Add Customer) and RED box (Warning) can NEVER coexist.
+  // Each trigger clears the opposite flag AND bumps a key. The key bump is
+  // watched by the replay effects below which imperatively .set()+.start()
+  // the animation controls — GUARANTEED replay on every tap.
+  const triggerBlueCustomerBox = useCallback(() => {
+    setShowCreditGate(false)        // strict exclusivity: kill red
+    setShowInlineCustomer(true)     // show blue
+    setCustomerBlockKey((k) => k + 1) // signal replay effect
+  }, [])
+
+  const triggerRedWarningBox = useCallback(() => {
+    setShowInlineCustomer(false)    // strict exclusivity: kill blue
+    setShowCreditGate(true)         // show red
+    setCreditGateKey((k) => k + 1)  // signal replay effect
+  }, [])
+
+  // §UX-REFINEMENT: Imperative animation replay. Runs AFTER render so the
+  // motion.div is mounted. .set() snaps to initial values, .start() animates
+  // to final values — this is the ONLY reliable way to replay an entrance
+  // animation on an already-mounted component (key-based remount does NOT
+  // replay `initial` on React 19 + framer-motion 12).
+  useEffect(() => {
+    if (customerBlockKey === 0) return // skip initial mount
+    if (!showInlineCustomer || showCreditGate) return // box not visible
+    let cancelled = false
+    blueBoxControls.set({ opacity: 0, y: 18, scale: 0.94 })
+    // Small delay so the .set() is committed before .start()
+    const t = setTimeout(() => {
+      if (!cancelled) {
+        blueBoxControls.start({
+          opacity: 1, y: 0, scale: 1,
+          transition: { type: 'spring', stiffness: 320, damping: 18 },
+        })
+      }
+    }, 16)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [customerBlockKey, showInlineCustomer, showCreditGate, blueBoxControls])
+
+  useEffect(() => {
+    if (creditGateKey === 0) return // skip initial mount
+    if (!showCreditGate) return // box not visible
+    let cancelled = false
+    redBoxControls.set({ opacity: 0, y: 20, scale: 0.93, x: 0 })
+    const t = setTimeout(() => {
+      if (!cancelled) {
+        // Entrance spring
+        redBoxControls.start({
+          opacity: 1, y: 0, scale: 1,
+          transition: { type: 'spring', stiffness: 320, damping: 16 },
+        }).then(() => {
+          if (!cancelled) {
+            // Shake warning after entrance
+            redBoxControls.start({
+              x: [0, -8, 8, -6, 6, 0],
+              transition: { duration: 0.45, ease: 'easeInOut' },
+            })
+          }
+        })
+      }
+    }, 16)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [creditGateKey, showCreditGate, redBoxControls])
+
+  const handleGenerateInvoice = async () => {
+    if (cart.length === 0) {
+      toast.error(t('sale.cart.empty'))
+      return
+    }
+    // §2: Hard-stop — block if Ledger Due > 0 AND Customer == null
+    if (ledgerDue > 0 && !customer) {
+      // §UX-REFINEMENT: Trigger animated RED warning (re-animates every failure)
+      triggerRedWarningBox()
+      toast.error(t('sale.credit.mandatory'), {
+        description: t('sale.credit.mandatoryDesc').replace('{amount}', ledgerDue.toFixed(2)),
+      })
+      return
+    }
+    setShowCreditGate(false)
+    setConfirming(true)
+    try {
+      // §1: Split payment — amountPaid is the sum of all split modes.
+      // If no split, fall back to full grand total.
+      const amountPaid = hasSplitPayment ? totalSplitPaid : grandTotal
+      // §P16-STEP3.8: Generate idempotency key for this sale operation.
+      // This prevents duplicate invoice creation on retry/double-click.
+      const saleOperationId = crypto.randomUUID()
+      // §P16-STEP3.8: Send ALL accounting to invoice API in ONE atomic request.
+      // The server creates cash credit + credit debit INSIDE its db.$transaction.
+      // SalePad no longer makes separate /api/transactions calls.
+      const invoice = await apiPost('/api/invoices', {
+        partyId: customer?.id,
+        items: cart.map((i) => ({
+          productId: i.productId,
+          name: i.name,
+          quantity: i.quantity,
+          unitPrice: Number(i.price) || 0,
+          discount: 0,
+          gstRate: 0,
+          total: Number(i.total) || 0,
+        })),
+        discountMode,
+        discountValue: discountNum,
+        isGst: false,
+        paymentMode,
+        type: 'retail',
+        amountPaid,
+        deliveryStatus: fulfillmentStatus,
+        deliveryCharge: deliveryChargeNum,
+        // §P16-STEP3.8: Idempotency + atomic transaction creation
+        saleOperationId,
+        salePadMode: true,
+      })
+      // Server has created ALL accounting effects atomically:
+      // - Invoice + InvoiceItems + stock + party balance + sale side-effect
+      // - Cash credit (type=credit, amount=amountPaid)
+      // - Credit debit (type=debit, amount=amountDue)
+      // No separate /api/transactions calls needed.
+      const serverAmountDue = Number(invoice.amountDue) || 0
+      const serverAmountPaid = Number(invoice.amountPaid) || 0
+      if (serverAmountDue > 0) {
+        toast.success(t('sale.credit.addedToast').replace('{amount}', serverAmountDue.toFixed(2)))
+      } else {
+        toast.success(t('sale.toast.invoiceCreated'))
+      }
+      // Sound Box: announce payment received
+      soundBoxSpeak({ amount: serverAmountPaid, customerName: customer?.name })
+      triggerRefresh()
+      // Clear active cart + split payment fields
+      setCart([])
+      setCustomer(null)
+      setSplitCash('')
+      setSplitUpi('')
+      setSplitCredit('')
+      setSplitChequeNo('')
+      setDiscountValue(''); setDeliveryCharge('')
+      setConfirming(false)
+      setSelectedInvoiceId(invoice.id)
+      setActiveView('billing')
+    } catch (e) {
+      toast.error(t('common.failed') + ': ' + String(e))
+      setConfirming(false)
+    }
+  }
+
+  const handleDone = async () => {
+    if (cart.length === 0) {
+      toast.error(t('sale.cart.empty'))
+      return
+    }
+    // §2: Hard-stop — block if Ledger Due > 0 OR Pick Up Later, AND Customer == null
+    if ((ledgerDue > 0 || fulfillmentStatus === 'pickup') && !customer) {
+      // §UX-REFINEMENT: Trigger animated RED warning (re-animates every failure)
+      triggerRedWarningBox()
+      toast.error(t('sale.credit.mandatory'), {
+        description: t('sale.credit.mandatoryDesc').replace('{amount}', ledgerDue.toFixed(2)),
+      })
+      return
+    }
+    setShowCreditGate(false)
+    setConfirming(true)
+    try {
+      // §1: Split payment — amountPaid is sum of all split modes (or grand total if no split)
+      const amountPaid = hasSplitPayment ? totalSplitPaid : grandTotal
+      // §P16-STEP3.8: Generate idempotency key + send ALL accounting in ONE atomic request.
+      const saleOperationId = crypto.randomUUID()
+      const invoice = await apiPost('/api/invoices', {
+        partyId: customer?.id,
+        items: cart.map((i) => ({
+          productId: i.productId,
+          name: i.name,
+          quantity: i.quantity,
+          unitPrice: Number(i.price) || 0,
+          discount: 0,
+          gstRate: 0,
+          total: Number(i.total) || 0,
+        })),
+        discountMode,
+        discountValue: discountNum,
+        isGst: false,
+        paymentMode,
+        type: 'retail',
+        amountPaid,
+        deliveryCharge: deliveryChargeNum,
+        // §P16-STEP3.8: Idempotency + atomic transaction creation
+        saleOperationId,
+        salePadMode: true,
+        salePadCashDescription: customer ? `Sale (${mode}) — split payment` : undefined,
+        salePadWalkInDescription: `Walk-in sale (${mode}) — split payment`,
+        salePadCreditDescription: `Ledger due (split payment)`,
+      })
+      // Server has created ALL accounting effects atomically inside db.$transaction.
+      const serverAmountPaid = Number(invoice.amountPaid) || 0
+      const serverAmountDue = Number(invoice.amountDue) || 0
+      if (serverAmountDue > 0) {
+        toast.success(t('sale.credit.doneToast').replace('{amount}', serverAmountDue.toFixed(2)))
+      } else {
+        toast.success(t('sale.toast.doneStock'))
+      }
+      // Sound Box: announce payment received
+      soundBoxSpeak({ amount: amountPaid, customerName: customer?.name })
+      triggerRefresh()
+      setCart([])
+      setCustomer(null)
+      setSplitCash('')
+      setSplitUpi('')
+      setSplitCredit('')
+      setSplitChequeNo('')
+      setDiscountValue(''); setDeliveryCharge('')
+      setConfirming(false)
+    } catch (e) {
+      toast.error(t('common.failed') + ': ' + String(e))
+      setConfirming(false)
+    }
+  }
+
+  const partyItems = (parties || []).map((p) => ({
+    id: p.id,
+    title: p.name,
+    subtitle: p.phone || 'No phone',
+  }))
+
+  const modeMeta = {
+    retail: { label: t('sale.mode.retail'), sub: 'Retail · per kg/pcs', icon: Store, color: 'emerald' },
+    full: { label: t('sale.mode.full'), sub: 'Full · per bag/box', icon: Boxes, color: 'teal' },
+    wholesale: { label: t('sale.mode.wholesale'), sub: 'Wholesale · bulk rate', icon: Layers, color: 'amber' },
+  } as const
+
+  return (
+    <div className="space-y-4 pb-4" style={{ overflowAnchor: 'none' }}>
+      {/* §1: Back button → goes to Billing page (not dashboard) */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => useAppStore.getState().setActiveView('billing')}
+          className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center shrink-0"
+          aria-label="Back to Billing"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <h2 className="text-base font-semibold flex-1">Quick Sale</h2>
+        {/* §SECRET-COST-REVEAL: Eye toggle moved to a floating FAB (below)
+            so it stays accessible when scrolling through the product grid. */}
+      </div>
+
+      {/* §SECRET-COST-REVEAL: The cost display bar has been MOVED to a fixed
+          floating tooltip that appears ABOVE the Eye FAB (see bottom of component).
+          Previously it was rendered inline here at the top of the page, which
+          meant it was out of view when the user scrolled down. Now it's
+          position:fixed so it's always visible regardless of scroll depth. */}
+
+      {/* §1: Customer Input Bar — pinned to absolute TOP of Quick Sale */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setShowCustPicker(true)}
+          className="flex-1 h-11 px-3 rounded-xl border border-dashed border-border bg-card flex items-center gap-2 text-sm hover:bg-muted transition-colors"
+        >
+          {customer ? (
+            <>
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span className="font-medium text-foreground truncate">{customer.name}</span>
+              {customer.phone && <span className="text-[11px] text-muted-foreground">· {customer.phone}</span>}
+            </>
+          ) : (
+            <>
+              <UserPlus className="w-4 h-4 text-muted-foreground" />
+              <span className="text-muted-foreground">{t('sale.addCustomerOptional')}</span>
+            </>
+          )}
+        </button>
+        <button
+          onClick={() => setShowPartyForm(true)}
+          className="w-11 h-11 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:bg-primary/90 transition-colors"
+          aria-label={t('sale.newCustomer')}
+          title={t('sale.newCustomerReg')}
+        >
+          <Plus className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* §3: Multi-Cart Hold Protocol — পার্সন ১, ২, ৩, + */}
+      <div className="p-3 rounded-2xl bg-gradient-to-r from-teal-500/5 to-emerald-500/5 border border-teal-500/20">
+        <div className="flex items-center gap-2 mb-2">
+          <Users className="w-4 h-4 text-teal-500" />
+          <p className="text-xs font-semibold text-teal-700 dark:text-teal-300">{t('sale.cartHold')}</p>
+        </div>
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+          {carts.map((c, cartIndex) => {
+            const active = c.id === activeCartId
+            const itemCount = c.items.length
+            const cartTotal = c.items.reduce((s, i) => s + Number(i.total || 0), 0)
+            // §1: Dynamic Tab Name — use index+1 for position-based labeling.
+            // If a customer is selected, show their name. Otherwise 'পার্সন N' (N = index+1).
+            const tabLabel = c.customer?.name || t('sale.cart.person').replace('{n}', String(cartIndex + 1))
+            return (
+              <div
+                key={c.id}
+                className={`shrink-0 relative px-4 py-2.5 rounded-xl border-2 transition-all min-w-[100px] cursor-pointer ${
+                  active
+                    ? 'border-teal-500 bg-teal-500 text-white shadow-md'
+                    : 'border-border bg-card text-muted-foreground'
+                }`}
+                onClick={() => switchCart(c.id)}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold truncate max-w-[90px]">{tabLabel}</span>
+                  {itemCount > 0 && (
+                    <span className={`text-[10px] px-1.5 rounded-full shrink-0 ${active ? 'bg-white/25' : 'bg-muted'}`}>
+                      {itemCount}
+                    </span>
+                  )}
+                </div>
+                {itemCount > 0 && (
+                  <p className={`text-[10px] tabular mt-0.5 ${active ? 'text-white/80' : 'text-muted-foreground'}`}>
+                    {formatCurrency(cartTotal, currency)}
+                  </p>
+                )}
+                {/* §1: X close button on EVERY cart (active + non-active) when >1 cart */}
+                {carts.length > 1 && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); requestCartClose(c.id) }}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors shadow-sm"
+                    aria-label={t('sale.cart.closeLabel').replace('{label}', tabLabel)}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+                {active && itemCount > 0 && (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                )}
+              </div>
+            )
+          })}
+          {/* + button to add new cart */}
+          <button
+            onClick={addNewCart}
+            className="shrink-0 w-11 h-11 rounded-xl border-2 border-dashed border-teal-400/50 flex items-center justify-center text-teal-500 hover:bg-teal-500/10 transition-colors"
+            aria-label="Add new cart"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
+          {/* §1: Held Queue button — shows count of held carts */}
+          {heldQueue.length > 0 && (
+            <button
+              onClick={() => setShowHeldQueue(true)}
+              className="shrink-0 px-3 h-11 rounded-xl border-2 border-amber-400/50 bg-amber-500/10 flex items-center gap-1.5 text-amber-600 hover:bg-amber-500/20 transition-colors"
+              aria-label="Held queue"
+            >
+              <Layers className="w-4 h-4" />
+              <span className="text-[10px] font-bold">{heldQueue.length}</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* §2: Mode selector — default shows only খুচরো + আস্ত. পাইকারি is cloaked,
+          revealed only via explicit left-swipe from the right edge. */}
+      <div
+        className="relative overflow-hidden -mx-1 px-1"
+        onTouchStart={(e) => {
+          const t = e.touches[0]
+          // §2: only trigger reveal if swipe starts near right edge (last 20% of screen)
+          if (t.clientX > window.innerWidth * 0.8) {
+            swipeStartX.current = t.clientX
+            swipeStartY.current = t.clientY
+          }
+        }}
+        onTouchMove={(e) => {
+          if (swipeStartX.current === null) return
+          const t = e.touches[0]
+          const dx = swipeStartX.current - t.clientX
+          const dy = Math.abs(swipeStartY.current! - t.clientY)
+          // Left-swipe: dx > 60 and horizontal-dominant
+          if (dx > 60 && dy < 40 && !wholesaleRevealed) {
+            setWholesaleRevealed(true)
+          }
+        }}
+        onTouchEnd={() => {
+          swipeStartX.current = null
+          swipeStartY.current = null
+        }}
+        onMouseDown={(e) => {
+          // Desktop: right-edge click-drag
+          if (e.clientX > window.innerWidth * 0.8) {
+            swipeStartX.current = e.clientX
+            swipeStartY.current = e.clientY
+          }
+        }}
+        onMouseMove={(e) => {
+          if (swipeStartX.current === null) return
+          const dx = swipeStartX.current - e.clientX
+          const dy = Math.abs(swipeStartY.current! - e.clientY)
+          if (dx > 60 && dy < 40 && !wholesaleRevealed) {
+            setWholesaleRevealed(true)
+          }
+        }}
+        onMouseUp={() => {
+          swipeStartX.current = null
+          swipeStartY.current = null
+        }}
+        onMouseLeave={() => {
+          swipeStartX.current = null
+          swipeStartY.current = null
+        }}
+      >
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+          {/* Default visible cards: retail + full */}
+          {(['retail', 'full'] as const).map((m) => {
+            const meta = modeMeta[m]
+            const Icon = meta.icon
+            const active = mode === m
+            return (
+              <button
+                key={m}
+                onClick={() => handleModeSwitch(m)}
+                className={`shrink-0 px-4 py-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-1 min-w-[120px] min-h-[80px] justify-center relative ${
+                  active
+                    ? meta.color === 'emerald' ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
+                    : 'border-teal-500 bg-teal-50 dark:bg-teal-950/30'
+                    : 'border-border bg-muted/30'
+                }`}
+              >
+                <Icon className={`w-5 h-5 ${
+                  active
+                    ? meta.color === 'emerald' ? 'text-emerald-600' : 'text-teal-600'
+                    : 'text-muted-foreground'
+                }`} />
+                <span className={`text-xs font-bold ${
+                  active
+                    ? meta.color === 'emerald' ? 'text-emerald-600' : 'text-teal-600'
+                    : 'text-muted-foreground'
+                }`}>{meta.label}</span>
+                <span className="text-[9px] text-muted-foreground">{meta.sub}</span>
+              </button>
+            )
+          })}
+
+          {/* §2: Cloaked wholesale card — animates in only after left-swipe reveal */}
+          <AnimatePresence>
+            {wholesaleRevealed && (
+              <motion.button
+                initial={{ width: 0, opacity: 0, marginRight: 0 }}
+                animate={{ width: 'auto', opacity: 1, marginRight: 8 }}
+                exit={{ width: 0, opacity: 0, marginRight: 0 }}
+                transition={{ duration: 0.3 }}
+                onClick={() => handleModeSwitch('wholesale')}
+                className={`shrink-0 px-4 py-3 rounded-2xl border-2 transition-all flex flex-col items-center gap-1 min-w-[120px] min-h-[80px] justify-center relative overflow-hidden ${
+                  mode === 'wholesale'
+                    ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30'
+                    : 'border-amber-400/40 bg-amber-500/5'
+                }`}
+              >
+                {(() => {
+                  const m = 'wholesale' as const
+                  const meta = modeMeta[m]
+                  const Icon = meta.icon
+                  const active = mode === m
+                  const locked = !wholesaleUnlocked
+                  return (
+                    <>
+                      <Icon className={`w-5 h-5 ${active ? 'text-amber-600' : 'text-amber-500/70'}`} />
+                      <span className={`text-xs font-bold ${active ? 'text-amber-600' : 'text-amber-600/80'}`}>{meta.label}</span>
+                      <span className="text-[9px] text-muted-foreground">{meta.sub}</span>
+                      {locked && (
+                        <span className="absolute top-1.5 right-1.5">
+                          <Lock className="w-3 h-3 text-amber-500" />
+                        </span>
+                      )}
+                      {wholesaleUnlocked && !active && (
+                        <ShieldCheck className="absolute top-1.5 right-1.5 w-3 h-3 text-emerald-500" />
+                      )}
+                    </>
+                  )
+                })()}
+              </motion.button>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* §2: Swipe hint — visible when wholesale is NOT yet revealed */}
+        {!wholesaleRevealed && (
+          <div className="absolute right-0 top-0 bottom-0 flex items-center pointer-events-none">
+            <motion.div
+              animate={{ x: [0, -6, 0] }}
+              transition={{ repeat: Infinity, duration: 1.5 }}
+              className="flex items-center gap-1 px-2 py-1 rounded-l-xl bg-amber-500/20 text-amber-600 text-[9px] font-medium"
+            >
+              <ChevronLeft className="w-3 h-3" />
+              <span>{t('sale.cart.swipe')}</span>
+            </motion.div>
+          </div>
+        )}
+
+        {/* §2: Re-hide button when wholesale is revealed */}
+        {wholesaleRevealed && (
+          <button
+            onClick={() => {
+              setWholesaleRevealed(false)
+              if (mode === 'wholesale') {
+                setMode('retail')
+                setWholesaleUnlocked(false)
+              }
+            }}
+            className="absolute right-0 top-0 bottom-0 px-2 flex items-center text-amber-600 hover:bg-amber-500/10"
+            aria-label="Hide wholesale"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Category slider */}
+      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+        {categories.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setActiveCategory(cat)}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all min-h-[36px] ${
+              activeCategory === cat ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+            }`}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+
+      {/* §2: Sub-category slider — dynamically loaded based on selected main category */}
+      {subCategories.length > 1 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
+          {subCategories.map((subCat) => (
+            <button
+              key={subCat}
+              onClick={() => setActiveSubCategorySafe(subCat)}
+              className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all min-h-[30px] ${
+                effectiveSubCategory === subCat ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+              }`}
+            >
+              {subCat}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Product grid */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+          {mode === 'retail' ? t('sale.grid.retail') : mode === 'full' ? t('sale.grid.full') : t('sale.grid.wholesale')}
+        </p>
+        {/* §LOADING-SPINNER: Subtle inline loading indicator shown while fetching
+            custom prices for a NEW customer (not cached). Does NOT freeze the UI —
+            the product grid remains interactive with default prices. */}
+        <AnimatePresence>
+          {isLoadingPrices && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="flex items-center gap-2 px-3 py-1.5 mb-2 rounded-lg bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-900/50 overflow-hidden"
+            >
+              <Loader2 className="w-3.5 h-3.5 text-teal-600 animate-spin shrink-0" />
+              <p className="text-[10px] text-teal-600 dark:text-teal-400 font-medium">
+                Loading custom prices for {customer?.name || 'customer'}…
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        {filteredProducts.length === 0 ? (
+          <EmptyState
+            icon={Package}
+            title={mode === 'retail' ? t('sale.empty.retail') : mode === 'wholesale' ? t('sale.empty.wholesale') : t('sale.empty.none')}
+            description={
+              mode === 'retail' ? t('sale.empty.retailHint')
+              : mode === 'wholesale' ? t('sale.empty.wholesaleHint')
+              : undefined
+            }
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            {filteredProducts.map((p) => {
+              const price = Number(getPrice(p)) || 0
+              const unit = getPriceUnit(p)
+              const inCart = cart.find((i) => i.cartKey === getCartKey(p.id, mode))
+              return (
+                <motion.button
+                  key={p.id}
+                  whileTap={{ scale: 0.96 }}
+                  onClick={() => addToCart(p)}
+                  // §SECRET-COST-REVEAL: Long-press gesture to reveal cost in the HEADER bar.
+                  // The product card itself stays 100% unchanged — customer can't see the cost.
+                  // Only works when isCostRevealEnabled is true (master toggle).
+                  onPointerDown={() => {
+                    if (!isCostRevealEnabled) return
+                    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
+                    longPressTimerRef.current = setTimeout(() => {
+                      setRevealedCostProductId(p.id)
+                    }, 400) // 400ms = long press threshold
+                  }}
+                  onPointerUp={() => {
+                    if (longPressTimerRef.current) {
+                      clearTimeout(longPressTimerRef.current)
+                      longPressTimerRef.current = null
+                    }
+                    setRevealedCostProductId(null)
+                  }}
+                  onPointerLeave={() => {
+                    if (longPressTimerRef.current) {
+                      clearTimeout(longPressTimerRef.current)
+                      longPressTimerRef.current = null
+                    }
+                    setRevealedCostProductId(null)
+                  }}
+                  className={`relative p-3 rounded-2xl border text-left transition-all ${
+                    inCart ? 'border-primary bg-primary/5' : 'border-border bg-card hover:border-primary/30'
+                  }`}
+                >
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mb-2">
+                    <Package className="w-4 h-4 text-amber-600" />
+                  </div>
+                  <p className="text-xs font-medium truncate">{p.name}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {mode === 'retail' && (p as any).looseStock !== undefined
+                      ? `${(p as any).looseStock} ${unit}`
+                      : `${p.stock} ${p.unit}`} {t('sale.cart.inStock')}
+                  </p>
+                  {/* Product card always shows the selling price — cost is shown in the header bar */}
+                  <p className="text-sm font-bold tabular text-primary mt-0.5">
+                    {formatCurrency(price, currency)}
+                    <span className="text-[9px] text-muted-foreground font-normal">/{unit}</span>
+                  </p>
+                  {/* §PRIVACY-FIX: Removed the green "CUSTOM"/"TIER" badge — it caused
+                      visual clutter and the merchant already knows the price is customized
+                      because they explicitly selected that buyer's cart. Cards are now clean. */}
+                  {inCart && (
+                    <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center">
+                      {inCart.quantity}
+                    </span>
+                  )}
+                </motion.button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Cart — only shows active cart's items */}
+      <AnimatePresence>
+        {cart.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="rounded-2xl bg-card border border-border p-4 shadow-lg"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                <ShoppingBag className="w-4 h-4" /> {activeCart.customer?.name || activeCart.label} · {t('sale.cart.label')} ({cart.length})
+              </h3>
+              <button onClick={() => setCart([])} className="text-xs text-red-600 font-medium">{t('sale.cart.clear')}</button>
+            </div>
+            <div className="space-y-2 max-h-64 overflow-y-auto scroll-area">
+              {cart.map((item) => (
+                <CartRow
+                  key={item.cartKey}
+                  item={item}
+                  mode={mode}
+                  masterGstOn={masterGstOn}
+                  currency={currency}
+                  onSetUnitPrice={setUnitPrice}
+                  onSetQty={setQty}
+                  onCommitQty={commitQty}
+                  onUpdateQty={updateQty}
+                  onSetManualTotal={setManualTotal}
+                  onResetManualTotal={resetManualTotal}
+                  onRemoveFromCart={removeFromCart}
+                  onToggleItemGst={toggleItemGst}
+                  onSetItemGstRate={setItemGstRate}
+                />
+              ))}
+            </div>
+
+            {/* §3: Billing Sequence — 5 rows with Left Buttons | Right Values alignment */}
+            <div className="pt-3 mt-2 border-t border-border space-y-2">
+              {/* Row 1: GST Toggle — Left: [No GST]/[Include GST] button, Right: GST amount */}
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => setMasterGstOn(!masterGstOn)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    masterGstOn
+                      ? 'bg-teal-500 text-white'
+                      : 'bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {masterGstOn ? 'Include GST' : 'No GST'}
+                </button>
+                <span className="tabular text-sm font-medium text-teal-600">
+                  {masterGstOn && gstAmount > 0 ? `+${formatCurrency(gstAmount, currency)}` : '₹0.00'}
+                </span>
+              </div>
+
+              {/* Row 2: Total after GST (subtotal + GST) */}
+              <div className="flex justify-between items-center text-sm bg-muted/30 rounded-lg px-3 py-1.5">
+                <span className="text-muted-foreground">{t('sale.bill.totalWithGst')}</span>
+                <span className="tabular font-semibold">{formatCurrency(subtotalWithGst, currency)}</span>
+              </div>
+
+              {/* Row 3: Discount Block — §1: Added label "Additional Discount (ছাড়)" */}
+              <div className="space-y-1">
+                <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">{t('sale.bill.discountLabel')}</label>
+                <div className="flex items-center gap-2">
+                  {/* §2: Segmented toggle — active: solid blue bg + white text, inactive: transparent + grey text */}
+                  <div className="flex items-center gap-0.5 bg-muted/50 p-0.5 rounded-md">
+                    <button
+                      type="button"
+                      onClick={() => setDiscountMode('flat')}
+                      className={`px-3 py-1.5 rounded-md text-[12px] font-bold transition-all ${
+                        discountMode === 'flat' ? 'bg-teal-600 text-white shadow-sm' : 'bg-transparent text-gray-400'
+                      }`}
+                    >
+                      ₹
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDiscountMode('percent')}
+                      className={`px-3 py-1.5 rounded-md text-[12px] font-bold transition-all ${
+                        discountMode === 'percent' ? 'bg-teal-600 text-white shadow-sm' : 'bg-transparent text-gray-400'
+                      }`}
+                    >
+                      %
+                    </button>
+                  </div>
+                  <Input
+                    value={discountValue}
+                    onChange={(e) => setDiscountValue(e.target.value)}
+                    className="h-8 text-sm flex-1"
+                    inputMode="numeric"
+                    placeholder="0"
+                  />
+                  <span className="tabular text-sm font-medium text-amber-600 min-w-[80px] text-right">
+                    −{formatCurrency(discountAmount, currency)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Row 4: Total after Discount */}
+              <div className="flex justify-between items-center text-sm bg-muted/30 rounded-lg px-3 py-1.5">
+                <span className="text-muted-foreground">{t('sale.bill.totalAfterDiscount')}</span>
+                <span className="tabular font-semibold">{formatCurrency(grandTotal, currency)}</span>
+              </div>
+
+              {/* §2: Auto-discount info from MRP vs Sale Price */}
+              {autoDiscountTotal > 0 && (
+                <div className="flex justify-between text-[10px] text-emerald-600 px-1">
+                  <span>{t('sale.bill.autoDiscount')}</span>
+                  <span className="tabular font-medium">−{formatCurrency(autoDiscountTotal, currency)}</span>
+                </div>
+              )}
+
+              {/* §1: Round Off — displayed right above Delivery Charge */}
+              {Math.abs(roundOffAmount) > 0.001 && (
+                <div className="flex justify-between text-xs text-muted-foreground px-1">
+                  <span>Round Off ({roundOffAmount > 0 ? '+' : '−'}₹{Math.abs(roundOffAmount).toFixed(2)})</span>
+                  <span className="tabular">{formatCurrency(roundOffAmount, currency)}</span>
+                </div>
+              )}
+
+              {/* §1: Delivery/Shipping Charge — between Round Off and Actual Price */}
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-muted-foreground shrink-0">
+                  {t('sale.bill.delivery')}
+                </label>
+                <div className="flex items-baseline gap-0.5 flex-1">
+                  <span className="text-[10px] text-muted-foreground">₹</span>
+                  <input
+                    value={deliveryCharge}
+                    onChange={(e) => setDeliveryCharge(e.target.value)}
+                    className="w-full text-sm tabular bg-transparent border-0 border-b border-border focus:border-primary outline-none px-0 py-0.5"
+                    inputMode="numeric"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+
+              {/* Row 5: Final Payable — [Actual Price] (includes delivery) */}
+              <div className="flex justify-between items-center pt-2 border-t border-border">
+                <span className="font-bold text-base">Actual Price</span>
+                <motion.span
+                  key={roundedTotal}
+                  initial={{ scale: 1.05 }}
+                  animate={{ scale: 1 }}
+                  transition={{ duration: 0.15 }}
+                  className="font-bold tabular text-primary text-xl"
+                >
+                  {formatCurrency(roundedTotal, currency)}
+                </motion.span>
+              </div>
+            </div>
+
+            {/* §1: Customer bar removed from mid-screen — now at TOP only */}
+
+            {/* §4: Payment Mode split matrix — underneath Actual Price */}
+            <div className="mt-3 p-3 rounded-xl bg-muted/30 border border-border/50">
+              <p className="text-[10px] text-muted-foreground uppercase mb-2 font-medium">{t('sale.bill.splitPayment')}</p>
+              <div className="grid grid-cols-2 gap-2">
+                {/* Cash split */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <Wallet className="w-3 h-3" /> Cash ₹
+                  </label>
+                  <Input
+                    value={splitCash}
+                    onChange={(e) => setSplitCash(e.target.value)}
+                    className="h-9 text-sm"
+                    inputMode="numeric"
+                    placeholder="0"
+                  />
+                </div>
+                {/* UPI split */}
+                <div className="space-y-1">
+                  <button
+                    onClick={() => setPaymentMode(paymentMode === 'upi' ? 'cash' : 'upi')}
+                    className="text-[10px] text-muted-foreground flex items-center gap-1 w-full"
+                  >
+                    <QrCode className={`w-3 h-3 ${paymentMode === 'upi' ? 'text-violet-600' : ''}`} />
+                    UPI ₹
+                    {paymentMode === 'upi' && <span className="ml-auto text-[9px] text-violet-600">{t('sale.bill.qrOn')}</span>}
+                    {/* §3: Green checkmark when UPI amount matches expected total */}
+                    {splitUpiNum > 0 && splitUpiNum >= roundedTotal && (
+                      <span className="text-emerald-600 font-bold ml-1">✅</span>
+                    )}
+                  </button>
+                  <div className="relative">
+                    <Input
+                      value={splitUpi}
+                      onChange={(e) => { setSplitUpi(e.target.value); setPaymentMode('upi') }}
+                      className={`h-9 text-sm ${paymentMode === 'upi' ? 'border-violet-400' : ''} ${splitUpiNum > 0 && splitUpiNum >= roundedTotal ? 'pr-8 border-emerald-400' : ''}`}
+                      inputMode="numeric"
+                      placeholder="0"
+                    />
+                    {/* §3: Green checkmark inside UPI field when amount matches */}
+                    {splitUpiNum > 0 && splitUpiNum >= roundedTotal && (
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-emerald-500 text-sm">✓</span>
+                    )}
+                  </div>
+                  {/* §3: Status text under UPI field */}
+                  {splitUpiNum > 0 && (
+                    <p className={`text-[9px] ${splitUpiNum >= roundedTotal ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}`}>
+                      {splitUpiNum >= roundedTotal
+                        ? t('sale.split.exact')
+                        : t('sale.split.remaining').replace('{amount}', (roundedTotal - splitUpiNum).toFixed(2))
+                      }
+                    </p>
+                  )}
+                </div>
+                {/* §1: Credit split input REMOVED — user uses Cash + UPI only.
+                    Ledger Due is calculated automatically when Total Input < Actual Price. */}
+                {/* Cheque */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-muted-foreground flex items-center gap-1">
+                    <FileCheck className="w-3 h-3" /> Cheque No
+                  </label>
+                  <Input
+                    value={splitChequeNo}
+                    onChange={(e) => setSplitChequeNo(e.target.value)}
+                    className="h-9 text-sm"
+                    placeholder="CHQ-001234"
+                  />
+                </div>
+              </div>
+
+              {/* Split payment summary */}
+              {hasSplitPayment && (
+                <div className="mt-2 pt-2 border-t border-border/50 space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t('sale.bill.totalPaid')}</span>
+                    <span className="tabular font-medium text-emerald-600">₹{totalSplitPaid.toFixed(2)}</span>
+                  </div>
+                  {overpaid > 0 ? (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">{t('sale.bill.changeRet')}</span>
+                      <span className="tabular font-medium text-emerald-600">₹{overpaid.toFixed(2)}</span>
+                    </div>
+                  ) : ledgerDue > 0 ? (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">{t('sale.credit.due')} (Ledger Due)</span>
+                      <span className="tabular font-medium text-amber-600">₹{ledgerDue.toFixed(2)}</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">{t('sale.bill.status')}</span>
+                      <span className="tabular font-medium text-emerald-600">{t('sale.bill.fullyPaid')}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* UPI QR — conditional on amount > 0 */}
+            <AnimatePresence>
+              {paymentMode === 'upi' && upiQrAmount > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-3 mt-2 rounded-xl bg-violet-50 dark:bg-violet-950/30">
+                    <div className="flex items-center gap-2 mb-2">
+                      <QrCode className="w-4 h-4 text-violet-600" />
+                      <p className="text-xs font-medium text-violet-700 dark:text-violet-300 flex-1">
+                        {t('sale.qr.upi')} {splitUpiNum > 0 && <span className="text-[10px]">({t('sale.qr.split').replace('{amount}', splitUpiNum.toFixed(2))})</span>}
+                      </p>
+                      {/* §6: Share QR button */}
+                      {upiQrDataUrl && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const res = await fetch(upiQrDataUrl)
+                              const blob = await res.blob()
+                              const file = new File([blob], `upi-qr-${upiQrAmount}.png`, { type: 'image/png' })
+                              const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchantName)}&am=${upiQrAmount.toFixed(2)}&cu=INR`
+                              if (navigator.share) {
+                                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                                  await navigator.share({ title: t('sale.qr.upi'), text: `Pay ₹${upiQrAmount.toFixed(2)} to ${merchantName}`, files: [file] })
+                                } else {
+                                  await navigator.share({ title: 'UPI Payment', text: upiUrl })
+                                }
+                              } else {
+                                // Fallback: open WhatsApp
+                                const text = encodeURIComponent(`Pay ₹${upiQrAmount.toFixed(2)} to ${merchantName}\n${upiUrl}`)
+                                window.open(`https://wa.me/?text=${text}`, '_blank')
+                              }
+                            } catch (e) {
+                              // Fallback: download QR image
+                              const link = document.createElement('a')
+                              link.download = `upi-qr-${upiQrAmount}.png`
+                              link.href = upiQrDataUrl
+                              link.click()
+                            }
+                          }}
+                          className="w-7 h-7 rounded-lg bg-violet-600 text-white flex items-center justify-center hover:bg-violet-700 transition-colors"
+                          aria-label="Share QR code"
+                          title="Share QR"
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    {upiQrDataUrl ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <img src={upiQrDataUrl} alt="UPI QR Code" className="w-44 h-44 rounded-lg bg-white p-1" />
+                        <div className="text-center w-full">
+                          <p className="text-[10px] text-muted-foreground">{t('sale.qr.scan')}</p>
+                          <p className="text-sm font-bold tabular text-violet-700 dark:text-violet-300">
+                            {formatCurrency(upiQrAmount, currency)}
+                          </p>
+                          <p className="text-[9px] text-muted-foreground mt-0.5">{upiId}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-4">
+                        <p className="text-[11px] text-muted-foreground">{t('sale.qr.generating')}</p>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* §2: Ledger Due — show when Total Input < Actual Price (red/orange).
+                §1: Auto-opens customer picker if no customer selected. */}
+            <AnimatePresence>
+              {isShortAmount && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div
+                    onClick={() => { if (!customer) triggerBlueCustomerBox(); }}
+                    className={`p-3 mt-2 rounded-xl bg-orange-50 dark:bg-orange-950/30 border border-orange-400/40 ${!customer ? 'cursor-pointer hover:bg-orange-100 dark:hover:bg-orange-950/50 active:scale-[0.98]' : ''} transition-transform`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-orange-700 dark:text-orange-300">
+                        {t('sale.credit.due')} (Ledger Due)
+                      </span>
+                      <span className="text-lg font-bold tabular text-orange-600">
+                        ₹{ledgerDue.toFixed(2)}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-orange-600 mt-1">
+                      {t('sale.credit.dueNote')}
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* §3: Exchange Calculator — ONLY when Total Input > Actual Price */}
+            <AnimatePresence>
+              {isChangeDue && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-3 mt-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Calculator className="w-4 h-4 text-emerald-600" />
+                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">{t('sale.exchange.calc')}</p>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-emerald-700 dark:text-emerald-300">
+                        {t('sale.exchange.return')}
+                      </span>
+                      <span className="text-2xl font-bold tabular text-emerald-600">
+                        ₹{overpaid.toFixed(2)}
+                      </span>
+                    </div>
+                    {/* Breakdown */}
+                    <div className="mt-2 pt-2 border-t border-emerald-200 dark:border-emerald-800 space-y-1 text-[10px]">
+                      <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
+                        <span>Actual Price</span>
+                        <span className="tabular">{formatCurrency(roundedTotal, currency)}</span>
+                      </div>
+                      <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
+                        <span>{t('sale.exchange.paid')}</span>
+                        <span className="tabular">{formatCurrency(totalPaidForExchange, currency)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* §LAYOUT-SHIFT-FIX: STRICT MUTUAL EXCLUSIVITY — Blue box OR Red box, NEVER both.
+                CRITICAL: Two-layer structure that eliminates the height dip during
+                blue↔red swaps (which caused the scroll jump when clicking Done/Invoice).
+
+                • OUTER layer (show/hide): ONE persistent motion.div present whenever
+                  customerBoxMode !== null. Animates height 0↔auto ONLY for null↔box
+                  transitions (first appear / final hide). Its key NEVER changes during
+                  a blue↔red swap, so React reuses the same node — height stays STABLE.
+                  No height dip = no scroll clamp = no top shift.
+
+                • INNER layer (blue↔red swap): AnimatePresence mode="popLayout" swaps
+                  between blue/red motion.divs. popLayout takes the exiting node OUT of
+                  flow (position:absolute) so the entering node occupies its natural
+                  flow height immediately. NO height animation here — only opacity/transform
+                  via useAnimationControls. Height never dips during swap.
+
+                • useAnimationControls drives the re-trigger bounce on every tap
+                  (.set() to initial → .start() to final). GUARANTEED replay. */}
+            {(() => {
+              const customerBoxMode: 'blue' | 'red' | null = showCreditGate
+                ? 'red'
+                : showInlineCustomer
+                  ? 'blue'
+                  : null
+
+              return (
+                <AnimatePresence mode="wait" initial={false}>
+                  {customerBoxMode !== null && (
+                    <motion.div
+                      key="customer-box-slot"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                      className="overflow-hidden"
+                    >
+                      {/* §INNER: blue↔red swap. popLayout = exiting node goes absolute,
+                          entering node takes flow position at natural height. No dip. */}
+                      <AnimatePresence mode="popLayout" initial={false}>
+                        {customerBoxMode === 'blue' && (
+                          <motion.div
+                            key="new-customer-inner"
+                            animate={blueBoxControls}
+                            data-anim-key={customerBlockKey}
+                            className="mt-3 p-3 rounded-xl border-2 border-teal-400/50 bg-teal-50 dark:bg-teal-950/20"
+                          >
+                            <div className="flex items-center gap-1.5 mb-2">
+                              <UserPlus className="w-3.5 h-3.5 text-teal-600" />
+                              <p className="text-xs font-medium text-teal-700 dark:text-teal-300">
+                                {t('sale.newCustomer')}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setShowCustPicker(true)}
+                                className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-teal-400 bg-card flex items-center gap-2 text-sm hover:bg-teal-50 dark:hover:bg-teal-950/20 transition-colors"
+                              >
+                                <UserPlus className="w-4 h-4 text-teal-600" />
+                                <span className="text-teal-700 dark:text-teal-300 font-medium">{t('sale.selectCustomer')}</span>
+                              </button>
+                              <button
+                                onClick={() => { setShowPartyForm(true); }}
+                                className="w-11 h-11 rounded-xl bg-teal-500 text-white flex items-center justify-center shrink-0 hover:bg-teal-600 transition-colors"
+                                aria-label={t('sale.newCustomer')}
+                              >
+                                <Plus className="w-5 h-5" />
+                              </button>
+                            </div>
+                          </motion.div>
+                        )}
+                        {customerBoxMode === 'red' && (
+                          <motion.div
+                            key="red-inner"
+                            animate={redBoxControls}
+                            data-anim-key={creditGateKey}
+                            className="mt-3"
+                          >
+                            <div className="p-3 rounded-xl border-2 border-red-500 bg-red-50 dark:bg-red-950/30">
+                              {/* Mandatory warning label */}
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                                <p className="text-xs font-bold text-red-700 dark:text-red-300">
+                                  {t('sale.credit.mandatory')}
+                                </p>
+                              </div>
+                              {/* Clone of Add Customer input */}
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => { setShowCustPicker(true); }}
+                                  className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-red-400 bg-card flex items-center gap-2 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                                >
+                                  <UserPlus className="w-4 h-4 text-red-600" />
+                                  <span className="text-red-700 dark:text-red-300 font-medium">{t('sale.selectCustomer')}</span>
+                                </button>
+                                <button
+                                  onClick={() => { setShowPartyForm(true); }}
+                                  className="w-11 h-11 rounded-xl bg-red-500 text-white flex items-center justify-center shrink-0 hover:bg-red-600 transition-colors"
+                                  aria-label={t('sale.newCustomer')}
+                                >
+                                  <Plus className="w-5 h-5" />
+                                </button>
+                              </div>
+                              {/* Ledger due amount */}
+                              <p className="text-[10px] text-red-600 mt-1.5 text-center">
+                                {t('sale.credit.dueLabel')}: ₹{ledgerDue.toFixed(2)}
+                              </p>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              )
+            })()}
+
+            {/* §5: Fulfillment Status toggle — Handled Over / Pick Up Later */}
+            <div className="flex items-center gap-2 mt-2 p-2.5 rounded-xl bg-muted/30 border border-border/50">
+              <span className="text-[11px] font-medium text-muted-foreground shrink-0">Delivery Status:</span>
+              <div className="flex items-center gap-1 flex-1">
+                <button
+                  onClick={() => setFulfillmentStatus('handed')}
+                  className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    fulfillmentStatus === 'handed' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-card text-muted-foreground'
+                  }`}
+                >
+                  ✓ Handed Over
+                </button>
+                <button
+                  onClick={() => {
+                    setFulfillmentStatus('pickup')
+                    // §UX-REFINEMENT: Force blue box to (re-)animate on every tap.
+                    // Strict exclusivity: this also dismisses any red warning.
+                    if (!customer) triggerBlueCustomerBox()
+                  }}
+                  className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    fulfillmentStatus === 'pickup' ? 'bg-amber-600 text-white shadow-sm' : 'bg-card text-muted-foreground'
+                  }`}
+                >
+                  📦 Pick Up Later
+                </button>
+              </div>
+            </div>
+
+            {/* §4: Action Footer — Invoice (left) + Done (right) */}
+            <div className="flex items-center gap-2 mt-3">
+              <Button
+                variant="outline"
+                onClick={handleGenerateInvoice}
+                disabled={confirming}
+                className="h-12 px-6 text-sm font-semibold rounded-2xl flex-1"
+              >
+                <Receipt className="w-4 h-4 mr-1.5" /> {confirming ? '…' : t('sale.checkout.invoice')}
+              </Button>
+              <Button
+                onClick={handleDone}
+                disabled={confirming}
+                className="h-12 px-8 text-base font-bold rounded-2xl shadow-lg"
+              >
+                {confirming ? (
+                  <><span className="animate-spin">⏳</span> {t('sale.checkout.processing')}</>
+                ) : (
+                  <><CheckCircle2 className="w-5 h-5 mr-2" /> {t('sale.checkout.done')}</>
+                )}
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <FullScreenPicker
+        open={showCustPicker}
+        onClose={() => setShowCustPicker(false)}
+        onSelect={(item) => {
+          const p = (parties || []).find((x) => x.id === item.id)
+          if (p) setCustomer(p)
+          setShowCustPicker(false)
+        }}
+        items={partyItems}
+        placeholder={t('sale.searchCustomer')}
+        emptyText={t('sale.noCustomerFound')}
+      />
+
+      {/* §1: PartyForm — rendered here so [+] icon can trigger customer registration
+          directly from Quick Sale without navigating away.
+          §AUTO-SELECT: onSuccess callback auto-selects the newly created customer
+          so the user doesn't have to manually search for them. */}
+      <PartyForm
+        open={showPartyForm}
+        onOpenChange={(o) => setShowPartyForm(o)}
+        onSuccess={(party) => {
+          // §AUTO-SELECT: Instantly set the newly created customer as the
+          // active cart's customer. No manual search needed.
+          if (party.type === 'customer' || party.type === 'both') {
+            setCustomer(party)
+            setCustomerBlockKey((k) => k + 1) // replay entrance animation
+          }
+        }}
+      />
+
+      {/* §1: Cart Close Prompt — Wipe or Send to Held Queue */}
+      <AnimatePresence>
+        {closePromptCartId !== null && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+            onClick={() => setClosePromptCartId(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card rounded-2xl p-5 max-w-sm w-full space-y-4 shadow-2xl"
+            >
+              <div className="text-center">
+                <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-3">
+                  <Trash2 className="w-6 h-6 text-red-500" />
+                </div>
+                <h3 className="text-base font-bold">{t('sale.closeCart.title')}</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t('sale.closeCart.body').replace('{label}', carts.find((c) => c.id === closePromptCartId)?.customer?.name || carts.find((c) => c.id === closePromptCartId)?.label || '').replace('{n}', String(carts.find((c) => c.id === closePromptCartId)?.items.length || 0))}
+                  {carts.find((c) => c.id === closePromptCartId)?.items.length || 0}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  className="w-full h-11 border-amber-400 text-amber-600 hover:bg-amber-500/10"
+                  onClick={() => sendToHeldQueue(closePromptCartId)}
+                >
+                  <Layers className="w-4 h-4 mr-2" /> {t('sale.closeCart.hold')}
+                  <span className="text-[10px] text-muted-foreground ml-1">{t('sale.closeCart.holdSub')}</span>
+                </Button>
+                <Button
+                  variant="destructive"
+                  className="w-full h-11"
+                  onClick={() => wipeCart(closePromptCartId)}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" /> {t('sale.closeCart.wipe')}
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="w-full h-10"
+                  onClick={() => setClosePromptCartId(null)}
+                >
+                  {t('common.cancel')}
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* §1: Held Queue Modal — restore or delete held carts */}
+      <AnimatePresence>
+        {showHeldQueue && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+            onClick={() => setShowHeldQueue(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card rounded-2xl p-5 max-w-sm w-full space-y-3 shadow-2xl"
+            >
+              <div className="flex items-center gap-2 pb-2 border-b border-border">
+                <Layers className="w-5 h-5 text-amber-500" />
+                <h3 className="text-base font-bold">{t('sale.holdQueue.title').replace('{n}', String(heldQueue.length))}</h3>
+              </div>
+              {heldQueue.length === 0 ? (
+                <p className="text-center text-sm text-muted-foreground py-4">{t('sale.holdQueue.empty')}</p>
+              ) : (
+                <div className="space-y-2 max-h-72 overflow-y-auto">
+                  {heldQueue.map((c, hqIndex) => {
+                    const cartTotal = c.items.reduce((s, i) => s + Number(i.total || 0), 0)
+                    return (
+                      <div key={c.id} className="p-3 rounded-xl bg-amber-500/5 border border-amber-400/30">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-bold">{c.customer?.name || t('sale.cart.person').replace('{n}', String(hqIndex + 1))}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {t('sale.holdQueue.items').replace('{n}', String(c.items.length))} · {formatCurrency(cartTotal, currency)}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => restoreFromHeldQueue(c.id)}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-500 text-white text-[11px] font-medium hover:bg-emerald-600"
+                            >
+                              {t('sale.holdQueue.restore')}
+                            </button>
+                            <button
+                              onClick={() => deleteFromHeldQueue(c.id)}
+                              className="w-7 h-7 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center"
+                              aria-label="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              <Button variant="ghost" className="w-full h-10" onClick={() => setShowHeldQueue(false)}>
+                {t('common.close')}
+              </Button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* §SECRET-COST-REVEAL: Floating Action Button (FAB) for the Eye toggle.
+          
+          §ISSUE-1-FIX: Scoped to Quick Sale page ONLY — checks activeView ===
+          'sale-pad' before rendering. Previously the FAB leaked to all pages
+          because SalePadView is always mounted (display:none when inactive)
+          and createPortal(document.body) rendered it regardless.
+          
+          §ISSUE-2-FIX: Moved to TOP-RIGHT corner (was bottom-right). Uses
+          position:fixed so it stays pinned to the top-right when scrolling
+          down the product grid.
+          
+          §STEALTH-TOOLTIP: When a product is long-pressed (and cost reveal is ON),
+          ONLY the raw cost price appears as a tiny, dull-colored text label
+          next to the FAB. No profit, no percentage, no sell price — those are
+          a privacy hazard at a physical counter where customers can peek.
+          The text is faint grey so it blends in; only the merchant knows
+          what that number means. */}
+      {typeof document !== 'undefined' && activeView === 'sale-pad' && createPortal(
+        <div className="fixed top-14 right-3 z-[500] flex items-center gap-1.5">
+          {/* §STEALTH-COST: Minimal cost display — appears next to the Eye FAB
+              when a product is long-pressed. Shows ONLY the raw cost price in
+              faint grey text. No background, no border, no profit/percentage.
+              Blends in so customers can't easily notice it. */}
+          <AnimatePresence>
+            {revealedCostProductId && isCostRevealEnabled && (() => {
+              const rp = products?.find((p) => p.id === revealedCostProductId)
+              if (!rp) return null
+              const unit = getPriceUnit(rp)
+              // §RETAIL-COST: For retail mode, divide purchase price by conversion factor
+              const baseCost = (rp as any).purchasePrice || 0
+              const convFactor = (rp as any).conversionFactor || 1
+              const costPrice = mode === 'retail' && (rp as any).retailEnabled && convFactor > 0
+                ? baseCost / convFactor
+                : baseCost
+              return (
+                <motion.span
+                  initial={{ opacity: 0, x: 5 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 5 }}
+                  transition={{ duration: 0.1 }}
+                  /* §STEALTH: Faint grey text, no background, no border. Just the
+                     raw number. Only the merchant knows what it means. */
+                  className="text-[11px] tabular text-muted-foreground/60 dark:text-muted-foreground/50 select-none"
+                >
+                  {formatCurrency(costPrice, currency)}/{unit}
+                </motion.span>
+              )
+            })()}
+          </AnimatePresence>
+
+          {/* §EYE-FAB: The toggle button itself — top-right, fixed position */}
+          <button
+            onClick={() => setIsCostRevealEnabled((v) => !v)}
+            className={`w-9 h-9 rounded-full shadow-sm flex items-center justify-center transition-all active:scale-90 ${
+              isCostRevealEnabled
+                ? 'bg-muted text-muted-foreground'
+                : 'bg-background border border-border text-muted-foreground/60 shadow-black/5'
+            }`}
+            aria-label={isCostRevealEnabled ? 'Disable cost reveal' : 'Enable cost reveal'}
+            title={isCostRevealEnabled ? 'Cost reveal ON — long-press products to see cost' : 'Enable cost reveal'}
+          >
+            {isCostRevealEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+          </button>
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
+// trigger rebuild Fri Jul 17 00:09:50 UTC 2026

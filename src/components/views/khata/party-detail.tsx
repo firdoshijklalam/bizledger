@@ -1,0 +1,774 @@
+'use client'
+
+import { useAppStore } from '@/store/app-store'
+import { useI18n } from '@/store/i18n-store'
+import { useFetch, apiPost } from '@/hooks/use-fetch'
+import type { Party, Transaction, Invoice, SupplierCatalogItem } from '@/lib/types'
+import { formatCurrency, formatDate, GRADE_META } from '@/lib/utils'
+import { paymentReminderMessage } from '@/lib/message-templates'
+import type { TemplateSlotId } from '@/store/message-template-store'
+import { motion } from 'framer-motion'
+import {
+  ArrowLeft, Phone, Plus, Receipt, FileEdit, ArrowDownLeft, ArrowUpRight,
+  CheckCircle2, X, Zap, Share2, FileText, Award, Package,
+  Users, Briefcase, Fingerprint, ShieldAlert, Loader2, AlertTriangle, MessageCircle,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { toast } from 'sonner'
+import { useState, useCallback, useRef } from 'react'
+import { TransactionForm } from './transaction-form'
+import { PartyForm } from './party-form'
+import { ShareSheet } from '@/components/shared/share-sheet'
+import { CompareSuppliersModal } from '@/components/shared/compare-suppliers-modal'
+import { TrustScoreCard } from '@/components/shared/trust-score-card'
+import { DefaulterAlertBanner } from '@/components/shared/defaulter-alert-banner'
+// §PARTY-NOTES-ACTIVATION: Dormant PartyNote feature now has a CRUD API +
+// dedicated UI. Render the section on the party detail page.
+import { PartyNotesSection } from './party-notes-section'
+// §CUSTOMER-BEHAVIOUR: Staff-rated interaction/service behaviour. Distinct
+// from the financial AI Credit Trust Score (TrustScoreCard). Rendered after
+// the trust score card so users see both signals together but clearly labeled.
+import { CustomerBehaviourSection } from './customer-behaviour-section'
+// §COMPLAINTS: Compact complaints summary on the customer profile.
+import { PartyComplaintsSection } from './party-complaints-section'
+// §FOLLOWUPS: Compact follow-up summary on the customer profile.
+import { PartyFollowupsSection } from './party-followups-section'
+// §MESSAGING: Compact conversations summary on the customer profile.
+import { PartyMessagesSection } from './party-messages-section'
+// §LIFETIME-PROFIT: Read-only customer profit derived from authoritative accounting.
+import { PartyLifetimeProfitSection } from './party-lifetime-profit-section'
+// §TIMELINE: Read-only composed timeline from existing domain records.
+import { PartyTimelineSection } from './party-timeline-section'
+// §REWARDS: Profit-based loyalty reward cycle.
+import { PartyRewardsSection } from './party-rewards-section'
+// §PRODUCT-FEEDBACK: first-class customer feedback request domain. Renders
+// after rewards so a merchant reviewing a customer's relationship sees
+// rewards first, then product feedback history + the "Request Feedback"
+// action. Customers only (feedback is for buyers, not suppliers).
+import { PartyFeedbackSection } from './party-feedback-section'
+import {
+  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { useScrollStore } from '@/store/scroll-store'
+
+interface PartyDetailData extends Party {
+  transactions: Transaction[]
+  invoices: Invoice[]
+  partyNotes: any[]
+}
+
+export function PartyDetail({ partyId }: { partyId: string }) {
+  const {
+    setSelectedPartyId, setActiveView, setShowInvoiceForm, business,
+    setSelectedInvoiceId, setEditingPartyId, editingPartyId, returnToView,
+    setReturnToView, overlayPartyId, setOverlayPartyId, setOverlayInvoiceId,
+    // §GLOBAL-MODALS: Use global modal store instead of local state.
+    // This ensures modals render at app-shell root (via createPortal) and
+    // escape the nested overlay stacking context.
+    openFamilyModal, openPartnerModal, openFingerprintModal,
+  } = useAppStore()
+  const { t } = useI18n()
+  const { data, loading, error, refetch } = useFetch<PartyDetailData>(`/api/parties/${partyId}`, [partyId])
+  const [showTxn, setShowTxn] = useState(false)
+  const [showSettle, setShowSettle] = useState(false)
+  const [showCompare, setShowCompare] = useState(false)
+  const [compareProduct, setCompareProduct] = useState<string>('')
+
+  // PRD Part 7 §3: restore scroll on back button (party detail → khata)
+  const { restore: restoreScrollPos } = useScrollStore()
+  const handleBack = () => {
+    // §2: If opened as overlay, close overlay (preserves underlying view + scroll)
+    if (overlayPartyId) {
+      setOverlayPartyId(null)
+      return
+    }
+    if (returnToView) {
+      setActiveView(returnToView)
+      setReturnToView(null)
+    } else {
+      setActiveView('khata')
+    }
+    setSelectedPartyId(null)
+    // Restore scroll after view transition
+    setTimeout(() => restoreScrollPos('khata'), 50)
+    setTimeout(() => restoreScrollPos('khata'), 150)
+    setTimeout(() => restoreScrollPos('khata'), 300)
+  }
+
+  // PRD Part 24: Source Products section for suppliers (fetches catalog)
+  const isSupplier = data?.type === 'supplier' || data?.type === 'both'
+  const isCustomer = data?.type === 'customer' || data?.type === 'both'
+  const { data: supplierCatalog } = useFetch<SupplierCatalogItem[]>(
+    isSupplier ? `/api/suppliers/${partyId}/catalog` : null,
+    [partyId, isSupplier]
+  )
+  // PRD Part 32 §3.1: check shared defaulter registry for this party's phone
+  const { data: defaulterMatch } = useFetch<any[]>(
+    data?.phone ? `/api/defaulter-registry?phone=${encodeURIComponent(data.phone)}` : null,
+    [data?.phone]
+  )
+  const activeDefaulter = defaulterMatch && defaulterMatch.length > 0 ? defaulterMatch[0] : null
+  // Multi-select state (PRD Part 7 §4)
+  const [multiSelectMode, setMultiSelectMode] = useState(false)
+  const [selectedTxIds, setSelectedTxIds] = useState<Set<string>>(new Set())
+  // Share sheet state (PRD Part 10 §2)
+  const [showShareSheet, setShowShareSheet] = useState(false)
+  const [shareSheetText, setShareSheetText] = useState('')
+  const [shareSheetTitle, setShareSheetTitle] = useState('')
+  // §CUSTOM-TEMPLATE-BADGE: which message-template slot generated the sheet's
+  // text (null for non-templated shares like statements) — drives the Custom chip.
+  const [shareSheetSlot, setShareSheetSlot] = useState<TemplateSlotId | null>(null)
+
+  // Multi-select handlers (PRD Part 7 §4) — must be before early return
+  const toggleTxSelection = useCallback((txId: string) => {
+    setSelectedTxIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(txId)) next.delete(txId)
+      else next.add(txId)
+      return next
+    })
+  }, [])
+
+  const selectAllTx = () => {
+    if (!data) return
+    setSelectedTxIds(new Set(data.transactions.map((t) => t.id)))
+  }
+
+  const deselectAllTx = () => {
+    setSelectedTxIds(new Set())
+    setMultiSelectMode(false)
+  }
+
+  const handleShareSelected = () => {
+    if (!data) return
+    const selected = data.transactions.filter((t) => selectedTxIds.has(t.id))
+    if (selected.length === 0) return
+    // PRD Part 10: Open dynamic share sheet instead of direct WhatsApp
+    const lines = [
+      `${business?.name || 'BizLedger'} — Selected Transactions`,
+      `Customer: ${data.name}`,
+      ``,
+    ]
+    selected.forEach((tx) => {
+      const isCredit = tx.type === 'credit'
+      lines.push(`${formatDate(tx.createdAt)} | ${isCredit ? t('txn.got') : t('txn.gave')} | ${formatCurrency(tx.amount, currency)} | ${tx.description || ''}`)
+    })
+    lines.push(``, `Total: ${selected.length} transactions`)
+    setShareSheetText(lines.join('\n'))
+    setShareSheetTitle(`${selected.length} Transactions Statement`)
+    setShareSheetSlot(null)
+    setShowShareSheet(true)
+  }
+
+  const handleShareStatement = () => {
+    if (!data) return
+    // PRD Part 10: Share full statement via dynamic share sheet
+    const lines = [
+      `${business?.name || 'BizLedger'} — Ledger Statement`,
+      `Customer: ${data.name}`,
+      ``,
+      `Date | Type | Amount | Description`,
+    ]
+    data.transactions.forEach((tx) => {
+      const isCredit = tx.type === 'credit'
+      lines.push(`${formatDate(tx.createdAt)} | ${isCredit ? t('txn.got') : t('txn.gave')} | ${formatCurrency(tx.amount, currency)} | ${tx.description || ''}`)
+    })
+    lines.push(``, `Current Balance: ${formatCurrency(data.balance, currency)}`)
+    setShareSheetText(lines.join('\n'))
+    setShareSheetTitle('Full Ledger Statement')
+    setShareSheetSlot(null)
+    setShowShareSheet(true)
+  }
+
+  // §PAYMENT-REMINDER: one-tap balance-aware reminder. Reuses the dynamic
+  // ShareSheet (WhatsApp / Telegram / SMS / Copy — feature-phone friendly)
+  // with a polite prefilled message, so merchants never have to type a
+  // payment reminder by hand. Direction-aware:
+  //   - receivable (You'll Receive) → "you owe us ₹X, kindly pay"
+  //   - payable   (You'll Pay)      → "we owe you ₹X, settling soon"
+  // The message is localized via §LOCALIZED-MESSAGE-TEMPLATES (en/bn/hi);
+  // the business name signs it; currency comes from settings.
+  const handleSendReminder = () => {
+    if (!data) return
+    const text = paymentReminderMessage({
+      partyName: data.name,
+      amount: formatCurrency(Math.abs(data.balance), currency),
+      direction: data.balance > 0 ? 'receivable' : 'payable',
+      businessName: business?.name || 'BizLedger',
+    })
+    setShareSheetText(text)
+    setShareSheetTitle('Payment Reminder')
+    // §DIRECTION-AWARE-SLOT: the paymentReminderMessage generator resolves
+    // overrides from this slot — pass it so the sheet can badge custom wording.
+    setShareSheetSlot(data.balance > 0 ? 'paymentReceivable' : 'paymentPayable')
+    setShowShareSheet(true)
+  }
+
+  // §4: Loading + error states — prevent blank screen
+  if (loading) {
+    return (
+      <div className="space-y-4 p-4">
+        <button onClick={handleBack} className="flex items-center gap-2 text-sm text-muted-foreground">
+          <ArrowLeft className="w-4 h-4" /> {t('common.back')}
+        </button>
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    )
+  }
+  if (error || !data) {
+    return (
+      <div className="space-y-4 p-4">
+        <button onClick={handleBack} className="flex items-center gap-2 text-sm text-muted-foreground">
+          <ArrowLeft className="w-4 h-4" /> {t('common.back')}
+        </button>
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <AlertTriangle className="w-10 h-10 text-muted-foreground/50" />
+          <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
+          <button onClick={() => refetch()} className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium">
+            {t('common.retry')}
+          </button>
+        </div>
+      </div>
+    )
+  }
+  const currency = business?.currency || 'INR'
+  const meta = GRADE_META[data.qualityGrade] ?? GRADE_META['B']
+  const isReceivable = data.balance > 0
+  const isPayable = data.balance < 0
+
+  const handleSettle = async (amount: number) => {
+    await apiPost('/api/transactions', {
+      partyId: data.id,
+      type: isReceivable ? 'credit' : 'debit',
+      amount,
+      description: 'Settlement (বুঝিয়ে নেওয়া)',
+      category: 'Settlement',
+    })
+    toast.success('Settled successfully')
+    setShowSettle(false)
+    refetch()
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      className="space-y-4"
+    >
+      {/* PRD Part 32 §3.1: Defaulter alert banner */}
+      {activeDefaulter && (
+        <DefaulterAlertBanner
+          amount={activeDefaulter.defaultAmount}
+          merchantName={activeDefaulter.merchantName}
+          partyName={data.name}
+        />
+      )}
+
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleBack}
+          className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center"
+          aria-label="Back"
+        >
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <h2 className="text-base font-semibold flex-1 truncate">{data.name}</h2>
+        <button
+          onClick={() => setEditingPartyId(partyId)}
+          className="w-10 h-10 rounded-full hover:bg-muted flex items-center justify-center"
+          aria-label="Edit"
+        >
+          <FileEdit className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Profile card */}
+      <div className="rounded-2xl bg-card border border-border p-5 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white text-xl font-bold shrink-0">
+            {data.name.charAt(0).toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-base font-semibold truncate">{data.name}</h3>
+              {/* §SUPPLIER-EXCLUSION: Grade badges are ONLY for customers
+                  (and 'both'). Suppliers never show a grade badge. */}
+              {isCustomer && (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>
+                  {data.qualityGrade} · {meta.desc}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground capitalize">{t(`common.${data.type}`)}</p>
+            {data.phone && (
+              <a href={`tel:${data.phone}`} className="text-xs text-primary flex items-center gap-1 mt-1">
+                <Phone className="w-3 h-3" /> {data.phone}
+              </a>
+            )}
+          </div>
+        </div>
+
+        {/* Balance */}
+        <div className="mt-4 p-4 rounded-xl bg-muted/50">
+          <p className="text-xs text-muted-foreground mb-0.5">
+            {isReceivable ? t('khata.outstanding') : isPayable ? t('khata.payables') : t('khata.balance')}
+          </p>
+          <p className={`text-2xl font-bold tabular ${isReceivable ? 'text-emerald-600' : isPayable ? 'text-red-600' : 'text-foreground'}`}>
+            {formatCurrency(Math.abs(data.balance), currency)}
+          </p>
+          {data.creditLimit && (
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Credit Limit: {formatCurrency(data.creditLimit, currency)}
+            </p>
+          )}
+          {/* §PAYMENT-REMINDER CTA — only when there is something to remind
+              about (non-zero balance) and a channel exists (phone on file).
+              Emerald = WhatsApp association. Opens the dynamic ShareSheet
+              (WhatsApp / Telegram / SMS / Copy) with a prefilled polite
+              reminder — see handleSendReminder. */}
+          {data.balance !== 0 && data.phone && (
+            <button
+              onClick={handleSendReminder}
+              className="w-full mt-3 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all min-h-[44px]"
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>{t('khata.remind')}</span>
+            </button>
+          )}
+        </div>
+
+        {/* Action buttons */}
+        <div className="grid grid-cols-4 gap-2 mt-4">
+          {data.phone && (
+            <Button
+              variant="outline"
+              className="flex flex-col items-center gap-1 h-auto py-2.5"
+              onClick={() => window.location.href = `tel:${data.phone}`}
+            >
+              <Phone className="w-4 h-4" />
+              <span className="text-[10px]">{t('khata.call')}</span>
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            className="flex flex-col items-center gap-1 h-auto py-2.5"
+            onClick={() => setShowTxn(true)}
+          >
+            <Plus className="w-4 h-4" />
+            <span className="text-[10px]">Entry</span>
+          </Button>
+          <Button
+            variant="outline"
+            className="flex flex-col items-center gap-1 h-auto py-2.5"
+            onClick={() => {
+              useAppStore.getState().setPendingNewCustomer(data.id, data.name)
+              // §FIX: Clear BOTH overlays so sale-pad is visible.
+              setOverlayPartyId(null)
+              setOverlayInvoiceId(null)
+              // §FIX: Use current activeView as return target instead of
+              // hardcoding 'khata'. If the user came from Dashboard or Billing,
+              // they should return there, not always to Khata.
+              setReturnToView(useAppStore.getState().activeView || 'khata')
+              setActiveView('sale-pad')
+            }}
+          >
+            <Zap className="w-4 h-4" />
+            <span className="text-[10px]">Quick Sale</span>
+          </Button>
+          <Button
+            variant="outline"
+            className="flex flex-col items-center gap-1 h-auto py-2.5"
+            onClick={() => setShowSettle(true)}
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span className="text-[10px]">{t('khata.settleUp')}</span>
+          </Button>
+        </div>
+
+        {/* PRD Part 32 §4: Biometric linking buttons */}
+        <div className="grid grid-cols-3 gap-2 mt-2">
+          <Button
+            variant="outline"
+            className="flex items-center justify-center gap-1.5 h-9 text-[11px]"
+            onClick={() => openFingerprintModal(data.id, data.name)}
+          >
+            <Fingerprint className="w-3.5 h-3.5 text-emerald-600" /> Fingerprint
+          </Button>
+          {isCustomer && (
+            <Button
+              variant="outline"
+              className="flex items-center justify-center gap-1.5 h-9 text-[11px]"
+              onClick={() => openFamilyModal(data.id, data.name)}
+            >
+              <Users className="w-3.5 h-3.5 text-cyan-600" /> Family
+            </Button>
+          )}
+          {isSupplier && (
+            <Button
+              variant="outline"
+              className="flex items-center justify-center gap-1.5 h-9 text-[11px]"
+              onClick={() => openPartnerModal(data.id, data.name)}
+            >
+              <Briefcase className="w-3.5 h-3.5 text-purple-600" /> Partner
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* PRD Part 32 §3.2: AI Credit Trust Score (customers only) */}
+      {isCustomer && (
+        <TrustScoreCard partyId={partyId} partyName={data.name} />
+      )}
+
+      {/* §CUSTOMER-BEHAVIOUR: Staff-rated interaction/service behaviour.
+          Intentionally rendered right after the TrustScoreCard so users
+          see both signals together. Visually distinct (Heart icon +
+          violet palette) from the financial TrustScoreCard (Star icon +
+          emerald/amber/red). Customers only — same gating as trust score. */}
+      {isCustomer && (
+        <CustomerBehaviourSection partyId={partyId} />
+      )}
+
+      {/* §COMPLAINTS: Compact complaints summary. Customers + suppliers
+          (any party with a relation) can have complaints. */}
+      <PartyComplaintsSection partyId={partyId} partyName={data.name} />
+
+      {/* §FOLLOWUPS: Compact follow-up summary. Shows active follow-ups,
+          overdue count, and a quick-create action. Placed after complaints
+          since follow-ups often relate to complaints (complaint_followup type). */}
+      <PartyFollowupsSection partyId={partyId} />
+
+      {/* §MESSAGING: Compact conversations summary. Shows recent conversations
+          + last message + unread count. Clicking opens the Messages view. */}
+      <PartyMessagesSection partyId={partyId} partyName={data.name} />
+
+      {/* §LIFETIME-PROFIT: Read-only profit derived from authoritative accounting.
+          Uses the same formula as Reports P&L (netRevenue - cogs = grossProfit). */}
+      {isCustomer && (
+        <PartyLifetimeProfitSection partyId={partyId} />
+      )}
+
+      {/* §TIMELINE: Read-only composed timeline from existing domain records
+          (Invoice, Transaction, Message, Complaint, BehaviourHistory, Note). */}
+      {isCustomer && (
+        <PartyTimelineSection partyId={partyId} />
+      )}
+
+      {/* §REWARDS: Profit-based loyalty reward cycle. Shows progress toward
+          threshold + Give Reward action when unlocked. */}
+      {isCustomer && (
+        <PartyRewardsSection partyId={partyId} />
+      )}
+
+      {/* §PRODUCT-FEEDBACK: post-purchase review requests for this customer.
+          Shows pending/submitted counts, the feedback list (rating, comment,
+          status), and the "Request Feedback" action that schedules a new
+          request. Customers only — feedback is for buyers, not suppliers. */}
+      {isCustomer && (
+        <PartyFeedbackSection partyId={partyId} partyName={data.name} />
+      )}
+
+      {/* Transactions — multi-select + share (PRD Part 6 §2 + Part 7 §4) */}
+      <div className="rounded-2xl bg-card border border-border p-4 shadow-sm">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold">{t('khata.transactions')}</h3>
+          <div className="flex items-center gap-2">
+            {data.transactions.length > 0 && !multiSelectMode && (
+              <button
+                onClick={handleShareStatement}
+                className="text-[10px] font-medium text-primary bg-primary/10 px-2 py-1 rounded-lg flex items-center gap-1"
+              >
+                <FileText className="w-3 h-3" /> Share Statement
+              </button>
+            )}
+            <span className="text-xs text-muted-foreground">{data.transactions.length}</span>
+          </div>
+        </div>
+
+        {/* Multi-select control bar (PRD Part 7 §4.3)
+            §SELECTION-SYNC: The "Select All" button shows an ACTIVE state
+            (filled bg-primary text-primary-foreground) when ALL visible
+            transactions are selected. If the user unchecks even one item,
+            the button visually deactivates (bg-primary/10 text-primary). */}
+        {multiSelectMode && (
+          <div className="flex items-center justify-between gap-2 mb-3 p-2 rounded-xl bg-primary/5 border border-primary/20">
+            <div className="flex items-center gap-2">
+              {(() => {
+                const visibleTxIds = data.transactions.map((t) => t.id)
+                const allSelected = visibleTxIds.length > 0 && visibleTxIds.every((id) => selectedTxIds.has(id))
+                return (
+                  <button
+                    onClick={allSelected ? deselectAllTx : selectAllTx}
+                    className={`text-[10px] font-medium px-2.5 py-1.5 rounded-lg transition-colors ${
+                      allSelected
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-primary/10 text-primary hover:bg-primary/20'
+                    }`}
+                  >
+                    {allSelected ? '✓ All Selected' : 'Select All'}
+                  </button>
+                )
+              })()}
+              <button onClick={deselectAllTx} className="text-[10px] font-medium text-muted-foreground px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/80 transition-colors">Deselect All</button>
+            </div>
+            <span className="text-[10px] text-muted-foreground">{selectedTxIds.size} selected</span>
+          </div>
+        )}
+
+        {data.transactions.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">No transactions yet</p>
+        ) : (
+          <>
+            <div className="space-y-1 max-h-96 overflow-y-auto scroll-area">
+              {data.transactions.map((tx) => {
+                const isCredit = tx.type === 'credit'
+                const isSelected = selectedTxIds.has(tx.id)
+                return (
+                  <TxRow
+                    key={tx.id}
+                    tx={tx}
+                    isCredit={isCredit}
+                    isSelected={isSelected}
+                    multiSelectMode={multiSelectMode}
+                    currency={currency}
+                    onLongPress={() => { setMultiSelectMode(true); setSelectedTxIds(new Set([tx.id])) }}
+                    onToggle={() => toggleTxSelection(tx.id)}
+                  />
+                )
+              })}
+            </div>
+            {/* Share Selected button (PRD Part 7 §4.4) */}
+            {multiSelectMode && selectedTxIds.size > 0 && (
+              <button
+                onClick={handleShareSelected}
+                className="w-full mt-3 h-11 rounded-xl bg-primary text-primary-foreground font-medium text-sm flex items-center justify-center gap-2"
+              >
+                <Share2 className="w-4 h-4" /> Share Selected ({selectedTxIds.size})
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Invoices */}
+      {data.invoices.length > 0 && (
+        <div className="rounded-2xl bg-card border border-border p-4 shadow-sm">
+          <h3 className="text-sm font-semibold mb-3">{t('pp.invoices').replace('{n}', String(data.invoices.length))}</h3>
+          <div className="space-y-1 max-h-64 overflow-y-auto scroll-area">
+            {data.invoices.map((inv) => (
+              <button
+                key={inv.id}
+                onClick={() => {
+                  // §FIX: Close party overlay first so invoice overlay (z-70) is visible
+                  // (party overlay z-80 would cover invoice overlay z-70)
+                  setOverlayPartyId(null)
+                  setOverlayInvoiceId(inv.id)
+                }}
+                className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 text-left"
+              >
+                <Receipt className="w-4 h-4 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{inv.invoiceNumber}</p>
+                  <p className="text-[11px] text-muted-foreground">{formatDate(inv.createdAt)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-semibold tabular">{formatCurrency(inv.grandTotal, currency)}</p>
+                  <span className={`text-[10px] ${inv.status === 'paid' ? 'text-emerald-600' : inv.status === 'partial' ? 'text-amber-600' : 'text-red-600'}`}>
+                    {inv.status}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* PRD Part 24: Source Products section for suppliers */}
+      {isSupplier && supplierCatalog && supplierCatalog.length > 0 && (
+        <div className="rounded-2xl bg-card border border-border p-4 shadow-sm">
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
+            <Package className="w-4 h-4 text-purple-600" /> Source Products ({supplierCatalog.length})
+          </h3>
+          <div className="space-y-2 max-h-72 overflow-y-auto scroll-area">
+            {supplierCatalog.map((item) => (
+              <div key={item.id} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium truncate">{item.productName}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    Base: {formatCurrency(item.basePrice, currency)} · Landed: {formatCurrency(item.perUnitLandedCost || 0, currency)}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setCompareProduct(item.productName)
+                    setShowCompare(true)
+                  }}
+                  className="text-[10px] font-medium text-purple-600 bg-purple-100 dark:bg-purple-900/30 px-2 py-1 rounded-lg flex items-center gap-0.5 shrink-0"
+                >
+                  <Award className="w-3 h-3" /> Compare
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* §PARTY-NOTES-ACTIVATION: Dormant PartyNote feature now has a CRUD
+          API + dedicated UI. The old `showNote` state + `MessageSquare`
+          import were stubs that never rendered; they have been removed and
+          replaced with the self-contained PartyNotesSection, which fetches
+          and edits notes via /api/parties/[partyId]/notes. */}
+      <PartyNotesSection partyId={partyId} />
+
+      <TransactionForm open={showTxn} onOpenChange={setShowTxn} party={data} />
+      <SettleUpDialog open={showSettle} onOpenChange={setShowSettle} party={data} onConfirm={handleSettle} />
+      <PartyForm
+        open={!!editingPartyId}
+        onOpenChange={(o) => { if (!o) setEditingPartyId(null) }}
+        partyId={editingPartyId}
+      />
+      <ShareSheet
+        open={showShareSheet}
+        onClose={() => setShowShareSheet(false)}
+        templateSlot={shareSheetSlot ?? undefined}
+        customerName={data.name}
+        customerPhone={data.phone ?? null}
+        shareText={shareSheetText}
+        shareTitle={shareSheetTitle}
+      />
+
+      {/* Compare Suppliers Modal (PRD Part 24) */}
+      <CompareSuppliersModal
+        open={showCompare}
+        onOpenChange={(o) => setShowCompare(o)}
+        name={compareProduct}
+      />
+
+      {/* §GLOBAL-MODALS: Family / Partner / Fingerprint modals have been
+          MOVED to app-shell root. They are now triggered via global state
+          (openFamilyModal, openPartnerModal, openFingerprintModal) and
+          rendered at the app root via createPortal. This ensures they
+          always render on top of ALL overlays (party z-80, invoice z-70)
+          regardless of how deep the user navigated to get to this profile. */}
+    </motion.div>
+  )
+}
+
+
+function SettleUpDialog({
+  open, onOpenChange, party, onConfirm,
+}: { open: boolean; onOpenChange: (o: boolean) => void; party: Party; onConfirm: (amt: number) => void }) {
+  const { business } = useAppStore()
+  const currency = business?.currency || 'INR'
+  const [amount, setAmount] = useState(String(Math.abs(party.balance)))
+  const isReceivable = party.balance > 0
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <FormDialogContent aria-describedby={undefined} className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Settle Up</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div className="p-3 rounded-xl bg-muted/50 text-sm">
+            <p className="text-muted-foreground text-xs">
+              {isReceivable ? 'Customer will pay you' : 'You will pay supplier'}
+            </p>
+            <p className={`text-lg font-bold tabular ${isReceivable ? 'text-emerald-600' : 'text-red-600'}`}>
+              {formatCurrency(Math.abs(party.balance), currency)}
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Settlement Amount</Label>
+            <Input value={amount} onChange={(e) => setAmount(e.target.value)} className="h-11" inputMode="numeric" />
+          </div>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="h-11">Cancel</Button>
+          <Button className="h-11 flex-1" onClick={() => onConfirm(Number(amount) || 0)}>
+            Confirm Settlement
+          </Button>
+        </DialogFooter>
+      </FormDialogContent>
+    </Dialog>
+  )
+}
+
+// Transaction row with long-press multi-select (PRD Part 7 §4)
+// §FULL-ROW-CLICK: In multi-select mode, the ENTIRE row is clickable to
+// toggle selection — not just the tiny checkbox. The row gets a clear
+// background highlight when selected. In normal mode, long-press activates
+// multi-select mode.
+function TxRow({ tx, isCredit, isSelected, multiSelectMode, currency, onLongPress, onToggle }: {
+  tx: any
+  isCredit: boolean
+  isSelected: boolean
+  multiSelectMode: boolean
+  currency: string
+  onLongPress: () => void
+  onToggle: () => void
+}) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const longPressedRef = useRef(false)
+
+  const handleStart = () => {
+    longPressedRef.current = false
+    timerRef.current = setTimeout(() => {
+      longPressedRef.current = true
+      onLongPress()
+    }, 500)
+  }
+  const handleEnd = () => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
+    if (!longPressedRef.current && multiSelectMode) {
+      onToggle()
+    }
+  }
+
+  return (
+    <div
+      // §FULL-ROW-CLICK: In multi-select mode, onClick toggles selection.
+      // In normal mode, long-press (onTouchStart/onMouseDown timer) activates
+      // multi-select. The entire card is the tap target.
+      onClick={multiSelectMode ? onToggle : undefined}
+      onTouchStart={handleStart}
+      onTouchEnd={handleEnd}
+      onMouseDown={handleStart}
+      onMouseUp={handleEnd}
+      onMouseLeave={() => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null } }}
+      className={`flex items-center gap-3 p-2.5 rounded-lg transition-all select-none ${
+        multiSelectMode ? 'cursor-pointer' : ''
+      } ${
+        isSelected
+          ? 'bg-primary/15 border border-primary/40 ring-1 ring-primary/20'
+          : multiSelectMode
+          ? 'border border-transparent hover:bg-muted/50'
+          : 'hover:bg-muted/50'
+      }`}
+    >
+      {multiSelectMode && (
+        <span className={`w-5 h-5 rounded-md border-2 shrink-0 flex items-center justify-center transition-colors ${
+          isSelected ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/40 bg-background'
+        }`}>
+          {isSelected && <CheckCircle2 className="w-3 h-3" />}
+        </span>
+      )}
+      <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isCredit ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
+        {isCredit ? <ArrowDownLeft className="w-4 h-4 text-emerald-600" /> : <ArrowUpRight className="w-4 h-4 text-red-600" />}
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{tx.description || tx.type}</p>
+        <p className="text-[11px] text-muted-foreground">{formatDate(tx.createdAt)}</p>
+      </div>
+      <span className={`text-sm font-semibold tabular shrink-0 ${isCredit ? 'text-emerald-600' : 'text-red-600'}`}>
+        {isCredit ? '+' : '-'}{formatCurrency(tx.amount, currency)}
+      </span>
+    </div>
+  )
+}

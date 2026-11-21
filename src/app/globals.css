@@ -1,0 +1,319 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.75rem;
+  /* BizLedger light theme — emerald green primary, warm neutral background */
+  --background: oklch(0.97 0.005 145);
+  --foreground: oklch(0.18 0.02 150);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.02 150);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.02 150);
+  --primary: oklch(0.52 0.13 152);
+  --primary-foreground: oklch(0.99 0.01 150);
+  --secondary: oklch(0.95 0.01 145);
+  --secondary-foreground: oklch(0.25 0.02 150);
+  --muted: oklch(0.95 0.008 145);
+  --muted-foreground: oklch(0.5 0.015 150);
+  --accent: oklch(0.93 0.02 145);
+  --accent-foreground: oklch(0.25 0.02 150);
+  --destructive: oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.9 0.008 145);
+  --input: oklch(0.92 0.008 145);
+  --ring: oklch(0.52 0.13 152);
+  --chart-1: oklch(0.6 0.15 152);
+  --chart-2: oklch(0.65 0.16 70);
+  --chart-3: oklch(0.6 0.18 25);
+  --chart-4: oklch(0.55 0.13 230);
+  --chart-5: oklch(0.7 0.15 300);
+  --sidebar: oklch(0.985 0.005 145);
+  --sidebar-foreground: oklch(0.18 0.02 150);
+  --sidebar-primary: oklch(0.52 0.13 152);
+  --sidebar-primary-foreground: oklch(0.99 0.01 150);
+  --sidebar-accent: oklch(0.93 0.02 145);
+  --sidebar-accent-foreground: oklch(0.25 0.02 150);
+  --sidebar-border: oklch(0.9 0.008 145);
+  --sidebar-ring: oklch(0.52 0.13 152);
+
+  --color-success: oklch(0.52 0.13 152);
+  --color-danger: oklch(0.55 0.22 25);
+  --color-billing: oklch(0.65 0.16 70);
+}
+
+.dark {
+  /* Premium Dark Theme */
+  --background: oklch(0.14 0.015 160);
+  --foreground: oklch(0.97 0.005 150);
+  --card: oklch(0.19 0.015 160);
+  --card-foreground: oklch(0.97 0.005 150);
+  --popover: oklch(0.21 0.016 160);
+  --popover-foreground: oklch(0.97 0.005 150);
+  --primary: oklch(0.72 0.17 155);
+  --primary-foreground: oklch(0.13 0.02 155);
+  --secondary: oklch(0.25 0.014 160);
+  --secondary-foreground: oklch(0.97 0.005 150);
+  --muted: oklch(0.22 0.013 160);
+  --muted-foreground: oklch(0.72 0.012 150);
+  --accent: oklch(0.28 0.018 158);
+  --accent-foreground: oklch(0.97 0.005 150);
+  --destructive: oklch(0.68 0.21 22);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.72 0.17 155);
+  --chart-1: oklch(0.72 0.17 155);
+  --chart-2: oklch(0.75 0.16 70);
+  --chart-3: oklch(0.7 0.2 25);
+  --chart-4: oklch(0.68 0.15 230);
+  --chart-5: oklch(0.78 0.16 300);
+  --sidebar: oklch(0.18 0.014 160);
+  --sidebar-foreground: oklch(0.97 0.005 150);
+  --sidebar-primary: oklch(0.72 0.17 155);
+  --sidebar-primary-foreground: oklch(0.13 0.02 155);
+  --sidebar-accent: oklch(0.28 0.018 158);
+  --sidebar-accent-foreground: oklch(0.97 0.005 150);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.72 0.17 155);
+  --color-success: oklch(0.72 0.17 155);
+  --color-danger: oklch(0.68 0.21 22);
+  --color-billing: oklch(0.75 0.16 70);
+}
+
+/* PRD Part 14: Premium dark theme extras — glassmorphism, glow, radial bg */
+/* §FIX: Removed .dark [class*="bg-background"] from backdrop-filter selector.
+   It was too broad — applied backdrop-filter to the root <div className="bg-background">
+   which creates a containing block that breaks position:fixed on ALL descendants
+   (including the floating mic icon, which then scrolled with the page).
+   Now only header and nav get glassmorphism (they're position:fixed themselves). */
+.dark header,
+.dark nav {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.dark .bg-card,
+.dark [class*="rounded-2xl"][class*="bg-card"] {
+  box-shadow:
+    0 1px 0 0 oklch(1 0 0 / 4%) inset,
+    0 4px 12px -2px oklch(0 0 0 / 0.4),
+    0 8px 24px -4px oklch(0 0 0 / 0.3);
+}
+
+.dark button[class*="bg-primary"]:not([class*="hover\\:"]),
+.dark .bg-primary:not(.dark .bg-primary\/5) {
+  box-shadow:
+    0 0 0 1px oklch(0.7 0.15 152 / 0.4),
+    0 4px 16px -2px oklch(0.7 0.15 152 / 0.5),
+    0 0 24px -4px oklch(0.7 0.15 152 / 0.6);
+}
+
+.dark body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 0% 0%, oklch(0.7 0.15 152 / 0.08), transparent 40%),
+    radial-gradient(circle at 100% 100%, oklch(0.75 0.16 300 / 0.06), transparent 40%);
+  z-index: -1;
+}
+
+/* Dark scrollbar styling */
+.dark ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: oklch(0.14 0.015 160);
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: oklch(0.3 0.015 160 / 0.6);
+  border-radius: 9999px;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.4 0.018 160 / 0.8);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Tabular numbers for currency */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+  }
+
+  /* Premium Dark Mode Enhancements */
+  .dark body {
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, oklch(0.72 0.17 155 / 0.08), transparent),
+      radial-gradient(ellipse 60% 50% at 80% 120%, oklch(0.75 0.16 70 / 0.05), transparent) !important;
+    background-attachment: fixed;
+    background-color: oklch(0.14 0.015 160);
+  }
+  .dark header {
+    background: oklch(0.14 0.015 160 / 0.7) !important;
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom-color: oklch(1 0 0 / 8%) !important;
+  }
+  .dark nav[class*="fixed"][class*="bottom"] {
+    background: oklch(0.14 0.015 160 / 0.8) !important;
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-top-color: oklch(1 0 0 / 8%) !important;
+  }
+  .dark .bg-primary { box-shadow: 0 0 20px -4px oklch(0.72 0.17 155 / 0.4); }
+}
+
+/* Custom scrollbar */
+.scroll-area::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-area::-webkit-scrollbar-thumb {
+  background: oklch(0.7 0.01 150 / 0.3);
+  border-radius: 9999px;
+}
+.scroll-area::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.7 0.01 150 / 0.5);
+}
+
+/* Hide scrollbar for horizontal sliders */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Print styles — hide ALL app UI, show only invoice content (PRD Part 9 §3.1) */
+@media print {
+  body {
+    overflow: visible !important;
+    height: auto !important;
+    background: white !important;
+  }
+  /* Hide ALL app chrome — header, nav, FAB, search, etc */
+  .no-print,
+  .action-buttons,
+  header,
+  nav,
+  [class*="fixed"][class*="bottom"],
+  [class*="sticky"][class*="top"],
+  [class*="SideDrawer"],
+  [class*="FloatingInvoice"],
+  [class*="BottomTab"],
+  [class*="TopAppBar"],
+  [class*="SearchOverlay"],
+  [aria-label="Quick Actions"],
+  [aria-label="Search"],
+  [aria-label="Notifications"],
+  [aria-label="Choose language"],
+  [aria-label="Toggle theme"],
+  [aria-label="Start voice input"],
+  [aria-label="Stop voice input"] {
+    display: none !important;
+  }
+  /* Show only invoice content */
+  .invoice-content,
+  .print-area {
+    display: block !important;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+  }
+  /* Force black text for print */
+  * {
+    color: black !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+/* ─── §SKELETON-SHIMMER ──────────────────────────────────────────────────
+   Global skeleton upgrade: a light sweep travels across the bar (more
+   polished than the flat opacity pulse). Implemented as a moving gradient
+   mask so it works on ANY background the Skeleton component is placed on
+   (cards, popovers, dark mode). Reduced-motion users fall back to a plain
+   fade via the media query below. */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgb(255 255 255 / 0.22) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer {
+    animation: none;
+    background-image: none;
+  }
+}
