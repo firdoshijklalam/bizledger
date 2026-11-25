@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner'
 import { formatCurrency } from '@/lib/utils'
 import { toNumber } from '@/lib/numeric'
+import { useI18n } from '@/store/i18n-store'
 
 export function BillingTabs() {
   // §2: Read from cart-store (same as Quick Sale) — real-time sync
@@ -21,6 +22,7 @@ export function BillingTabs() {
   const setCarts = useCartStore(s => s.setCarts)
   const business = useAppStore(s => s.business)
   const navigateTo = useAppStore(s => s.navigateTo)
+  const { t } = useI18n()
 
   const [closeConfirmCartId, setCloseConfirmCartId] = useState<number | null>(null)
   const currency = business?.currency || 'INR'
@@ -32,13 +34,13 @@ export function BillingTabs() {
     // §2: Load this cart into Quick Sale and navigate there
     setActiveCartId(cart.id)
     navigateTo('sale-pad')
-    toast.success(`${cart.customer?.name || 'কার্ট'} লোড হয়েছে`)
+    toast.success(t('sale.draft.loaded').replace('{name}', cart.customer?.name || t('sale.cart.label')))
   }
 
   const handleRemoveDraft = (cartId: number) => {
     if (carts.length <= 1) {
       // Reset to empty (§STATE-LEAK-FIX: include all per-cart billing fields)
-      setCarts([{ id: 1, label: 'পার্সন ১', items: [], customer: null, paymentMode: 'cash', splitCash: '', splitUpi: '', splitChequeNo: '', discountMode: 'flat', discountValue: '', deliveryCharge: '', fulfillmentStatus: 'handed' }])
+      setCarts([{ id: 1, label: t('sale.cart.person').replace('{n}', '1'), items: [], customer: null, paymentMode: 'cash', splitCash: '', splitUpi: '', splitChequeNo: '', discountMode: 'flat', discountValue: '', deliveryCharge: '', fulfillmentStatus: 'handed' }])
       setActiveCartId(1)
     } else {
       const newCarts = carts.filter(c => c.id !== cartId)
@@ -55,7 +57,7 @@ export function BillingTabs() {
         {draftCarts.map((cart, idx) => {
           const label = cart.customer?.name
             ? (cart.customer.name.length > 10 ? cart.customer.name.substring(0, 10) + '…' : cart.customer.name)
-            : `পার্সন ${carts.indexOf(cart) + 1}`
+            : t('sale.cart.person').replace('{n}', String(carts.indexOf(cart) + 1))
           const itemCount = cart.items.length
           const cartTotal = cart.items.reduce((s, i) => s + toNumber(i.total), 0)
 
@@ -90,7 +92,7 @@ export function BillingTabs() {
 
         {/* Show empty state if no drafts */}
         {draftCarts.length === 0 && (
-          <p className="text-[11px] text-muted-foreground px-1 py-2">কোনো হোল্ড করা বিল নেই</p>
+          <p className="text-[11px] text-muted-foreground px-1 py-2">{t('bill.holdEmpty')}</p>
         )}
 
         {/* Add new draft button — creates new cart + opens Quick Sale */}
@@ -109,18 +111,18 @@ export function BillingTabs() {
       <AlertDialog open={!!closeConfirmCartId} onOpenChange={(o) => !o && setCloseConfirmCartId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>এই বিল বাতিল করবেন?</AlertDialogTitle>
+            <AlertDialogTitle>{t('bill.discardTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
-              এই হোল্ড করা বিলে {carts.find(c => c.id === closeConfirmCartId)?.items.length || 0}টি পণ্য আছে। এটি মুছে ফেললে আর ফিরে পাবেন না।
+              {t('bill.discardBody').replace('{n}', String(carts.find(c => c.id === closeConfirmCartId)?.items.length || 0))}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="h-11">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="h-11">{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               className="h-11 bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => { if (closeConfirmCartId) handleRemoveDraft(closeConfirmCartId) }}
             >
-              Discard Bill
+              {t('bill.discard')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

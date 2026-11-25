@@ -5,11 +5,13 @@ import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
 import type { Party, Transaction, Invoice, SupplierCatalogItem } from '@/lib/types'
 import { formatCurrency, formatDate, GRADE_META } from '@/lib/utils'
+import { paymentReminderMessage } from '@/lib/message-templates'
+import type { TemplateSlotId } from '@/store/message-template-store'
 import { motion } from 'framer-motion'
 import {
   ArrowLeft, Phone, Plus, Receipt, FileEdit, ArrowDownLeft, ArrowUpRight,
   CheckCircle2, X, Zap, Share2, FileText, Award, Package,
-  Users, Briefcase, Fingerprint, ShieldAlert, Loader2, AlertTriangle,
+  Users, Briefcase, Fingerprint, ShieldAlert, Loader2, AlertTriangle, MessageCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
@@ -27,6 +29,23 @@ import { PartyNotesSection } from './party-notes-section'
 // from the financial AI Credit Trust Score (TrustScoreCard). Rendered after
 // the trust score card so users see both signals together but clearly labeled.
 import { CustomerBehaviourSection } from './customer-behaviour-section'
+// §COMPLAINTS: Compact complaints summary on the customer profile.
+import { PartyComplaintsSection } from './party-complaints-section'
+// §FOLLOWUPS: Compact follow-up summary on the customer profile.
+import { PartyFollowupsSection } from './party-followups-section'
+// §MESSAGING: Compact conversations summary on the customer profile.
+import { PartyMessagesSection } from './party-messages-section'
+// §LIFETIME-PROFIT: Read-only customer profit derived from authoritative accounting.
+import { PartyLifetimeProfitSection } from './party-lifetime-profit-section'
+// §TIMELINE: Read-only composed timeline from existing domain records.
+import { PartyTimelineSection } from './party-timeline-section'
+// §REWARDS: Profit-based loyalty reward cycle.
+import { PartyRewardsSection } from './party-rewards-section'
+// §PRODUCT-FEEDBACK: first-class customer feedback request domain. Renders
+// after rewards so a merchant reviewing a customer's relationship sees
+// rewards first, then product feedback history + the "Request Feedback"
+// action. Customers only (feedback is for buyers, not suppliers).
+import { PartyFeedbackSection } from './party-feedback-section'
 import {
   Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -99,6 +118,9 @@ export function PartyDetail({ partyId }: { partyId: string }) {
   const [showShareSheet, setShowShareSheet] = useState(false)
   const [shareSheetText, setShareSheetText] = useState('')
   const [shareSheetTitle, setShareSheetTitle] = useState('')
+  // §CUSTOM-TEMPLATE-BADGE: which message-template slot generated the sheet's
+  // text (null for non-templated shares like statements) — drives the Custom chip.
+  const [shareSheetSlot, setShareSheetSlot] = useState<TemplateSlotId | null>(null)
 
   // Multi-select handlers (PRD Part 7 §4) — must be before early return
   const toggleTxSelection = useCallback((txId: string) => {
@@ -132,11 +154,12 @@ export function PartyDetail({ partyId }: { partyId: string }) {
     ]
     selected.forEach((tx) => {
       const isCredit = tx.type === 'credit'
-      lines.push(`${formatDate(tx.createdAt)} | ${isCredit ? 'পেলাম' : 'দিলাম'} | ${formatCurrency(tx.amount, currency)} | ${tx.description || ''}`)
+      lines.push(`${formatDate(tx.createdAt)} | ${isCredit ? t('txn.got') : t('txn.gave')} | ${formatCurrency(tx.amount, currency)} | ${tx.description || ''}`)
     })
     lines.push(``, `Total: ${selected.length} transactions`)
     setShareSheetText(lines.join('\n'))
     setShareSheetTitle(`${selected.length} Transactions Statement`)
+    setShareSheetSlot(null)
     setShowShareSheet(true)
   }
 
@@ -151,11 +174,36 @@ export function PartyDetail({ partyId }: { partyId: string }) {
     ]
     data.transactions.forEach((tx) => {
       const isCredit = tx.type === 'credit'
-      lines.push(`${formatDate(tx.createdAt)} | ${isCredit ? 'পেলাম' : 'দিলাম'} | ${formatCurrency(tx.amount, currency)} | ${tx.description || ''}`)
+      lines.push(`${formatDate(tx.createdAt)} | ${isCredit ? t('txn.got') : t('txn.gave')} | ${formatCurrency(tx.amount, currency)} | ${tx.description || ''}`)
     })
     lines.push(``, `Current Balance: ${formatCurrency(data.balance, currency)}`)
     setShareSheetText(lines.join('\n'))
     setShareSheetTitle('Full Ledger Statement')
+    setShareSheetSlot(null)
+    setShowShareSheet(true)
+  }
+
+  // §PAYMENT-REMINDER: one-tap balance-aware reminder. Reuses the dynamic
+  // ShareSheet (WhatsApp / Telegram / SMS / Copy — feature-phone friendly)
+  // with a polite prefilled message, so merchants never have to type a
+  // payment reminder by hand. Direction-aware:
+  //   - receivable (You'll Receive) → "you owe us ₹X, kindly pay"
+  //   - payable   (You'll Pay)      → "we owe you ₹X, settling soon"
+  // The message is localized via §LOCALIZED-MESSAGE-TEMPLATES (en/bn/hi);
+  // the business name signs it; currency comes from settings.
+  const handleSendReminder = () => {
+    if (!data) return
+    const text = paymentReminderMessage({
+      partyName: data.name,
+      amount: formatCurrency(Math.abs(data.balance), currency),
+      direction: data.balance > 0 ? 'receivable' : 'payable',
+      businessName: business?.name || 'BizLedger',
+    })
+    setShareSheetText(text)
+    setShareSheetTitle('Payment Reminder')
+    // §DIRECTION-AWARE-SLOT: the paymentReminderMessage generator resolves
+    // overrides from this slot — pass it so the sheet can badge custom wording.
+    setShareSheetSlot(data.balance > 0 ? 'paymentReceivable' : 'paymentPayable')
     setShowShareSheet(true)
   }
 
@@ -164,7 +212,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
     return (
       <div className="space-y-4 p-4">
         <button onClick={handleBack} className="flex items-center gap-2 text-sm text-muted-foreground">
-          <ArrowLeft className="w-4 h-4" /> পিছনে
+          <ArrowLeft className="w-4 h-4" /> {t('common.back')}
         </button>
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
@@ -176,13 +224,13 @@ export function PartyDetail({ partyId }: { partyId: string }) {
     return (
       <div className="space-y-4 p-4">
         <button onClick={handleBack} className="flex items-center gap-2 text-sm text-muted-foreground">
-          <ArrowLeft className="w-4 h-4" /> পিছনে
+          <ArrowLeft className="w-4 h-4" /> {t('common.back')}
         </button>
         <div className="flex flex-col items-center justify-center py-20 gap-3">
           <AlertTriangle className="w-10 h-10 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">ডেটা লোড করা যায়নি</p>
+          <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
           <button onClick={() => refetch()} className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium">
-            আবার চেষ্টা করুন
+            {t('common.retry')}
           </button>
         </div>
       </div>
@@ -269,7 +317,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
         {/* Balance */}
         <div className="mt-4 p-4 rounded-xl bg-muted/50">
           <p className="text-xs text-muted-foreground mb-0.5">
-            {isReceivable ? t('khata.outstanding') : isPayable ? 'আপনি দেবেন' : 'ব্যালেন্স'}
+            {isReceivable ? t('khata.outstanding') : isPayable ? t('khata.payables') : t('khata.balance')}
           </p>
           <p className={`text-2xl font-bold tabular ${isReceivable ? 'text-emerald-600' : isPayable ? 'text-red-600' : 'text-foreground'}`}>
             {formatCurrency(Math.abs(data.balance), currency)}
@@ -278,6 +326,20 @@ export function PartyDetail({ partyId }: { partyId: string }) {
             <p className="text-[11px] text-muted-foreground mt-1">
               Credit Limit: {formatCurrency(data.creditLimit, currency)}
             </p>
+          )}
+          {/* §PAYMENT-REMINDER CTA — only when there is something to remind
+              about (non-zero balance) and a channel exists (phone on file).
+              Emerald = WhatsApp association. Opens the dynamic ShareSheet
+              (WhatsApp / Telegram / SMS / Copy) with a prefilled polite
+              reminder — see handleSendReminder. */}
+          {data.balance !== 0 && data.phone && (
+            <button
+              onClick={handleSendReminder}
+              className="w-full mt-3 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all min-h-[44px]"
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>{t('khata.remind')}</span>
+            </button>
           )}
         </div>
 
@@ -373,6 +435,45 @@ export function PartyDetail({ partyId }: { partyId: string }) {
         <CustomerBehaviourSection partyId={partyId} />
       )}
 
+      {/* §COMPLAINTS: Compact complaints summary. Customers + suppliers
+          (any party with a relation) can have complaints. */}
+      <PartyComplaintsSection partyId={partyId} partyName={data.name} />
+
+      {/* §FOLLOWUPS: Compact follow-up summary. Shows active follow-ups,
+          overdue count, and a quick-create action. Placed after complaints
+          since follow-ups often relate to complaints (complaint_followup type). */}
+      <PartyFollowupsSection partyId={partyId} />
+
+      {/* §MESSAGING: Compact conversations summary. Shows recent conversations
+          + last message + unread count. Clicking opens the Messages view. */}
+      <PartyMessagesSection partyId={partyId} partyName={data.name} />
+
+      {/* §LIFETIME-PROFIT: Read-only profit derived from authoritative accounting.
+          Uses the same formula as Reports P&L (netRevenue - cogs = grossProfit). */}
+      {isCustomer && (
+        <PartyLifetimeProfitSection partyId={partyId} />
+      )}
+
+      {/* §TIMELINE: Read-only composed timeline from existing domain records
+          (Invoice, Transaction, Message, Complaint, BehaviourHistory, Note). */}
+      {isCustomer && (
+        <PartyTimelineSection partyId={partyId} />
+      )}
+
+      {/* §REWARDS: Profit-based loyalty reward cycle. Shows progress toward
+          threshold + Give Reward action when unlocked. */}
+      {isCustomer && (
+        <PartyRewardsSection partyId={partyId} />
+      )}
+
+      {/* §PRODUCT-FEEDBACK: post-purchase review requests for this customer.
+          Shows pending/submitted counts, the feedback list (rating, comment,
+          status), and the "Request Feedback" action that schedules a new
+          request. Customers only — feedback is for buyers, not suppliers. */}
+      {isCustomer && (
+        <PartyFeedbackSection partyId={partyId} partyName={data.name} />
+      )}
+
       {/* Transactions — multi-select + share (PRD Part 6 §2 + Part 7 §4) */}
       <div className="rounded-2xl bg-card border border-border p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
@@ -458,7 +559,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
       {/* Invoices */}
       {data.invoices.length > 0 && (
         <div className="rounded-2xl bg-card border border-border p-4 shadow-sm">
-          <h3 className="text-sm font-semibold mb-3">Invoices ({data.invoices.length})</h3>
+          <h3 className="text-sm font-semibold mb-3">{t('pp.invoices').replace('{n}', String(data.invoices.length))}</h3>
           <div className="space-y-1 max-h-64 overflow-y-auto scroll-area">
             {data.invoices.map((inv) => (
               <button
@@ -535,6 +636,7 @@ export function PartyDetail({ partyId }: { partyId: string }) {
       <ShareSheet
         open={showShareSheet}
         onClose={() => setShowShareSheet(false)}
+        templateSlot={shareSheetSlot ?? undefined}
         customerName={data.name}
         customerPhone={data.phone ?? null}
         shareText={shareSheetText}
@@ -569,7 +671,7 @@ function SettleUpDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <FormDialogContent className="max-w-md">
+      <FormDialogContent aria-describedby={undefined} className="max-w-md">
         <DialogHeader>
           <DialogTitle>Settle Up</DialogTitle>
         </DialogHeader>

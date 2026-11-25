@@ -474,8 +474,8 @@ async function main() {
   {
     // §SETUP: create a fresh party + behaviour + 2 history rows
     const rParty = (await db.party.create({ data: { businessId: TEST_BIZ_A, name: 'Reset Party', type: 'customer' } })).id
-    await callPut(behaviourRoute.PUT, rParty, { rating: 'GOOD', notes: 'first' })
-    await callPut(behaviourRoute.PUT, rParty, { rating: 'BEST', notes: 'second' })
+    await callPut(behaviourRoute.PUT, rParty, { rating: 'GOOD', notes: 'first', tags: ['Respectful'] })
+    await callPut(behaviourRoute.PUT, rParty, { rating: 'BEST', notes: 'second', tags: ['Respectful', 'Regular customer'] })
 
     // Verify precondition: 1 behaviour row + 2 history rows
     const behBefore = await db.customerBehaviour.findUnique({
@@ -508,8 +508,10 @@ async function main() {
     // Snapshot data fully retained
     assert(histAfter[0].rating === 'GOOD', `R7: history[0].rating=GOOD preserved (got ${histAfter[0].rating})`)
     assert(histAfter[0].notes === 'first', 'R8: history[0].notes preserved')
-    assert(histAfter[1].rating === 'BEST', `R9: history[1].rating=BEST preserved (got ${histAfter[1].rating})`)
-    assert(histAfter[1].notes === 'second', 'R10: history[1].notes preserved')
+    assert(histAfter[0].tags !== null && JSON.parse(histAfter[0].tags!).includes('Respectful'), 'R9: history[0].tags preserved')
+    assert(histAfter[1].rating === 'BEST', `R10: history[1].rating=BEST preserved (got ${histAfter[1].rating})`)
+    assert(histAfter[1].notes === 'second', 'R11: history[1].notes preserved')
+    assert(histAfter[1].tags !== null && JSON.parse(histAfter[1].tags!).length === 2, 'R12: history[1].tags preserved (2 tags)')
 
     // §PARTY-DELETE-CONSEQUENCE: deleting the Party still cascades to history
     // (documented in schema §PARTY-DELETE comment). Verify this known behavior.
@@ -517,7 +519,7 @@ async function main() {
     const histAfterPartyDelete = await db.customerBehaviourHistory.findMany({
       where: { businessId: TEST_BIZ_A, partyId: rParty },
     })
-    assert(histAfterPartyDelete.length === 0, 'R11: party deletion cascades to history (known consequence — see §PARTY-DELETE comment in schema)')
+    assert(histAfterPartyDelete.length === 0, 'R13: party deletion cascades to history (known consequence — see §PARTY-DELETE comment in schema)')
   }
 
   await cleanup()

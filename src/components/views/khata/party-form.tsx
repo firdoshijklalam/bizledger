@@ -118,7 +118,7 @@ export function PartyForm({ open, onOpenChange, partyId, onSuccess, initialType 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <FormDialogContent className="max-w-md">
+      <FormDialogContent aria-describedby={undefined} className="max-w-md">
         <DialogHeader>
           <DialogTitle>{partyId ? 'Edit Party' : t('khata.addParty')}</DialogTitle>
         </DialogHeader>
@@ -221,7 +221,7 @@ export function PartyForm({ open, onOpenChange, partyId, onSuccess, initialType 
                       balanceType === 'receivable' ? 'bg-emerald-500 text-white' : 'bg-muted'
                     }`}
                   >
-                    পাবো
+                    {t('khata.receivables')}
                   </button>
                   <button
                     onClick={() => setBalanceType('payable')}
@@ -229,7 +229,7 @@ export function PartyForm({ open, onOpenChange, partyId, onSuccess, initialType 
                       balanceType === 'payable' ? 'bg-red-500 text-white' : 'bg-muted'
                     }`}
                   >
-                    দেবো
+                    {t('khata.payables')}
                   </button>
                 </div>
               </div>

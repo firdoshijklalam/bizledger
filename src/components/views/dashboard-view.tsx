@@ -44,6 +44,7 @@ import {
   type DashboardCardDef,
 } from '@/components/shared/dashboard-card-management'
 import { ProfitLossDrilldownSheet } from '@/components/shared/profit-loss-drilldown-sheet'
+import { EodSummaryCard } from '@/components/views/dashboard/eod-summary-card'
 import {
   DashboardCustomizationSheet,
   SectionSettingsSheet,
@@ -126,7 +127,7 @@ interface ExtendedDashboardStats extends DashboardStats {
 // §TIME-RANGES: REMOVED — was a duplicate of DASHBOARD_RANGES from
 // src/lib/date-ranges.ts. Use DASHBOARD_RANGES instead. Single source of truth.
 
-const PIE_COLORS = ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6']
+const PIE_COLORS = ['#10b981', '#f59e0b', '#f97316', '#8b5cf6', '#ec4899', '#14b8a6']
 
 // §ROUTING (Phase 5 D1 fix): The lossy mapToHistoryRange() and
 // mapToReportsRange() functions have been REMOVED. They collapsed
@@ -612,6 +613,15 @@ export function DashboardView() {
   // §PHASE-5-D4: businessHealth card now opens Reports P&L with a special
   // 'health' tab signal so the Health Breakdown section is shown front-and-center.
   const allCardDefs: Array<DashboardCardDef & { recommended?: boolean; isTimeMetric?: boolean }> = [
+    // §FINANCIAL-COLOR-SEMANTICS (VLM QA finding): the VALUE color follows a
+    // semantic financial language that mirrors the chart legends (emerald =
+    // money in, red = money out/owed), NOT the card's decorative accent.
+    // Card bg + icon tint keep their per-metric identity; only the value
+    // text is semantic, so adjacent cards never show arbitrary different
+    // colors for the same kind of number (Total Sales vs Net Revenue).
+    // - income family (sales / revenue / collection / profit) → emerald
+    // - expense / payable → red
+    // - neutral counts (stock, health, invoices…) → card accent
     { id: 'totalReceivable', label: t('dash.receivable'), icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Money owed to you by customers', recommended: true,
       valueExtractor: (d) => d?.totalReceivable ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: () => { saveScrollPos('dashboard'); setKhataFilter('receivable'); setActiveView('khata') } },
@@ -624,16 +634,16 @@ export function DashboardView() {
     { id: 'lowStock', label: t('dash.lowStock'), icon: AlertTriangle, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', description: 'Products below stock threshold', recommended: true,
       valueExtractor: (d) => d?.lowStockCount ?? 0, formatValue: (v) => String(v),
       onClick: () => { saveScrollPos('dashboard'); setInventoryFilter('low-stock'); setActiveView('inventory') } },
-    { id: 'totalSales', label: 'Total Sales (incl. GST)', icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', description: 'Sales for selected period (incl. GST) — SUM(grandTotal)', recommended: true, isTimeMetric: true, defaultRange: '1d',
+    { id: 'totalSales', label: 'Total Sales (incl. GST)', icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Sales for selected period (incl. GST) — SUM(grandTotal)', recommended: true, isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeSales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: (ctx) => { saveScrollPos('dashboard'); setHistoryRangeContext(ctx); setActiveView('history') } },
-    { id: 'totalCollection', label: 'Total Collection', icon: ArrowDownRight, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', description: 'Collections for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
+    { id: 'totalCollection', label: 'Total Collection', icon: ArrowDownRight, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Collections for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeCollection ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: (ctx) => { saveScrollPos('dashboard'); setHistoryRangeContext(ctx); setActiveView('history') } },
     { id: 'totalExpense', label: 'Total Expense', icon: ArrowUpRight, tint: 'bg-red-500', bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-300', description: 'Expenses for selected period', recommended: true, isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeExpense ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
-    { id: 'totalRevenue', label: 'Net Revenue (excl. GST)', icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', description: 'Net revenue (pre-tax, post-discount) — SUM(subtotal − discountAmount)', recommended: true, isTimeMetric: true, defaultRange: '1d',
+    { id: 'totalRevenue', label: 'Net Revenue (excl. GST)', icon: Receipt, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Net revenue (pre-tax, post-discount) — SUM(subtotal − discountAmount)', recommended: true, isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeNetRevenue ?? d?.rangeSales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
     // §P16-STEP3.8.1-NEW-CARDS: Net Profit / Loss + Gross Profit.
@@ -643,17 +653,17 @@ export function DashboardView() {
     // Net Profit = Gross Profit - Authoritative Operating Expense (CAN BE NEGATIVE).
     // Gross Profit = Net Revenue - COGS (CAN BE NEGATIVE).
     // Negative values display with a minus sign — never silently converted to positive.
-    { id: 'netProfitLoss', label: 'Net Profit / Loss', icon: TrendingUp, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', description: 'Net profit/loss (Gross Profit − authoritative OpEx) — can be negative', recommended: true, isTimeMetric: true, defaultRange: '1d',
+    { id: 'netProfitLoss', label: 'Net Profit / Loss', icon: TrendingUp, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Net profit/loss (Gross Profit − authoritative OpEx) — can be negative', recommended: true, isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeNetProfit ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
     { id: 'grossProfit', label: 'Gross Profit', icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Gross profit (Net Revenue − COGS) — can be negative', isTimeMetric: true, defaultRange: '1d',
       valueExtractor: (d) => d?.rangeGrossProfit ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: (ctx) => { saveScrollPos('dashboard'); setReportsRangeContext(ctx); setActiveView('reports') } },
     // §ADDITIONAL-CARDS: Available but hidden by default
-    { id: 'totalCustomers', label: 'Total Customers', icon: Users, tint: 'bg-blue-500', bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-700 dark:text-blue-300', description: 'Total number of customers',
+    { id: 'totalCustomers', label: 'Total Customers', icon: Users, tint: 'bg-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300', description: 'Total number of customers',
       valueExtractor: (d) => d?.partyCount ?? 0, formatValue: (v) => String(v),
       onClick: () => { saveScrollPos('dashboard'); setKhataFilter('all'); setActiveView('khata') } },
-    { id: 'totalProducts', label: 'Total Products', icon: Package, tint: 'bg-indigo-500', bg: 'bg-indigo-50 dark:bg-indigo-950/30', text: 'text-indigo-700 dark:text-indigo-300', description: 'Total number of products',
+    { id: 'totalProducts', label: 'Total Products', icon: Package, tint: 'bg-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300', description: 'Total number of products',
       valueExtractor: (d) => d?.productCount ?? 0, formatValue: (v) => String(v),
       onClick: () => { saveScrollPos('dashboard'); setActiveView('inventory') } },
     { id: 'totalInvoices', label: 'Total Invoices', icon: FileText, tint: 'bg-cyan-500', bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-700 dark:text-cyan-300', description: 'Total invoices issued',
@@ -662,7 +672,7 @@ export function DashboardView() {
     { id: 'stockValue', label: 'Stock Value', icon: Boxes, tint: 'bg-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300', description: 'Total value of current inventory',
       valueExtractor: (d) => d?.inventoryValue ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: () => { saveScrollPos('dashboard'); setActiveView('inventory') } },
-    { id: 'todaySales', label: "Today's Sales", icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300', description: 'Sales for today only',
+    { id: 'todaySales', label: "Today's Sales", icon: Wallet, tint: 'bg-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Sales for today only',
       valueExtractor: (d) => d?.todaySales ?? 0, formatValue: (v, c) => formatCurrency(v, c),
       onClick: () => { saveScrollPos('dashboard'); setHistoryRangeContext({ range: '1d' }); setActiveView('history') } },
     { id: 'monthlyRevenue', label: 'Monthly Revenue', icon: TrendingUp, tint: 'bg-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-700 dark:text-emerald-300', description: 'Revenue this month (incl. GST)',
@@ -799,7 +809,7 @@ export function DashboardView() {
     // §STEP-4E: New actions backed by existing routes/views
     { label: 'View Invoices', icon: FileText, view: 'billing' as const, action: 'view-invoices' as const, color: 'text-purple-600 bg-purple-50 dark:bg-purple-950/30' },
     { label: 'Low Stock', icon: AlertTriangle, view: 'inventory' as const, action: 'low-stock' as const, color: 'text-red-600 bg-red-50 dark:bg-red-950/30' },
-    { label: 'Add Customer', icon: UserPlus, view: 'khata' as const, action: 'add-customer' as const, color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/30' },
+    { label: 'Add Customer', icon: UserPlus, view: 'khata' as const, action: 'add-customer' as const, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30' },
     { label: 'Add Supplier', icon: Truck, view: 'khata' as const, action: 'add-supplier' as const, color: 'text-cyan-600 bg-cyan-50 dark:bg-cyan-950/30' },
   ]
   // §STEP-1B: Use getOrderedQuickActions to respect saved order.
@@ -846,6 +856,9 @@ export function DashboardView() {
   const renderSection = (id: string): React.ReactNode => {
     if (!isSectionVisible(dashSectionConfig, id)) return null
     switch (id) {
+      // §EOD-SUMMARY: shareable "Day Summary" snapshot card (today IST)
+      case 'daySummary':
+        return <EodSummaryCard />
       case 'summaryCards':
         return (
           <>
@@ -873,12 +886,22 @@ export function DashboardView() {
                 const Icon = def.icon
                 const value = def.valueExtractor(data)
                 const formatted = def.formatValue(value, currency)
+                // §VALUE-AWARE-COLOR: negative values (e.g., negative receivable
+                // from advance payments, or a loss) render RED + font-extrabold +
+                // a TrendingDown glyph so problems are instantly recognizable —
+                // never silently themed to the card's accent color (VLM QA
+                // finding: red alone wasn't emphatic enough next to positives).
+                // Positives keep the card color.
+                const valueColor = value < 0 ? 'text-red-600 dark:text-red-400 font-extrabold' : def.text
                 return (
                   <motion.button key={config.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} onClick={() => def.onClick({ range: '1d' })} aria-label={def.label} className="text-left focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-2xl">
-                    <Card className={`p-4 ${def.bg} border-none hover:shadow-md transition-shadow h-full active:scale-[0.98]`}>
+                    <Card className={`p-4 ${def.bg} border-none hover:shadow-md transition-shadow h-full active:scale-[0.98] ring-1 ring-black/[0.04] dark:ring-white/[0.06]`}>
                       <div className="flex items-start justify-between mb-2"><span className={`w-8 h-8 rounded-lg ${def.tint} text-white flex items-center justify-center`}><Icon className="w-4 h-4" /></span></div>
                       <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{def.label}</p>
-                      <p className={`text-base font-bold tabular ${def.text}`}>{formatted}</p>
+                      <p className={`text-lg font-bold tabular tracking-tight ${valueColor}`}>
+                        {value < 0 && <TrendingDown className="w-3.5 h-3.5 inline-block mr-0.5 -mt-1 align-middle" aria-hidden="true" />}
+                        {formatted}
+                      </p>
                     </Card>
                   </motion.button>
                 )
@@ -1002,7 +1025,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#14b8a6', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" name="Revenue" />
                     <Area type="monotone" dataKey="expense" stroke="#f87171" strokeWidth={2} fill="url(#exp)" name="Expense" />
                   </AreaChart>
@@ -1011,7 +1034,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#14b8a6', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     <Bar dataKey="revenue" fill="#10b981" radius={[3, 3, 0, 0]} name="Revenue" />
                     <Bar dataKey="expense" fill="#f87171" radius={[3, 3, 0, 0]} name="Expense" />
                   </BarChart>
@@ -1021,7 +1044,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#14b8a6', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     {/* §FIX-3: Series names updated to match 'Net Cash Flow' semantics */}
                     <Line type="monotone" dataKey="profitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Net" />
                     <Line type="monotone" dataKey="lossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Outflow" />
@@ -1032,7 +1055,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#14b8a6', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     {/* §FIX-3: Series names updated to match 'Net Cash Flow' semantics */}
                     <Bar dataKey="profitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Net" />
                     <Bar dataKey="lossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Outflow" />
@@ -1045,7 +1068,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                    <Tooltip content={<ProfitLossTooltip currency={currency} onViewDetails={(fullDate) => { const idx = data.salesTrend.findIndex(b => b.fullDate === fullDate); if (idx >= 0) setDrilldownBucket({ index: idx, fullDate }) }} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Tooltip content={<ProfitLossTooltip currency={currency} onViewDetails={(fullDate) => { const idx = data.salesTrend.findIndex(b => b.fullDate === fullDate); if (idx >= 0) setDrilldownBucket({ index: idx, fullDate }) }} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#14b8a6', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     <Line type="monotone" dataKey="netProfitVal" stroke="#10b981" strokeWidth={2} dot={false} name="Profit" />
                     <Line type="monotone" dataKey="netLossVal" stroke="#f87171" strokeWidth={2} dot={false} name="Loss" />
                   </RechartsLineChart>
@@ -1055,7 +1078,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                    <Tooltip content={<ProfitLossTooltip currency={currency} onViewDetails={(fullDate) => { const idx = data.salesTrend.findIndex(b => b.fullDate === fullDate); if (idx >= 0) setDrilldownBucket({ index: idx, fullDate }) }} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Tooltip content={<ProfitLossTooltip currency={currency} onViewDetails={(fullDate) => { const idx = data.salesTrend.findIndex(b => b.fullDate === fullDate); if (idx >= 0) setDrilldownBucket({ index: idx, fullDate }) }} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#14b8a6', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     <Bar dataKey="netProfitVal" fill="#10b981" radius={[3, 3, 0, 0]} name="Profit" />
                     <Bar dataKey="netLossVal" fill="#f87171" radius={[3, 3, 0, 0]} name="Loss" />
                   </BarChart>
@@ -1066,7 +1089,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#14b8a6', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     <Line type="monotone" dataKey="cashIn" stroke="#10b981" strokeWidth={2} dot={false} name="Cash In" />
                     <Line type="monotone" dataKey="cashOut" stroke="#f87171" strokeWidth={2} dot={false} name="Cash Out" />
                   </RechartsLineChart>
@@ -1077,7 +1100,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#14b8a6', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     <Bar dataKey="cashIn" fill="#10b981" radius={[3, 3, 0, 0]} name="Cash In" />
                     <Bar dataKey="cashOut" fill="#f87171" radius={[3, 3, 0, 0]} name="Cash Out" />
                   </BarChart>
@@ -1087,7 +1110,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#14b8a6', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     <Line type="monotone" dataKey="collected" stroke="#10b981" strokeWidth={2} dot={false} name="Collected" />
                     <Line type="monotone" dataKey="creditGiven" stroke="#ef4444" strokeWidth={2} dot={false} name="New Credit" />
                   </RechartsLineChart>
@@ -1097,7 +1120,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#14b8a6', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     <Bar dataKey="collected" fill="#10b981" radius={[3, 3, 0, 0]} name="Collected" />
                     <Bar dataKey="creditGiven" fill="#ef4444" radius={[3, 3, 0, 0]} name="New Credit" />
                   </BarChart>
@@ -1115,7 +1138,7 @@ export function DashboardView() {
                     <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.005 145)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                     <YAxis type="number" domain={[0, 'auto']} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={32} tickFormatter={formatChartAxisValue} allowDecimals={false} />
-                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                    <Tooltip content={<CustomTooltip currency={currency} />} allowEscapeViewBox={{ x: false, y: false }} cursor={{ stroke: '#14b8a6', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     <Area type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} fill="url(#rev)" name="Revenue" />
                   </AreaChart>
                 )}
@@ -2548,13 +2571,13 @@ function OnlineOrdersList({ currency, onNavigate }: { currency: string; onNaviga
         <div key={order.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted">
           <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
             order.status === 'pending' ? 'bg-amber-100 dark:bg-amber-900/30' :
-            order.status === 'confirmed' ? 'bg-blue-100 dark:bg-blue-900/30' :
+            order.status === 'confirmed' ? 'bg-teal-100 dark:bg-teal-900/30' :
             order.status === 'delivered' ? 'bg-emerald-100 dark:bg-emerald-900/30' :
             'bg-red-100 dark:bg-red-900/30'
           }`}>
             <Package className={`w-4 h-4 ${
               order.status === 'pending' ? 'text-amber-600' :
-              order.status === 'confirmed' ? 'text-blue-600' :
+              order.status === 'confirmed' ? 'text-teal-600' :
               order.status === 'delivered' ? 'text-emerald-600' :
               'text-red-600'
             }`} />
@@ -2622,7 +2645,7 @@ function TimeMetricCard({
   const rangeLabel = dashboardRangeLabel(range, customStart, customEnd)
 
   return (
-    <Card className={`p-4 ${bg} border-none hover:shadow-md transition-shadow h-full relative`}>
+    <Card className={`p-4 ${bg} border-none hover:shadow-md transition-shadow h-full relative ring-1 ring-black/[0.04] dark:ring-white/[0.06]`}>
       {/* Dropdown trigger — top-right corner. z-20 sits above the card button.
           stopPropagation on the wrapper prevents the card's onClick from
           firing when the dropdown trigger is tapped. */}
@@ -2657,8 +2680,23 @@ function TimeMetricCard({
           </span>
         </div>
         <p className="text-[11px] text-muted-foreground leading-tight mb-0.5">{label}</p>
-        <p className={`text-base font-bold tabular ${text}`}>{formatCurrency(value, currency)}</p>
-        <p className="text-[9px] text-muted-foreground/70 mt-0.5 truncate">{rangeLabel}</p>
+        {/* §VALUE-AWARE-COLOR (VLM QA findings): time metrics are all money.
+            - NEGATIVE (loss / negative profit) → RED — losses must be instantly
+              recognizable, never silently themed to the card's accent color.
+            - ZERO (no activity in the range) → MUTED — visually distinct from
+              active positive numbers, reads as "nothing happened yet".
+            - POSITIVE → emerald (income semantic — see §FINANCIAL-COLOR-SEMANTICS). */}
+        <p
+          className={`text-lg font-bold tabular tracking-tight ${
+            value < 0 ? 'text-red-600 dark:text-red-400 font-extrabold' : value === 0 ? 'text-muted-foreground' : text
+          }`}
+        >
+          {value < 0 && (
+            <TrendingDown className="w-3.5 h-3.5 inline-block mr-0.5 -mt-1 align-middle" aria-hidden="true" />
+          )}
+          {formatCurrency(value, currency)}
+        </p>
+        <p className="text-[10px] text-muted-foreground/80 mt-0.5 truncate">{rangeLabel}</p>
       </button>
 
       {/* Custom date picker — inline when Custom selected */}

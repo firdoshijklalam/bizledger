@@ -7,7 +7,7 @@ import type { Product } from '@/lib/types'
 import { formatCurrency } from '@/lib/utils'
 import { toNumber } from '@/lib/numeric'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Package, Plus, AlertTriangle, Search, Trash2, Tag, TrendingUp, X } from 'lucide-react'
+import { Package, Plus, AlertTriangle, Search, Trash2, Tag, TrendingUp, X, Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState, LoadingState } from '@/components/shared/states'
@@ -87,6 +87,20 @@ export function InventoryView() {
   }, [inventoryStatsRange, setInventoryStatsRange, setStatsRange])
 
   const { data: rawProducts, loading, refetch } = useFetch<Product[]>('/api/products', [])
+  // §FEEDBACK-RATING-BADGE: business-wide per-product feedback rollup — ONE
+  // request (not N per-product requests) powers the ★ badges on the product
+  // list cards. Plain-object response (no items/hasMore envelope) so useFetch
+  // returns it as-is. Products without feedback simply don't get a badge.
+  const { data: feedbackStats } = useFetch<{
+    products: Array<{ productId: string; avgRating: number | null; reviews: number; submitted: number }>
+  } | null>('/api/feedback/analytics', [])
+  const ratingByProduct = useMemo(() => {
+    const m = new Map<string, { avgRating: number; reviews: number }>()
+    for (const p of feedbackStats?.products ?? []) {
+      if (p.avgRating != null && p.reviews > 0) m.set(p.productId, { avgRating: p.avgRating, reviews: p.reviews })
+    }
+    return m
+  }, [feedbackStats])
   // §STEP-4B-VIEW-ALL: Fetch authoritative per-product sales stats when the
   // user entered via Dashboard Top Products / Top Revenue Products View-All.
   // Reuses /api/dashboard with ?includeAllProductStats=true — same source as
@@ -332,7 +346,31 @@ export function InventoryView() {
                           {isLow ? <AlertTriangle className="w-5 h-5 text-orange-600" /> : <Package className="w-5 h-5 text-amber-600" />}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold truncate">{p.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-sm font-semibold truncate">{p.name}</p>
+                            {/* §FEEDBACK-RATING-BADGE: ★ avg-rating chip from the
+                                business-wide analytics rollup. Only products with
+                                at least one rated review get a badge; amber for
+                                4★+, rose for under 3★ (needs attention). */}
+                            {(() => {
+                              const r = ratingByProduct.get(p.id)
+                              if (!r) return null
+                              const low = r.avgRating < 3
+                              return (
+                                <span
+                                  className={`shrink-0 inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums ${
+                                    low
+                                      ? 'bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300'
+                                      : 'bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300'
+                                  }`}
+                                  aria-label={`Average rating ${r.avgRating.toFixed(1)} of 5 from ${r.reviews} review${r.reviews === 1 ? '' : 's'}`}
+                                >
+                                  <Star className={`w-2.5 h-2.5 ${low ? 'fill-rose-500 text-rose-500' : 'fill-amber-400 text-amber-400'}`} aria-hidden="true" />
+                                  {r.avgRating.toFixed(1)}
+                                </span>
+                              )
+                            })()}
+                          </div>
                           <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
                             {p.category && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground flex items-center gap-0.5">

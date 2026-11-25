@@ -3,11 +3,13 @@
 import { useAppStore } from '@/store/app-store'
 import { useI18n } from '@/store/i18n-store'
 import { useTheme } from 'next-themes'
-import { Search, Bell, Moon, Sun, Languages, BookOpen } from 'lucide-react'
+import { Search, Bell, Moon, Sun, Languages, BookOpen, CheckCircle2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useMounted } from '@/hooks/use-mounted'
 import { useNotificationStore } from '@/store/notification-store'
+import { apiPut } from '@/hooks/use-fetch'
 // §1: GlobalVoiceInput removed — replaced by draggable FloatingKeyboardMic
 
 const VIEW_TITLES: Record<string, string> = {
@@ -94,17 +96,56 @@ export function TopAppBar() {
             )}
           </Button>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-10 w-10 rounded-full"
-            onClick={() => setLanguage(language === 'en' ? 'bn' : language === 'bn' ? 'hi' : 'en')}
-            aria-label="Toggle language"
-          >
-            <span className="text-xs font-bold">
-              {language === 'en' ? 'বাং' : language === 'bn' ? 'हि' : 'EN'}
-            </span>
-          </Button>
+          {/* §LANGUAGE-PICKER: explicit 3-way picker (replaces the blind
+              en→bn→hi cycle toggle). Users now SEE which languages exist and
+              which is active — critical now that every core view is fully
+              localized. Tapping the current language closes the popover. */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 rounded-full"
+                aria-label={t('lang.pick')}
+              >
+                <span className="text-xs font-bold text-primary">
+                  {language === 'en' ? 'EN' : language === 'bn' ? 'বাং' : 'हि'}
+                </span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-44 p-1.5">
+              <p className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {t('lang.pick')}
+              </p>
+              {(['en', 'bn', 'hi'] as const).map((lang) => (
+                <button
+                  key={lang}
+                  onClick={() => {
+                    setLanguage(lang)
+                    // §LANGUAGE-PERSIST-SYNC (Task 10 bug fix): app-shell
+                    // hydrates the language FROM /api/app-settings on every
+                    // load, so a picker choice that only sets the local store
+                    // was silently reverted on the next reload. Fire-and-forget
+                    // the same PUT the Settings picker does (partial body —
+                    // the route upserts, undefined fields are left unchanged).
+                    // Failure is non-fatal: local choice still applies this
+                    // session; worst case it reverts after reload, exactly the
+                    // pre-fix behavior.
+                    apiPut('/api/app-settings', { language: lang }).catch(() => {})
+                  }}
+                  className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-sm transition-colors ${
+                    language === lang
+                      ? 'bg-primary/10 text-primary font-semibold'
+                      : 'hover:bg-muted text-foreground'
+                  }`}
+                  aria-pressed={language === lang}
+                >
+                  <span>{t('lang.' + lang)}</span>
+                  {language === lang && <CheckCircle2 className="w-4 h-4" />}
+                </button>
+              ))}
+            </PopoverContent>
+          </Popover>
 
           {mounted && (
             <Button

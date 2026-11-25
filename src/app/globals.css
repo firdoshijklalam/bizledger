@@ -262,7 +262,7 @@
   [aria-label="Quick Actions"],
   [aria-label="Search"],
   [aria-label="Notifications"],
-  [aria-label="Toggle language"],
+  [aria-label="Choose language"],
   [aria-label="Toggle theme"],
   [aria-label="Start voice input"],
   [aria-label="Stop voice input"] {
@@ -285,5 +285,35 @@
     box-shadow: none !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+}
+
+/* ─── §SKELETON-SHIMMER ──────────────────────────────────────────────────
+   Global skeleton upgrade: a light sweep travels across the bar (more
+   polished than the flat opacity pulse). Implemented as a moving gradient
+   mask so it works on ANY background the Skeleton component is placed on
+   (cards, popovers, dark mode). Reduced-motion users fall back to a plain
+   fade via the media query below. */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgb(255 255 255 / 0.22) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer {
+    animation: none;
+    background-image: none;
   }
 }

@@ -4,13 +4,14 @@ import { useAppStore, type OutstandingTab, type OutstandingGradeFilter, type Par
 import { useI18n } from '@/store/i18n-store'
 import { useFetch } from '@/hooks/use-fetch'
 import { formatCurrency, formatDate, GRADE_META } from '@/lib/utils'
+import { paymentReminderMessage } from '@/lib/message-templates'
 import { toNumber } from '@/lib/numeric'
 import { motion } from 'framer-motion'
 import {
   FileText, FileSpreadsheet, Printer, TrendingUp, TrendingDown,
   IndianRupee, Users, Package, BarChart3, AlertCircle, Receipt,
   Megaphone, Medal, ShoppingCart, Gift, Bell, Ban, ChevronDown, ChevronUp,
-  X, Heart,
+  X, Heart, Star,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -22,6 +23,7 @@ import {
 } from 'recharts'
 import { useMemo, useState, useEffect } from 'react'
 import { buildReportCsv, computeRangeDates, computeGstRangeDates, type ReportType } from '@/lib/reports-csv'
+import { FeedbackAnalytics } from './reports/feedback-analytics'
 import {
   computeRangeBounds,
   dashboardRangeLabel,
@@ -81,7 +83,7 @@ export function ReportsView() {
   // Health Breakdown section (rendered inside the P&L tab). It's NOT a real
   // report tab — set as 'pl' but a separate `showHealthBreakdown` flag controls
   // the section's prominent display.
-  const [activeReport, setActiveReport] = useState<'pl' | 'gst' | 'party' | 'outstanding' | 'stock' | 'grade'>('pl')
+  const [activeReport, setActiveReport] = useState<'pl' | 'gst' | 'party' | 'outstanding' | 'stock' | 'grade' | 'feedback'>('pl')
   // §PHASE-5-D4: When the dashboard Business Health card is clicked, this flag
   // is set true on mount to expand the Health Breakdown section prominently.
   const [showHealthBreakdown, setShowHealthBreakdown] = useState(false)
@@ -393,6 +395,7 @@ export function ReportsView() {
     { id: 'outstanding', label: t('rep.outstanding'), icon: AlertCircle },
     { id: 'stock', label: t('rep.stockAgeing'), icon: Package },
     { id: 'grade', label: t('rep.gradeDist'), icon: BarChart3 },
+    { id: 'feedback', label: t('rep.feedback'), icon: Star },
   ] as const
 
   // P&L: bar chart data with net loss highlight (uses netRevenue, not gross)
@@ -418,14 +421,21 @@ export function ReportsView() {
   // Grade distribution with parties (PRD Part 19 §6)
   const gradeParties = (grade: string) => data.partyLedger.filter((p) => p.grade === grade)
 
-  // Customer Quality actions
-  const handleRemind = (phone: string | null | undefined, name: string) => {
+  // Customer Quality actions — §LOCALIZED: WhatsApp reminder text now follows
+  // the app language (was hardcoded Bengali). Receivables rows = money owed TO
+  // the merchant, so the direction-aware receivable template fits.
+  const handleRemind = (phone: string | null | undefined, name: string, amount: number) => {
     if (!phone) {
       toast.error(`${name} has no phone number`)
       return
     }
     const cleaned = phone.replace(/[^0-9]/g, '').replace(/^0/, '91')
-    const text = encodeURIComponent(`প্রিয় ${name}, আপনার বকেয়া পেমেন্ট সম্পর্কে অনুরোধ করা হলো। ধন্যবাদ 🙏`)
+    const text = encodeURIComponent(paymentReminderMessage({
+      partyName: name,
+      amount: formatCurrency(Math.abs(amount), currency),
+      direction: amount >= 0 ? 'receivable' : 'payable',
+      businessName: business?.name || 'BizLedger',
+    }))
     window.open(`https://wa.me/${cleaned}?text=${text}`, '_blank')
     toast.success(`Reminder sent to ${name}`)
   }
@@ -459,15 +469,21 @@ export function ReportsView() {
 
       {/* §EXPORT-BUTTONS: Only 2 buttons — "Export CSV" (contextual per-report CSV download)
           and "Print" (browser print-to-PDF). The old "Download PDF" button was removed
-          because it was a duplicate of Print (both called window.print()). */}
-      <div className="grid grid-cols-2 gap-2 action-buttons">
-        <Button variant="outline" onClick={() => exportExcel(REPORTS.find((r) => r.id === activeReport)!.label)} className="h-11 flex-col text-xs">
-          <FileSpreadsheet className="w-4 h-4 mb-0.5" /> {t('rep.exportExcel')}
-        </Button>
-        <Button variant="outline" onClick={() => window.print()} className="h-11 flex-col text-xs">
-          <Printer className="w-4 h-4 mb-0.5" /> {t('rep.print')}
-        </Button>
-      </div>
+          because it was a duplicate of Print (both called window.print()).
+          §FEEDBACK-TAB: hidden here for the feedback tab — FeedbackAnalytics
+          renders its own export row because it owns the analytics fetch
+          (different data source from /api/reports; buildFeedbackCsv consumes
+          the analytics payload directly). */}
+      {activeReport !== 'feedback' && (
+        <div className="grid grid-cols-2 gap-2 action-buttons">
+          <Button variant="outline" onClick={() => exportExcel(REPORTS.find((r) => r.id === activeReport)!.label)} className="h-11 flex-col text-xs">
+            <FileSpreadsheet className="w-4 h-4 mb-0.5" /> {t('rep.exportExcel')}
+          </Button>
+          <Button variant="outline" onClick={() => window.print()} className="h-11 flex-col text-xs">
+            <Printer className="w-4 h-4 mb-0.5" /> {t('rep.print')}
+          </Button>
+        </div>
+      )}
 
       {/* Report content */}
       <motion.div
@@ -753,9 +769,9 @@ export function ReportsView() {
 
               {/* CGST/SGST/IGST split (PRD Part 19 §2) */}
               <div className="grid grid-cols-2 gap-2 mb-4">
-                <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30">
+                <div className="p-3 rounded-xl bg-teal-50 dark:bg-teal-950/30">
                   <p className="text-[10px] text-muted-foreground">Intra-State (CGST+SGST)</p>
-                  <p className="text-sm font-bold tabular text-blue-700 dark:text-blue-300">{formatCurrency(intraStateSplit, currency)}</p>
+                  <p className="text-sm font-bold tabular text-teal-700 dark:text-teal-300">{formatCurrency(intraStateSplit, currency)}</p>
                   <p className="text-[9px] text-muted-foreground">CGST 9% + SGST 9%</p>
                 </div>
                 <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/30">
@@ -925,13 +941,13 @@ export function ReportsView() {
                 onClick={() => setOutstandingTab('receivables')}
                 className={`flex-1 py-2 rounded-md text-xs font-medium ${outstandingTab === 'receivables' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
               >
-                Receivables (পাবো)
+                {t('rep.totalReceivable')}
               </button>
               <button
                 onClick={() => setOutstandingTab('payables')}
                 className={`flex-1 py-2 rounded-md text-xs font-medium ${outstandingTab === 'payables' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
               >
-                Payables (দেবো)
+                {t('rep.totalPayable')}
               </button>
             </div>
 
@@ -994,7 +1010,7 @@ export function ReportsView() {
                             <span className="font-semibold tabular text-emerald-600">{formatCurrency(r.amount, currency)}</span>
                             {/* Remind button (megaphone) (PRD Part 19 §4) */}
                             <button
-                              onClick={() => handleRemind(r.phone, r.name)}
+                              onClick={() => handleRemind(r.phone, r.name, r.amount)}
                               className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center text-amber-600"
                               aria-label="Send reminder"
                             >
@@ -1188,7 +1204,7 @@ export function ReportsView() {
                                   </button>
                                   <button
                                     onClick={() => handleOfferGreet(p.name, 'greet')}
-                                    className="text-[9px] px-2 py-1 rounded-md bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 flex items-center gap-0.5"
+                                    className="text-[9px] px-2 py-1 rounded-md bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 flex items-center gap-0.5"
                                   >
                                     <Bell className="w-2.5 h-2.5" /> Greet
                                   </button>
@@ -1222,6 +1238,11 @@ export function ReportsView() {
             </div>
           </Card>
         )}
+
+        {/* §FEEDBACK-ANALYTICS-TAB: business-wide product feedback analytics.
+            Self-contained component — owns its own /api/feedback/analytics
+            fetch + its own Export CSV row (buildFeedbackCsv). */}
+        {activeReport === 'feedback' && <FeedbackAnalytics />}
       </motion.div>
 
       {/* Recent Invoices section REMOVED from all tabs (PRD Part 19 §7) */}

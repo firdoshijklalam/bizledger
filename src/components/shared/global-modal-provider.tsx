@@ -122,7 +122,7 @@ function GlobalFingerprintRegisterDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <FormDialogContent className="max-w-md">
+      <FormDialogContent aria-describedby={undefined} className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Fingerprint className="w-5 h-5 text-emerald-600" />

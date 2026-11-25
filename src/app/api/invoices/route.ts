@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, getCurrentBusiness } from '@/lib/db'
 import { serializeDecimals } from '@/lib/decimal-serializer'
 import { createInvoice, InvoiceValidationError } from '@/lib/invoice-service'
+import { processOutboxRowForInvoice } from '@/lib/reward-outbox'
+import { processFeedbackOutboxRowForInvoice } from '@/lib/feedback-outbox'
 
 // §VERCEL-LIMIT: Allow up to 20s for invoice creation (stock validation + transaction with many items)
 export const maxDuration = 20
@@ -118,6 +120,46 @@ export async function POST(req: NextRequest) {
 
     // §NOTIFICATION-SALE: Call the extracted core function (same logic, testable)
     const saleNotificationCreated = await createSaleNotification(business.id, invoice)
+
+    // §STEP7-REWARD-OUTBOX: durable post-commit processing. Replaces the old
+    // fire-and-forget accrueCustomerRewardFromInvoice(...).catch(console.error).
+    //
+    // The outbox row was created atomically INSIDE createInvoice's
+    // $transaction (src/lib/invoice-service.ts). This call invokes
+    // processOutboxRowForInvoice which:
+    //   1. finds the outbox row (already committed with the invoice)
+    //   2. invokes accrueCustomerRewardFromInvoice (idempotent by sourceInvoiceId)
+    //   3. marks the outbox row COMPLETED (success) or FAILED (error + attempts++)
+    //
+    // §NON-FATAL: if this fails, the sale remains committed. The outbox row
+    // stays PENDING/FAILED and the cron worker will retry.
+    // §NON-BLOCKING: this is fire-and-forget (not awaited) — the response is
+    // returned immediately. The outbox row is the durable record.
+    // §IDEMPOTENCY: CustomerRewardEvent.@@unique([businessId, sourceInvoiceId])
+    // guarantees at-most-once accrual (idempotent / at-most-once per invoice).
+    // The outbox row is the at-least-once trigger (the cron + immediate
+    // handler may both invoke accrual). Together: effectively exactly-once
+    // business effect.
+    processOutboxRowForInvoice(business.id, invoice.id)
+
+    // §PRODUCT-FEEDBACK-OUTBOX: durable post-commit processing. Replaces the
+    // old fire-and-forget maybeCreateProductFeedbackForInvoice. The outbox
+    // row was created atomically INSIDE createInvoice's $transaction
+    // (src/lib/invoice-service.ts). This call invokes
+    // processFeedbackOutboxRowForInvoice which:
+    //   1. finds the outbox row (already committed with the invoice)
+    //   2. parses the productIds JSON → one ProductFeedback per unique
+    //      productId (or one generic record when productIds is null/empty)
+    //   3. marks the outbox row COMPLETED (success) or FAILED (error + attempts++)
+    //
+    // §NON-FATAL: if this fails, the sale remains committed. The outbox row
+    // stays PENDING/FAILED and the cron worker will retry.
+    // §NON-BLOCKING: fire-and-forget (not awaited) — the response is returned
+    // immediately. The outbox row is the durable record.
+    // §IDEMPOTENCY: createProductFeedbackRecord's dedupKey + partial unique
+    // index guarantees at-most-one active feedback per (party, invoice,
+    // product) tuple. The outbox row is the at-least-once trigger.
+    processFeedbackOutboxRowForInvoice(business.id, invoice.id)
 
     const response = NextResponse.json(serializeDecimals(invoice))
     if (saleNotificationCreated) {

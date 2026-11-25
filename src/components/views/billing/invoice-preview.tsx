@@ -167,7 +167,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
     const payUrl = `${window.location.origin}/payment/${invoice.paymentLandingToken || invoice.id}`
     const phone = invoice.party?.phone?.replace(/[^0-9]/g, '').replace(/^0/, '91') || ''
     const text = encodeURIComponent(
-      `${business?.name} বিল: #${invoice.invoiceNumber}, মোট: ${formatCurrency(safeGrandTotal, currency)}। পেমেন্ট করতে ক্লিক করুন: ${payUrl}`
+      `${business?.name} ${t('bill.invoiceNo')}: #${invoice.invoiceNumber}, ${t('sale.bill.totalWithGst')}: ${formatCurrency(safeGrandTotal, currency)}. ${t('inv.pickupPayNow')}: ${payUrl}`
     )
     window.location.href = phone ? `sms:${phone}?body=${text}` : `sms:?body=${text}`
   }
@@ -241,7 +241,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
     setUpdatingStatus(true)
     try {
       await apiPut(`/api/invoices/${invoice.id}`, { deliveryStatus: 'handed' })
-      toast.success('মাল বুঝিয়ে দেওয়া হয়েছে ✓')
+      toast.success(t('inv.handedOver'))
       // §FIX: Use triggerRefresh instead of window.location.reload().
       // reload() causes full SPA refresh (loses scroll, reloads everything).
       triggerRefresh()
@@ -249,7 +249,7 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
       if (overlayInvoiceId) setOverlayInvoiceId(null)
       else if (selectedInvoiceId) setSelectedInvoiceId(null)
     } catch (e) {
-      toast.error('আপডেট ব্যর্থ')
+      toast.error(t('common.failed'))
     } finally {
       setUpdatingStatus(false)
     }
@@ -266,15 +266,15 @@ export function InvoicePreview({ invoiceId }: { invoiceId: string }) {
         <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-400 flex items-center gap-3">
           <span className="text-2xl">📦</span>
           <div className="flex-1">
-            <p className="text-sm font-bold text-amber-700 dark:text-amber-300">Pick Up Later — মাল এখনও দোকানে আছে</p>
-            <p className="text-[11px] text-amber-600 dark:text-amber-400">গ্রাহক মাল বুঝে নিলে আপডেট করুন</p>
+            <p className="text-sm font-bold text-amber-700 dark:text-amber-300">{t('inv.pickupPendingTitle')}</p>
+            <p className="text-[11px] text-amber-600 dark:text-amber-400">{t('inv.pickupPendingHint')}</p>
           </div>
           <Button
             onClick={handleMarkHandedOver}
             disabled={updatingStatus}
             className="h-10 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shrink-0"
           >
-            {updatingStatus ? '⏳' : '✓ বুঝিয়ে দিন'}
+            {updatingStatus ? '⏳' : t('inv.markHandedOver')}
           </Button>
         </div>
       )}

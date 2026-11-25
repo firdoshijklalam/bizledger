@@ -62,7 +62,7 @@ export function TransactionForm({ open, onOpenChange, party }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <FormDialogContent className="max-w-md">
+      <FormDialogContent aria-describedby={undefined} className="max-w-md">
         <DialogHeader>
           <DialogTitle>{t('khata.addTransaction')}</DialogTitle>
           {party && <p className="text-xs text-muted-foreground">{party.name}</p>}
@@ -70,25 +70,41 @@ export function TransactionForm({ open, onOpenChange, party }: Props) {
 
         <div className="space-y-4 py-2">
           <div>
-            <Label className="text-xs mb-1.5 block">Transaction Type</Label>
-            <div className="grid grid-cols-2 gap-2">
+            <Label className="text-xs mb-1.5 block">{t('txn.type')}</Label>
+            <div className="grid grid-cols-2 gap-2.5">
               <button
                 onClick={() => setType('credit')}
-                className={`flex flex-col items-center gap-1 py-3 rounded-xl border-2 transition-all min-h-[64px] ${
-                  type === 'credit' ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30' : 'border-border bg-muted'
+                aria-pressed={type === 'credit'}
+                className={`group relative flex flex-col items-center gap-1 py-3.5 px-2 rounded-2xl border-2 transition-all min-h-[72px] overflow-hidden active:scale-[0.97] ${
+                  type === 'credit'
+                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 shadow-md shadow-emerald-500/10'
+                    : 'border-border bg-muted hover:border-emerald-300 dark:hover:border-emerald-800'
                 }`}
               >
-                <ArrowDownLeft className={`w-5 h-5 ${type === 'credit' ? 'text-emerald-600' : 'text-muted-foreground'}`} />
-                <span className="text-xs font-medium">টাকা পেলাম</span>
+                <span className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full transition-opacity ${type === 'credit' ? 'bg-emerald-500 opacity-100' : 'opacity-0'}`} />
+                <span className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                  type === 'credit' ? 'bg-emerald-500/15' : 'bg-muted-foreground/10'
+                }`}>
+                  <ArrowDownLeft className={`w-5 h-5 ${type === 'credit' ? 'text-emerald-600' : 'text-muted-foreground'}`} />
+                </span>
+                <span className={`text-xs font-semibold ${type === 'credit' ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`}>{t('txn.got')}</span>
               </button>
               <button
                 onClick={() => setType('debit')}
-                className={`flex flex-col items-center gap-1 py-3 rounded-xl border-2 transition-all min-h-[64px] ${
-                  type === 'debit' ? 'border-red-500 bg-red-50 dark:bg-red-950/30' : 'border-border bg-muted'
+                aria-pressed={type === 'debit'}
+                className={`group relative flex flex-col items-center gap-1 py-3.5 px-2 rounded-2xl border-2 transition-all min-h-[72px] overflow-hidden active:scale-[0.97] ${
+                  type === 'debit'
+                    ? 'border-red-500 bg-red-50 dark:bg-red-950/40 shadow-md shadow-red-500/10'
+                    : 'border-border bg-muted hover:border-red-300 dark:hover:border-red-800'
                 }`}
               >
-                <ArrowUpRight className={`w-5 h-5 ${type === 'debit' ? 'text-red-600' : 'text-muted-foreground'}`} />
-                <span className="text-xs font-medium">টাকা দিলাম</span>
+                <span className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full transition-opacity ${type === 'debit' ? 'bg-red-500 opacity-100' : 'opacity-0'}`} />
+                <span className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                  type === 'debit' ? 'bg-red-500/15' : 'bg-muted-foreground/10'
+                }`}>
+                  <ArrowUpRight className={`w-5 h-5 ${type === 'debit' ? 'text-red-600' : 'text-muted-foreground'}`} />
+                </span>
+                <span className={`text-xs font-semibold ${type === 'debit' ? 'text-red-700 dark:text-red-300' : 'text-muted-foreground'}`}>{t('txn.gave')}</span>
               </button>
             </div>
           </div>
@@ -107,13 +123,13 @@ export function TransactionForm({ open, onOpenChange, party }: Props) {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="desc" className="text-xs">Description</Label>
+            <Label htmlFor="desc" className="text-xs">{t('txn.desc')}</Label>
             <Textarea
               id="desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               className="min-h-[60px]"
-              placeholder={type === 'credit' ? 'Payment received for…' : 'Paid for…'}
+              placeholder={type === 'credit' ? t('txn.receivedFor') : t('txn.paidFor')}
             />
           </div>
 

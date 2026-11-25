@@ -10,13 +10,15 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Bell, AlertTriangle, AlertCircle, MessageSquare, CheckCircle2, TrendingUp,
   X, Settings, Megaphone, Store, FolderOpen, CheckCheck, Loader2, ShoppingBag,
+  ListTodo, Clock,
 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { ShareSheet } from '@/components/shared/share-sheet'
 import { LoadingState, ErrorState } from '@/components/shared/states'
 import { toast } from 'sonner'
 import { useState, useMemo, useRef, useCallback } from 'react'
-import { timeAgo } from '@/lib/utils'
+import { timeAgo, formatCurrency } from '@/lib/utils'
+import { paymentReminderMessage } from '@/lib/message-templates'
 
 // §TYPE-META: Maps DB notification `type` string to icon + color.
 // The DB type field is a free-form string (default "system"). This map covers
@@ -26,23 +28,26 @@ const TYPE_META: Record<string, { icon: any; color: string; bg: string }> = {
   overdue: { icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-100 dark:bg-red-900/30' },
   'low-stock': { icon: AlertTriangle, color: 'text-orange-600', bg: 'bg-orange-100 dark:bg-orange-900/30' },
   low_stock: { icon: AlertTriangle, color: 'text-orange-600', bg: 'bg-orange-100 dark:bg-orange-900/30' },
-  promise: { icon: MessageSquare, color: 'text-blue-600', bg: 'bg-blue-100 dark:bg-blue-900/30' },
+  promise: { icon: MessageSquare, color: 'text-violet-600', bg: 'bg-violet-100 dark:bg-violet-900/30' },
   backup: { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-100 dark:bg-emerald-900/30' },
   defaulter: { icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-100 dark:bg-red-900/30' },
   grade: { icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-100 dark:bg-purple-900/30' },
   'custom-price': { icon: TrendingUp, color: 'text-teal-600', bg: 'bg-teal-100 dark:bg-teal-900/30' },
+  followup_due_soon: { icon: Clock, color: 'text-amber-600', bg: 'bg-amber-100 dark:bg-amber-900/30' },
+  followup_overdue: { icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-100 dark:bg-red-900/30' },
   system: { icon: Bell, color: 'text-muted-foreground', bg: 'bg-muted' },
 }
 
 const FALLBACK_META = { icon: Bell, color: 'text-muted-foreground', bg: 'bg-muted' }
 
-// PRD Part 27 §3: Channel toggle labels
+// PRD Part 27 §3: Channel toggle labels — localized (en/bn/hi) via i18n keys
 const CHANNEL_LABELS = [
-  { key: 'sales' as const, label: 'Sale Notifications', labelBn: 'বিক্রয় বিজ্ঞপ্তি' },
-  { key: 'lowStock' as const, label: 'Low Stock Alerts', labelBn: 'লো স্টক অ্যালার্ট' },
-  { key: 'overduePayments' as const, label: 'Overdue Payment Warnings', labelBn: 'বকেয়া পেমেন্ট সতর্কতা' },
-  { key: 'gradeChanges' as const, label: 'Customer Grade Changes', labelBn: 'গ্রেড পরিবর্তন' },
-  { key: 'backups' as const, label: 'App System Backups', labelBn: 'সিস্টেম ব্যাকআপ' },
+  { key: 'sales' as const, labelKey: 'notif.ch.sales' },
+  { key: 'lowStock' as const, labelKey: 'notif.ch.lowStock' },
+  { key: 'overduePayments' as const, labelKey: 'notif.ch.overdue' },
+  { key: 'gradeChanges' as const, labelKey: 'notif.ch.grades' },
+  { key: 'backups' as const, labelKey: 'notif.ch.backups' },
+  { key: 'followUps' as const, labelKey: 'notif.ch.followUps' },
 ]
 
 export function NotificationsView() {
@@ -118,16 +123,16 @@ export function NotificationsView() {
     const amount = party ? Math.abs(party.balance) : 0
     setRemindParty({ name: party?.name || partyName, phone: party?.phone, amount })
     setShowRemindSheet(true)
-    toast.success(`${party?.name || partyName}-কে তাগাদা পাঠানো হচ্ছে…`)
+    toast.success(t('notif.toast.reminding').replace('{name}', party?.name || partyName))
   }
 
   const handleOrderForecast = () => {
-    toast.success('সাপ্লায়ার ক্যাটালগ খোলা হচ্ছে…')
+    toast.success(t('notif.toast.openingCatalog'))
     setActiveView('sourcing')
   }
 
   const handleOpenStorage = () => {
-    toast.success('লোকাল ব্যাকআপ ফাইল ডাউনলোড হচ্ছে…')
+    toast.success(t('notif.toast.backupDownload'))
     const a = document.createElement('a')
     a.href = '/api/data-export?format=json'
     a.click()
@@ -220,12 +225,11 @@ export function NotificationsView() {
             className="overflow-hidden"
           >
             <div className="p-4 rounded-2xl bg-card border border-border space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase">নোটিফিকেশন চ্যানেল (Channels)</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase">{t('notif.channels')}</p>
               {CHANNEL_LABELS.map((ch) => (
                 <div key={ch.key} className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium">{ch.label}</p>
-                    <p className="text-[10px] text-muted-foreground">{ch.labelBn}</p>
+                    <p className="text-sm font-medium">{t(ch.labelKey)}</p>
                   </div>
                   <Switch
                     checked={channels[ch.key]}
@@ -348,7 +352,7 @@ export function NotificationsView() {
       {/* Swipe hint */}
       {!loading && !error && filtered.length > 0 && (
         <p className="text-center text-[10px] text-muted-foreground/50">
-          ← সোয়াইপ করে ডিসমিস করুন (Swipe to dismiss) →
+          {t('notif.swipeHint')}
         </p>
       )}
 
@@ -358,8 +362,13 @@ export function NotificationsView() {
         onClose={() => setShowRemindSheet(false)}
         customerName={remindParty?.name || ''}
         customerPhone={remindParty?.phone ?? null}
-        shareText={remindParty ? `প্রিয় ${remindParty.name},\n\nআপনার বকেয়া টাকা: ${remindParty.amount > 0 ? '₹' + remindParty.amount : 'নির্ধারিত'}\n\nঅনুগ্রহ করে শীঘ্র পরিশোধ করুন।\n\nধন্যবাদ,\n${business?.name || 'BizLedger'}` : ''}
-        shareTitle="তাগাদা (Reminder)"
+        shareText={remindParty ? paymentReminderMessage({
+          partyName: remindParty.name,
+          amount: remindParty.amount > 0 ? formatCurrency(remindParty.amount, currency) : '—',
+          direction: 'receivable',
+          businessName: business?.name || 'BizLedger',
+        }) : ''}
+        shareTitle={t('notif.reminderTitle')}
       />
     </div>
   )

@@ -2,7 +2,6 @@
   "name": "auto-deploy-service",
   "version": "1.0.0",
   "private": true,
-  "scripts": {
-    "dev": "bun --hot index.ts"
-  }
+  "scripts": {},
+  "disabled": "safety policy 2026-10-09: 'dev' script removed so no starter can launch this service (it auto-pushed local main to GitHub). Do not re-add without owner approval. See .zscripts/dev.sh SAFETY-DISABLE."
 }

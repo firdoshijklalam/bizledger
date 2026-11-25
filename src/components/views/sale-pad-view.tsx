@@ -52,6 +52,7 @@ const CartRow = memo(function CartRow({
   onSetManualTotal, onResetManualTotal, onRemoveFromCart,
   onToggleItemGst, onSetItemGstRate,
 }: CartRowProps) {
+  const { t } = useI18n()
   const effectiveMrp = item.itemMode === 'retail' ? item.retailMrp : item.mrp
   const hasMrpDiscount = effectiveMrp > 0 && effectiveMrp > item.price
 
@@ -61,15 +62,15 @@ const CartRow = memo(function CartRow({
       <div className="flex items-center gap-2 mb-2">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">
-            {item.name} {item.itemMode === 'retail' && <span className="text-[10px] text-emerald-600 font-normal">(খুচরো)</span>}
+            {item.name} {item.itemMode === 'retail' && <span className="text-[10px] text-emerald-600 font-normal">({t('sale.mode.retail')})</span>}
           </p>
           {hasMrpDiscount && (
             <span className="text-[10px] text-emerald-600 font-medium">
-              ছাড় ₹{(effectiveMrp - item.price).toFixed(2)} per {item.unit}
+              {t('bill.discount')} ₹{(effectiveMrp - item.price).toFixed(2)} per {item.unit}
             </span>
           )}
           {item.manualOverride && (
-            <span className="text-[10px] text-amber-600 font-medium ml-1">· মোট ম্যানুয়াল</span>
+            <span className="text-[10px] text-amber-600 font-medium ml-1">· {t('sale.cart.manualTotal')}</span>
           )}
         </div>
         <button
@@ -84,7 +85,7 @@ const CartRow = memo(function CartRow({
       <div className="grid grid-cols-3 gap-2 items-end">
         {/* Column 1: rate */}
         <div className="space-y-0.5">
-          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">প্রতি {item.unit} দর</label>
+          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">{t('sale.cart.rate').replace('{unit}', item.unit)}</label>
           <div className="flex items-baseline gap-0.5">
             <span className="text-[10px] text-muted-foreground">₹</span>
             <input
@@ -97,7 +98,7 @@ const CartRow = memo(function CartRow({
         </div>
         {/* Column 2: qty */}
         <div className="space-y-0.5">
-          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">কত {item.unit} নেবে</label>
+          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block">{t('sale.cart.qty').replace('{unit}', item.unit)}</label>
           <div className="flex items-center gap-1">
             <button onClick={() => onUpdateQty(item.cartKey, -1)} className="w-6 h-6 rounded bg-card border border-border flex items-center justify-center text-muted-foreground hover:bg-muted shrink-0" aria-label="Decrease">
               <Minus className="w-3 h-3" />
@@ -117,7 +118,7 @@ const CartRow = memo(function CartRow({
         </div>
         {/* Column 3: total with MRP strikethrough */}
         <div className="space-y-0.5">
-          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block text-right">মোট দাম</label>
+          <label className="text-[9px] text-muted-foreground/70 font-medium uppercase tracking-wide block text-right">{t('sale.cart.total')}</label>
           <div className="flex flex-col items-end">
             {hasMrpDiscount && (
               <del className="text-[9px] text-muted-foreground/50 tabular leading-none">
@@ -143,8 +144,8 @@ const CartRow = memo(function CartRow({
           onClick={() => onToggleItemGst(item.cartKey)}
           className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[9px] font-medium transition-all ${
             item.itemGstEnabled
-              ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-600'
-              : 'border-border bg-card text-muted-foreground hover:border-blue-400'
+              ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/30 text-teal-600'
+              : 'border-border bg-card text-muted-foreground hover:border-teal-400'
           }`}
         >
           {item.itemGstEnabled ? (
@@ -167,14 +168,14 @@ const CartRow = memo(function CartRow({
               <Plus className="w-2.5 h-2.5" />
               <span>Add GST</span>
               {masterGstOn && item.gstRate > 0 && (
-                <span className="text-blue-500 ml-0.5">({item.gstRate}%)</span>
+                <span className="text-teal-500 ml-0.5">({item.gstRate}%)</span>
               )}
             </>
           )}
         </button>
         {hasMrpDiscount && (
           <span className="text-emerald-600 font-medium">
-            ছাড় ₹{((Number(effectiveMrp) - Number(item.price)) * Number(item.quantity || 0)).toFixed(2)}
+            {t('bill.discount')} ₹{((Number(effectiveMrp) - Number(item.price)) * Number(item.quantity || 0)).toFixed(2)}
           </span>
         )}
       </div>
@@ -958,7 +959,7 @@ export function SalePadView() {
     // No longer inherits/leaks from the previous cart's payment inputs.
     const newCart: HeldCart = {
       id: nextId,
-      label: `পার্সন ${nextId}`,
+      label: t('sale.cart.person').replace('{n}', String(nextId)),
       items: [],
       customer: null,
       paymentMode: 'cash',
@@ -975,8 +976,8 @@ export function SalePadView() {
     // §STATE-LEAK-FIX: removed setDiscountValue('')/setDeliveryCharge('') —
     // billing is now per-cart; new cart already starts empty. Clearing here
     // would have wiped the values of the cart we just switched FROM (bug).
-    toast.success(`${newCart.label} এর জন্য নতুন কার্ট খোলা হলো`, {
-      description: 'আগের কার্ট হোল্ড করা আছে',
+    toast.success(t('sale.toast.newCart').replace('{label}', newCart.label), {
+      description: t('sale.toast.prevHeld'),
     })
   }
 
@@ -987,7 +988,7 @@ export function SalePadView() {
     // billing is now per-cart; switching to a cart shows THAT cart's own
     // preserved payment inputs. The mirror subscription in the store keeps
     // the top-level selectors in sync automatically.
-    toast(`কার্ট সুইচ হলো`, { description: carts.find((c) => c.id === id)?.label })
+    toast(t('sale.cart.switched'), { description: carts.find((c) => c.id === id)?.label })
   }
 
   // §1: Multi-Cart Tab Closure — prompt to Wipe or Send to Held Queue
@@ -1004,7 +1005,7 @@ export function SalePadView() {
 
   const doRemoveCart = (id: number) => {
     if (carts.length <= 1) {
-      toast('কমপক্ষে ১টি কার্ট থাকতে হবে')
+      toast(t('sale.cart.minOne'))
       return
     }
     const newCarts = carts.filter((c) => c.id !== id)
@@ -1019,7 +1020,7 @@ export function SalePadView() {
   // §1: Wipe — permanently delete the cart and its items
   const wipeCart = (id: number) => {
     doRemoveCart(id)
-    toast.success('কার্ট মুছে ফেলা হয়েছে')
+    toast.success(t('sale.cart.deleted'))
   }
 
   // §1: Send to Held Queue — remove from active viewport but keep recoverable
@@ -1028,8 +1029,8 @@ export function SalePadView() {
     if (!target) return
     setHeldQueue([...heldQueue, target])
     doRemoveCart(id)
-    toast.success(`${target.customer?.name || target.label} হোল্ড কিউ-তে পাঠানো হয়েছে`, {
-      description: 'পুনরুদ্ধার করতে হোল্ড কিউ বাটনে ট্যাপ করুন',
+    toast.success(t('sale.cart.holdSent').replace('{name}', target.customer?.name || target.label), {
+      description: t('sale.cart.holdSentDesc'),
     })
   }
 
@@ -1041,12 +1042,12 @@ export function SalePadView() {
     setHeldQueue(heldQueue.filter((c) => c.id !== id))
     setStoreCartId(id)
     setShowHeldQueue(false)
-    toast.success(`${target.customer?.name || target.label} পুনরুদ্ধার করা হয়েছে`)
+    toast.success(t('sale.cart.restored').replace('{name}', target.customer?.name || target.label))
   }
 
   const deleteFromHeldQueue = (id: number) => {
     setHeldQueue(heldQueue.filter((c) => c.id !== id))
-    toast.success('হোল্ড কিউ থেকে মুছে ফেলা হয়েছে')
+    toast.success(t('sale.cart.holdDeleted'))
   }
 
   // §2: Wholesale mode is eye-locked — PIN gate required
@@ -1058,14 +1059,14 @@ export function SalePadView() {
       }
       triggerGate(
         'inventory_price',
-        'পাইকারি মোড আনলক — বিশেষ পাইকারি রেট দেখতে ভেরিফিকেশন প্রয়োজন',
+        t('sale.wholesale.gate'),
         () => {
           setWholesaleUnlocked(true)
           setMode('wholesale')
-          toast.success('পাইকারি মোড আনলক হলো', { description: 'এক্সক্লুসিভ পাইকারি দাম এখন দৃশ্যমান' })
+          toast.success(t('sale.wholesale.unlocked'), { description: t('sale.wholesale.unlockedDesc') })
         },
         () => {
-          toast('পাইকারি মোড লক রয়ে গেছে', { description: 'পিন প্রয়োজন' })
+          toast(t('sale.wholesale.locked'), { description: t('sale.wholesale.lockedDesc') })
         }
       )
       return
@@ -1140,15 +1141,15 @@ export function SalePadView() {
 
   const handleGenerateInvoice = async () => {
     if (cart.length === 0) {
-      toast.error('কার্ট খালি')
+      toast.error(t('sale.cart.empty'))
       return
     }
     // §2: Hard-stop — block if Ledger Due > 0 AND Customer == null
     if (ledgerDue > 0 && !customer) {
       // §UX-REFINEMENT: Trigger animated RED warning (re-animates every failure)
       triggerRedWarningBox()
-      toast.error('বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক', {
-        description: `খাতায় বাকি ₹${ledgerDue.toFixed(2)} — কাস্টমার ছাড়া ট্রানজেকশন নিষিদ্ধ`,
+      toast.error(t('sale.credit.mandatory'), {
+        description: t('sale.credit.mandatoryDesc').replace('{amount}', ledgerDue.toFixed(2)),
       })
       return
     }
@@ -1195,9 +1196,9 @@ export function SalePadView() {
       const serverAmountDue = Number(invoice.amountDue) || 0
       const serverAmountPaid = Number(invoice.amountPaid) || 0
       if (serverAmountDue > 0) {
-        toast.success(`ইনভয়েস তৈরি · খাতায় বাকি ₹${serverAmountDue.toFixed(2)} যুক্ত হয়েছে`)
+        toast.success(t('sale.credit.addedToast').replace('{amount}', serverAmountDue.toFixed(2)))
       } else {
-        toast.success('ইনভয়েস তৈরি হয়েছে')
+        toast.success(t('sale.toast.invoiceCreated'))
       }
       // Sound Box: announce payment received
       soundBoxSpeak({ amount: serverAmountPaid, customerName: customer?.name })
@@ -1214,22 +1215,22 @@ export function SalePadView() {
       setSelectedInvoiceId(invoice.id)
       setActiveView('billing')
     } catch (e) {
-      toast.error('ব্যর্থ: ' + String(e))
+      toast.error(t('common.failed') + ': ' + String(e))
       setConfirming(false)
     }
   }
 
   const handleDone = async () => {
     if (cart.length === 0) {
-      toast.error('কার্ট খালি')
+      toast.error(t('sale.cart.empty'))
       return
     }
     // §2: Hard-stop — block if Ledger Due > 0 OR Pick Up Later, AND Customer == null
     if ((ledgerDue > 0 || fulfillmentStatus === 'pickup') && !customer) {
       // §UX-REFINEMENT: Trigger animated RED warning (re-animates every failure)
       triggerRedWarningBox()
-      toast.error('বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক', {
-        description: `খাতায় বাকি ₹${ledgerDue.toFixed(2)} — কাস্টমার ছাড়া ট্রানজেকশন নিষিদ্ধ`,
+      toast.error(t('sale.credit.mandatory'), {
+        description: t('sale.credit.mandatoryDesc').replace('{amount}', ledgerDue.toFixed(2)),
       })
       return
     }
@@ -1269,9 +1270,9 @@ export function SalePadView() {
       const serverAmountPaid = Number(invoice.amountPaid) || 0
       const serverAmountDue = Number(invoice.amountDue) || 0
       if (serverAmountDue > 0) {
-        toast.success(`সম্পন্ন · খাতায় বাকি ₹${serverAmountDue.toFixed(2)} যুক্ত হয়েছে`)
+        toast.success(t('sale.credit.doneToast').replace('{amount}', serverAmountDue.toFixed(2)))
       } else {
-        toast.success('সম্পন্ন হয়েছে — স্টক আপডেট হয়েছে')
+        toast.success(t('sale.toast.doneStock'))
       }
       // Sound Box: announce payment received
       soundBoxSpeak({ amount: amountPaid, customerName: customer?.name })
@@ -1285,7 +1286,7 @@ export function SalePadView() {
       setDiscountValue(''); setDeliveryCharge('')
       setConfirming(false)
     } catch (e) {
-      toast.error('ব্যর্থ: ' + String(e))
+      toast.error(t('common.failed') + ': ' + String(e))
       setConfirming(false)
     }
   }
@@ -1297,9 +1298,9 @@ export function SalePadView() {
   }))
 
   const modeMeta = {
-    retail: { label: 'খুচরো প্রোডাক্ট', sub: 'Retail · per kg/pcs', icon: Store, color: 'emerald' },
-    full: { label: 'প্রোডাক্ট', sub: 'Full · per bag/box', icon: Boxes, color: 'teal' },
-    wholesale: { label: 'পাইকারি প্রোডাক্ট', sub: 'Wholesale · bulk rate', icon: Layers, color: 'amber' },
+    retail: { label: t('sale.mode.retail'), sub: 'Retail · per kg/pcs', icon: Store, color: 'emerald' },
+    full: { label: t('sale.mode.full'), sub: 'Full · per bag/box', icon: Boxes, color: 'teal' },
+    wholesale: { label: t('sale.mode.wholesale'), sub: 'Wholesale · bulk rate', icon: Layers, color: 'amber' },
   } as const
 
   return (
@@ -1339,25 +1340,25 @@ export function SalePadView() {
           ) : (
             <>
               <UserPlus className="w-4 h-4 text-muted-foreground" />
-              <span className="text-muted-foreground">কাস্টমার যোগ করুন (ঐচ্ছিক)</span>
+              <span className="text-muted-foreground">{t('sale.addCustomerOptional')}</span>
             </>
           )}
         </button>
         <button
           onClick={() => setShowPartyForm(true)}
           className="w-11 h-11 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:bg-primary/90 transition-colors"
-          aria-label="নতুন কাস্টমার যোগ করুন"
-          title="নতুন কাস্টমার রেজিস্ট্রেশন"
+          aria-label={t('sale.newCustomer')}
+          title={t('sale.newCustomerReg')}
         >
           <Plus className="w-5 h-5" />
         </button>
       </div>
 
       {/* §3: Multi-Cart Hold Protocol — পার্সন ১, ২, ৩, + */}
-      <div className="p-3 rounded-2xl bg-gradient-to-r from-blue-500/5 to-emerald-500/5 border border-blue-500/20">
+      <div className="p-3 rounded-2xl bg-gradient-to-r from-teal-500/5 to-emerald-500/5 border border-teal-500/20">
         <div className="flex items-center gap-2 mb-2">
-          <Users className="w-4 h-4 text-blue-500" />
-          <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">কার্ট হোল্ড সিস্টেম (Multi-Cart)</p>
+          <Users className="w-4 h-4 text-teal-500" />
+          <p className="text-xs font-semibold text-teal-700 dark:text-teal-300">{t('sale.cartHold')}</p>
         </div>
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
           {carts.map((c, cartIndex) => {
@@ -1366,13 +1367,13 @@ export function SalePadView() {
             const cartTotal = c.items.reduce((s, i) => s + Number(i.total || 0), 0)
             // §1: Dynamic Tab Name — use index+1 for position-based labeling.
             // If a customer is selected, show their name. Otherwise 'পার্সন N' (N = index+1).
-            const tabLabel = c.customer?.name || `পার্সন ${cartIndex + 1}`
+            const tabLabel = c.customer?.name || t('sale.cart.person').replace('{n}', String(cartIndex + 1))
             return (
               <div
                 key={c.id}
                 className={`shrink-0 relative px-4 py-2.5 rounded-xl border-2 transition-all min-w-[100px] cursor-pointer ${
                   active
-                    ? 'border-blue-500 bg-blue-500 text-white shadow-md'
+                    ? 'border-teal-500 bg-teal-500 text-white shadow-md'
                     : 'border-border bg-card text-muted-foreground'
                 }`}
                 onClick={() => switchCart(c.id)}
@@ -1395,7 +1396,7 @@ export function SalePadView() {
                   <button
                     onClick={(e) => { e.stopPropagation(); requestCartClose(c.id) }}
                     className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors shadow-sm"
-                    aria-label={`Close পার্সন ${cartIndex + 1}`}
+                    aria-label={t('sale.cart.closeLabel').replace('{label}', tabLabel)}
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -1409,7 +1410,7 @@ export function SalePadView() {
           {/* + button to add new cart */}
           <button
             onClick={addNewCart}
-            className="shrink-0 w-11 h-11 rounded-xl border-2 border-dashed border-blue-400/50 flex items-center justify-center text-blue-500 hover:bg-blue-500/10 transition-colors"
+            className="shrink-0 w-11 h-11 rounded-xl border-2 border-dashed border-teal-400/50 flex items-center justify-center text-teal-500 hover:bg-teal-500/10 transition-colors"
             aria-label="Add new cart"
           >
             <Plus className="w-5 h-5" />
@@ -1561,7 +1562,7 @@ export function SalePadView() {
               className="flex items-center gap-1 px-2 py-1 rounded-l-xl bg-amber-500/20 text-amber-600 text-[9px] font-medium"
             >
               <ChevronLeft className="w-3 h-3" />
-              <span>সোয়াইপ</span>
+              <span>{t('sale.cart.swipe')}</span>
             </motion.div>
           </div>
         )}
@@ -1619,7 +1620,7 @@ export function SalePadView() {
       {/* Product grid */}
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-          {mode === 'retail' ? 'খুচরো পণ্য (per kg/pcs)' : mode === 'full' ? 'প্রোডাক্ট (per bag/box)' : 'পাইকারি পণ্য (bulk rate)'}
+          {mode === 'retail' ? t('sale.grid.retail') : mode === 'full' ? t('sale.grid.full') : t('sale.grid.wholesale')}
         </p>
         {/* §LOADING-SPINNER: Subtle inline loading indicator shown while fetching
             custom prices for a NEW customer (not cached). Does NOT freeze the UI —
@@ -1630,10 +1631,10 @@ export function SalePadView() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="flex items-center gap-2 px-3 py-1.5 mb-2 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 overflow-hidden"
+              className="flex items-center gap-2 px-3 py-1.5 mb-2 rounded-lg bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-900/50 overflow-hidden"
             >
-              <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin shrink-0" />
-              <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+              <Loader2 className="w-3.5 h-3.5 text-teal-600 animate-spin shrink-0" />
+              <p className="text-[10px] text-teal-600 dark:text-teal-400 font-medium">
                 Loading custom prices for {customer?.name || 'customer'}…
               </p>
             </motion.div>
@@ -1642,10 +1643,10 @@ export function SalePadView() {
         {filteredProducts.length === 0 ? (
           <EmptyState
             icon={Package}
-            title={mode === 'retail' ? 'কোনো খুচরো পণ্য নেই' : mode === 'wholesale' ? 'কোনো পাইকারি পণ্য নেই' : 'কোনো পণ্য নেই'}
+            title={mode === 'retail' ? t('sale.empty.retail') : mode === 'wholesale' ? t('sale.empty.wholesale') : t('sale.empty.none')}
             description={
-              mode === 'retail' ? 'প্রোডাক্ট ফর্মে "খুচরো দাম" সেট করুন।'
-              : mode === 'wholesale' ? 'প্রোডাক্ট ফর্মে "Wholesale Price" সেট করুন।'
+              mode === 'retail' ? t('sale.empty.retailHint')
+              : mode === 'wholesale' ? t('sale.empty.wholesaleHint')
               : undefined
             }
           />
@@ -1695,7 +1696,7 @@ export function SalePadView() {
                   <p className="text-[10px] text-muted-foreground">
                     {mode === 'retail' && (p as any).looseStock !== undefined
                       ? `${(p as any).looseStock} ${unit}`
-                      : `${p.stock} ${p.unit}`} স্টকে
+                      : `${p.stock} ${p.unit}`} {t('sale.cart.inStock')}
                   </p>
                   {/* Product card always shows the selling price — cost is shown in the header bar */}
                   <p className="text-sm font-bold tabular text-primary mt-0.5">
@@ -1728,9 +1729,9 @@ export function SalePadView() {
           >
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                <ShoppingBag className="w-4 h-4" /> {activeCart.customer?.name || activeCart.label} · কার্ট ({cart.length})
+                <ShoppingBag className="w-4 h-4" /> {activeCart.customer?.name || activeCart.label} · {t('sale.cart.label')} ({cart.length})
               </h3>
-              <button onClick={() => setCart([])} className="text-xs text-red-600 font-medium">মুছুন</button>
+              <button onClick={() => setCart([])} className="text-xs text-red-600 font-medium">{t('sale.cart.clear')}</button>
             </div>
             <div className="space-y-2 max-h-64 overflow-y-auto scroll-area">
               {cart.map((item) => (
@@ -1761,26 +1762,26 @@ export function SalePadView() {
                   onClick={() => setMasterGstOn(!masterGstOn)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                     masterGstOn
-                      ? 'bg-blue-500 text-white'
+                      ? 'bg-teal-500 text-white'
                       : 'bg-muted text-muted-foreground'
                   }`}
                 >
                   {masterGstOn ? 'Include GST' : 'No GST'}
                 </button>
-                <span className="tabular text-sm font-medium text-blue-600">
+                <span className="tabular text-sm font-medium text-teal-600">
                   {masterGstOn && gstAmount > 0 ? `+${formatCurrency(gstAmount, currency)}` : '₹0.00'}
                 </span>
               </div>
 
               {/* Row 2: Total after GST (subtotal + GST) */}
               <div className="flex justify-between items-center text-sm bg-muted/30 rounded-lg px-3 py-1.5">
-                <span className="text-muted-foreground">GST সহ মোট</span>
+                <span className="text-muted-foreground">{t('sale.bill.totalWithGst')}</span>
                 <span className="tabular font-semibold">{formatCurrency(subtotalWithGst, currency)}</span>
               </div>
 
-              {/* Row 3: Discount Block — §1: Added label "Additional Discount (ছাড়)" */}
+              {/* Row 3: Discount Block — §1: Added label "Additional Discount (ছাড়)" */}
               <div className="space-y-1">
-                <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Additional Discount (ছাড়)</label>
+                <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">{t('sale.bill.discountLabel')}</label>
                 <div className="flex items-center gap-2">
                   {/* §2: Segmented toggle — active: solid blue bg + white text, inactive: transparent + grey text */}
                   <div className="flex items-center gap-0.5 bg-muted/50 p-0.5 rounded-md">
@@ -1788,7 +1789,7 @@ export function SalePadView() {
                       type="button"
                       onClick={() => setDiscountMode('flat')}
                       className={`px-3 py-1.5 rounded-md text-[12px] font-bold transition-all ${
-                        discountMode === 'flat' ? 'bg-blue-600 text-white shadow-sm' : 'bg-transparent text-gray-400'
+                        discountMode === 'flat' ? 'bg-teal-600 text-white shadow-sm' : 'bg-transparent text-gray-400'
                       }`}
                     >
                       ₹
@@ -1797,7 +1798,7 @@ export function SalePadView() {
                       type="button"
                       onClick={() => setDiscountMode('percent')}
                       className={`px-3 py-1.5 rounded-md text-[12px] font-bold transition-all ${
-                        discountMode === 'percent' ? 'bg-blue-600 text-white shadow-sm' : 'bg-transparent text-gray-400'
+                        discountMode === 'percent' ? 'bg-teal-600 text-white shadow-sm' : 'bg-transparent text-gray-400'
                       }`}
                     >
                       %
@@ -1818,14 +1819,14 @@ export function SalePadView() {
 
               {/* Row 4: Total after Discount */}
               <div className="flex justify-between items-center text-sm bg-muted/30 rounded-lg px-3 py-1.5">
-                <span className="text-muted-foreground">ছাড় পরবর্তী মোট</span>
+                <span className="text-muted-foreground">{t('sale.bill.totalAfterDiscount')}</span>
                 <span className="tabular font-semibold">{formatCurrency(grandTotal, currency)}</span>
               </div>
 
               {/* §2: Auto-discount info from MRP vs Sale Price */}
               {autoDiscountTotal > 0 && (
                 <div className="flex justify-between text-[10px] text-emerald-600 px-1">
-                  <span>স্বয়ংক্রিয় ছাড় (MRP vs দর)</span>
+                  <span>{t('sale.bill.autoDiscount')}</span>
                   <span className="tabular font-medium">−{formatCurrency(autoDiscountTotal, currency)}</span>
                 </div>
               )}
@@ -1841,7 +1842,7 @@ export function SalePadView() {
               {/* §1: Delivery/Shipping Charge — between Round Off and Actual Price */}
               <div className="flex items-center gap-2">
                 <label className="text-[10px] text-muted-foreground shrink-0">
-                  ডেলিভারি / পরিবহন খরচ
+                  {t('sale.bill.delivery')}
                 </label>
                 <div className="flex items-baseline gap-0.5 flex-1">
                   <span className="text-[10px] text-muted-foreground">₹</span>
@@ -1874,7 +1875,7 @@ export function SalePadView() {
 
             {/* §4: Payment Mode split matrix — underneath Actual Price */}
             <div className="mt-3 p-3 rounded-xl bg-muted/30 border border-border/50">
-              <p className="text-[10px] text-muted-foreground uppercase mb-2 font-medium">Split Payment (একসাথে একাধিক মোড)</p>
+              <p className="text-[10px] text-muted-foreground uppercase mb-2 font-medium">{t('sale.bill.splitPayment')}</p>
               <div className="grid grid-cols-2 gap-2">
                 {/* Cash split */}
                 <div className="space-y-1">
@@ -1897,7 +1898,7 @@ export function SalePadView() {
                   >
                     <QrCode className={`w-3 h-3 ${paymentMode === 'upi' ? 'text-violet-600' : ''}`} />
                     UPI ₹
-                    {paymentMode === 'upi' && <span className="ml-auto text-[9px] text-violet-600">QR চালু</span>}
+                    {paymentMode === 'upi' && <span className="ml-auto text-[9px] text-violet-600">{t('sale.bill.qrOn')}</span>}
                     {/* §3: Green checkmark when UPI amount matches expected total */}
                     {splitUpiNum > 0 && splitUpiNum >= roundedTotal && (
                       <span className="text-emerald-600 font-bold ml-1">✅</span>
@@ -1920,8 +1921,8 @@ export function SalePadView() {
                   {splitUpiNum > 0 && (
                     <p className={`text-[9px] ${splitUpiNum >= roundedTotal ? 'text-emerald-600 font-medium' : 'text-muted-foreground'}`}>
                       {splitUpiNum >= roundedTotal
-                        ? '✓ পরিমাণ সঠক — পেমেন্ট সম্পূর্ণ'
-                        : `₹${(roundedTotal - splitUpiNum).toFixed(2)} বাকি`
+                        ? t('sale.split.exact')
+                        : t('sale.split.remaining').replace('{amount}', (roundedTotal - splitUpiNum).toFixed(2))
                       }
                     </p>
                   )}
@@ -1946,23 +1947,23 @@ export function SalePadView() {
               {hasSplitPayment && (
                 <div className="mt-2 pt-2 border-t border-border/50 space-y-1 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">মোট পরিশোধিত</span>
+                    <span className="text-muted-foreground">{t('sale.bill.totalPaid')}</span>
                     <span className="tabular font-medium text-emerald-600">₹{totalSplitPaid.toFixed(2)}</span>
                   </div>
                   {overpaid > 0 ? (
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">বাকি (খুচরা)</span>
+                      <span className="text-muted-foreground">{t('sale.bill.changeRet')}</span>
                       <span className="tabular font-medium text-emerald-600">₹{overpaid.toFixed(2)}</span>
                     </div>
                   ) : ledgerDue > 0 ? (
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">খাতায় বাকি (Ledger Due)</span>
+                      <span className="text-muted-foreground">{t('sale.credit.due')} (Ledger Due)</span>
                       <span className="tabular font-medium text-amber-600">₹{ledgerDue.toFixed(2)}</span>
                     </div>
                   ) : (
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">স্ট্যাটাস</span>
-                      <span className="tabular font-medium text-emerald-600">সম্পূর্ণ পরিশোধিত ✓</span>
+                      <span className="text-muted-foreground">{t('sale.bill.status')}</span>
+                      <span className="tabular font-medium text-emerald-600">{t('sale.bill.fullyPaid')}</span>
                     </div>
                   )}
                 </div>
@@ -1982,7 +1983,7 @@ export function SalePadView() {
                     <div className="flex items-center gap-2 mb-2">
                       <QrCode className="w-4 h-4 text-violet-600" />
                       <p className="text-xs font-medium text-violet-700 dark:text-violet-300 flex-1">
-                        UPI পেমেন্ট QR {splitUpiNum > 0 && <span className="text-[10px]">(স্প্লিট: ₹{splitUpiNum.toFixed(2)})</span>}
+                        {t('sale.qr.upi')} {splitUpiNum > 0 && <span className="text-[10px]">({t('sale.qr.split').replace('{amount}', splitUpiNum.toFixed(2))})</span>}
                       </p>
                       {/* §6: Share QR button */}
                       {upiQrDataUrl && (
@@ -1995,7 +1996,7 @@ export function SalePadView() {
                               const upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(merchantName)}&am=${upiQrAmount.toFixed(2)}&cu=INR`
                               if (navigator.share) {
                                 if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                                  await navigator.share({ title: 'UPI Payment QR', text: `Pay ₹${upiQrAmount.toFixed(2)} to ${merchantName}`, files: [file] })
+                                  await navigator.share({ title: t('sale.qr.upi'), text: `Pay ₹${upiQrAmount.toFixed(2)} to ${merchantName}`, files: [file] })
                                 } else {
                                   await navigator.share({ title: 'UPI Payment', text: upiUrl })
                                 }
@@ -2024,7 +2025,7 @@ export function SalePadView() {
                       <div className="flex flex-col items-center gap-2">
                         <img src={upiQrDataUrl} alt="UPI QR Code" className="w-44 h-44 rounded-lg bg-white p-1" />
                         <div className="text-center w-full">
-                          <p className="text-[10px] text-muted-foreground">স্ক্যান করে পরিশোধ করুন</p>
+                          <p className="text-[10px] text-muted-foreground">{t('sale.qr.scan')}</p>
                           <p className="text-sm font-bold tabular text-violet-700 dark:text-violet-300">
                             {formatCurrency(upiQrAmount, currency)}
                           </p>
@@ -2033,7 +2034,7 @@ export function SalePadView() {
                       </div>
                     ) : (
                       <div className="text-center py-4">
-                        <p className="text-[11px] text-muted-foreground">QR তৈরি হচ্ছে…</p>
+                        <p className="text-[11px] text-muted-foreground">{t('sale.qr.generating')}</p>
                       </div>
                     )}
                   </div>
@@ -2057,14 +2058,14 @@ export function SalePadView() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-orange-700 dark:text-orange-300">
-                        খাতায় বাকি (Ledger Due)
+                        {t('sale.credit.due')} (Ledger Due)
                       </span>
                       <span className="text-lg font-bold tabular text-orange-600">
                         ₹{ledgerDue.toFixed(2)}
                       </span>
                     </div>
                     <p className="text-[10px] text-orange-600 mt-1">
-                      সম্পন্ন হলে এই পরিমাণ কাস্টমারের খাতায় যুক্ত হবে
+                      {t('sale.credit.dueNote')}
                     </p>
                   </div>
                 </motion.div>
@@ -2083,11 +2084,11 @@ export function SalePadView() {
                   <div className="p-3 mt-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-400/40">
                     <div className="flex items-center gap-2 mb-2">
                       <Calculator className="w-4 h-4 text-emerald-600" />
-                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">এক্সচেঞ্জ ক্যালকুলেটর</p>
+                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">{t('sale.exchange.calc')}</p>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-bold text-emerald-700 dark:text-emerald-300">
-                        ফেরত দিতে হবে
+                        {t('sale.exchange.return')}
                       </span>
                       <span className="text-2xl font-bold tabular text-emerald-600">
                         ₹{overpaid.toFixed(2)}
@@ -2100,7 +2101,7 @@ export function SalePadView() {
                         <span className="tabular">{formatCurrency(roundedTotal, currency)}</span>
                       </div>
                       <div className="flex justify-between text-emerald-700 dark:text-emerald-300">
-                        <span>নগদ + UPI প্রদান</span>
+                        <span>{t('sale.exchange.paid')}</span>
                         <span className="tabular">{formatCurrency(totalPaidForExchange, currency)}</span>
                       </div>
                     </div>
@@ -2150,29 +2151,29 @@ export function SalePadView() {
                       <AnimatePresence mode="popLayout" initial={false}>
                         {customerBoxMode === 'blue' && (
                           <motion.div
-                            key="blue-inner"
+                            key="new-customer-inner"
                             animate={blueBoxControls}
                             data-anim-key={customerBlockKey}
-                            className="mt-3 p-3 rounded-xl border-2 border-blue-400/50 bg-blue-50 dark:bg-blue-950/20"
+                            className="mt-3 p-3 rounded-xl border-2 border-teal-400/50 bg-teal-50 dark:bg-teal-950/20"
                           >
                             <div className="flex items-center gap-1.5 mb-2">
-                              <UserPlus className="w-3.5 h-3.5 text-blue-600" />
-                              <p className="text-xs font-medium text-blue-700 dark:text-blue-300">
-                                কাস্টমার যোগ করুন
+                              <UserPlus className="w-3.5 h-3.5 text-teal-600" />
+                              <p className="text-xs font-medium text-teal-700 dark:text-teal-300">
+                                {t('sale.newCustomer')}
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => setShowCustPicker(true)}
-                                className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-blue-400 bg-card flex items-center gap-2 text-sm hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-colors"
+                                className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-teal-400 bg-card flex items-center gap-2 text-sm hover:bg-teal-50 dark:hover:bg-teal-950/20 transition-colors"
                               >
-                                <UserPlus className="w-4 h-4 text-blue-600" />
-                                <span className="text-blue-700 dark:text-blue-300 font-medium">কাস্টমার নির্বাচন করুন</span>
+                                <UserPlus className="w-4 h-4 text-teal-600" />
+                                <span className="text-teal-700 dark:text-teal-300 font-medium">{t('sale.selectCustomer')}</span>
                               </button>
                               <button
                                 onClick={() => { setShowPartyForm(true); }}
-                                className="w-11 h-11 rounded-xl bg-blue-500 text-white flex items-center justify-center shrink-0 hover:bg-blue-600 transition-colors"
-                                aria-label="নতুন কাস্টমার"
+                                className="w-11 h-11 rounded-xl bg-teal-500 text-white flex items-center justify-center shrink-0 hover:bg-teal-600 transition-colors"
+                                aria-label={t('sale.newCustomer')}
                               >
                                 <Plus className="w-5 h-5" />
                               </button>
@@ -2191,7 +2192,7 @@ export function SalePadView() {
                               <div className="flex items-center gap-1.5 mb-2">
                                 <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
                                 <p className="text-xs font-bold text-red-700 dark:text-red-300">
-                                  বাকি রাখার জন্য কাস্টমার যুক্ত করা বাধ্যতামূলক
+                                  {t('sale.credit.mandatory')}
                                 </p>
                               </div>
                               {/* Clone of Add Customer input */}
@@ -2201,19 +2202,19 @@ export function SalePadView() {
                                   className="flex-1 h-11 px-3 rounded-xl border-2 border-dashed border-red-400 bg-card flex items-center gap-2 text-sm hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
                                 >
                                   <UserPlus className="w-4 h-4 text-red-600" />
-                                  <span className="text-red-700 dark:text-red-300 font-medium">কাস্টমার নির্বাচন করুন</span>
+                                  <span className="text-red-700 dark:text-red-300 font-medium">{t('sale.selectCustomer')}</span>
                                 </button>
                                 <button
                                   onClick={() => { setShowPartyForm(true); }}
                                   className="w-11 h-11 rounded-xl bg-red-500 text-white flex items-center justify-center shrink-0 hover:bg-red-600 transition-colors"
-                                  aria-label="নতুন কাস্টমার"
+                                  aria-label={t('sale.newCustomer')}
                                 >
                                   <Plus className="w-5 h-5" />
                                 </button>
                               </div>
                               {/* Ledger due amount */}
                               <p className="text-[10px] text-red-600 mt-1.5 text-center">
-                                খাতায় বাকি: ₹{ledgerDue.toFixed(2)} · কাস্টমার যুক্ত করলে ট্রানজেকশন সম্পন্ন হবে
+                                {t('sale.credit.dueLabel')}: ₹{ledgerDue.toFixed(2)}
                               </p>
                             </div>
                           </motion.div>
@@ -2261,7 +2262,7 @@ export function SalePadView() {
                 disabled={confirming}
                 className="h-12 px-6 text-sm font-semibold rounded-2xl flex-1"
               >
-                <Receipt className="w-4 h-4 mr-1.5" /> {confirming ? '…' : 'ইনভয়েস'}
+                <Receipt className="w-4 h-4 mr-1.5" /> {confirming ? '…' : t('sale.checkout.invoice')}
               </Button>
               <Button
                 onClick={handleDone}
@@ -2269,9 +2270,9 @@ export function SalePadView() {
                 className="h-12 px-8 text-base font-bold rounded-2xl shadow-lg"
               >
                 {confirming ? (
-                  <><span className="animate-spin">⏳</span> হচ্ছে…</>
+                  <><span className="animate-spin">⏳</span> {t('sale.checkout.processing')}</>
                 ) : (
-                  <><CheckCircle2 className="w-5 h-5 mr-2" /> সম্পন্ন হয়েছে</>
+                  <><CheckCircle2 className="w-5 h-5 mr-2" /> {t('sale.checkout.done')}</>
                 )}
               </Button>
             </div>
@@ -2288,8 +2289,8 @@ export function SalePadView() {
           setShowCustPicker(false)
         }}
         items={partyItems}
-        placeholder="কাস্টমার খুঁজুন…"
-        emptyText="কোনো কাস্টমার পাওয়া যায়নি"
+        placeholder={t('sale.searchCustomer')}
+        emptyText={t('sale.noCustomerFound')}
       />
 
       {/* §1: PartyForm — rendered here so [+] icon can trigger customer registration
@@ -2330,10 +2331,10 @@ export function SalePadView() {
                 <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-3">
                   <Trash2 className="w-6 h-6 text-red-500" />
                 </div>
-                <h3 className="text-base font-bold">কার্ট বন্ধ করুন</h3>
+                <h3 className="text-base font-bold">{t('sale.closeCart.title')}</h3>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {carts.find((c) => c.id === closePromptCartId)?.customer?.name || carts.find((c) => c.id === closePromptCartId)?.label} এর কার্টে{' '}
-                  {carts.find((c) => c.id === closePromptCartId)?.items.length || 0} টি আইটেম আছে। কী করবেন?
+                  {t('sale.closeCart.body').replace('{label}', carts.find((c) => c.id === closePromptCartId)?.customer?.name || carts.find((c) => c.id === closePromptCartId)?.label || '').replace('{n}', String(carts.find((c) => c.id === closePromptCartId)?.items.length || 0))}
+                  {carts.find((c) => c.id === closePromptCartId)?.items.length || 0}
                 </p>
               </div>
               <div className="space-y-2">
@@ -2342,22 +2343,22 @@ export function SalePadView() {
                   className="w-full h-11 border-amber-400 text-amber-600 hover:bg-amber-500/10"
                   onClick={() => sendToHeldQueue(closePromptCartId)}
                 >
-                  <Layers className="w-4 h-4 mr-2" /> হোল্ড কিউ-তে পাঠান
-                  <span className="text-[10px] text-muted-foreground ml-1">(পুনরুদ্ধারযোগ্য)</span>
+                  <Layers className="w-4 h-4 mr-2" /> {t('sale.closeCart.hold')}
+                  <span className="text-[10px] text-muted-foreground ml-1">{t('sale.closeCart.holdSub')}</span>
                 </Button>
                 <Button
                   variant="destructive"
                   className="w-full h-11"
                   onClick={() => wipeCart(closePromptCartId)}
                 >
-                  <Trash2 className="w-4 h-4 mr-2" /> সম্পূর্ণ মুছে ফেলুন
+                  <Trash2 className="w-4 h-4 mr-2" /> {t('sale.closeCart.wipe')}
                 </Button>
                 <Button
                   variant="ghost"
                   className="w-full h-10"
                   onClick={() => setClosePromptCartId(null)}
                 >
-                  বাতিল
+                  {t('common.cancel')}
                 </Button>
               </div>
             </motion.div>
@@ -2384,10 +2385,10 @@ export function SalePadView() {
             >
               <div className="flex items-center gap-2 pb-2 border-b border-border">
                 <Layers className="w-5 h-5 text-amber-500" />
-                <h3 className="text-base font-bold">হোল্ড কিউ ({heldQueue.length})</h3>
+                <h3 className="text-base font-bold">{t('sale.holdQueue.title').replace('{n}', String(heldQueue.length))}</h3>
               </div>
               {heldQueue.length === 0 ? (
-                <p className="text-center text-sm text-muted-foreground py-4">হোল্ড কিউ খালি</p>
+                <p className="text-center text-sm text-muted-foreground py-4">{t('sale.holdQueue.empty')}</p>
               ) : (
                 <div className="space-y-2 max-h-72 overflow-y-auto">
                   {heldQueue.map((c, hqIndex) => {
@@ -2396,9 +2397,9 @@ export function SalePadView() {
                       <div key={c.id} className="p-3 rounded-xl bg-amber-500/5 border border-amber-400/30">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm font-bold">{c.customer?.name || `পার্সন ${hqIndex + 1}`}</p>
+                            <p className="text-sm font-bold">{c.customer?.name || t('sale.cart.person').replace('{n}', String(hqIndex + 1))}</p>
                             <p className="text-[11px] text-muted-foreground">
-                              {c.items.length} আইটেম · {formatCurrency(cartTotal, currency)}
+                              {t('sale.holdQueue.items').replace('{n}', String(c.items.length))} · {formatCurrency(cartTotal, currency)}
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5">
@@ -2406,7 +2407,7 @@ export function SalePadView() {
                               onClick={() => restoreFromHeldQueue(c.id)}
                               className="px-2.5 py-1 rounded-lg bg-emerald-500 text-white text-[11px] font-medium hover:bg-emerald-600"
                             >
-                              পুনরুদ্ধার
+                              {t('sale.holdQueue.restore')}
                             </button>
                             <button
                               onClick={() => deleteFromHeldQueue(c.id)}
@@ -2423,7 +2424,7 @@ export function SalePadView() {
                 </div>
               )}
               <Button variant="ghost" className="w-full h-10" onClick={() => setShowHeldQueue(false)}>
-                বন্ধ করুন
+                {t('common.close')}
               </Button>
             </motion.div>
           </motion.div>

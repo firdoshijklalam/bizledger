@@ -3,6 +3,7 @@ import { db, getCurrentBusiness } from '@/lib/db'
 import { generateSearchTags } from '@/lib/transliteration'
 import { apiError } from '@/lib/api-error'
 import { serializeDecimals } from '@/lib/decimal-serializer'
+import { processOutboxRowForInvoice } from '@/lib/reward-outbox'
 
 /**
  * PATCH /api/customer-orders/[id]/status — update order status.
@@ -237,6 +238,23 @@ async function syncCompletedOrder(order: any, businessId: string) {
       data: { invoiceId: invoice.id },
     })
 
+    // §STEP7-REWARD-OUTBOX: create the durable reward-accrual work record
+    // INSIDE the same $transaction as the invoice + transaction + order update.
+    // Atomicity guarantee: if the order completes, the outbox row commits; if
+    // the outbox write fails, the entire order completion rolls back.
+    //
+    // §ELIGIBILITY: the invoice created here is type='retail' (line 207) with
+    // a non-null partyId (party is always find-or-created above). It is always
+    // eligible for reward accrual.
+    await tx.rewardAccrualOutbox.create({
+      data: {
+        businessId,
+        invoiceId: invoice.id,
+        status: 'PENDING',
+        attempts: 0,
+      },
+    })
+
     // §ORDER-SYNC: Mark the order as completed + link the transaction + invoice.
     const updatedOrder = await tx.customerOrder.update({
       where: { id: order.id },
@@ -249,6 +267,20 @@ async function syncCompletedOrder(order: any, businessId: string) {
 
     return { order: updatedOrder, transaction, invoice, party }
   })
+
+  // §STEP7-REWARD-OUTBOX: durable post-commit processing. Replaces the old
+  // fire-and-forget accrueCustomerRewardFromInvoice(...).catch(console.error).
+  //
+  // This invokes processOutboxRowForInvoice which:
+  //   1. finds the outbox row (created atomically above)
+  //   2. invokes accrueCustomerRewardFromInvoice (idempotent by sourceInvoiceId)
+  //   3. marks the outbox row COMPLETED (success) or FAILED (error + attempts++)
+  //
+  // §NON-FATAL: if this fails, the completed online order remains committed.
+  // The outbox row stays PENDING/FAILED and the cron worker will retry.
+  // §NON-BLOCKING: this is fire-and-forget (not awaited) — the response is
+  // returned immediately. The outbox row is the durable record.
+  processOutboxRowForInvoice(businessId, result.invoice.id)
 
   // §DECIMAL-FIX-C: result.order is a CustomerOrder with raw Decimal fields
   // (subtotal, deliveryCharge, grandTotal, commissionAmount).

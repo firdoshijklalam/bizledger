@@ -52,6 +52,33 @@ async function main() {
   console.log('   Business:', business.name)
   console.log('')
   console.log('⚠️  CHANGE THE PASSWORD IMMEDIATELY after first login!')
+
+  // §BIOMETRIC-SEED: register a "primary" fingerprint record for the business
+  // so the biometric gates (Inventory Price Modification, Wholesale Reveal,
+  // Discount, etc.) are testable in dev. The gate's biometric path has a demo
+  // fallback that accepts any registered role='primary' fingerprint when no
+  // specific fingerprintHash is presented (see /api/biometric/gate route).
+  // Without this record, every "Simulate Fingerprint Scan" fails and the gate
+  // locks down after repeated attempts.
+  const existingFp = await db.fingerprintRecord.findFirst({
+    where: { businessId: business.id, role: 'primary' },
+  })
+  if (!existingFp) {
+    await db.fingerprintRecord.create({
+      data: {
+        fingerprintHash: `dev-seed-${business.id}-${Date.now()}`,
+        businessId: business.id,
+        hand: 'right',
+        finger: 'thumb',
+        role: 'primary',
+        linkedName: 'Owner (dev seed)',
+        scannerType: 'native',
+      },
+    })
+    console.log('👍 Seeded a primary fingerprint record (biometric gates now testable in dev)')
+  } else {
+    console.log('👍 Primary fingerprint record already present')
+  }
 }
 
 main()

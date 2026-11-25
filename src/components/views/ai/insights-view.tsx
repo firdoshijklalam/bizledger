@@ -1,6 +1,7 @@
 'use client'
 
 import { useAppStore } from '@/store/app-store'
+import { paymentReminderMessage } from '@/lib/message-templates'
 import { useFetch } from '@/hooks/use-fetch'
 import { formatCurrency, GRADE_META } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -46,13 +47,20 @@ export function InsightsView() {
   }
   if (!data) return <EmptyState icon={TrendingUp} title="No insights available" />
 
-  const handleRemind = (d: { name: string; phone?: string | null }) => {
+  const handleRemind = (d: { name: string; balance?: number; phone?: string | null }) => {
     if (!d.phone) {
       toast.error(`${d.name} has no phone number`)
       return
     }
     const cleaned = d.phone.replace(/[^0-9]/g, '').replace(/^0/, '91')
-    const text = encodeURIComponent(`প্রিয় ${d.name}, আপনার বকেয়া পেমেন্ট সম্পর্কে অনুরোধ করা হলো। ধন্যবাদ 🙏`)
+    // §LOCALIZED-MESSAGE-TEMPLATES: replaced a hardcoded Bengali message —
+    // EN/HI merchants now send reminders in their app language.
+    const text = encodeURIComponent(paymentReminderMessage({
+      partyName: d.name,
+      amount: formatCurrency(d.balance ?? 0, currency),
+      direction: 'receivable',
+      businessName: business?.name || 'BizLedger',
+    }))
     window.open(`https://wa.me/${cleaned}?text=${text}`, '_blank')
     toast.success(`Reminder sent to ${d.name}`)
   }
@@ -261,7 +269,7 @@ export function InsightsView() {
 
       {/* AI Suggestion Modal (PRD Part 20 §5) */}
       <Dialog open={!!aiSuggestion} onOpenChange={(o) => !o && setAiSuggestion(null)}>
-        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto scroll-area">
+        <DialogContent aria-describedby={undefined} className="max-w-md max-h-[80vh] overflow-y-auto scroll-area">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Lightbulb className="w-4 h-4 text-amber-600" /> AI Suggestions — {aiSuggestion?.name}

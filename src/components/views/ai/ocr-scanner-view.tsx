@@ -1,6 +1,7 @@
 'use client'
 
 import { useAppStore } from '@/store/app-store'
+import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
 import { formatCurrency } from '@/lib/utils'
 import { toNumber } from '@/lib/numeric'
@@ -40,6 +41,7 @@ const SCAN_MESSAGES = [
 
 export function OcrScannerView() {
   const { business, triggerRefresh } = useAppStore()
+  const { t } = useI18n()
   const { data: suppliers } = useFetch<Party[]>('/api/parties?type=supplier', [])
   const { data: allProducts } = useFetch<Product[]>('/api/products', [])
 
@@ -241,8 +243,8 @@ export function OcrScannerView() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="p-4 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900">
-        <p className="text-sm font-semibold text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
+      <div className="p-4 rounded-2xl bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-900">
+        <p className="text-sm font-semibold text-teal-700 dark:text-teal-300 flex items-center gap-1.5">
           <ScanLine className="w-4 h-4" /> OCR Bill Scanner
         </p>
         <p className="text-xs text-muted-foreground mt-1">
@@ -327,24 +329,24 @@ export function OcrScannerView() {
           <Card className="p-4">
             <div className="flex items-center gap-2 mb-3">
               <Store className="w-4 h-4 text-purple-600" />
-              <h3 className="text-sm font-semibold">সাপ্লায়ার তথ্য (Supplier Profile)</h3>
+              <h3 className="text-sm font-semibold">{t('ocr.supplier')}</h3>
             </div>
             <div className="space-y-2">
               <div>
-                <Label className="text-[10px] text-muted-foreground">বিল থেকে পাওয়া নাম (Vendor from bill)</Label>
+                <Label className="text-[10px] text-muted-foreground">{t('ocr.vendor')}</Label>
                 <Input value={editVendor} onChange={(e) => setEditVendor(e.target.value)} className="h-9 text-sm" placeholder="Auto-detected vendor name" />
               </div>
               <div>
-                <Label className="text-[10px] text-muted-foreground">বিটুবি নেটওয়ার্ক থেকে সিলেক্ট করুন (Match supplier)</Label>
+                <Label className="text-[10px] text-muted-foreground">{t('ocr.matchSupplier')}</Label>
                 <select value={editSupplierId} onChange={(e) => setEditSupplierId(e.target.value)} className="w-full h-9 rounded-xl bg-muted px-3 text-sm border-0 outline-none">
-                  <option value="">— নতুন সাপ্লায়ার (New) —</option>
+                  <option value="">{t('ocr.newSupplier')}</option>
                   {(suppliers || []).map((s) => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <Label className="text-[10px] text-muted-foreground">বিলের তারিখ (Invoice Date)</Label>
+                <Label className="text-[10px] text-muted-foreground">{t('ocr.invoiceDate')}</Label>
                 <Input value={editDate} onChange={(e) => setEditDate(e.target.value)} className="h-9 text-sm" placeholder="DD/MM/YYYY" />
               </div>
             </div>
@@ -354,16 +356,16 @@ export function OcrScannerView() {
           <Card className="p-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-amber-600" /> আইটেম তালিকা ({editItems.length})
+                <FileText className="w-4 h-4 text-amber-600" /> {t('ocr.items')} ({editItems.length})
               </h3>
               <Edit3 className="w-3.5 h-3.5 text-muted-foreground" />
             </div>
             {/* Table header */}
             <div className="grid grid-cols-12 gap-1 text-[9px] text-muted-foreground uppercase mb-1 px-1">
-              <span className="col-span-5">পণ্যের নাম</span>
+              <span className="col-span-5">{t('ocr.col.name')}</span>
               <span className="col-span-2 text-center">Qty</span>
-              <span className="col-span-2 text-center">দাম</span>
-              <span className="col-span-3 text-right">মোট</span>
+              <span className="col-span-2 text-center">{t('ocr.col.price')}</span>
+              <span className="col-span-3 text-right">{t('ocr.col.total')}</span>
             </div>
             <div className="space-y-1">
               {editItems.map((item, i) => {
@@ -406,7 +408,7 @@ export function OcrScannerView() {
           {/* §2.3: Taxation & Grand Total */}
           <Card className="p-4">
             <h3 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
-              <Zap className="w-4 h-4 text-amber-600" /> ট্যাক্স ও মোট (GST & Total)
+              <Zap className="w-4 h-4 text-amber-600" /> {t('ocr.gstTotal')}
             </h3>
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
@@ -420,12 +422,12 @@ export function OcrScannerView() {
                 </div>
               </div>
               <div>
-                <Label className="text-[10px] text-muted-foreground">Grand Total (বিলের মোট)</Label>
+                <Label className="text-[10px] text-muted-foreground">{t('ocr.grandTotal')}</Label>
                 <Input value={editGrandTotal} onChange={(e) => setEditGrandTotal(e.target.value)} className="h-10 text-lg font-bold tabular text-primary" inputMode="numeric" />
               </div>
               {/* Calculated vs scanned reconciliation */}
               <div className="p-2 rounded-lg bg-muted/30 flex justify-between text-[11px]">
-                <span className="text-muted-foreground">AI ক্যালকুলেটেড মোট:</span>
+                <span className="text-muted-foreground">{t('ocr.aiTotal')}</span>
                 <span className={`font-semibold tabular ${Math.abs(calculatedTotal - Number(editGrandTotal)) < 1 ? 'text-emerald-600' : 'text-amber-600'}`}>
                   {formatCurrency(calculatedTotal, currency)}
                   {Math.abs(calculatedTotal - Number(editGrandTotal)) >= 1 && ' ⚠️'}
@@ -454,11 +456,11 @@ export function OcrScannerView() {
 
           {/* Sync info */}
           <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
-            <p className="text-[10px] text-emerald-700 dark:text-emerald-300 font-medium mb-1">Confirm & Sync করলে যা হবে:</p>
+            <p className="text-[10px] text-emerald-700 dark:text-emerald-300 font-medium mb-1">{t('ocr.syncTitle')}</p>
             <div className="space-y-0.5">
-              <p className="text-[10px] text-muted-foreground">📦 <strong>Inventory:</strong> স্টক আপডেট হবে (নতুন পণ্য অটো-ক্রিয়েট হবে)</p>
-              <p className="text-[10px] text-muted-foreground">🧾 <strong>GST Engine:</strong> ITC (Input Tax Credit)-তে যুক্ত হবে</p>
-              <p className="text-[10px] text-muted-foreground">📒 <strong>Khata:</strong> সাপ্লায়ার লেজারে ট্রানজেকশন পোস্ট হবে</p>
+              <p className="text-[10px] text-muted-foreground">📦 <strong>Inventory:</strong> {t('ocr.sync.inv')}</p>
+              <p className="text-[10px] text-muted-foreground">🧾 <strong>GST Engine:</strong> {t('ocr.sync.gst')}</p>
+              <p className="text-[10px] text-muted-foreground">📒 <strong>Khata:</strong> {t('ocr.sync.khata')}</p>
             </div>
           </div>
         </motion.div>

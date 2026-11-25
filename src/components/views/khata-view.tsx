@@ -6,7 +6,7 @@ import { useFetch } from '@/hooks/use-fetch'
 import type { Party } from '@/lib/types'
 import { formatCurrency, GRADE_META } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
-import { BookOpen, Plus, Users, Filter, Phone, ChevronRight } from 'lucide-react'
+import { BookOpen, Plus, Users, Filter, Phone, ChevronRight, ArrowDownLeft, ArrowUpRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { EmptyState, LoadingState } from '@/components/shared/states'
@@ -150,11 +150,15 @@ export function KhataView() {
   }, [phoneticFiltered, khataFilter, effectiveGradeFilter])
 
   const totals = useMemo(() => {
-    if (!parties) return { receivable: 0, payable: 0 }
+    if (!parties) return { receivable: 0, payable: 0, receivableCount: 0, payableCount: 0 }
     const num = (v: any): number => Number(v) || 0
+    const receivableParties = parties.filter((p) => num(p.balance) > 0)
+    const payableParties = parties.filter((p) => num(p.balance) < 0)
     return {
-      receivable: parties.filter((p) => num(p.balance) > 0).reduce((s, p) => s + num(p.balance), 0),
-      payable: parties.filter((p) => num(p.balance) < 0).reduce((s, p) => s + Math.abs(num(p.balance)), 0),
+      receivable: receivableParties.reduce((s, p) => s + num(p.balance), 0),
+      payable: payableParties.reduce((s, p) => s + Math.abs(num(p.balance)), 0),
+      receivableCount: receivableParties.length,
+      payableCount: payableParties.length,
     }
   }, [parties])
 
@@ -169,25 +173,58 @@ export function KhataView() {
         <Plus className="w-4 h-4 mr-1.5" /> {t('khata.addParty')}
       </Button>
 
-      {/* Summary cards */}
+      {/* Summary cards — §BALANCE-CARD-REDESIGN: direction icons + active-state
+          scaling + count chip, so the two money directions are instantly
+          distinguishable at a glance (VLM: "label + number" read as one blob
+          before). Filter-active state now scales + ring, not just fill. */}
       <div className="grid grid-cols-2 gap-3">
         <button
           onClick={() => setKhataFilter(khataFilter === 'receivable' ? 'all' : 'receivable')}
-          className={`text-left p-4 rounded-2xl border transition-all ${
-            khataFilter === 'receivable' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-emerald-50 dark:bg-emerald-950/30 border-transparent'
+          aria-pressed={khataFilter === 'receivable'}
+          className={`group text-left p-4 rounded-2xl border transition-all active:scale-[0.97] ${
+            khataFilter === 'receivable'
+              ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/25 scale-[1.02]'
+              : 'bg-emerald-50 dark:bg-emerald-950/30 border-transparent hover:shadow-md hover:shadow-emerald-500/10'
           }`}
         >
-          <p className="text-xs opacity-80 mb-1">{t('khata.receivables')}</p>
-          <p className="text-lg font-bold tabular">{formatCurrency(totals.receivable, currency)}</p>
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-xs opacity-80 font-medium">{t('khata.receivables')}</p>
+            <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+              khataFilter === 'receivable' ? 'bg-white/20' : 'bg-emerald-500/10'
+            }`}>
+              <ArrowDownLeft className="w-4.5 h-4.5" strokeWidth={2.5} />
+            </span>
+          </div>
+          <p className="text-lg font-bold tabular tracking-tight leading-snug">{formatCurrency(totals.receivable, currency)}</p>
+          {totals.receivableCount > 0 && (
+            <p className={`text-[10px] mt-0.5 ${khataFilter === 'receivable' ? 'text-white/70' : 'text-emerald-600 dark:text-emerald-400'}`}>
+              {totals.receivableCount} {totals.receivableCount === 1 ? 'party' : 'parties'}
+            </p>
+          )}
         </button>
         <button
           onClick={() => setKhataFilter(khataFilter === 'payable' ? 'all' : 'payable')}
-          className={`text-left p-4 rounded-2xl border transition-all ${
-            khataFilter === 'payable' ? 'bg-red-500 text-white border-red-500' : 'bg-red-50 dark:bg-red-950/30 border-transparent'
+          aria-pressed={khataFilter === 'payable'}
+          className={`group text-left p-4 rounded-2xl border transition-all active:scale-[0.97] ${
+            khataFilter === 'payable'
+              ? 'bg-red-500 text-white border-red-500 shadow-lg shadow-red-500/25 scale-[1.02]'
+              : 'bg-red-50 dark:bg-red-950/30 border-transparent hover:shadow-md hover:shadow-red-500/10'
           }`}
         >
-          <p className="text-xs opacity-80 mb-1">{t('khata.payables')}</p>
-          <p className="text-lg font-bold tabular">{formatCurrency(totals.payable, currency)}</p>
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-xs opacity-80 font-medium">{t('khata.payables')}</p>
+            <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+              khataFilter === 'payable' ? 'bg-white/20' : 'bg-red-500/10'
+            }`}>
+              <ArrowUpRight className="w-4.5 h-4.5" strokeWidth={2.5} />
+            </span>
+          </div>
+          <p className="text-lg font-bold tabular tracking-tight leading-snug">{formatCurrency(totals.payable, currency)}</p>
+          {totals.payableCount > 0 && (
+            <p className={`text-[10px] mt-0.5 ${khataFilter === 'payable' ? 'text-white/70' : 'text-red-600 dark:text-red-400'}`}>
+              {totals.payableCount} {totals.payableCount === 1 ? 'party' : 'parties'}
+            </p>
+          )}
         </button>
       </div>
 
@@ -311,7 +348,7 @@ export function KhataView() {
                           {p.balance === 0 ? 'Settled' : formatCurrency(Math.abs(p.balance), currency)}
                         </p>
                         <p className="text-[10px] text-muted-foreground">
-                          {isReceivable ? t('khata.outstanding') : isPayable ? 'দেবো' : ''}
+                          {isReceivable ? t('khata.outstanding') : isPayable ? t('khata.payables') : ''}
                         </p>
                       </div>
                       <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />

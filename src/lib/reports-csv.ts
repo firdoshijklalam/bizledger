@@ -173,6 +173,66 @@ export function buildReportCsv(type: ReportType, data: ReportDataShape): string 
   }
 }
 
+// ─── Feedback analytics CSV (Reports → Feedback tab) ────────────────────────
+
+/**
+ * §FEEDBACK-CSV: CSV export for the business-wide feedback analytics rollup
+ * (/api/feedback/analytics). Exported separately from buildReportCsv because
+ * it consumes the ANALYTICS payload (not the /api/reports ReportDataShape the
+ * other 6 tabs use) — the FeedbackAnalytics component owns that fetch and
+ * calls this directly, so no data plumbing through the reports view.
+ *
+ * Sections: summary metrics, status counts, rating distribution, per-product
+ * leaderboard (avg rating, reviews, response rate).
+ */
+export function buildFeedbackCsv(a: {
+  total: number
+  byStatus: Record<string, number>
+  submitted: number
+  rated: number
+  avgRating: number | null
+  responseRate: number
+  distribution: Record<string, number>
+  products: Array<{
+    name: string
+    sku?: string | null
+    total: number
+    submitted: number
+    reviews: number
+    avgRating: number | null
+    responseRate: number
+  }>
+}): string {
+  const avg = a.avgRating != null ? a.avgRating.toFixed(2) : '—'
+  return buildCsv([
+    ['BizLedger — Product Feedback Analytics'],
+    [],
+    ['Metric', 'Value'],
+    ['Total requests', a.total],
+    ['Submitted', a.submitted],
+    ['Rated reviews', a.rated],
+    ['Avg rating', avg],
+    ['Response rate (%)', a.responseRate],
+    [],
+    ['Status', 'Count'],
+    ...Object.entries(a.byStatus).map(([k, v]) => [k, v] as any[]),
+    [],
+    ['Stars', 'Count'],
+    ...[5, 4, 3, 2, 1].map((n) => [String(n), a.distribution[String(n)] ?? 0] as any[]),
+    [],
+    ['Product', 'SKU', 'Total', 'Submitted', 'Rated reviews', 'Avg rating', 'Response rate (%)'],
+    ...a.products.map((p) => [
+      p.name,
+      p.sku || '',
+      p.total,
+      p.submitted,
+      p.reviews,
+      p.avgRating != null ? p.avgRating.toFixed(2) : '—',
+      p.responseRate,
+    ] as any[]),
+  ])
+}
+
 // ─── Date-range parsing for /api/reports ────────────────────────────────────
 
 export interface DateRange {

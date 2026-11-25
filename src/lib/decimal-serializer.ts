@@ -65,7 +65,7 @@ export const DECIMAL_FIELDS = new Set([
   // PurchaseOrder / PurchaseOrderItem / SupplierCatalogItem
   'totalAmount', 'transportFare', 'coolieCharge', 'totalCost', 'basePrice',
   // AppSettings
-  'gateDiscountLimit',
+  'gateDiscountLimit', 'rewardThreshold',
 ])
 
 /**

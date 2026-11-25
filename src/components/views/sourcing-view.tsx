@@ -15,7 +15,7 @@ import { useMemo, useState, useEffect } from 'react'
 interface CartItem { catalogItemId: string; productName: string; category?: string | null; quantity: number; unitPrice: number; transportFare: number; coolieCharge: number; matchedProductId?: string | null; supplierId: string; supplierName: string; unit: string }
 type Tab = 'browse' | 'orders'
 const PO_STATUS: Record<string, { color: string; icon: any; label: string }> = {
-  sent: { color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300', icon: Truck, label: 'Sent' },
+  sent: { color: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300', icon: Truck, label: 'Sent' },
   dispatched: { color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300', icon: Truck, label: 'Dispatched' },
   received: { color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300', icon: PackageCheck, label: 'Received' },
   cancelled: { color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300', icon: X, label: 'Cancelled' },

@@ -117,7 +117,7 @@ function roleBadgeClass(relation: string | null, role: string): string {
     return 'border-amber-500/30 bg-amber-500/10 text-amber-300'
   }
   if (relation === 'Collection Agent') {
-    return 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+    return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
   }
   return 'border-amber-500/30 bg-amber-500/10 text-amber-300'
 }
@@ -403,7 +403,7 @@ function PartnerAgentRow({ fp, deleting, onDelete }: RowProps) {
     fp.role === 'partner'
       ? 'bg-emerald-500/10 text-emerald-300'
       : fp.relation === 'Collection Agent'
-        ? 'bg-sky-500/10 text-sky-300'
+        ? 'bg-cyan-500/10 text-cyan-300'
         : 'bg-amber-500/10 text-amber-300'
 
   return (

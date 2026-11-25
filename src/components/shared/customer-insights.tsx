@@ -69,7 +69,7 @@ interface InsightsData {
 const TABS = [
   { id: 'top', label: 'Top Buyers', icon: Crown, color: 'text-amber-600' },
   { id: 'churned', label: 'Churned', icon: TrendingDown, color: 'text-red-600' },
-  { id: 'refill', label: 'Refill Due', icon: Clock, color: 'text-blue-600' },
+  { id: 'refill', label: 'Refill Due', icon: Clock, color: 'text-teal-600' },
 ] as const
 
 // §SMART-TEMPLATES: Quick-action chips with template variables.
@@ -298,7 +298,7 @@ export function CustomerInsights({ productId }: { productId: string }) {
             <p className="text-[9px] text-muted-foreground">VIP</p>
           </div>
           <div className="text-center">
-            <p className="text-lg font-bold tabular text-blue-600">{data.summary.refillDueCount}</p>
+            <p className="text-lg font-bold tabular text-teal-600">{data.summary.refillDueCount}</p>
             <p className="text-[9px] text-muted-foreground">Refill Due</p>
           </div>
         </div>
@@ -548,13 +548,13 @@ function BuyerRow({
           )}
           {/* §REFILL-INFO: Show avg cycle on refill tab */}
           {tab === 'refill' && buyer.avgCycleDays && (
-            <span className="text-[10px] text-blue-600 dark:text-blue-400">
+            <span className="text-[10px] text-teal-600 dark:text-teal-400">
               · avg {buyer.avgCycleDays}d cycle
             </span>
           )}
           {tab === 'refill' && buyer.status && (
             <span className={`text-[10px] flex items-center gap-0.5 ${
-              buyer.status === 'overdue' ? 'text-red-600' : buyer.status === 'due-soon' ? 'text-amber-600' : 'text-blue-600'
+              buyer.status === 'overdue' ? 'text-red-600' : buyer.status === 'due-soon' ? 'text-amber-600' : 'text-teal-600'
             }`}>
               {buyer.status === 'overdue' ? <AlertCircle className="w-2.5 h-2.5" /> : <Clock className="w-2.5 h-2.5" />}
               {buyer.status === 'overdue' ? 'Overdue' : buyer.status === 'due-soon' ? `Due in ${buyer.expectedInDays}d` : `In ${buyer.expectedInDays}d`}

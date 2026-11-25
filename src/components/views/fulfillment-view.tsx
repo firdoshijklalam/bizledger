@@ -74,7 +74,7 @@ const ORIGIN_TABS = [
 
 const STATUS_TABS = [
   { id: 'pending', label: 'To Pack', icon: Package, color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30' },
-  { id: 'ready', label: 'Ready', icon: Clock, color: 'text-blue-600 bg-blue-100 dark:bg-blue-900/30' },
+  { id: 'ready', label: 'Ready', icon: Clock, color: 'text-teal-600 bg-teal-100 dark:bg-teal-900/30' },
   { id: 'handed', label: 'Fulfilled', icon: CheckCircle2, color: 'text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30' },
 ] as const
 

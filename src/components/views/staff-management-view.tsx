@@ -1,6 +1,7 @@
 'use client'
 
 import { useAppStore } from '@/store/app-store'
+import { useI18n } from '@/store/i18n-store'
 import { useFetch, apiPost } from '@/hooks/use-fetch'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -75,6 +76,7 @@ const AI_RECOMMENDATIONS: Record<string, Record<string, boolean>> = {
 
 export function StaffManagementView() {
   const { business, triggerRefresh } = useAppStore()
+  const { t } = useI18n()
   const { data: staff, loading, refetch } = useFetch<Staff[]>('/api/staff', [])
   const { data: auditLogs } = useFetch<AuditLogEntry[]>('/api/audit-log', [])
   const [showAddModal, setShowAddModal] = useState(false)
@@ -100,9 +102,9 @@ export function StaffManagementView() {
     if (recommended) {
       setPerms({ ...recommended })
       if (newRole === 'sales') {
-        toast.info('🤖 AI: Salesman-এর জন্য শুধু Billing অনুমোদিত। সংবেদনশীল সেটিংস/ব্যাকআপ বন্ধ রাখা হয়েছে।')
+        toast.info(`🤖 ${t('staff.aiSales')}`)
       } else {
-        toast.info('🤖 AI: Manager-এর জন্য Inventory, Khata, Reports, Sourcing অনুমোদিত। Export/Delete বন্ধ।')
+        toast.info(`🤖 ${t('staff.aiManager')}`)
       }
     }
   }
@@ -112,11 +114,11 @@ export function StaffManagementView() {
   }
 
   const handleAddStaff = async () => {
-    if (!name.trim()) { toast.error('নাম দিন'); return }
+    if (!name.trim()) { toast.error(t('staff.noName')); return }
     setSaving(true)
     try {
       await apiPost('/api/staff', { name, phone, role, ...perms })
-      toast.success(`${name} যুক্ত হয়েছে — Staff ID: জেনারেট হয়েছে`)
+      toast.success(t('staff.added').replace('{name}', name))
       refetch()
       triggerRefresh()
       setName(''); setPhone(''); setRole('sales')
@@ -146,68 +148,109 @@ export function StaffManagementView() {
   }
 
   return (
-    <div className="space-y-4 pb-4">
+    <div className="space-y-3 pb-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-base font-semibold flex items-center gap-2">
             <Users className="w-5 h-5 text-primary" /> Staff Management
           </h2>
-          <p className="text-[11px] text-muted-foreground">আনলিমিটেড স্টাফ যোগ করুন · RBAC পারমিশন · অডিট লগ</p>
+          <p className="text-[11px] text-muted-foreground">{t('staff.sub')}</p>
         </div>
       </div>
 
-      {/* PRD Part 31 §3: Multi-Business Switch */}
-      <Card className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border border-blue-200 dark:border-blue-800">
+      {/* PRD Part 31 §3: Multi-Business Switch
+          §STAFF-STYLE: was a blue→indigo gradient (indigo is off-palette) —
+          emerald/teal tint matches the app's business/active semantics. */}
+      <Card className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 border border-emerald-200 dark:border-emerald-800">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Store className="w-4 h-4 text-blue-600" />
+            <Store className="w-4 h-4 text-emerald-600" />
             <div>
-              <p className="text-sm font-medium">একটিভ বিজনেস</p>
+              <p className="text-sm font-medium">{t('staff.activeBiz')}</p>
               <p className="text-[10px] text-muted-foreground">{business?.name || 'BizLedger'}</p>
             </div>
           </div>
           <button
-            onClick={() => toast.info('Switch Business — একাধিক বিজনেস লিংক করা সম্ভব (Multi-tenant)')}
-            className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium"
+            onClick={() => toast.info(t('staff.switchHint'))}
+            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium transition-colors min-h-[36px]"
           >
             Switch Business
           </button>
         </div>
       </Card>
 
-      {/* Tab: Staff List / Audit Log */}
-      <div className="flex gap-1 p-1 rounded-xl bg-muted">
-        <button onClick={() => setActiveTab('staff')} className={`flex-1 py-2 rounded-lg text-xs font-medium ${activeTab === 'staff' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
-          <Users className="w-3.5 h-3.5 inline mr-1" /> Staff ({staff?.length || 0})
+      {/* Tab: Staff List / Audit Log — segmented control
+          §STAFF-TABS (VLM round 9): the previous bg-card-only active state still
+          read as "disabled label". Active now gets the app-wide emerald-tinted
+          PILL treatment (mirrors the Settings tab pills) — unambiguous. */}
+      <div className="flex gap-1 p-1 rounded-xl bg-muted" role="tablist" aria-label="Staff / Audit Log">
+        <button
+          role="tab"
+          aria-selected={activeTab === 'staff'}
+          onClick={() => setActiveTab('staff')}
+          className={`flex-1 py-2 rounded-lg text-xs min-h-[40px] transition-colors ${
+            activeTab === 'staff'
+              ? 'bg-emerald-500/10 dark:bg-emerald-400/15 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/25 shadow-sm font-semibold'
+              : 'text-muted-foreground font-medium hover:text-foreground'
+          }`}
+        >
+          <Users className={`w-3.5 h-3.5 inline mr-1 ${activeTab === 'staff' ? 'text-emerald-600 dark:text-emerald-400' : ''}`} /> Staff ({staff?.length || 0})
         </button>
-        <button onClick={() => setActiveTab('audit')} className={`flex-1 py-2 rounded-lg text-xs font-medium ${activeTab === 'audit' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
-          <History className="w-3.5 h-3.5 inline mr-1" /> Audit Log
+        <button
+          role="tab"
+          aria-selected={activeTab === 'audit'}
+          onClick={() => setActiveTab('audit')}
+          className={`flex-1 py-2 rounded-lg text-xs min-h-[40px] transition-colors ${
+            activeTab === 'audit'
+              ? 'bg-emerald-500/10 dark:bg-emerald-400/15 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/25 shadow-sm font-semibold'
+              : 'text-muted-foreground font-medium hover:text-foreground'
+          }`}
+        >
+          <History className={`w-3.5 h-3.5 inline mr-1 ${activeTab === 'audit' ? 'text-emerald-600 dark:text-emerald-400' : ''}`} /> Audit Log
         </button>
       </div>
 
       {/* Staff List */}
       {activeTab === 'staff' && (
         <>
-          <Button onClick={() => setShowAddModal(true)} className="w-full h-12">
-            <UserPlus className="w-5 h-5 mr-2" /> Add New Staff
-          </Button>
-
+          {/* §EMPTY-STATE (VLM round 9): the previous layout — a full-width CTA
+              button + a distant muted EmptyState below — read as "broken bottom
+              half" with a massive dead gap. The empty state is now ONE designed
+              card: tinted icon (contrast), strong heading, and the CTA INSIDE
+              the state so the action lives where the explanation is. */}
           {loading ? <LoadingState /> : !staff || staff.length === 0 ? (
-            <EmptyState icon={Users} title="No staff added yet" description="আনলিমিটেড ম্যানেজার ও সেলসম্যান যোগ করুন" />
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-2xl border border-dashed border-border bg-muted/30 dark:bg-muted/10 px-6 py-8 flex flex-col items-center text-center"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-emerald-100 dark:bg-emerald-900/40 ring-1 ring-emerald-500/25 flex items-center justify-center mb-3">
+                <UserPlus className="w-7 h-7 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              </div>
+              <h3 className="text-sm font-semibold text-foreground">No staff added yet</h3>
+              <p className="text-xs text-muted-foreground max-w-[260px] mt-1 mb-4">{t('staff.empty')}</p>
+              <Button onClick={() => setShowAddModal(true)} className="h-11 px-6">
+                <UserPlus className="w-4 h-4 mr-2" /> Add New Staff
+              </Button>
+            </motion.div>
           ) : (
-            <div className="space-y-2">
+            <>
+              <Button onClick={() => setShowAddModal(true)} className="w-full h-12">
+                <UserPlus className="w-5 h-5 mr-2" /> Add New Staff
+              </Button>
+              <div className="space-y-2">
               <AnimatePresence>
                 {staff.map((s, i) => (
                   <motion.div key={s.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
                     <Card className="p-4">
                       <div className="flex items-start gap-3">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${s.role === 'manager' ? 'bg-blue-100 dark:bg-blue-900/30' : 'bg-amber-100 dark:bg-amber-900/30'}`}>
-                          <Users className={`w-5 h-5 ${s.role === 'manager' ? 'text-blue-600' : 'text-amber-600'}`} />
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${s.role === 'manager' ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-amber-100 dark:bg-amber-900/30'}`}>
+                          <Users className={`w-5 h-5 ${s.role === 'manager' ? 'text-emerald-600' : 'text-amber-600'}`} />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <p className="text-sm font-semibold truncate">{s.name}</p>
-                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${s.role === 'manager' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${s.role === 'manager' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
                               {s.role === 'manager' ? '👤 Manager' : '💼 Sales'}
                             </span>
                           </div>
@@ -233,7 +276,8 @@ export function StaffManagementView() {
                   </motion.div>
                 ))}
               </AnimatePresence>
-            </div>
+              </div>
+            </>
           )}
         </>
       )}
@@ -242,7 +286,7 @@ export function StaffManagementView() {
       {activeTab === 'audit' && (
         <div className="space-y-2">
           {!auditLogs || auditLogs.length === 0 ? (
-            <EmptyState icon={History} title="No activity logged yet" description="স্টাফ কার্যকলাপ এখানে রেকর্ড হবে" />
+            <EmptyState icon={History} title="No activity logged yet" description={t('staff.auditEmpty')} />
           ) : (
             <AnimatePresence>
               {auditLogs.map((log, i) => (
@@ -252,11 +296,11 @@ export function StaffManagementView() {
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
                         log.action.includes('delete') ? 'bg-red-100 dark:bg-red-900/30' :
                         log.action.includes('create') ? 'bg-emerald-100 dark:bg-emerald-900/30' :
-                        'bg-blue-100 dark:bg-blue-900/30'
+                        'bg-teal-100 dark:bg-teal-900/30'
                       }`}>
                         {log.action.includes('delete') ? <Trash2 className="w-3.5 h-3.5 text-red-600" /> :
                          log.action.includes('create') ? <Receipt className="w-3.5 h-3.5 text-emerald-600" /> :
-                         <FileEdit className="w-3.5 h-3.5 text-blue-600" />}
+                         <FileEdit className="w-3.5 h-3.5 text-teal-600" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium">{log.description}</p>
@@ -275,7 +319,7 @@ export function StaffManagementView() {
 
       {/* PRD Part 31 §1: Add Staff Modal with AI Permission Grid */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-        <FormDialogContent className="max-w-md">
+        <FormDialogContent aria-describedby={undefined} className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserPlus className="w-4 h-4" /> Add New Staff
@@ -283,16 +327,16 @@ export function StaffManagementView() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <div className="space-y-1.5">
-              <Label className="text-xs">নাম (Name) *</Label>
+              <Label className="text-xs">{t('staff.name')}</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} className="h-11" placeholder="Rahul Sharma" />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">ফোন (Phone)</Label>
+              <Label className="text-xs">{t('staff.phone')}</Label>
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} className="h-11" placeholder="+91 90000 12345" />
             </div>
             {/* Role selector with AI recommendation */}
             <div className="space-y-1.5">
-              <Label className="text-xs">রোল (Role)</Label>
+              <Label className="text-xs">{t('staff.role')}</Label>
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={() => handleRoleChange('manager')} className={`p-3 rounded-xl text-xs font-medium transition-all ${role === 'manager' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
                   👤 Manager
@@ -306,7 +350,7 @@ export function StaffManagementView() {
             <div className="space-y-2">
               <div className="flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                <Label className="text-xs font-semibold">পারমিশন গ্রিড (AI Recommended)</Label>
+                <Label className="text-xs font-semibold">{t('staff.permGrid')}</Label>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {PERMISSIONS.map((p) => {
@@ -327,13 +371,13 @@ export function StaffManagementView() {
                   )
                 })}
               </div>
-              <p className="text-[9px] text-muted-foreground">🤖 AI রোল অনুযায়ী অটো-রেকমেন্ড করেছে — ম্যানুয়ালি এডিট করতে পারেন</p>
+              <p className="text-[9px] text-muted-foreground">🤖 {t('staff.permHint')}</p>
             </div>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setShowAddModal(false)} className="h-11">বাতিল</Button>
+            <Button variant="outline" onClick={() => setShowAddModal(false)} className="h-11">{t('common.cancel')}</Button>
             <Button onClick={handleAddStaff} disabled={saving || !name.trim()} className="h-11 flex-1">
-              {saving ? 'যোগ হচ্ছে…' : 'যোগ করুন + QR জেনারেট করুন'}
+              {saving ? t('staff.adding') : t('staff.add')}
             </Button>
           </DialogFooter>
         </FormDialogContent>
@@ -341,7 +385,7 @@ export function StaffManagementView() {
 
       {/* PRD Part 31 §1: QR Code Modal */}
       <Dialog open={!!showQrFor} onOpenChange={(o) => !o && setShowQrFor(null)}>
-        <DialogContent className="max-w-xs">
+        <DialogContent aria-describedby={undefined} className="max-w-xs">
           <DialogHeader>
             <DialogTitle className="text-center">Staff QR Code</DialogTitle>
           </DialogHeader>
@@ -358,9 +402,9 @@ export function StaffManagementView() {
                   })}
                 </div>
               </div>
-              <p className="text-[10px] text-muted-foreground">স্টাফ এই QR স্ক্যান করে লগইন করবেন</p>
+              <p className="text-[10px] text-muted-foreground">{t('staff.qrHint')}</p>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="flex-1 h-9 text-xs" onClick={() => { toast.success('QR কপি করা হয়েছে'); navigator.clipboard?.writeText(getQrString(showQrFor)) }}>
+                <Button variant="outline" size="sm" className="flex-1 h-9 text-xs" onClick={() => { toast.success(t('staff.qrCopied')); navigator.clipboard?.writeText(getQrString(showQrFor)) }}>
                   Copy Token
                 </Button>
                 <Button size="sm" className="flex-1 h-9 text-xs" onClick={() => setShowQrFor(null)}>

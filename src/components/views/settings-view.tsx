@@ -11,7 +11,7 @@ import {
   Moon, Sun, Bell, Languages, Calendar, FileText, IndianRupee, Trash2, Sparkles, Palette, Mic, Keyboard,
   AlertCircle, CheckCircle2, QrCode, ChevronDown, ChevronUp, Lock, Fingerprint,
   Store, MapPin, Navigation, Star, TrendingUp, ShoppingCart, Crown, ExternalLink,
-  Smartphone, Radio, Globe, Server, Ban, Cloud, User, Volume2, LogOut, Loader2,
+  Smartphone, Radio, Globe, Server, Ban, Cloud, User, Volume2, LogOut, Loader2, Gift, Clock, MessageSquare,
 } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -34,10 +34,12 @@ import { ImportBackupModal } from '@/components/shared/import-backup-modal'
 import { ExternalImportModal } from '@/components/shared/external-import-modal'
 import { ImportHistoryModal } from '@/components/shared/import-history-modal'
 import type { ImportEntityType } from '@/lib/external-import'
+import { MessageTemplatesEditor } from '@/components/views/settings/message-templates-editor'
 
 const TABS = [
   { id: 'profile', labelKey: 'set.profile', icon: Building2 },
   { id: 'preferences', labelKey: 'set.preferences', icon: Sliders },
+  { id: 'templates', labelKey: 'set.templates', icon: MessageSquare },
   { id: 'data', labelKey: 'set.data', icon: Database },
   { id: 'marketplace', labelKey: 'set.marketplace', icon: Store },
   { id: 'security', labelKey: 'set.security', icon: Shield },
@@ -64,7 +66,7 @@ export function SettingsView() {
   const [showExternalImportModal, setShowExternalImportModal] = useState(false)
   const [externalImportType, setExternalImportType] = useState<ImportEntityType>('customers')
   const [showImportHistoryModal, setShowImportHistoryModal] = useState(false)
-  const [tab, setTab] = useState<'profile' | 'preferences' | 'data' | 'marketplace' | 'security'>('profile')
+  const [tab, setTab] = useState<'profile' | 'preferences' | 'templates' | 'data' | 'marketplace' | 'security'>('profile')
 
   // §AUTH-LOGOUT: Sign out the current user — clears the session cookie via
   // the logout API, then redirects to /login. The back button after logout
@@ -85,7 +87,7 @@ export function SettingsView() {
     }
   }
 
-  const { data: settings } = useFetch<AppSettingsData & { id: string }>('/api/app-settings', [])
+  const { data: settings, refetch: refetchSettings } = useFetch<AppSettingsData & { id: string }>('/api/app-settings', [])
 
   // Profile form state — sync from business (adjust during render to avoid effect setState)
   const [form, setForm] = useState<Partial<Business>>({})
@@ -119,6 +121,19 @@ export function SettingsView() {
     externalScannerEnabled: false,
     defaulterRegistryEnabled: true,
   })
+  // §REWARD-THRESHOLD: configurable profit threshold (INR) for reward-cycle
+  // unlock. Synced from settings.rewardThreshold (default ₹400). Saved via
+  // PUT /api/app-settings on blur; the response re-syncs the value (no stale
+  // local overwrite).
+  const [rewardThreshold, setRewardThreshold] = useState(400)
+  const [rewardThresholdSaving, setRewardThresholdSaving] = useState(false)
+  // §FEEDBACK-DELAY-HOURS: configurable delay (hours) before requesting
+  // product feedback after a purchase. Synced from settings.feedbackDelayHours
+  // (default 48). Saved via PUT /api/app-settings on blur; the response
+  // re-syncs the value (no stale local overwrite). Mirrors the rewardThreshold
+  // server-sync fix exactly.
+  const [feedbackDelayHours, setFeedbackDelayHours] = useState(48)
+  const [feedbackDelaySaving, setFeedbackDelaySaving] = useState(false)
   const [lastSettingsId, setLastSettingsId] = useState<string | null>(null)
   if (settings && settings.id !== lastSettingsId) {
     setLastSettingsId(settings.id)
@@ -135,6 +150,8 @@ export function SettingsView() {
       externalScannerEnabled: (settings as any).externalScannerEnabled ?? false,
       defaulterRegistryEnabled: (settings as any).defaulterRegistryEnabled ?? true,
     })
+    setRewardThreshold((settings as any).rewardThreshold ?? 400)
+    setFeedbackDelayHours((settings as any).feedbackDelayHours ?? 48)
     setPrefs({
       notificationsEnabled: settings.notificationsEnabled,
       autoBackupEnabled: settings.autoBackupEnabled,
@@ -220,7 +237,7 @@ export function SettingsView() {
   // PRD Part 30 §1.2: PIN-guarded reset
   const handleResetWithPin = async () => {
     if (!resetPin || resetPin.length < 4) {
-      toast.error('PIN দিন (৪-৬ ডিজিট)')
+      toast.error(t('set.pinRequired'))
       return
     }
     setResetting(true)
@@ -232,7 +249,7 @@ export function SettingsView() {
         body: JSON.stringify({ action: 'verify', pin: resetPin }),
       })
       if (!pinRes.ok) {
-        toast.error('ভুল PIN — রিসেট অনুমোদিত নয়')
+        toast.error(t('set.pinWrong'))
         setResetting(false)
         return
       }
@@ -241,7 +258,7 @@ export function SettingsView() {
       const res = await fetch('/api/reset', { method: 'POST' })
       if (!res.ok) throw new Error('Reset failed')
       toast.dismiss()
-      toast.success('ডেমো ডেটা রিসেট সফল!')
+      toast.success(t('set.resetSuccess'))
       setShowResetModal(false)
       setResetPin('')
       // PRD Part 30 §1.1: Push local notification on restore/reset
@@ -251,15 +268,15 @@ export function SettingsView() {
       useNotificationStore.getState().addLocalNotification({
         id: crypto.randomUUID(),
         type: 'system',
-        title: 'ডেটা রিসেট সম্পন্ন ✅',
-        body: 'সমস্ত ডেটা ডিফল্ট স্টেটে রিসেট করা হয়েছে।',
-        time: 'এইমাত্র',
+        title: t('set.resetDoneTitle'),
+        body: t('set.resetDoneBody'),
+        time: t('set.justNow'),
         read: false,
       })
       setTimeout(() => window.location.reload(), 800)
     } catch (e) {
       toast.dismiss()
-      toast.error('রিসেট ব্যর্থ: ' + String(e))
+      toast.error(t('set.resetFailed') + String(e))
     } finally {
       setResetting(false)
     }
@@ -281,18 +298,27 @@ export function SettingsView() {
   return (
     <div className="space-y-4">
       {/* Tabs */}
-      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+      {/* §SETTINGS-TABS-STYLE: active tab is a tinted pill (bg-primary/10 +
+          ring + icon emphasis) instead of a solid fill — softer, consistent
+          with the Reports tab strip and the bottom-nav active-pill language;
+          role=tab/tablist semantics for screen readers. */}
+      <div role="tablist" aria-label="Settings sections" className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 pb-0.5">
         {TABS.map((tb) => {
           const Icon = tb.icon
+          const isActive = tab === tb.id
           return (
             <button
               key={tb.id}
+              role="tab"
+              aria-selected={isActive}
               onClick={() => setTab(tb.id)}
-              className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all min-h-[40px] ${
-                tab === tb.id ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted text-muted-foreground'
+              className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all min-h-[40px] ring-1 ${
+                isActive
+                  ? 'bg-primary/10 text-primary ring-primary/25 shadow-sm'
+                  : 'bg-muted/60 text-muted-foreground ring-transparent hover:bg-muted'
               }`}
             >
-              <Icon className="w-3.5 h-3.5" /> {t(tb.labelKey)}
+              <Icon className={`w-3.5 h-3.5 transition-transform ${isActive ? 'scale-110' : 'scale-100 opacity-70'}`} /> {t(tb.labelKey)}
             </button>
           )
         })}
@@ -312,10 +338,10 @@ export function SettingsView() {
             </div>
 
             {/* PRD Part 28 §3: Invoice header info banner */}
-            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 flex items-start gap-2">
-              <FileText className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
-              <p className="text-[10px] text-blue-700 dark:text-blue-300">
-                এই তথ্যগুলো সরাসরি ইনভয়েস পিডিএফ ও থার্মাল প্রিন্ট হেডারে অটো-সিঙ্ক হবে। Save করার সাথে সাথে নতুন বিলগুলোতে আপডেটেড তথ্য দেখা যাবে।
+            <div className="p-3 rounded-xl bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 flex items-start gap-2">
+              <FileText className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
+              <p className="text-[10px] text-teal-700 dark:text-teal-300">
+                {t('set.profile.sync')}
               </p>
             </div>
 
@@ -329,7 +355,7 @@ export function SettingsView() {
             <div className="space-y-1.5">
               <Label className="text-xs flex items-center gap-1">
                 {t('set.gstin')}
-                <span className="text-[9px] text-muted-foreground">(১৫ ডিজিট আলফানিউমেরিক)</span>
+                <span className="text-[9px] text-muted-foreground">{t('set.gstin.hint')}</span>
               </Label>
               <Input
                 value={form.gstin || ''}
@@ -340,7 +366,7 @@ export function SettingsView() {
               />
               {form.gstin && !gstinValid && (
                 <p className="text-[10px] text-red-600 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" /> Invalid GSTIN Format (১৫ ডিজিট আলফানিউমেরিক, স্টেট কোড দিয়ে শুরু)
+                  <AlertCircle className="w-3 h-3" /> {t('set.gstin.invalid')}
                 </p>
               )}
               {form.gstin && gstinValid && (
@@ -354,7 +380,7 @@ export function SettingsView() {
             <div className="space-y-1.5">
               <Label className="text-xs flex items-center gap-1">
                 {t('set.pan')}
-                <span className="text-[9px] text-muted-foreground">(১০ ডিজিট আলফানিউমেরিক)</span>
+                <span className="text-[9px] text-muted-foreground">{t('set.pan.hint')}</span>
               </Label>
               <Input
                 value={form.pan || ''}
@@ -365,7 +391,7 @@ export function SettingsView() {
               />
               {form.pan && !panValid && (
                 <p className="text-[10px] text-red-600 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" /> Invalid PAN Format (১০ ডিজিট: ৫ অক্ষর + ৪ সংখ্যা + ১ অক্ষর)
+                  <AlertCircle className="w-3 h-3" /> {t('set.pan.invalid')}
                 </p>
               )}
               {form.pan && panValid && (
@@ -379,7 +405,7 @@ export function SettingsView() {
             <div className="space-y-1.5">
               <Label className="text-xs flex items-center gap-1">
                 {t('set.upiId')}
-                <span className="text-[9px] text-muted-foreground">(VPA — বিল QR এ অটো-লিঙ্ক হবে)</span>
+                <span className="text-[9px] text-muted-foreground">{t('set.upi.hint')}</span>
               </Label>
               <div className="flex gap-2">
                 <Input
@@ -406,7 +432,7 @@ export function SettingsView() {
               {/* PRD Part 28 §2: Dynamic QR preview */}
               {showQrPreview && upiQrString && (
                 <div className="p-4 rounded-xl bg-muted/30 border border-border text-center">
-                  <p className="text-[10px] text-muted-foreground mb-2">ডাইনামিক UPI QR Preview</p>
+                  <p className="text-[10px] text-muted-foreground mb-2">{t('set.upi.qrPreview')}</p>
                   <div className="w-32 h-32 mx-auto bg-white rounded-xl p-2 flex items-center justify-center">
                     {/* QR pattern — uses CSS grid */}
                     <div className="grid grid-cols-8 gap-0.5 w-24 h-24">
@@ -418,7 +444,7 @@ export function SettingsView() {
                     </div>
                   </div>
                   <p className="text-[10px] font-medium mt-2">{form.upiId}</p>
-                  <p className="text-[9px] text-muted-foreground mt-1">বিল তৈরি হলে এই QR অটো-জেনারেট হবে (amount সহ)</p>
+                  <p className="text-[9px] text-muted-foreground mt-1">{t('set.upi.qrNote')}</p>
                 </div>
               )}
             </div>
@@ -445,10 +471,10 @@ export function SettingsView() {
             </div>
             {/* PRD Part 28 §1: Save button locked if validation fails */}
             <Button onClick={saveProfile} disabled={!isFormValid} className="w-full h-11">
-              <Save className="w-4 h-4 mr-1.5" /> {isFormValid ? t('set.save') : 'ফরম ভ্যালিড করুন…'}
+              <Save className="w-4 h-4 mr-1.5" /> {isFormValid ? t('set.save') : t('set.saveInvalid')}
             </Button>
             {!isFormValid && (
-              <p className="text-[10px] text-red-600 text-center">ভ্যালিডেশন এরর — GSTIN/PAN/UPI ফরম্যাট ঠিক করুন</p>
+              <p className="text-[10px] text-red-600 text-center">{t('set.validationError')}</p>
             )}
           </Card>
         )}
@@ -575,10 +601,28 @@ export function SettingsView() {
             </div>
 
             {/* Notifications with expandable channel sub-toggles */}
+            {/* §NO-NESTED-BUTTON: this row was previously a <button> wrapping
+                the <Switch> (which itself renders a <button role="switch">) —
+                button-in-button is invalid HTML and fired a hydration error
+                (second instance of the product-form bug, fixed the same way).
+                Now a div with role="button" + full keyboard support. The
+                Switch sits in a stopPropagation wrapper so toggling it does
+                NOT bubble up and collapse/expand the channel list (that was
+                a pre-existing jank: flipping the master switch also flipped
+                the expansion state). */}
             <div>
-              <button
+              <div
+                role="button"
+                tabIndex={0}
+                aria-expanded={showNotifChannels}
                 onClick={() => setShowNotifChannels(!showNotifChannels)}
-                className="w-full flex items-center justify-between gap-3 py-1"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setShowNotifChannels(!showNotifChannels)
+                  }
+                }}
+                className="w-full flex items-center justify-between gap-3 py-1 cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <div className="flex items-center gap-3">
                   <span className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center">
@@ -586,29 +630,28 @@ export function SettingsView() {
                   </span>
                   <p className="text-sm font-medium">{t('set.notifications')}</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                   <Switch
                     checked={prefs.notificationsEnabled}
                     onCheckedChange={(v) => setPrefs({ ...prefs, notificationsEnabled: v })}
                   />
                   {showNotifChannels ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
                 </div>
-              </button>
+              </div>
               {/* PRD Part 29 §2: Expandable granular channel sub-toggles */}
               {showNotifChannels && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="ml-12 mt-2 space-y-2 overflow-hidden">
-                  <p className="text-[10px] text-muted-foreground uppercase mb-1">চ্যানেল প্রেফারেন্স</p>
+                  <p className="text-[10px] text-muted-foreground uppercase mb-1">{t('set.ch.pref')}</p>
                   {([
-                    { key: 'sales' as const, label: 'Sale Notifications', labelBn: 'বিক্রয় বিজ্ঞপ্তি' },
-                    { key: 'lowStock' as const, label: 'Low Stock Alerts', labelBn: 'লো স্টক অ্যালার্ট' },
-                    { key: 'overduePayments' as const, label: 'Payment Overdue Warnings', labelBn: 'বকেয়া পেমেন্ট তাগাদা' },
-                    { key: 'gradeChanges' as const, label: 'Customer Grade Changes', labelBn: 'গ্রাহক গ্রেড পরিবর্তন' },
-                    { key: 'backups' as const, label: 'App System Backups', labelBn: 'সিস্টেম ব্যাকআপ' },
+                    { key: 'sales' as const, labelKey: 'set.ch.sales' },
+                    { key: 'lowStock' as const, labelKey: 'set.ch.lowStock' },
+                    { key: 'overduePayments' as const, labelKey: 'set.ch.overdue' },
+                    { key: 'gradeChanges' as const, labelKey: 'set.ch.grade' },
+                    { key: 'backups' as const, labelKey: 'set.ch.backups' },
                   ]).map((ch) => (
                     <div key={ch.key} className="flex items-center justify-between gap-2 py-1">
                       <div>
-                        <p className="text-xs font-medium">{ch.label}</p>
-                        <p className="text-[9px] text-muted-foreground">{ch.labelBn}</p>
+                        <p className="text-xs font-medium">{t(ch.labelKey)}</p>
                       </div>
                       <Switch checked={channels[ch.key]} onCheckedChange={() => toggleChannel(ch.key)} />
                     </div>
@@ -628,7 +671,7 @@ export function SettingsView() {
             {/* PRD Part 29 §1: Voice & Input Settings (after Invoice Prefix, before Save) */}
             <div className="p-4 rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 space-y-3">
               <p className="text-xs font-semibold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
-                <Mic className="w-3.5 h-3.5" /> ভয়েস ও ইনপুট সেটিংস (Voice & Input)
+                <Mic className="w-3.5 h-3.5" /> {t('set.voice.section')}
               </p>
               {/* Toggle 1: Enable Global Voice Input */}
               <div className="flex items-center justify-between gap-3">
@@ -638,12 +681,12 @@ export function SettingsView() {
                   </span>
                   <div>
                     <p className="text-xs font-medium">Enable Global Voice Input</p>
-                    <p className="text-[9px] text-muted-foreground">টপ বারের মাইক ও ভয়েস কমান্ড</p>
+                    <p className="text-[9px] text-muted-foreground">{t('set.voice.globalSub')}</p>
                   </div>
                 </div>
                 <Switch
                   checked={globalVoiceEnabled}
-                  onCheckedChange={(v) => { setGlobalVoice(v); toast.success(`Global Voice ${v ? 'চালু' : 'বন্ধ'}`) }}
+                  onCheckedChange={(v) => { setGlobalVoice(v); toast.success(`Global Voice ${v ? t('set.on') : t('set.off')}`) }}
                 />
               </div>
               {/* Toggle 2: Tap-to-Voice / Double-Tap Keyboard */}
@@ -654,12 +697,12 @@ export function SettingsView() {
                   </span>
                   <div>
                     <p className="text-xs font-medium">Tap-to-Voice / Double-Tap Keyboard</p>
-                    <p className="text-[9px] text-muted-foreground">১-ক্লিকে মাইক, ২-ক্লিকে কীবোর্ড</p>
+                    <p className="text-[9px] text-muted-foreground">{t('set.voice.tapSub')}</p>
                   </div>
                 </div>
                 <Switch
                   checked={tapToVoiceEnabled}
-                  onCheckedChange={(v) => { setTapToVoice(v); toast.success(`Tap-to-Voice ${v ? 'চালু' : 'বন্ধ'}`) }}
+                  onCheckedChange={(v) => { setTapToVoice(v); toast.success(`Tap-to-Voice ${v ? t('set.on') : t('set.off')}`) }}
                 />
               </div>
               {/* PRD Part 37 — Sound Box Toggle */}
@@ -669,13 +712,13 @@ export function SettingsView() {
                     <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
                   </span>
                   <div>
-                    <p className="text-xs font-medium">সাউন্ড বক্স (Sound Box)</p>
-                    <p className="text-[9px] text-muted-foreground">পেমেন্ট এলে "₹৫০০ প্রাপ্ত হয়েছে" ঘোষণা</p>
+                    <p className="text-xs font-medium">{t('set.soundbox')}</p>
+                    <p className="text-[9px] text-muted-foreground">{t('set.soundbox.sub')}</p>
                   </div>
                 </div>
                 <Switch
                   checked={soundBoxEnabled}
-                  onCheckedChange={(v) => { setSoundBoxEnabled(v); toast.success(`সাউন্ড বক্স ${v ? 'চালু ✅' : 'বন্ধ'}`) }}
+                  onCheckedChange={(v) => { setSoundBoxEnabled(v); toast.success(`${t('set.soundbox')} ${v ? t('set.on') + ' ✅' : t('set.off')}`) }}
                 />
               </div>
               {/* Sound Box Test Button */}
@@ -692,14 +735,14 @@ export function SettingsView() {
                       utterance.lang = lang === 'bn' ? 'bn-IN' : lang === 'hi' ? 'hi-IN' : 'en-IN'
                       utterance.rate = 0.9
                       window.speechSynthesis.speak(utterance)
-                      toast.success('সাউন্ড বক্স টেস্ট চলছে...')
+                      toast.success(t('set.soundbox.testing'))
                     } else {
-                      toast.error('এই ব্রাউজারে সাউন্ড বক্স সাপোর্ট করে না')
+                      toast.error(t('set.soundbox.unsupported'))
                     }
                   }}
                   className="w-full py-2 rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-medium flex items-center justify-center gap-1.5 hover:bg-emerald-500/20 transition-colors"
                 >
-                  <Volume2 className="w-3.5 h-3.5" /> টেস্ট করুন (Test Sound)
+                  <Volume2 className="w-3.5 h-3.5" /> {t('set.soundbox.test')}
                 </button>
               )}
             </div>
@@ -710,6 +753,9 @@ export function SettingsView() {
             </Button>
           </Card>
         )}
+
+        {/* §MESSAGE-TEMPLATES: per-business customizable customer messages */}
+        {tab === 'templates' && <MessageTemplatesEditor />}
 
         {tab === 'data' && (
           <div className="space-y-3">
@@ -847,7 +893,7 @@ export function SettingsView() {
               <h3 className="text-sm font-semibold mb-1 text-destructive flex items-center gap-1.5">
                 <Lock className="w-4 h-4" /> Danger Zone
               </h3>
-              <p className="text-[11px] text-muted-foreground mb-4">PIN বা বায়োমেট্রিক প্রয়োজন — ডেটা রিসেট করতে।</p>
+              <p className="text-[11px] text-muted-foreground mb-4">{t('set.danger.sub')}</p>
               <Button
                 variant="outline"
                 onClick={reseed}
@@ -1131,22 +1177,13 @@ export function SettingsView() {
               {/* PRD Part 30 §2: Role descriptions */}
               <div className="p-3 rounded-xl bg-muted/30 space-y-1.5">
                 {userRole === 'owner' && (
-                  <>
-                    <p className="text-[10px] text-emerald-600 font-medium">✅ সম্পূর্ণ অ্যাক্সেস — সব ফিচার, ডিলিট, এক্সপোর্ট, সেটিংস</p>
-                    <p className="text-[10px] text-muted-foreground">Full access — all features, delete, export, settings</p>
-                  </>
+                  <p className="text-[10px] text-emerald-600 font-medium">✅ {t('set.role.ownerDesc')}</p>
                 )}
                 {userRole === 'manager' && (
-                  <>
-                    <p className="text-[10px] text-amber-600 font-medium">⚠️ সেলস, ইনভেন্টরি, খাতা — কোনো ডিলিট/এক্সপোর্ট/সেটিংস নয়</p>
-                    <p className="text-[10px] text-muted-foreground">Sales, Inventory, Khata — no delete/export/settings (greyed out)</p>
-                  </>
+                  <p className="text-[10px] text-amber-600 font-medium">⚠️ {t('set.role.managerDesc')}</p>
                 )}
                 {userRole === 'sales' && (
-                  <>
-                    <p className="text-[10px] text-red-600 font-medium">🔒 শুধু হোম + বিলিং — খাতা ও More মেনু হাইড</p>
-                    <p className="text-[10px] text-muted-foreground">Home + Billing only — Khata & More menu hidden</p>
-                  </>
+                  <p className="text-[10px] text-red-600 font-medium">🔒 {t('set.role.salesDesc')}</p>
                 )}
               </div>
             </Card>
@@ -1208,6 +1245,129 @@ export function SettingsView() {
                     inputMode="numeric"
                   />
                 </div>
+              </div>
+            </Card>
+
+            {/* §REWARD-THRESHOLD: Customer Reward Threshold configuration */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Gift className="w-4 h-4 text-amber-600" />
+                <h3 className="text-sm font-semibold">Customer Reward Threshold</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                The profit amount a customer must accumulate to unlock a reward cycle. Changing this does not affect existing reward cycles (their threshold is snapshotted at creation); only newly created cycles use the updated value.
+              </p>
+              <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-muted/30">
+                <div className="flex items-start gap-2 flex-1 min-w-0">
+                  <IndianRupee className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium">Reward Threshold (₹)</p>
+                    <p className="text-[10px] text-muted-foreground">Profit required to unlock a reward cycle (₹1 – ₹10,00,000)</p>
+                  </div>
+                </div>
+                <Input
+                  type="number"
+                  value={rewardThreshold}
+                  onChange={(e) => setRewardThreshold(Number(e.target.value))}
+                  onBlur={async () => {
+                    // §SERVER-SYNC-FIX: capture the current server-saved value
+                    // so we can restore it if the save is rejected. After a
+                    // successful save, use the server-RETURNED value (from the
+                    // apiPut response body) to update the local state — NOT
+                    // the local input value, which may differ from the
+                    // server's 2-dp-rounded persisted value. This guarantees
+                    // the UI reflects the exact server-returned value without
+                    // relying on the id-change sync (which is skipped when
+                    // refetching the same AppSettings record/id) and without
+                    // a full-page reload.
+                    const prevServerValue = (settings as any).rewardThreshold ?? 400
+                    setRewardThresholdSaving(true)
+                    try {
+                      const updated = await apiPut('/api/app-settings', { rewardThreshold })
+                      const serverValue = (updated as any)?.rewardThreshold
+                      if (typeof serverValue === 'number' && !Number.isNaN(serverValue)) {
+                        setRewardThreshold(serverValue)
+                      }
+                      toast.success('Reward threshold updated')
+                      await refetchSettings()
+                    } catch (e: any) {
+                      toast.error(e?.message || 'Invalid reward threshold')
+                      // §RESTORE: restore the previous server-saved value
+                      // (the invalid local input is discarded; no stale
+                      // value remains).
+                      setRewardThreshold(prevServerValue)
+                      await refetchSettings()
+                    } finally {
+                      setRewardThresholdSaving(false)
+                    }
+                  }}
+                  className="w-28 h-9 text-xs"
+                  inputMode="numeric"
+                  disabled={rewardThresholdSaving}
+                  min={1}
+                  max={1000000}
+                />
+              </div>
+            </Card>
+
+            {/* §FEEDBACK-DELAY-HOURS: Product Feedback Delay configuration.
+                Mirrors the reward-threshold Card pattern exactly — same
+                layout, same server-sync fix (apiPut → response value
+                replaces local input → refetch + sync). Range 1-168 hours. */}
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-violet-600" />
+                <h3 className="text-sm font-semibold">Feedback Delay (hours)</h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Hours after a purchase before requesting product feedback (1–168).
+                A per-product override on the Product profile takes precedence over
+                this global default at request-creation time.
+              </p>
+              <div className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-muted/30">
+                <div className="flex items-start gap-2 flex-1 min-w-0">
+                  <Clock className="w-3.5 h-3.5 text-violet-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium">Feedback Delay (hours)</p>
+                    <p className="text-[10px] text-muted-foreground">Delay before a post-purchase feedback request (1–168 hours)</p>
+                  </div>
+                </div>
+                <Input
+                  type="number"
+                  value={feedbackDelayHours}
+                  onChange={(e) => setFeedbackDelayHours(Number(e.target.value))}
+                  onBlur={async () => {
+                    // §SERVER-SYNC-FIX: capture the current server-saved value
+                    // so we can restore it if the save is rejected. After a
+                    // successful save, use the server-RETURNED value (from the
+                    // apiPut response body) to update the local state — NOT
+                    // the local input value, which may differ from the
+                    // server's persisted value. Mirrors the rewardThreshold
+                    // server-sync fix exactly.
+                    const prevServerValue = (settings as any).feedbackDelayHours ?? 48
+                    setFeedbackDelaySaving(true)
+                    try {
+                      const updated = await apiPut('/api/app-settings', { feedbackDelayHours })
+                      const serverValue = (updated as any)?.feedbackDelayHours
+                      if (typeof serverValue === 'number' && !Number.isNaN(serverValue)) {
+                        setFeedbackDelayHours(serverValue)
+                      }
+                      toast.success('Feedback delay updated')
+                      await refetchSettings()
+                    } catch (e: any) {
+                      toast.error(e?.message || 'Invalid feedback delay hours')
+                      setFeedbackDelayHours(prevServerValue)
+                      await refetchSettings()
+                    } finally {
+                      setFeedbackDelaySaving(false)
+                    }
+                  }}
+                  className="w-28 h-9 text-xs"
+                  inputMode="numeric"
+                  disabled={feedbackDelaySaving}
+                  min={1}
+                  max={168}
+                />
               </div>
             </Card>
 
@@ -1274,18 +1434,18 @@ export function SettingsView() {
 
       {/* PRD Part 30 §1.2: PIN Re-authentication Modal for Reset */}
       <Dialog open={showResetModal} onOpenChange={setShowResetModal}>
-        <FormDialogContent className="max-w-md">
+        <FormDialogContent aria-describedby={undefined} className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Lock className="w-4 h-4 text-destructive" /> রিসেট অথেন্টিকেশন
+              <Lock className="w-4 h-4 text-destructive" /> {t('set.reset.auth')}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
             <p className="text-xs text-muted-foreground">
-              ডেটা রিসেট করতে আপনার App PIN দিন অথবা বায়োমেট্রিক স্ক্যান করুন।
+              {t('set.reset.body')}
             </p>
             <div className="space-y-1.5">
-              <Label className="text-xs">App PIN (৪-৬ ডিজিট)</Label>
+              <Label className="text-xs">{t('set.reset.pinLabel')}</Label>
               <Input
                 value={resetPin}
                 onChange={(e) => setResetPin(e.target.value.replace(/[^0-9]/g, ''))}
@@ -1299,21 +1459,21 @@ export function SettingsView() {
             {/* Biometric option */}
             <button
               onClick={async () => {
-                toast.info('বায়োমেট্রিক স্ক্যান শুরু হচ্ছে…')
+                toast.info(t('set.reset.bioStart'))
                 // Simulate biometric — in production this would use the device API
                 setTimeout(() => {
-                  toast.success('বায়োমেট্রিক ভেরিফাইড ✅')
+                  toast.success(t('set.reset.bioVerified'))
                   setResetPin('0000') // Auto-fill with verified token
                 }, 1500)
               }}
               className="w-full p-3 rounded-xl border border-dashed border-border flex items-center justify-center gap-2 text-sm text-muted-foreground hover:bg-muted"
             >
-              <Fingerprint className="w-5 h-5" /> বায়োমেট্রিক ফিঙ্গারপ্রিন্ট স্ক্যান
+              <Fingerprint className="w-5 h-5" /> {t('set.reset.bioScan')}
             </button>
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => { setShowResetModal(false); setResetPin('') }} className="h-11">
-              বাতিল
+              {t('common.cancel')}
             </Button>
             <Button
               onClick={handleResetWithPin}
@@ -1321,7 +1481,7 @@ export function SettingsView() {
               variant="destructive"
               className="h-11 flex-1"
             >
-              {resetting ? 'রিসেট হচ্ছে…' : 'রিসেট নিশ্চিত করুন'}
+              {resetting ? t('set.reset.resetting') : t('set.reset.confirm')}
             </Button>
           </DialogFooter>
         </FormDialogContent>

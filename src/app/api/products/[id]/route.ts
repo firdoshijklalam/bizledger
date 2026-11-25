@@ -67,6 +67,26 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (stock < 0) return NextResponse.json({ error: 'Stock cannot be negative' }, { status: 400 })
     if (gstRate < 0 || gstRate > 100) return NextResponse.json({ error: 'GST rate must be between 0 and 100' }, { status: 400 })
 
+    // §PRODUCT-FEEDBACK-DELAY: optional per-product override (1–168 integer
+    // hours, same bounds as the global AppSettings value). Semantics:
+    //   - undefined (field omitted) → keep the existing value (Prisma no-op)
+    //   - null / '' / 0 → reset to null = use the AppSettings default
+    //   - integer 1–168 → override
+    // (see resolveEffectiveFeedbackDelay in src/lib/product-feedback.ts)
+    let feedbackDelayHours: number | null | undefined
+    if (body.feedbackDelayHours !== undefined) {
+      const raw = body.feedbackDelayHours
+      if (raw === null || raw === '' || Number(raw) === 0) {
+        feedbackDelayHours = null
+      } else {
+        const n = Number(raw)
+        if (!Number.isInteger(n) || n < 1 || n > 168) {
+          return NextResponse.json({ error: 'Feedback delay must be an integer between 1 and 168 hours' }, { status: 400 })
+        }
+        feedbackDelayHours = n
+      }
+    }
+
     // §3: Regenerate search tags if name changed
     const searchTags = body.name !== existing.name
       ? JSON.stringify(generateSearchTags(body.name || ''))
@@ -94,6 +114,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         retailMrp: body.retailEnabled ? (body.retailMrp ? Number(body.retailMrp) : null) : null,
         looseStock: body.retailEnabled ? (Number(body.looseStock) || 0) : 0,
         subCategory: body.subCategory || null,
+        feedbackDelayHours,
         // PRD Part 35: AI auto-fill + nested category + publishing
         description: body.description || null,
         isPublished: body.isPublished ?? true,

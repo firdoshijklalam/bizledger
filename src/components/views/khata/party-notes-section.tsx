@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useFetch, apiPost, apiPut, apiDelete } from '@/hooks/use-fetch'
+import { useI18n } from '@/store/i18n-store'
 import { timeAgo, formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -61,6 +62,7 @@ const NOTE_TYPE_META: Record<string, { label: string; icon: typeof Phone; color:
 const NOTE_TYPES = Object.keys(NOTE_TYPE_META)
 
 export function PartyNotesSection({ partyId }: { partyId: string }) {
+  const { t } = useI18n()
   const { data, loading, error, refetch } = useFetch<NotesResponse>(
     `/api/parties/${partyId}/notes`,
     [partyId]
@@ -77,7 +79,7 @@ export function PartyNotesSection({ partyId }: { partyId: string }) {
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold flex items-center gap-1.5">
           <MessageSquare className="w-4 h-4 text-muted-foreground" />
-          Notes
+          {t('pp.notes')}
           {notes.length > 0 && (
             <span className="text-xs text-muted-foreground font-normal">{notes.length}</span>
           )}
@@ -330,7 +332,7 @@ function NoteFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <FormDialogContent className="max-w-md">
+      <FormDialogContent aria-describedby={undefined} className="max-w-md">
         <DialogHeader>
           <DialogTitle>{mode === 'create' ? 'Add Note' : 'Edit Note'}</DialogTitle>
         </DialogHeader>

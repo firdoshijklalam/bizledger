@@ -418,13 +418,13 @@ export function TransactionHistoryView() {
           </div>
         )}
         {viewMode === 'transactions' && (
-          <div className="mb-2 flex items-center justify-between gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
-            <p className="text-xs font-medium text-blue-800 dark:text-blue-200">
+          <div className="mb-2 flex items-center justify-between gap-2 p-2 rounded-lg bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800">
+            <p className="text-xs font-medium text-teal-800 dark:text-teal-200">
               Showing all transactions (credit + debit) for {dashboardRangeLabel(range)}
             </p>
             <button
               onClick={() => setViewMode('invoices')}
-              className="text-[10px] px-2 py-1 rounded-lg bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/70 transition-colors"
+              className="text-[10px] px-2 py-1 rounded-lg bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300 hover:bg-teal-200 dark:hover:bg-teal-900/70 transition-colors"
             >
               ← Back to invoices
             </button>
@@ -447,7 +447,7 @@ export function TransactionHistoryView() {
               value={summary?.cashReceived || 0}
               sub={`UPI ₹${formatCurrency(summary?.upiReceived || 0, currency).replace('₹','')}`}
               icon={<Wallet className="w-3.5 h-3.5" />}
-              color="blue"
+              color="cyan"
               loading={summaryLoading}
             />
             <StatCard
@@ -517,7 +517,7 @@ export function TransactionHistoryView() {
               value={txnSummary?.count ?? 0}
               sub="records"
               icon={<Receipt className="w-3.5 h-3.5" />}
-              color="blue"
+              color="cyan"
               isCount
             />
           </div>
@@ -687,14 +687,14 @@ export function TransactionHistoryView() {
                       ? 'bg-teal-100 dark:bg-teal-900/30'
                       : isPickup
                         ? 'bg-amber-100 dark:bg-amber-900/30'
-                        : 'bg-blue-100 dark:bg-blue-900/30'
+                        : 'bg-teal-100 dark:bg-teal-900/30'
                   }`}>
                     {item.kind === 'due-collection' ? (
                       <ArrowDownToLine className="w-5 h-5 text-teal-600" />
                     ) : isPickup ? (
                       <Package className="w-5 h-5 text-amber-600" />
                     ) : (
-                      <Receipt className="w-5 h-5 text-blue-600" />
+                      <Receipt className="w-5 h-5 text-teal-600" />
                     )}
                   </div>
 
@@ -790,13 +790,13 @@ function StatCard({
   value: number
   sub: string
   icon: React.ReactNode
-  color: 'emerald' | 'blue' | 'teal' | 'amber' | 'violet' | 'rose'
+  color: 'emerald' | 'cyan' | 'teal' | 'amber' | 'violet' | 'rose'
   loading?: boolean
   isCount?: boolean
 }) {
   const colorMap = {
     emerald: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30',
-    blue: 'text-blue-600 bg-blue-50 dark:bg-blue-950/30',
+    cyan: 'text-cyan-700 bg-cyan-50 dark:bg-cyan-950/30',
     teal: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30',
     amber: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30',
     violet: 'text-violet-600 bg-violet-50 dark:bg-violet-950/30',

@@ -15,6 +15,9 @@ export type ViewId =
   | 'online-orders'
   | 'staff'
   | 'fulfillment'
+  | 'complaints'
+  | 'messages'
+  | 'followups'
 
 export type PartyType = 'customer' | 'supplier' | 'both'
 export type QualityGrade = 'A' | 'B' | 'C' | 'D' | 'E'
@@ -103,6 +106,9 @@ export interface Product {
   description?: string | null
   isPublished?: boolean
   categoryPath?: string | null
+  // §PRODUCT-FEEDBACK-DELAY: per-product override (1–168 hours) for the
+  // post-purchase feedback request timing. null = business default.
+  feedbackDelayHours?: number | null
   // §3: phonetic search tags (JSON array string from transliteration)
   searchTags?: string | null
   createdAt: string
@@ -198,6 +204,9 @@ export interface AppSettingsData {
   dateFormat: string
   invoicePrefix: string
   pinEnabled: boolean
+  // §REWARD-THRESHOLD: configurable profit threshold (INR) for reward-cycle
+  // unlock. Serialized to a number by serializeDecimals (Prisma Decimal).
+  rewardThreshold?: number
 }
 
 // PRD Part 13: B2B Sourcing types

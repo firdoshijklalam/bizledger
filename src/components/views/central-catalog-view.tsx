@@ -129,7 +129,7 @@ const AVATAR_GRADIENTS = [
   'from-rose-500 to-pink-600',
   'from-amber-500 to-orange-600',
   'from-violet-500 to-purple-600',
-  'from-cyan-500 to-sky-600',
+  'from-teal-500 to-cyan-600',
   'from-lime-500 to-green-600',
 ]
 
@@ -1932,7 +1932,7 @@ const SPLIT_STATUS_META: Record<string, {
   confirmed: {
     label: 'Confirmed',
     icon: Check,
-    badgeClass: 'bg-sky-100 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800/50',
+    badgeClass: 'bg-cyan-100 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800/50',
   },
   delivered: {
     label: 'Delivered',

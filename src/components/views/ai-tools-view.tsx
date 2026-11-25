@@ -54,7 +54,7 @@ const TOOLS: Array<{
     title: 'OCR Bill Scanner',
     desc: 'Scan supplier bills with camera — AI extracts items, prices & totals.',
     status: 'active',
-    color: 'text-blue-600 bg-blue-100 dark:bg-blue-900/30',
+    color: 'text-teal-600 bg-teal-100 dark:bg-teal-900/30',
   },
   {
     id: 'voice',
@@ -150,7 +150,7 @@ export function AiToolsView() {
                           <CheckCircle2 className="w-2.5 h-2.5 mr-0.5" /> Active
                         </Badge>
                       ) : (
-                        <Badge variant="secondary" className="text-[9px] h-4 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                        <Badge variant="secondary" className="text-[9px] h-4 bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">
                           Ready
                         </Badge>
                       )}

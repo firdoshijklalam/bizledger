@@ -90,7 +90,18 @@ export async function POST(req: NextRequest) {
     if (stock < 0) return NextResponse.json({ error: 'Stock cannot be negative' }, { status: 400 })
     if (gstRate < 0 || gstRate > 100) return NextResponse.json({ error: 'GST rate must be between 0 and 100' }, { status: 400 })
 
-    // §3: Auto-generate phonetic search tags from the product name
+    // §PRODUCT-FEEDBACK-DELAY: optional per-product override (1–168 integer
+    // hours, same bounds as the global AppSettings value). null/''/0/omitted
+    // → null = use the business-wide AppSettings.feedbackDelayHours default
+    // (see resolveEffectiveFeedbackDelay in src/lib/product-feedback.ts).
+    const rawFeedbackDelay = body.feedbackDelayHours
+    const feedbackDelayHours =
+      rawFeedbackDelay === null || rawFeedbackDelay === undefined || rawFeedbackDelay === '' || Number(rawFeedbackDelay) === 0
+        ? null
+        : Number(rawFeedbackDelay)
+    if (feedbackDelayHours !== null && (!Number.isInteger(feedbackDelayHours) || feedbackDelayHours < 1 || feedbackDelayHours > 168)) {
+      return NextResponse.json({ error: 'Feedback delay must be an integer between 1 and 168 hours' }, { status: 400 })
+    }
     const searchTags = JSON.stringify(generateSearchTags(body.name || ''))
 
     const product = await db.product.create({
@@ -116,6 +127,7 @@ export async function POST(req: NextRequest) {
         retailMrp: body.retailEnabled ? (body.retailMrp ? Number(body.retailMrp) : null) : null,
         looseStock: body.retailEnabled ? (Number(body.looseStock) || 0) : 0,
         subCategory: body.subCategory || null,
+        feedbackDelayHours,
         // PRD Part 35: AI auto-fill + nested category + publishing
         description: body.description || null,
         isPublished: body.isPublished ?? true,

@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { useFetch, apiPut } from '@/hooks/use-fetch'
+import { useStaffNameResolver, useCurrentStaffName } from '@/hooks/use-staff-name'
+import { useI18n } from '@/store/i18n-store'
 import { timeAgo, formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -10,10 +12,10 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
-  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, FormDialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  Drawer, DrawerContent, DrawerHeader, DrawerTitle,
+  Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerDescription,
 } from '@/components/ui/drawer'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -71,7 +73,7 @@ const RATING_META: Record<Rating, { label: string; emoji: string; badge: string;
   VERY_BAD: { label: 'Very Bad', emoji: '😠', badge: 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300', ring: 'ring-red-500/30', dot: 'bg-red-500' },
   BAD:      { label: 'Bad',       emoji: '😕', badge: 'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300', ring: 'ring-orange-500/30', dot: 'bg-orange-500' },
   GOOD:     { label: 'Good',     emoji: '🙂', badge: 'bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300', ring: 'ring-violet-500/30', dot: 'bg-violet-500' },
-  BETTER:   { label: 'Better',   emoji: '😊', badge: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300', ring: 'ring-indigo-500/30', dot: 'bg-indigo-500' },
+  BETTER:   { label: 'Better',   emoji: '😊', badge: 'bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300', ring: 'ring-teal-500/30', dot: 'bg-teal-500' },
   BEST:     { label: 'Best',     emoji: '🤩', badge: 'bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300', ring: 'ring-purple-500/30', dot: 'bg-purple-500' },
 }
 
@@ -88,11 +90,16 @@ function parseTags(tags: string | null): string[] {
 }
 
 export function CustomerBehaviourSection({ partyId }: { partyId: string }) {
+  const { t } = useI18n()
   const { data, loading, error, refetch } = useFetch<BehaviourResponse>(
     `/api/parties/${partyId}/behaviour`,
     [partyId]
   )
   const behaviour = data?.behaviour ?? null
+
+  // §STAFF-NAME-RESOLUTION: shared resolver for display + form + history.
+  const resolveName = useStaffNameResolver()
+  const currentStaffName = useCurrentStaffName()
 
   const [showEdit, setShowEdit] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
@@ -103,11 +110,11 @@ export function CustomerBehaviourSection({ partyId }: { partyId: string }) {
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold flex items-center gap-1.5">
           <Heart className="w-4 h-4 text-violet-500" />
-          Customer Behaviour
+          {t('pp.behaviour')}
           {/* §DISTINCT-LABEL: explicit "interaction/service" subtitle to
               distinguish from the financial AI Credit Trust Score. */}
           <span className="text-[10px] font-normal text-muted-foreground/70 hidden sm:inline">
-            · interaction
+            {t('pp.behaviour.sub')}
           </span>
         </h3>
         <div className="flex items-center gap-1">
@@ -155,7 +162,7 @@ export function CustomerBehaviourSection({ partyId }: { partyId: string }) {
           </p>
         </div>
       ) : (
-        <BehaviourDisplay behaviour={behaviour} />
+        <BehaviourDisplay behaviour={behaviour} resolveName={resolveName} />
       )}
 
       {/* Edit / Rate Dialog */}
@@ -164,6 +171,8 @@ export function CustomerBehaviourSection({ partyId }: { partyId: string }) {
         onOpenChange={setShowEdit}
         partyId={partyId}
         existing={behaviour}
+        resolveName={resolveName}
+        currentStaffName={currentStaffName}
         onSaved={() => refetch()}
       />
 
@@ -172,15 +181,22 @@ export function CustomerBehaviourSection({ partyId }: { partyId: string }) {
         open={showHistory}
         onOpenChange={setShowHistory}
         partyId={partyId}
+        resolveName={resolveName}
       />
     </div>
   )
 }
 
 // ─── Behaviour Display ─────────────────────────────────────────────────
-function BehaviourDisplay({ behaviour }: { behaviour: CustomerBehaviour }) {
+function BehaviourDisplay({
+  behaviour, resolveName,
+}: {
+  behaviour: CustomerBehaviour
+  resolveName: (raw: string | null | undefined) => string | null
+}) {
   const meta = RATING_META[behaviour.rating] || RATING_META.GOOD
   const tags = parseTags(behaviour.tags)
+  const ratedByName = resolveName(behaviour.ratedBy)
 
   return (
     <motion.div
@@ -218,8 +234,8 @@ function BehaviourDisplay({ behaviour }: { behaviour: CustomerBehaviour }) {
       {/* Footer: last rated info */}
       <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80">
         <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
-        {behaviour.ratedBy && <span>{behaviour.ratedBy}</span>}
-        {behaviour.ratedBy && <span>·</span>}
+        {ratedByName && <span>{ratedByName}</span>}
+        {ratedByName && <span>·</span>}
         <span title={formatDateTime(behaviour.updatedAt)}>
           {timeAgo(behaviour.updatedAt)}
         </span>
@@ -230,18 +246,24 @@ function BehaviourDisplay({ behaviour }: { behaviour: CustomerBehaviour }) {
 
 // ─── Edit / Rate Dialog ────────────────────────────────────────────────
 function EditBehaviourDialog({
-  open, onOpenChange, partyId, existing, onSaved,
+  open, onOpenChange, partyId, existing, resolveName, currentStaffName, onSaved,
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
   partyId: string
   existing: CustomerBehaviour | null
+  resolveName: (raw: string | null | undefined) => string | null
+  currentStaffName: string | null
   onSaved: () => void
 }) {
   const initialRating: Rating = existing?.rating ?? 'GOOD'
   const initialTags = parseTags(existing?.tags ?? null)
   const initialNotes = existing?.notes ?? ''
-  const initialRatedBy = existing?.ratedBy ?? ''
+  // §RATED-BY-INITIAL: existing ratings resolve their stored value (cuid →
+  // display name); NEW ratings prefill with the logged-in staff name.
+  const initialRatedBy = existing?.ratedBy
+    ? (resolveName(existing.ratedBy) ?? '')
+    : (currentStaffName ?? '')
 
   const [rating, setRating] = useState<Rating>(initialRating)
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set(initialTags))
@@ -441,6 +463,11 @@ function EditBehaviourDialog({
         <DrawerContent className="max-h-[85vh]">
           <DrawerHeader>
             <DrawerTitle>{existing ? 'Edit Behaviour' : 'Rate Customer Behaviour'}</DrawerTitle>
+            {/* §A11Y: DrawerDescription satisfies Radix's aria-describedby requirement,
+                eliminating the "Missing Description or aria-describedby" warning. */}
+            <DrawerDescription>
+              Rate this customer&apos;s interaction style — separate from their payment trust score.
+            </DrawerDescription>
           </DrawerHeader>
           <div className="px-4 pb-4 overflow-y-auto">
             {formContent}
@@ -454,6 +481,11 @@ function EditBehaviourDialog({
         <FormDialogContent className="max-w-md hidden sm:block">
           <DialogHeader>
             <DialogTitle>{existing ? 'Edit Behaviour' : 'Rate Customer Behaviour'}</DialogTitle>
+            {/* §A11Y: DialogDescription satisfies Radix's aria-describedby requirement,
+                eliminating the "Missing Description or aria-describedby" warning. */}
+            <DialogDescription>
+              Rate this customer&apos;s interaction style — separate from their payment trust score.
+            </DialogDescription>
           </DialogHeader>
           {formContent}
           <DialogFooter>{footer}</DialogFooter>
@@ -464,10 +496,11 @@ function EditBehaviourDialog({
 }
 
 // ─── History Drawer ────────────────────────────────────────────────────
-function HistoryDrawer({ open, onOpenChange, partyId }: {
+function HistoryDrawer({ open, onOpenChange, partyId, resolveName }: {
   open: boolean
   onOpenChange: (o: boolean) => void
   partyId: string
+  resolveName: (raw: string | null | undefined) => string | null
 }) {
   const { data, loading, error } = useFetch<HistoryResponse>(
     open ? `/api/parties/${partyId}/behaviour/history?limit=50` : null,
@@ -523,7 +556,7 @@ function HistoryDrawer({ open, onOpenChange, partyId }: {
                           {entry.ratedBy && (
                             <>
                               <span className="text-[10px] text-muted-foreground/70">·</span>
-                              <span className="text-[10px] text-muted-foreground truncate max-w-[100px]">{entry.ratedBy}</span>
+                              <span className="text-[10px] text-muted-foreground truncate max-w-[100px]">{resolveName(entry.ratedBy)}</span>
                             </>
                           )}
                         </div>

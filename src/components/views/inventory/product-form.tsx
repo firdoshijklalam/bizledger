@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
 import { useGateTrigger } from '@/store/biometric-gate-store'
-import { Package, Tag, Boxes, AlertTriangle, X, Plus, Upload, Camera, Sparkles, Loader2, ChevronRight, Globe, CheckCircle2, FileEdit, Trash2, Calculator } from 'lucide-react'
+import { Package, Tag, Boxes, AlertTriangle, X, Plus, Upload, Camera, Sparkles, Loader2, ChevronRight, Globe, CheckCircle2, FileEdit, Trash2, Calculator, Clock } from 'lucide-react'
 import { BadgePercent } from 'lucide-react'
 import { useVoiceInput } from '@/hooks/use-voice-input'
 import { Switch } from '@/components/ui/switch'
@@ -87,6 +87,10 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   const [gstRate, setGstRate] = useState('0')
   const [stock, setStock] = useState('')
   const [lowStockThreshold, setLowStockThreshold] = useState('5')
+  // §PRODUCT-FEEDBACK-DELAY: per-product override (hours) for the
+  // post-purchase feedback request timing. Empty = business default
+  // (AppSettings.feedbackDelayHours). 1–168 integer.
+  const [feedbackDelayHours, setFeedbackDelayHours] = useState('')
   const [supplierId, setSupplierId] = useState('')
   // PRD Part 11: Dual-stock + retail config
   const [retailEnabled, setRetailEnabled] = useState(false)
@@ -223,6 +227,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
       setGstRate(String(existing.gstRate))
       setStock(String(existing.stock))
       setLowStockThreshold(String(existing.lowStockThreshold))
+      setFeedbackDelayHours((existing as any).feedbackDelayHours ? String((existing as any).feedbackDelayHours) : '')
       setSupplierId(existing.supplierId || '')
       setRetailEnabled((existing as any).retailEnabled ?? false)
       setRetailUnit((existing as any).retailUnit || 'kg')
@@ -235,6 +240,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
       setName(''); setSku(''); setCategory(''); setUnit('pcs')
       setSupplierPrice(''); setTransportCost(''); setPurchasePrice(''); setSalePrice(''); setMrp(''); setWholesalePrice('')
       setGstRate('0'); setStock(''); setLowStockThreshold('5'); setSupplierId('')
+      setFeedbackDelayHours('')
       setRetailEnabled(false); setRetailUnit('kg'); setConversionFactor(''); setRetailSalePrice(''); setRetailMrp(''); setLooseStock('')
       setSubCategory('')
       setDescription('')
@@ -280,6 +286,8 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
         gstRate: Number(gstRate) || 0,
         stock: Number(stock) || 0,
         lowStockThreshold: Number(lowStockThreshold) || 5,
+        // §PRODUCT-FEEDBACK-DELAY: empty → null → use the AppSettings default
+        feedbackDelayHours: feedbackDelayHours.trim() ? Number(feedbackDelayHours) : null,
         supplierId: supplierId || null,
         // PRD Part 11: Dual-stock + retail config
         retailEnabled,
@@ -315,6 +323,12 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
       toast.error('Enter product name')
       return
     }
+    // §PRODUCT-FEEDBACK-DELAY: client-side guard (server validates too).
+    const fbDelayRaw = feedbackDelayHours.trim()
+    if (fbDelayRaw && (!/^\d+$/.test(fbDelayRaw) || Number(fbDelayRaw) < 1 || Number(fbDelayRaw) > 168)) {
+      toast.error('Feedback delay must be an integer between 1 and 168 hours')
+      return
+    }
     // PRD Part 32 §1.4: Inventory Price Modification gate
     // Gate only when EDITING an existing product's purchase price or bulk stock
     if (isEditingExisting && gateInventoryPriceEnabled) {
@@ -331,7 +345,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
-      <FormDialogContent
+      <FormDialogContent aria-describedby={undefined}
         className="max-w-md"
         // §PORTAL-CLICK-FIX: When the TieredPricingPage portal (createPortal)
         // is open, Radix Dialog with modal={false} treats clicks inside that
@@ -350,14 +364,14 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
           {/* PRD Part 35 §1.1: Top-most optional media dropzone */}
           <div className="space-y-1.5">
             <Label className="text-xs flex items-center gap-1.5">
-              <Camera className="w-3 h-3" /> প্রোডাক্ট ছবি (AI অটো-ফিলের জন্য — Optional)
+              <Camera className="w-3 h-3" /> {t('prod.photo')}
             </Label>
             {!mediaImage ? (
               <label className="flex flex-col items-center justify-center gap-1.5 p-5 rounded-xl border-2 border-dashed border-primary/30 bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors min-h-[100px]">
                 <Upload className="w-6 h-6 text-primary/60" />
                 <span className="text-xs text-muted-foreground text-center">
-                  প্রোডাক্টের ছবি আপলোড করুন<br/>
-                  <span className="text-[10px]">AI তাৎক্ষণিকভাবে নাম, ক্যাটাগরি, MRP, GST অটো-ফিল করবে</span>
+                  {t('prod.photoHint')}<br/>
+                  <span className="text-[10px]"></span>
                 </span>
                 <input
                   type="file"
@@ -375,7 +389,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
                 {aiScanning && (
                   <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
                     <Loader2 className="w-6 h-6 text-emerald-400 animate-spin" />
-                    <p className="text-xs text-white font-medium">GLM 5.2 ভিশন স্ক্যান করছে...</p>
+                    <p className="text-xs text-white font-medium">{t('prod.scanning')}</p>
                     <div className="flex gap-1">
                       {[0, 1, 2].map((i) => (
                         <motion.div
@@ -404,7 +418,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
             {aiScanned && (
               <p className="text-[10px] text-emerald-600 flex items-center gap-1">
                 <Sparkles className="w-3 h-3" />
-                AI ফিল্ডগুলো অটো-ফিল করেছে — প্রতিটি বক্স এডিটেবল. {aiSource === 'fallback' && '(সimulated)'}
+                {t('prod.aiFilled')} {aiSource === 'fallback' && `(${t('prod.aiSimulated')})`}
               </p>
             )}
           </div>
@@ -530,7 +544,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
 
           {/* Supplier linking (PRD v2 §9.3) */}
           <div className="space-y-1.5">
-            <Label htmlFor="supplier" className="text-xs">সাপ্লায়ারের নাম (Supplier)</Label>
+            <Label htmlFor="supplier" className="text-xs">{t('prod.supplierName')}</Label>
             <select
               id="supplier"
               value={supplierId}
@@ -546,23 +560,35 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
 
           {/* PRD Part 11 §1: Retail / Loose Product Configuration */}
           <div className="p-3 rounded-xl border border-dashed border-primary/30 bg-primary/5">
-            <button
-              type="button"
+            {/* §NO-NESTED-BUTTON: this row was previously a <button> wrapping
+                the <Switch> (which itself renders a <button role="switch">) —
+                button-in-button is invalid HTML and fired a hydration error.
+                Now a div with role="button" + full keyboard support. */}
+            <div
+              role="button"
+              tabIndex={0}
+              aria-pressed={retailEnabled}
               onClick={() => setRetailEnabled(!retailEnabled)}
-              className="w-full flex items-center justify-between"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setRetailEnabled(!retailEnabled)
+                }
+              }}
+              className="w-full flex items-center justify-between cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <div className="flex items-center gap-2">
                 <Plus className={`w-4 h-4 text-primary transition-transform ${retailEnabled ? 'rotate-45' : ''}`} />
-                <span className="text-sm font-medium">খুচরো / লুজ প্রোডাক্ট (Retail / Loose)</span>
+                <span className="text-sm font-medium">{t('prod.retailToggle')}</span>
               </div>
               <Switch checked={retailEnabled} onCheckedChange={setRetailEnabled} />
-            </button>
+            </div>
             {retailEnabled && (
               <div className="mt-3 space-y-3">
                 {/* Sub-unit selection */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <Label className="text-xs">খুচরো সাব-ইউনিট (Sub-Unit)</Label>
+                    <Label className="text-xs">{t('prod.retailSubUnit')}</Label>
                     <select
                       value={retailUnit}
                       onChange={(e) => setRetailUnit(e.target.value)}
@@ -574,7 +600,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
                     </select>
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-xs">কনভার্সন ফ্যাক্টর (1 {unit} = ? {retailUnit})</Label>
+                    <Label className="text-xs">{t('prod.conversion').replace('{unit}', unit).replace('{sub}', retailUnit)}</Label>
                     <Input
                       value={conversionFactor}
                       onChange={(e) => setConversionFactor(e.target.value)}
@@ -607,7 +633,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs">খোলা স্টক ({retailUnit})</Label>
+                  <Label className="text-xs">{t('prod.looseStock').replace('{unit}', retailUnit)}</Label>
                   <Input
                     value={looseStock}
                     onChange={(e) => setLooseStock(e.target.value)}
@@ -618,7 +644,7 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
                 </div>
                 {conversionFactor && Number(conversionFactor) > 0 && (
                   <p className="text-[10px] text-muted-foreground">
-                    ১ {unit} = {conversionFactor} {retailUnit} · খুচরো মূল্য: ₹{retailSalePrice || '0'}/{retailUnit}
+                    {t('prod.retailCalc').replace('{unit}', unit).replace('{factor}', conversionFactor).replace('{sub}', retailUnit).replace('{price}', retailSalePrice || '0')}
                   </p>
                 )}
               </div>
@@ -779,6 +805,28 @@ export function ProductForm({ open, onOpenChange, productId }: Props) {
           <div className="space-y-1.5">
             <Label htmlFor="lst" className="text-xs">Low Stock Alert Threshold</Label>
             <Input id="lst" value={lowStockThreshold} onChange={(e) => setLowStockThreshold(e.target.value)} className="h-11" inputMode="numeric" />
+          </div>
+
+          {/* §PRODUCT-FEEDBACK-DELAY: per-product override for the post-purchase
+              feedback request timing. Empty = use the business-wide default
+              (Settings → Feedback Delay). Mirrors the server-side 1–168 bound. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="fb-delay" className="text-xs flex items-center gap-1">
+              <Clock className="w-3 h-3 text-emerald-500" aria-hidden="true" />
+              Feedback Delay (hours)
+            </Label>
+            <Input
+              id="fb-delay"
+              value={feedbackDelayHours}
+              onChange={(e) => setFeedbackDelayHours(e.target.value)}
+              className="h-11"
+              inputMode="numeric"
+              placeholder="Business default"
+              aria-describedby="fb-delay-help"
+            />
+            <p id="fb-delay-help" className="text-[10px] text-muted-foreground/70">
+              Hours after a paid sale before feedback for this product is requested. Leave empty to use the business default (1–168).
+            </p>
           </div>
 
           {/* §DELETE-SAFETY: Delete button at the VERY BOTTOM of the form,
@@ -1147,7 +1195,7 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
                         </span>
                       )}
                       {row.customWholesalePrice != null && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-medium tabular">
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 font-medium tabular">
                           Ws ₹{row.customWholesalePrice.toFixed(0)}
                         </span>
                       )}
@@ -1383,7 +1431,7 @@ function TieredPricingPage({ productId, open, onOpenChange }: { productId: strin
                   />
                 </div>
                 {/* §RETAIL-PRICES: Retail mode (per kg/pcs) — SEPARATE from bulk */}
-                <p className="text-[9px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide mt-2">Retail / Loose (per kg/pcs)</p>
+                <p className="text-[9px] font-semibold text-teal-600 dark:text-teal-400 uppercase tracking-wide mt-2">Retail / Loose (per kg/pcs)</p>
                 <div className="flex items-center gap-1.5">
                   <span className="w-16 text-[10px] text-muted-foreground shrink-0">Sale ₹</span>
                   <Input

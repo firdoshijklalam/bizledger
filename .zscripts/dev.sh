@@ -48,6 +48,15 @@ start_mini_services() {
 
 		local service_name
 		service_name=$(basename "$service_dir")
+
+		# SAFETY-DISABLE: auto-deploy-service pushes local main to
+		# GitHub automatically (git push origin main whenever local
+		# main is ahead of origin). Disabled by owner decision on
+		# 2026-10-09. Do NOT re-enable without explicit owner approval.
+		if [ "$service_name" = "auto-deploy-service" ]; then
+			echo "[auto-deploy-service] SKIPPED - disabled by safety policy (owner-approved 2026-10-09)"
+			continue
+		fi
 		echo "Checking service: $service_name"
 
 		if [ ! -f "$service_dir/package.json" ]; then

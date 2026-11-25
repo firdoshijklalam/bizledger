@@ -42,7 +42,7 @@ import { LoadingState, EmptyState } from '@/components/shared/states'
 const TABS = [
   { id: 'all', label: 'All', icon: LayoutGrid, color: 'text-primary bg-primary/10' },
   { id: 'pending', label: 'New', icon: Clock, color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30' },
-  { id: 'processing', label: 'Processing', icon: Package, color: 'text-blue-600 bg-blue-100 dark:bg-blue-900/30' },
+  { id: 'processing', label: 'Processing', icon: Package, color: 'text-teal-600 bg-teal-100 dark:bg-teal-900/30' },
   { id: 'out_for_delivery', label: 'Out for Delivery', icon: Truck, color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/30' },
   { id: 'completed', label: 'Completed', icon: CheckCircle2, color: 'text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30' },
   { id: 'cancelled', label: 'Cancelled', icon: XCircle, color: 'text-red-600 bg-red-100 dark:bg-red-900/30' },
@@ -251,7 +251,7 @@ function OrderCard({
           </span>
           <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
             order.status === 'pending' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' :
-            order.status === 'processing' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
+            order.status === 'processing' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300' :
             order.status === 'out_for_delivery' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' :
             order.status === 'completed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' :
             'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
@@ -328,7 +328,7 @@ function OrderCard({
             <Button
               onClick={() => onUpdate(order.id, 'processing')}
               disabled={isUpdating}
-              className="flex-1 h-9 text-xs bg-blue-600 hover:bg-blue-700"
+              className="flex-1 h-9 text-xs bg-teal-600 hover:bg-teal-700"
               size="sm"
             >
               {isUpdating ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Play className="w-3.5 h-3.5 mr-1" />}

@@ -218,7 +218,7 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
       return
     }
     if (customer.qualityGrade === 'E') {
-      toast.warning('সতর্ক থাকুন — এই কাস্টমারের বকেয়া আছে (Grade E)')
+      toast.warning(t('bill.warnGradeE'))
     }
     // PRD Part 32 §1.2: High-Value Discount gate
     if (gateHighValueDiscountEnabled && discountAmount > gateDiscountLimit) {
@@ -282,7 +282,7 @@ export function InvoiceForm({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <FormDialogContent
+      <FormDialogContent aria-describedby={undefined}
         className="max-w-md"
         // When a child picker is open, allow pointer events to pass through to the picker portal
         onPointerDownOutside={(e) => {

@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Based on the provided screenshots:\n\n**Screenshot 1 (Customer Detail / Share Sheet):**\n*   **Layout:** The layout is clean and well-organized with clear sections for customer info, outstanding balance, and actions.\n*   **Clipping/Overflowing:** No, nothing appears to be clipped or overflowing. All text and elements are fully visible within their containers.\n*   **Scrollability Indicator:** No, there are no preview boxes with a small downward-chevron chip in this view.\n\n**Screenshot 2 (Message Templates Settings):**\n*   **Layout:** Yes, the layout is clean. The templates are presented in distinct cards with clear headers and preview areas.\n*   **Clipping/Overflowing:** No, the text inside the preview boxes wraps correctly. However, the second template's preview box (\"money going out\") does have a small downward-chevron chip (v) at the bottom right.\n*   **Scrollability Indicator:** **Yes**, the second preview box (\"Payment Reminder — money going out\") explicitly shows a small downward-chevron chip at the bottom right, indicating that the content is scrollable or there is more text to view.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1791262919,
+  "id": "20261006130152591cca37d59b4258",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261006130152591cca37d59b4258",
+  "usage": {
+    "completion_tokens": 232,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 847,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 1079
+  }
+}

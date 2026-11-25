@@ -1,6 +1,7 @@
 'use client'
 
 import { useAppStore } from '@/store/app-store'
+import { overdueReminderMessage } from '@/lib/message-templates'
 import { useFetch } from '@/hooks/use-fetch'
 import { formatCurrency, GRADE_META } from '@/lib/utils'
 import { toNumber } from '@/lib/numeric'
@@ -14,6 +15,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { LoadingState, EmptyState, ErrorState } from '@/components/shared/states'
 import { ShareSheet } from '@/components/shared/share-sheet'
+import type { TemplateSlotId } from '@/store/message-template-store'
 import { toast } from 'sonner'
 import { useState, useEffect } from 'react'
 import {
@@ -65,7 +67,9 @@ export function RemindersView() {
   const [rewriting, setRewriting] = useState(false)
 
   // Share sheet state (PRD Part 22 §3)
-  const [shareSheet, setShareSheet] = useState<{ text: string; title: string; name: string; phone: string | null } | null>(null)
+  // §CUSTOM-TEMPLATE-BADGE: slot — 'overdue' when the text came from the
+  // overdueReminderMessage generator (custom override → chip in the preview).
+  const [shareSheet, setShareSheet] = useState<{ text: string; title: string; name: string; phone: string | null; slot?: TemplateSlotId } | null>(null)
 
   if (loading) return <LoadingState />
   // §ERROR-VS-EMPTY: Surface API errors with Retry. An error here should NOT
@@ -76,7 +80,12 @@ export function RemindersView() {
   if (!data || data.length === 0) return <EmptyState icon={CheckCircle2} title="No overdue payments 🎉" description="All your customers are up to date!" />
 
   const defaultTemplate = (r: Reminder) =>
-    `প্রিয় ${r.name},\n\nআপনার ${business?.name || 'আমাদের দোকান'}-এ বকেয়া টাকা রয়েছে: ${formatCurrency(r.balance, currency)}\n${r.oldestInvoiceNumber ? `বিল: ${r.oldestInvoiceNumber}\n` : ''}অনুগ্রহ করে পেমেন্ট করুন। ধন্যবাদ 🙏`
+    overdueReminderMessage({
+      partyName: r.name,
+      amount: formatCurrency(r.balance, currency),
+      businessName: business?.name || 'BizLedger',
+      invoiceNumber: r.oldestInvoiceNumber || undefined,
+    })
 
   const handleEditTemplate = (r: Reminder) => {
     setEditingFor(r)
@@ -90,7 +99,13 @@ export function RemindersView() {
     try {
       // Simulated AI rewrite — produces a more polite/persuasive version
       const r = editingFor
-      const rewritten = `নমস্কার ${r.name} জি 🙏\n\nআশা করি আপনি ভালো আছেন। এটি ${business?.name || 'আমাদের দোকান'} থেকে একটি বিনয়ী অনুরোধ।\n\nআপনার অ্যাকাউন্টে ${formatCurrency(r.balance, currency)} বকেয়া রয়েছে${r.oldestInvoiceNumber ? ` (বিল: ${r.oldestInvoiceNumber})` : ''}। আপনার সুবিধামতো সময়ে পেমেন্ট করলে আমরা কৃতজ্ঞ থাকব।\n\nযদি কোনো সমস্যা থাকে তবে আমাদের জানান। আপনার সহযোগিতার জন্য ধন্যবাদ।\n\nশুভেচ্ছান্তে,\n${business?.name || 'BizLedger'}`
+      const rewritten = overdueReminderMessage({
+        partyName: r.name,
+        amount: formatCurrency(r.balance, currency),
+        businessName: business?.name || 'BizLedger',
+        invoiceNumber: r.oldestInvoiceNumber || undefined,
+        polite: true,
+      })
       setTemplateText(rewritten)
       toast.success('AI rewrote the template with a more polite tone')
     } catch (e) {
@@ -108,6 +123,7 @@ export function RemindersView() {
       title: `Payment Reminder — ${r.name}`,
       name: r.name,
       phone: r.phone,
+      slot: 'overdue',
     })
     setSentIds((prev) => new Set(prev).add(r.id))
   }
@@ -222,7 +238,7 @@ export function RemindersView() {
 
       {/* Edit Template Modal (PRD Part 22 §2) */}
       <Dialog open={!!editingFor} onOpenChange={(o) => !o && setEditingFor(null)}>
-        <FormDialogContent className="max-w-md">
+        <FormDialogContent aria-describedby={undefined} className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="w-4 h-4" /> Edit Reminder Template — {editingFor?.name}
@@ -271,6 +287,7 @@ export function RemindersView() {
         customerPhone={shareSheet?.phone || null}
         shareText={shareSheet?.text || ''}
         shareTitle={shareSheet?.title || ''}
+        templateSlot={shareSheet?.slot}
       />
     </div>
   )

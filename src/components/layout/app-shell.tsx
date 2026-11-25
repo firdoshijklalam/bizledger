@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/store/app-store'
 import { useNotificationStore } from '@/store/notification-store'
+import { useMessageTemplateStore } from '@/store/message-template-store'
 import { useI18n } from '@/store/i18n-store'
 import { TopAppBar } from './top-app-bar'
 import { BottomTabNav } from './bottom-tab-nav'
@@ -25,6 +26,9 @@ import { SourcingView } from '@/components/views/sourcing-view'
 import { StaffManagementView } from '@/components/views/staff-management-view'
 import { OnlineOrdersView } from '@/components/views/online-orders-view'
 import { FulfillmentView } from '@/components/views/fulfillment-view'
+import { ComplaintsView } from '@/components/views/complaints-view'
+import { FollowupsView } from '@/components/views/followups-view'
+import { MessagesView } from '@/components/views/messages-view'
 import { StoreCatalogView } from '@/components/views/store-catalog-view'
 import { CentralCatalogView } from '@/components/views/central-catalog-view'  // Part 36
 import { MoreShopsView } from '@/components/views/more-shops-view'
@@ -218,6 +222,10 @@ export function AppShell() {
   // language preference when it arrives. This avoids a separate fetch in
   // the bootstrap — the cache is populated by `useFetch('/api/app-settings')`
   // in BottomTabNav/DashboardView (deduped by TanStack Query).
+  // §MESSAGE-TEMPLATES: the same subscription hydrates the custom
+  // message-template overrides store (Settings → Templates) — zero extra
+  // network requests; message-templates.ts reads it synchronously.
+  const applyMessageTemplates = useMessageTemplateStore((s) => s.applyFromSettings)
   useEffect(() => {
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
       const query = event.query as any
@@ -226,10 +234,11 @@ export function AppShell() {
         if (settings?.language) {
           setLanguage(settings.language)
         }
+        applyMessageTemplates(settings)
       }
     })
     return () => unsubscribe()
-  }, [queryClient, setLanguage])
+  }, [queryClient, setLanguage, applyMessageTemplates])
 
   // PRD Part 33: Public pages render immediately — no business loading required
   // Payment Landing Page — public, no app chrome (PRD v2 §10.5)
@@ -377,6 +386,12 @@ function renderView(view: string) {
       return <FulfillmentView />
     case 'staff':
       return <StaffManagementView />
+    case 'complaints':
+      return <ComplaintsView />
+    case 'followups':
+      return <FollowupsView />
+    case 'messages':
+      return <MessagesView />
     default:
       return <DashboardView />
   }

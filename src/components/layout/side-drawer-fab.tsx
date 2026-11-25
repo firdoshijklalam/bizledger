@@ -29,7 +29,7 @@ const QUICK_ACTION_CATALOG: readonly QuickActionDef[] = [
   { id: 'new-invoice', icon: FileText, label: 'New Invoice', labelKey: 'qa.newInvoice', color: 'text-orange-600', primary: false },
   { id: 'view-invoices', icon: FileText, label: 'View Invoices', color: 'text-purple-600', primary: false },
   { id: 'low-stock', icon: AlertTriangle, label: 'Low Stock', color: 'text-red-600', primary: false },
-  { id: 'add-customer', icon: UserPlus, label: 'Add Customer', color: 'text-blue-600', primary: false },
+  { id: 'add-customer', icon: UserPlus, label: 'Add Customer', color: 'text-teal-600', primary: false },
   { id: 'add-supplier', icon: Truck, label: 'Add Supplier', color: 'text-cyan-600', primary: false },
 ]
 
@@ -52,8 +52,7 @@ const MENU_HEIGHT = 320
 const MENU_GAP = 8
 const MENU_WIDTH = 240 // w-60 = 15rem = 240px (used for near-top flip calc)
 
-// §1: Icon rotation tuning — matches user's Reanimated spec
-const IDLE_SPIN_DURATION = 3 // seconds per 360°
+// §1: Icon rotation tuning — spring for the open/close × affordance
 const ICON_SPRING = { type: 'spring' as const, stiffness: 200, damping: 15, mass: 0.8 }
 
 interface FabPos { x: number; y: number }
@@ -177,10 +176,17 @@ export function SideDrawerFab() {
     }
   }, [])
 
-  // §1: Icon rotation controller — drives the infinite idle spin + open/close transitions
+  // §1: Icon rotation controller — Plus → × (45°) while the menu is OPEN,
+  // back to + when closed.
+  // §IDLE-SPIN-REMOVED (QA round 9): the previous "infinite idle spin"
+  // (0→360° forever) made the closed FAB look BROKEN — any mid-rotation
+  // snapshot (e.g. at 45°, 135°, 225°…) rendered the Plus as an ×, so users
+  // saw a floating green "close" button that closed nothing (VLM review
+  // flagged it as an X-icon FAB with no menu open). It also kept the browser
+  // compositing an animation non-stop — real CPU/battery cost on mobile.
+  // The icon now rotates ONLY for the open/close affordance, which is the
+  // standard meaning of × on a FAB.
   const iconControls = useAnimationControls()
-  const fabOpenRef = useRef(fabOpen)
-  useEffect(() => { fabOpenRef.current = fabOpen }, [fabOpen])
 
   // Handle window resize (orientation change, etc.) — re-clamp position.
   useEffect(() => {
@@ -213,26 +219,13 @@ export function SideDrawerFab() {
     setFabOpen(false)
   }, [activeView, setFabOpen])
 
+  // §OPEN-CLOSE-AFFORDANCE: rotate to 45° (Plus → ×) while open; spring back
+  // to 0° when closed. No idle animation (see §IDLE-SPIN-REMOVED above).
   useEffect(() => {
     if (fabOpen) {
-      iconControls.start({
-        rotate: 45,
-        transition: ICON_SPRING,
-      })
+      iconControls.start({ rotate: 45, transition: ICON_SPRING })
     } else {
-      iconControls
-        .start({
-          rotate: 0,
-          transition: ICON_SPRING,
-        })
-        .then(() => {
-          if (!fabOpenRef.current) {
-            iconControls.start({
-              rotate: 360,
-              transition: { duration: IDLE_SPIN_DURATION, repeat: Infinity, ease: 'linear' },
-            })
-          }
-        })
+      iconControls.start({ rotate: 0, transition: ICON_SPRING })
     }
   }, [fabOpen, iconControls])
 

@@ -531,7 +531,7 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
                               <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0 ${
                                 r.duplicate === 'NEW' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
                                 : r.duplicate === 'EXACT_MATCH' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                                : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                : 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300'
                               }`}>
                                 {r.duplicate === 'NEW' ? 'NEW' : r.duplicate === 'EXACT_MATCH' ? 'EXISTS' : 'POSSIBLE'}
                               </span>
@@ -555,7 +555,7 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
                                 </button>
                                 <button
                                   onClick={() => setDuplicateResolutions((prev) => ({ ...prev, [r.duplicateMatchedId!]: 'merge' }))}
-                                  className={`px-2 py-1 rounded text-[10px] font-medium ${duplicateResolutions[r.duplicateMatchedId] === 'merge' ? 'bg-blue-200 text-blue-800 dark:bg-blue-900/50 dark:text-blue-200' : 'bg-muted text-muted-foreground'}`}
+                                  className={`px-2 py-1 rounded text-[10px] font-medium ${duplicateResolutions[r.duplicateMatchedId] === 'merge' ? 'bg-teal-200 text-teal-800 dark:bg-teal-900/50 dark:text-teal-200' : 'bg-muted text-muted-foreground'}`}
                                 >
                                   Merge
                                 </button>
@@ -580,7 +580,7 @@ export function ExternalImportModal({ open, onClose, initialType }: { open: bool
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         <CountRow label="New (will create)" value={preview.counts.new + Object.values(duplicateResolutions).filter((v) => v === 'new').length} color="emerald" />
                         <CountRow label="Skipped (exact + skip)" value={preview.counts.exactMatches + Object.values(duplicateResolutions).filter((v) => v === 'skip' || !v).length} color="amber" />
-                        <CountRow label="Merged" value={Object.values(duplicateResolutions).filter((v) => v === 'merge').length} color="blue" />
+                        <CountRow label="Merged" value={Object.values(duplicateResolutions).filter((v) => v === 'merge').length} color="teal" />
                         <CountRow label="Errors" value={preview.counts.errors} color="red" />
                       </div>
                     </Card>
@@ -651,7 +651,7 @@ function CountRow({ label, value, color }: { label: string; value: number; color
   const colorClass = color === 'emerald' ? 'text-emerald-600'
     : color === 'amber' ? 'text-amber-600'
     : color === 'red' ? 'text-red-600'
-    : color === 'blue' ? 'text-blue-600'
+    : color === 'teal' ? 'text-teal-600'
     : ''
   return (
     <div className="flex justify-between">
